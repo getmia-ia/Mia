@@ -1,0 +1,244 @@
+{
+  "updatedAt": "2026-01-02T14:55:57.501Z",
+  "createdAt": "2025-11-25T19:23:53.758Z",
+  "id": "7gI0vJIO6yP35nIl",
+  "name": "BMS - 3.3 - Plot Gráficos (Folha)",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Processar os dados que recebeu",
+        "height": 304,
+        "width": 640,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "b7444bf8-3d00-47b4-958f-9fbdf31816ca",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Code para preparar a url com os dados ",
+        "height": 304,
+        "width": 592
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        672,
+        0
+      ],
+      "id": "ef167e0b-1eaa-45d7-82dd-0e2d71c8d087",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4.1",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        272,
+        352
+      ],
+      "id": "bd916fe1-9dc4-47f2-83c6-67adb9bb1e34",
+      "name": "OpenRouter Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === INPUT ===\nlet chart = $json;\n\n// Se vier como string dentro de \"output\" (resposta do Agente), faz o parse\nif (chart.output && typeof chart.output === 'string') {\n  try {\n    // 1. EXTRAÇÃO ROBUSTA: Pega tudo desde o primeiro '{' até o último '}'\n    // Isso ignora textos como \"Aqui está o JSON:\" antes ou \"Espero ter ajudado\" depois.\n    const jsonMatch = chart.output.match(/\\{[\\s\\S]*\\}/);\n    \n    // Se não encontrar chaves, tenta usar a string original (fallback)\n    let jsonString = jsonMatch ? jsonMatch[0] : chart.output;\n\n    // 2. LIMPEZA DE SUJEIRA INTERNA (Markdown e Comentários)\n    const jsonClean = jsonString\n      .replace(/```json/g, '')   // remove ```json\n      .replace(/```/g, '')       // remove ```\n      .replace(/\\/\\/.*$/gm, '')  // remove // comentários de linha\n      .replace(/\\/\\*[\\s\\S]*?\\*\\//g, ''); // remove /* ... */ comentários de bloco\n\n    chart = JSON.parse(jsonClean);\n\n  } catch (e) {\n    // Dica de Debug: Mostra o que ele tentou parsear para você corrigir no prompt se necessário\n    throw new Error(`❌ Falha ao converter chart.output para JSON: ${e.message} ||| Conteúdo recebido: ${chart.output}`);\n  }\n}\n\n// Fallback: Se chart não tiver estrutura válida, retorna erro ou ignora\nif (!chart || (!chart.values && !chart.data)) {\n    // Retorna algo vazio ou erro controlado se preferir\n    return [{ json: { error: \"Sem dados para gráfico\", originalOutput: chart?.output } }];\n}\n\n// === BASE CONFIG ===\n// ... (MANTENHA O RESTANTE DO CÓDIGO DAQUI PARA BAIXO IGUAL AO ANTERIOR) ...\nconst baseUrl = 'https://image-charts.com/chart.js/2.8.0';\nconst background = 'white';\nconst colors = [\n  'rgba(78,121,167,1)',   // Azul\n  'rgba(242,142,43,1)',   // Laranja\n  'rgba(225,87,89,1)',    // Vermelho\n  'rgba(118,183,178,1)',  // Verde-azulado\n  'rgba(89,161,79,1)',    // Verde\n  'rgba(237,201,73,1)',   // Amarelo\n  'rgba(175,122,161,1)',  // Roxo\n  'rgba(255,157,167,1)',  // Rosa\n  'rgba(156,117,95,1)',   // Marrom\n  'rgba(186,176,171,1)',  // Cinza\n];\n\nlet datasets = [];\nlet config;\n\n// Função Helper para montar datasets\n// Suporta tanto Array simples [10, 20] quanto Objeto {\"TI\": [10], \"RH\": [20]}\n// Função Helper para montar datasets\n// Suporta tanto Array simples [10, 20] quanto Objeto {\"Set/25\": [10], \"Out/25\": [20]}\nconst buildDatasets = (values, type) => {\n    const isMultiSeries = !Array.isArray(values) && typeof values === 'object';\n    \n    if (isMultiSeries) {\n        return Object.entries(values).map(([label, data], i) => ({\n            label: label, // Nome da série (ex: \"Setembro/2025\")\n            data: data,\n            fill: type === 'line' ? false : true,\n            // Usa cores diferentes para cada mês/série\n            borderColor: colors[i % colors.length],\n            // Se for barra, usa cor sólida (1). Se linha, usa cor sólida também.\n            backgroundColor: type === 'line' ? colors[i % colors.length] : colors[i % colors.length].replace('1)', '0.8)'), \n            borderWidth: 1, // Borda mais fina para barras agrupadas fica mais elegante\n            tension: 0.3, \n            pointRadius: 4 // Ponto um pouco maior para linhas múltiplas\n        }));\n    } else {\n        // Série Única (Ex: Ranking simples)\n        return [{\n            label: chart.descricao || 'Valores',\n            data: values,\n            fill: type === 'line' ? false : true,\n            borderColor: colors[0],\n            backgroundColor: type === 'line' ? colors[0] : colors[0].replace('1)', '0.7)'),\n            borderWidth: 2,\n            tension: 0.3,\n            pointRadius: 3\n        }];\n    }\n};\n\n// === 1. GRÁFICO DE LINHA ===\nif (chart.tipo === 'linha') {\n  datasets = buildDatasets(chart.values, 'line');\n  \n  config = {\n    type: 'line',\n    data: {\n      labels: chart.labels,\n      datasets: datasets\n    },\n    options: {\n      responsive: true,\n      title: { display: true, text: chart.titulo },\n      legend: { position: 'top', display: true },\n      scales: {\n        yAxes: [{ ticks: { beginAtZero: true } }] // Garante que o eixo Y comece do 0\n      }\n    }\n  };\n}\n\n// === 2. GRÁFICO DE PIZZA (COM DADOS NA LEGENDA E DECIMAIS) ===\nelse if (chart.tipo === 'pizza') {\n  // Garante que values seja um array simples\n  const dataValues = Array.isArray(chart.values) ? chart.values : Object.values(chart.values)[0];\n  \n  // 1. Calcula o Total\n  const total = dataValues.reduce((a, b) => a + b, 0);\n\n  // 2. Cria \"Labels Ricos\" com 1 casa decimal (Ex: \"Feminino: 317 (35,8%)\")\n  const richLabels = chart.labels.map((label, i) => {\n      const value = dataValues[i];\n      \n      // MUDANÇA AQUI:\n      // toFixed(1) garante 1 casa decimal.\n      // replace('.', ',') troca ponto por vírgula para formato BR.\n      const percent = total > 0 \n        ? ((value / total) * 100).toFixed(1).replace('.', ',') \n        : '0,0';\n\n      return `${label}: ${value} (${percent}%)`;\n  });\n\n  datasets = [{\n    data: dataValues,\n    backgroundColor: colors.slice(0, chart.labels.length),\n    borderColor: 'white',\n    borderWidth: 2\n  }];\n\n  config = {\n    type: 'pie',\n    data: {\n      labels: richLabels, \n      datasets: datasets\n    },\n    options: {\n      responsive: true,\n      title: { display: true, text: chart.titulo },\n      legend: { \n          position: 'right',\n          labels: { \n            boxWidth: 12, \n            fontSize: 11,\n            padding: 15\n          } \n      },\n      plugins: {\n        datalabels: { \n            display: true, \n            color: 'white', \n            font: { weight: 'bold', size: 14 },\n            anchor: 'center',\n            align: 'center',\n                    }\n      }\n    }\n  };\n}\n\n// === 3. GRÁFICO HORIZONTAL (Correção v2.8.0) ===\nelse if (chart.tipo === 'horizontal') {\n  datasets = buildDatasets(chart.values, 'bar');\n\n  config = {\n    type: 'horizontalBar', // <--- CORREÇÃO CRÍTICA PARA CHART.JS 2.X\n    data: {\n      labels: chart.labels,\n      datasets: datasets\n    },\n    options: {\n      responsive: true,\n      title: { display: true, text: chart.titulo },\n      legend: { position: 'right', display: datasets.length > 1 }, // Esconde legenda se for só 1 série\n      scales: {\n        xAxes: [{ ticks: { beginAtZero: true } }]\n      }\n    }\n  };\n}\n\n// === 4. GRÁFICO DE BARRAS VERTICAIS (Padrão) ===\nelse {\n  datasets = buildDatasets(chart.values, 'bar');\n\n  config = {\n    type: 'bar',\n    data: {\n      labels: chart.labels,\n      datasets: datasets\n    },\n    options: {\n      responsive: true,\n      title: { display: true, text: chart.titulo },\n      legend: { position: 'top', display: datasets.length > 1 },\n      scales: {\n        yAxes: [{ ticks: { beginAtZero: true } }]\n      }\n    }\n  };\n}\n\n// === GERAR URL ===\n// Adicionando encodeURIComponent para garantir que caracteres especiais não quebrem a URL\nconst jsonConfig = encodeURIComponent(JSON.stringify(config));\nconst url = `${baseUrl}?bkg=${background}&c=${jsonConfig}`;\n\nreturn [{\n  json: { url, chart }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        96
+      ],
+      "id": "38a4741b-c2dc-4ba2-a24c-169b0bf04885",
+      "name": "Prepara a url de requisição da api"
+    },
+    {
+      "parameters": {
+        "url": "={{$json[\"url\"]}}",
+        "responseFormat": "file",
+        "options": {}
+      },
+      "name": "Chama a api Image-Chart",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        928,
+        96
+      ],
+      "id": "98f013d0-4293-4d7e-9bce-cc1bfec4a563"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Você é um especialista em visualização de dados e geração de configurações JSON para a API **Image-Charts**.\n\n**ENTRADA RECEBIDA:**\n- `pergunta`: \"{{ $json.pergunta }}\"\n- `filtros`: {{ JSON.stringify($json.filtros) }}\n- `dados`: {{ JSON.stringify($json.dados) }}\n- `analise_previa`: {{ JSON.stringify($json.resposta) }}\n\n**SUA MISSÃO:**\nAnalisar a estrutura dos dados (que varia conforme a consulta SQL) e gerar o JSON de configuração visual perfeito.\nUse a `analise_previa` para enriquecer o `titulo` e a `descricao` do gráfico com os insights já descobertos (ex: se a análise diz que \"caiu 10%\", coloque isso no título).\n---\n\n### 1. MAPEAMENTO INTELIGENTE DE COLUNAS\n\nAnalise o array `dados` e identifique os papéis das colunas:\n\n* **EIXO X (Rótulos):**\n    * **Prioridade 1 (Tempo):** Procure por `Mes_ref_folha`, `Mes`, `Data`.\n        * *Ação:* Se encontrar, o gráfico será de **Evolução Temporal** (`linha`).\n        * *Ordenação:* **OBRIGATÓRIO** ordenar os meses cronologicamente (use a coluna `Mes_Sort` se disponível para ordenar, mas exiba `Mes_ref_folha` no label).\n    * **Prioridade 2 (Categoria):** Se não houver tempo, procure por `Departamento`, `Área`, `Cargo`, `Tipo_Custo`, `Nome`, `Faixa_Etaria`.\n\n* **EIXO Y (Valores):**\n    * Procure a métrica numérica principal.\n    * **Ordem de Prioridade:** `Media_Valor` > `Total_Valor` > `Total_Gasto` > `Total_Colaboradores` > `Qtd` > `Aumento_Mensal_Folha`.\n\n* **SÉRIE (Agrupamento):**\n    * Verifique se há uma terceira dimensão.\n    * *Exemplo:* Se houver `Mes_ref_folha` AND `Departamento`, significa que devemos plotar **várias linhas** (uma para cada departamento) ao longo do tempo.\n\n---\n\n### 2. SELEÇÃO DO TIPO DE GRÁFICO (Regras de Decisão)\n\n1.  **BARRAS AGRUPADAS (Comparação Temporal x Categórica) [PRIORIDADE MÁXIMA]**\n    * **Condição:** Se os dados tiverem **Tempo** (ex: 2 ou 3 meses) **E** **Categoria** (ex: Deptos).\n    * **Objetivo:** Mostrar como cada departamento evoluiu mês a mês.\n    * **Estrutura:**\n        * `tipo`: `\"barras\"`\n        * `labels`: Lista das **CATEGORIAS** (ex: [\"TI\", \"RH\", \"Comercial\"]).\n        * `values`: Objeto onde as **Chaves são os MESES** e os valores são arrays alinhados com as categorias.\n        * *Exemplo:* `values: { \"Set/2025\": [1000, 2000], \"Out/2025\": [1100, 2100] }`\n\n2.  **LINHA (Evolução Longa)**\n    * **Condição:** Se houver **apenas Tempo** (sem categoria) OU Tempo longo (> 3 meses).\n    * `tipo`: `\"linha\"`\n\n3.  **BARRAS SIMPLES / HORIZONTAL (Ranking Estático)**\n    * **Condição:** Se houver **apenas Categoria** (ex: Ranking de um mês só).\n    * `tipo`: `\"barras\"` (ou `\"horizontal\"` se houver muitos itens).\n\n4.  **PIZZA**\n    * **Condição:** Apenas para proporções simples (ex: % por Sexo) num único momento.\n\n---\n\n### 3. PROCESSAMENTO DE DADOS E ESCALA (CRÍTICO)\n\n1.  **Escala Automática:**\n    * Se os valores forem **> 1.000.000**: Divida tudo por 1.000.000 e adicione **\"(em milhões)\"** ao título.\n    * Se forem **> 1.000**: Divida tudo por 1.000 e adicione **\"(em milhares)\"** ao título.\n    * *Caso contrário:* Use o valor original.\n\n2.  **Pivoteamento para Múltiplas Séries (Gráfico de Linha Complexo):**\n    * Se você identificou Tempo + Categoria:\n    * O campo `values` deve ser um **OBJETO**, não um array.\n    * As chaves do objeto são os nomes das categorias (ex: \"TI\", \"RH\").\n    * Os valores são arrays numéricos alinhados com o índice do array `labels`.\n    * *Importante:* Se uma categoria não tiver valor em determinado mês, preencha com `0` ou `null` para manter o alinhamento.\n\n---\n\n### 4. FORMATO DE SAÍDA (JSON)\n\nRetorne APENAS este JSON:\n\n{\n  \"tipo\": \"linha\" | \"barras\" | \"horizontal\" | \"pizza\",\n  \"labels\": [\"Jan/24\", \"Fev/24\"] OU [\"TI\", \"RH\", \"Comercial\"],\n  \"values\": [10, 20, 30] OU { \"TI\": [10, 12], \"RH\": [5, 6] },\n  \"titulo\": \"Título curto e impactante (ex: Gastos por Setor - em milhares)\",\n  \"descricao\": \"Resumo curtíssimo ou unidade. OBRIGATÓRIO: MÁXIMO 35 CARACTERES para não cortar na imagem. (Ex: 'Valores em Reais (R$)' ou 'Comparativo Mensal')\"\n}\n}\n\n**Exemplo de Barras Agrupadas (O que o usuário quer agora):**\n\n{\n  \"tipo\": \"barras\",\n  \"labels\": [\"Comercial\", \"Financeiro\", \"TI\"], \n  \"values\": {\n    \"Set/2025\": [6.5, 6.2, 5.8],\n    \"Out/2025\": [6.9, 6.5, 6.2]\n  },\n  \"titulo\": \"Média Salarial por Depto (em milhares)\",\n  \"descricao\": \"Valores em R$ (Ref: Out/2025)\"\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        272,
+        96
+      ],
+      "id": "6d61a213-3ebb-4a13-b636-38aac86511a3",
+      "name": "Define o tipo de gráfico que vai ser gerado"
+    },
+    {
+      "parameters": {
+        "inputSource": "jsonExample",
+        "jsonExample": "{\n  \"pergunta\": \"{{ $json.pergunta }}\",\n  \"dados\": \"{{ $json.resultados }}\", \n  \"filtros\": \"{{ $json.filtros }}\",\n  \"resposta\": \"{{ $json.resposta }}\"\n}"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        64,
+        96
+      ],
+      "id": "7f830ec4-c4d7-4081-952c-ec6b650ea924",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        112
+      ],
+      "id": "ab7a1b49-960f-4e17-91b7-2f62c10ccbae",
+      "name": "When clicking ‘Execute workflow’",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e7510c9a-4e61-4b54-bdcc-c8c9061fc1c3",
+              "name": "url_img",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1088,
+        96
+      ],
+      "id": "d58adfe5-dec5-443d-947c-8251a406ee64",
+      "name": "Retorna a url da img"
+    }
+  ],
+  "connections": {
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Define o tipo de gráfico que vai ser gerado",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara a url de requisição da api": {
+      "main": [
+        [
+          {
+            "node": "Chama a api Image-Chart",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chama a api Image-Chart": {
+      "main": [
+        [
+          {
+            "node": "Retorna a url da img",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define o tipo de gráfico que vai ser gerado": {
+      "main": [
+        [
+          {
+            "node": "Prepara a url de requisição da api",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Define o tipo de gráfico que vai ser gerado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "pergunta": "Qual o salario do 9804?",
+          "dados": "[\n  {\n    \"Nome\": \"Sr. Enzo Viana\",\n    \"Matrícula\": 9804,\n    \"Cargo\": \"Assistente\",\n    \"Salario_Contratual_Base\": 10863.99,\n    \"Mes_ref_folha\": \"10/2025\",\n    \"Total_Pago_Salario\": 6733.68\n  },\n  {\n    \"Nome\": \"Sr. Enzo Viana\",\n    \"Matrícula\": 9804,\n    \"Cargo\": \"Assistente\",\n    \"Salario_Contratual_Base\": 10863.99,\n    \"Mes_ref_folha\": \"09/2025\",\n    \"Total_Pago_Salario\": 5436.2\n  },\n  {\n    \"Nome\": \"Sr. Enzo Viana\",\n    \"Matrícula\": 9804,\n    \"Cargo\": \"Assistente\",\n    \"Salario_Contratual_Base\": 10863.99,\n    \"Mes_ref_folha\": \"08/2025\",\n    \"Total_Pago_Salario\": 6284.4\n  }\n]",
+          "filtros": "{\n  \"intencao\": \"financeiro\",\n  \"metrica\": \"total\",\n  \"ranking_tipo\": null,\n  \"agrupamento\": null,\n  \"mes_inicio\": \"08/2025\",\n  \"mes_fim\": \"10/2025\",\n  \"empresa\": \"\",\n  \"area\": null,\n  \"departamento\": null,\n  \"cargo\": null,\n  \"centro_de_custo\": null,\n  \"tipo_custo\": [\n    \"Salário\"\n  ],\n  \"termo_busca_rubrica\": null,\n  \"colaborador\": null,\n  \"matricula\": \"9804\",\n  \"busca_colaborador_fuzzy\": false,\n  \"sexo\": null,\n  \"estado_civil\": null,\n  \"cidade\": null,\n  \"estado\": null,\n  \"faixa_etaria\": null,\n  \"pcd\": null,\n  \"cota_aprendiz\": null,\n  \"tipo_contrato\": null,\n  \"cnpj\": null,\n  \"valor_simulacao\": null,\n  \"avaliacao_desempenho\": null,\n  \"status\": null,\n  \"logica_aplicada\": \"Consultando o salário total do colaborador com matrícula 9804 considerando os últimos 3 meses encerrados, de Agosto/2025 a Outubro/2025.\"\n}",
+          "resposta": "Considerando o último fechamento disponível na base de testes (Outubro/2025), temos a seguinte análise sobre o salário do colaborador Sr. Enzo Viana, matrícula 9804.\n\n1. **Resumo Executivo:**\n   - O salário total pago ao colaborador nos últimos três meses (Agosto a Outubro de 2025) foi de R$ 18.454,28.\n\n2. **Detalhamento por Mês:**\n   - Agosto/2025: R$ 6.284,40\n   - Setembro/2025: R$ 5.436,20\n   - Outubro/2025: R$ 6.733,68\n\n3. **Explicação do Cálculo:**\n   - O salário contratual base do colaborador para os meses analisados foi de R$ 10.863,99 por mês. Entretanto, o total pago foi inferior ao salário contratual base em todos os meses, resultando em valores líquidos diferentes devido a possíveis descontos ou ajustes. No período analisado, houve uma média de pagamento de R$ 6.151,43 por mês.\n\n4. **Tendência:**\n   - A tendência é de alta, com o valor pago em Outubro (R$ 6.733,68) sendo superior à média dos meses anteriores (R$ 6.151,43)."
+        }
+      }
+    ]
+  },
+  "versionId": "ee2f50aa-3bd6-4f26-96e5-d0347138ded3",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2025-11-25T19:23:53.758Z",
+      "createdAt": "2025-11-25T19:23:53.758Z",
+      "role": "workflow:owner",
+      "workflowId": "7gI0vJIO6yP35nIl",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
