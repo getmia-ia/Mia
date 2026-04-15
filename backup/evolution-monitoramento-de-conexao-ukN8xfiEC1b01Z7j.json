@@ -1,0 +1,511 @@
+{
+  "updatedAt": "2026-02-23T02:40:04.491Z",
+  "createdAt": "2026-02-23T00:28:11.292Z",
+  "id": "ukN8xfiEC1b01Z7j",
+  "name": "Evolution Monitoramento de conexão",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8,14,20 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1120,
+        -240
+      ],
+      "id": "8e12ed45-da9f-46cc-bfba-f0d00e08f89f",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://evo.miabuilder.com/instance/fetchInstances",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "evolutionApi",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -896,
+        -240
+      ],
+      "id": "23e0ac97-ef75-4550-acf5-867c18fbbdca",
+      "name": "HTTP Request",
+      "retryOnFail": true,
+      "credentials": {
+        "evolutionApi": {
+          "id": "MAuivBQDVhfC3Ang",
+          "name": "Evolution account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "sender": "ServiceSMS",
+        "phone": "={{ $json.Numeros }}",
+        "content": "={{ $('Números e Mensagem').item.json.Mensagem }}\n"
+      },
+      "type": "@infobip/n8n-nodes-infobip-api.infobipApi",
+      "typeVersion": 1,
+      "position": [
+        320,
+        -224
+      ],
+      "id": "a88cc6b3-9451-43cb-8316-6ba10ed0f381",
+      "name": "InfobipApi",
+      "credentials": {
+        "infobipApi": {
+          "id": "yBfdOm5QWMXuxJ3R",
+          "name": "Infobip account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "Numeros",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        96,
+        -224
+      ],
+      "id": "5c60e99e-145a-4a5b-8b71-10e742fab103",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "77a4ac5b-4000-4112-bd72-ead71fa204de",
+              "name": "ignoreNames",
+              "value": "=[\"\"] ",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -656,
+        -448
+      ],
+      "id": "019ec08a-a1de-4ad8-96ba-bad22ea7416c",
+      "name": "Ignorar Instancias",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega ignoreNames do node \"Ignorar Instancias\" (pode não existir)\nlet IGNORE = $('Ignorar Instancias').first()?.json?.ignoreNames;\n\n// Normaliza IGNORE para array de strings\nif (typeof IGNORE === 'string') {\n  const s = IGNORE.trim();\n\n  if (s.startsWith('[') && s.endsWith(']')) {\n    try { IGNORE = JSON.parse(s); } catch { IGNORE = [s]; }\n  } else {\n    IGNORE = s.split(',').map(x => x.trim()).filter(Boolean);\n  }\n} else if (!Array.isArray(IGNORE)) {\n  IGNORE = IGNORE ? [IGNORE] : [];\n}\n\n// Se for array de objetos, extrai \"name\"\nIGNORE = IGNORE.map(v => {\n  if (v && typeof v === 'object') return v.name ?? String(v);\n  return String(v);\n}).map(s => s.trim()).filter(Boolean);\n\nconst ignoreSet = new Set(IGNORE.map(s => s.toLowerCase()));\n\n// ✅ body já é array de objetos\nconst instances = $('HTTP Request').first()?.json?.body || [];\n\nconst names = instances\n  .filter(x => x?.name)\n  .filter(x => !ignoreSet.has(String(x.name).trim().toLowerCase()))\n  .filter(x => String(x.connectionStatus || '').toLowerCase() !== 'open')\n  .map(x => x.name);\n\n// Se não tiver nenhuma desconectada, não retorna nada\nif (names.length === 0) return [];\n\nreturn [{\n  instances: names.join(', '),\n  instancesList: names,\n  unconnectedInstances: names.length,\n  ignored: IGNORE, // deixe por enquanto pra validar; depois pode remover\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        -448
+      ],
+      "id": "bd738749-0d21-4489-be27-96bdb6f8712e",
+      "name": "Lista Instancias OFF"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "49257da7-c8ed-4d97-96a8-7529678a5ced",
+              "name": "Numeros",
+              "value": "[5511954187344]",
+              "type": "array"
+            },
+            {
+              "id": "5116cc4f-1074-4d10-a3d8-7c56754f6e37",
+              "name": "Mensagem",
+              "value": "={{ $('HTTP Request').item.json.statusCode === 200\n  ? `⚠️ EVOLUTION API\\n>> ${$('Lista Instancias OFF').item.json.instances} OFF(`+$json.unconnectedInstances+`)`\n  : `⚠️⚠️⚠️ EVOLUTION API\\n>> ATENÇÃO - SERVIDOR OFF`\n}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -128,
+        -224
+      ],
+      "id": "595ee6e5-b7eb-45cb-9a02-e58db81fc210",
+      "name": "Números e Mensagem"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Ignorar Instancias",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Números e Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "InfobipApi": {
+      "main": [
+        []
+      ]
+    },
+    "Ignorar Instancias": {
+      "main": [
+        [
+          {
+            "node": "Lista Instancias OFF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "InfobipApi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lista Instancias OFF": {
+      "main": [
+        [
+          {
+            "node": "Números e Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Números e Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "fde2d48a-f9e6-4a0c-94b9-9c53b82cabff",
+  "activeVersionId": "fde2d48a-f9e6-4a0c-94b9-9c53b82cabff",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-23T00:28:11.292Z",
+      "createdAt": "2026-02-23T00:28:11.292Z",
+      "role": "workflow:owner",
+      "workflowId": "ukN8xfiEC1b01Z7j",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-02-23T02:40:04.493Z",
+    "createdAt": "2026-02-23T02:40:04.493Z",
+    "versionId": "fde2d48a-f9e6-4a0c-94b9-9c53b82cabff",
+    "workflowId": "ukN8xfiEC1b01Z7j",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 8,14,20 * * *"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          -1120,
+          -240
+        ],
+        "id": "8e12ed45-da9f-46cc-bfba-f0d00e08f89f",
+        "name": "Schedule Trigger"
+      },
+      {
+        "parameters": {
+          "url": "https://evo.miabuilder.com/instance/fetchInstances",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "evolutionApi",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true
+              }
+            }
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          -896,
+          -240
+        ],
+        "id": "23e0ac97-ef75-4550-acf5-867c18fbbdca",
+        "name": "HTTP Request",
+        "retryOnFail": true,
+        "credentials": {
+          "evolutionApi": {
+            "id": "MAuivBQDVhfC3Ang",
+            "name": "Evolution account"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "sender": "ServiceSMS",
+          "phone": "={{ $json.Numeros }}",
+          "content": "={{ $('Números e Mensagem').item.json.Mensagem }}\n"
+        },
+        "type": "@infobip/n8n-nodes-infobip-api.infobipApi",
+        "typeVersion": 1,
+        "position": [
+          320,
+          -224
+        ],
+        "id": "a88cc6b3-9451-43cb-8316-6ba10ed0f381",
+        "name": "InfobipApi",
+        "credentials": {
+          "infobipApi": {
+            "id": "yBfdOm5QWMXuxJ3R",
+            "name": "Infobip account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "fieldToSplitOut": "Numeros",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitOut",
+        "typeVersion": 1,
+        "position": [
+          96,
+          -224
+        ],
+        "id": "5c60e99e-145a-4a5b-8b71-10e742fab103",
+        "name": "Split Out"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "77a4ac5b-4000-4112-bd72-ead71fa204de",
+                "name": "ignoreNames",
+                "value": "=[\"\"] ",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -656,
+          -448
+        ],
+        "id": "019ec08a-a1de-4ad8-96ba-bad22ea7416c",
+        "name": "Ignorar Instancias",
+        "executeOnce": true
+      },
+      {
+        "parameters": {
+          "jsCode": "// Pega ignoreNames do node \"Ignorar Instancias\" (pode não existir)\nlet IGNORE = $('Ignorar Instancias').first()?.json?.ignoreNames;\n\n// Normaliza IGNORE para array de strings\nif (typeof IGNORE === 'string') {\n  const s = IGNORE.trim();\n\n  if (s.startsWith('[') && s.endsWith(']')) {\n    try { IGNORE = JSON.parse(s); } catch { IGNORE = [s]; }\n  } else {\n    IGNORE = s.split(',').map(x => x.trim()).filter(Boolean);\n  }\n} else if (!Array.isArray(IGNORE)) {\n  IGNORE = IGNORE ? [IGNORE] : [];\n}\n\n// Se for array de objetos, extrai \"name\"\nIGNORE = IGNORE.map(v => {\n  if (v && typeof v === 'object') return v.name ?? String(v);\n  return String(v);\n}).map(s => s.trim()).filter(Boolean);\n\nconst ignoreSet = new Set(IGNORE.map(s => s.toLowerCase()));\n\n// ✅ body já é array de objetos\nconst instances = $('HTTP Request').first()?.json?.body || [];\n\nconst names = instances\n  .filter(x => x?.name)\n  .filter(x => !ignoreSet.has(String(x.name).trim().toLowerCase()))\n  .filter(x => String(x.connectionStatus || '').toLowerCase() !== 'open')\n  .map(x => x.name);\n\n// Se não tiver nenhuma desconectada, não retorna nada\nif (names.length === 0) return [];\n\nreturn [{\n  instances: names.join(', '),\n  instancesList: names,\n  unconnectedInstances: names.length,\n  ignored: IGNORE, // deixe por enquanto pra validar; depois pode remover\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -432,
+          -448
+        ],
+        "id": "bd738749-0d21-4489-be27-96bdb6f8712e",
+        "name": "Lista Instancias OFF"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "49257da7-c8ed-4d97-96a8-7529678a5ced",
+                "name": "Numeros",
+                "value": "[5511954187344]",
+                "type": "array"
+              },
+              {
+                "id": "5116cc4f-1074-4d10-a3d8-7c56754f6e37",
+                "name": "Mensagem",
+                "value": "={{ $('HTTP Request').item.json.statusCode === 200\n  ? `⚠️ EVOLUTION API\\n>> ${$('Lista Instancias OFF').item.json.instances} OFF(`+$json.unconnectedInstances+`)`\n  : `⚠️⚠️⚠️ EVOLUTION API\\n>> ATENÇÃO - SERVIDOR OFF`\n}}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -128,
+          -224
+        ],
+        "id": "595ee6e5-b7eb-45cb-9a02-e58db81fc210",
+        "name": "Números e Mensagem"
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request": {
+        "main": [
+          [
+            {
+              "node": "Ignorar Instancias",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Números e Mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "InfobipApi": {
+        "main": [
+          []
+        ]
+      },
+      "Ignorar Instancias": {
+        "main": [
+          [
+            {
+              "node": "Lista Instancias OFF",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Split Out": {
+        "main": [
+          [
+            {
+              "node": "InfobipApi",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Lista Instancias OFF": {
+        "main": [
+          [
+            {
+              "node": "Números e Mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Números e Mensagem": {
+        "main": [
+          [
+            {
+              "node": "Split Out",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
