@@ -1,0 +1,242 @@
+{
+  "updatedAt": "2026-04-13T20:31:21.277Z",
+  "createdAt": "2026-01-27T12:29:51.903Z",
+  "id": "F9tlBgq16WsWAtkY",
+  "name": "BMS - 7.3 - Plot Gráficos (Folha)",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Processar os dados que recebeu",
+        "height": 304,
+        "width": 640,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        80
+      ],
+      "id": "f764ba01-f148-4efc-8914-2aee95436348",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Code para preparar a url com os dados ",
+        "height": 304,
+        "width": 592
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        912,
+        80
+      ],
+      "id": "607252a6-46d1-4d20-8b6b-03f4af0eba57",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4.1",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        512,
+        432
+      ],
+      "id": "5d95b2a0-b53a-4738-9d81-b37daaf967c7",
+      "name": "OpenRouter Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === INPUT ===\nlet chart = $json;\n\n// Se vier como string dentro de \"output\" (resposta do Agente), faz o parse\nif (chart.output && typeof chart.output === 'string') {\n  try {\n    // 1. EXTRAÇÃO ROBUSTA: Pega tudo desde o primeiro '{' até o último '}'\n    // Isso ignora textos como \"Aqui está o JSON:\" antes ou \"Espero ter ajudado\" depois.\n    const jsonMatch = chart.output.match(/\\{[\\s\\S]*\\}/);\n    \n    // Se não encontrar chaves, tenta usar a string original (fallback)\n    let jsonString = jsonMatch ? jsonMatch[0] : chart.output;\n\n    // 2. LIMPEZA DE SUJEIRA INTERNA (Markdown e Comentários)\n    const jsonClean = jsonString\n      .replace(/```json/g, '')   // remove ```json\n      .replace(/```/g, '')       // remove ```\n      .replace(/\\/\\/.*$/gm, '')  // remove // comentários de linha\n      .replace(/\\/\\*[\\s\\S]*?\\*\\//g, ''); // remove /* ... */ comentários de bloco\n\n    chart = JSON.parse(jsonClean);\n\n  } catch (e) {\n    // Dica de Debug: Mostra o que ele tentou parsear para você corrigir no prompt se necessário\n    throw new Error(`❌ Falha ao converter chart.output para JSON: ${e.message} ||| Conteúdo recebido: ${chart.output}`);\n  }\n}\n\n// Fallback: Se chart não tiver estrutura válida, retorna erro ou ignora\nif (!chart || (!chart.values && !chart.data)) {\n    // Retorna algo vazio ou erro controlado se preferir\n    return [{ json: { error: \"Sem dados para gráfico\", originalOutput: chart?.output } }];\n}\n\n// === BASE CONFIG ===\n// ... (MANTENHA O RESTANTE DO CÓDIGO DAQUI PARA BAIXO IGUAL AO ANTERIOR) ...\nconst baseUrl = 'https://image-charts.com/chart.js/2.8.0';\nconst background = 'white';\nconst colors = [\n  'rgba(78,121,167,1)',   // Azul\n  'rgba(242,142,43,1)',   // Laranja\n  'rgba(225,87,89,1)',    // Vermelho\n  'rgba(118,183,178,1)',  // Verde-azulado\n  'rgba(89,161,79,1)',    // Verde\n  'rgba(237,201,73,1)',   // Amarelo\n  'rgba(175,122,161,1)',  // Roxo\n  'rgba(255,157,167,1)',  // Rosa\n  'rgba(156,117,95,1)',   // Marrom\n  'rgba(186,176,171,1)',  // Cinza\n];\n\nlet datasets = [];\nlet config;\n\n// Função Helper para montar datasets\n// Suporta tanto Array simples [10, 20] quanto Objeto {\"TI\": [10], \"RH\": [20]}\n// Função Helper para montar datasets\n// Suporta tanto Array simples [10, 20] quanto Objeto {\"Set/25\": [10], \"Out/25\": [20]}\nconst buildDatasets = (values, type) => {\n    const isMultiSeries = !Array.isArray(values) && typeof values === 'object';\n    \n    if (isMultiSeries) {\n        return Object.entries(values).map(([label, data], i) => ({\n            label: label, // Nome da série (ex: \"Setembro/2025\")\n            data: data,\n            fill: type === 'line' ? false : true,\n            // Usa cores diferentes para cada mês/série\n            borderColor: colors[i % colors.length],\n            // Se for barra, usa cor sólida (1). Se linha, usa cor sólida também.\n            backgroundColor: type === 'line' ? colors[i % colors.length] : colors[i % colors.length].replace('1)', '0.8)'), \n            borderWidth: 1, // Borda mais fina para barras agrupadas fica mais elegante\n            tension: 0.3, \n            pointRadius: 4 // Ponto um pouco maior para linhas múltiplas\n        }));\n    } else {\n        // Série Única (Ex: Ranking simples)\n        return [{\n            label: chart.descricao || 'Valores',\n            data: values,\n            fill: type === 'line' ? false : true,\n            borderColor: colors[0],\n            backgroundColor: type === 'line' ? colors[0] : colors[0].replace('1)', '0.7)'),\n            borderWidth: 2,\n            tension: 0.3,\n            pointRadius: 3\n        }];\n    }\n};\n\n// === 1. GRÁFICO DE LINHA ===\nif (chart.tipo === 'linha') {\n  datasets = buildDatasets(chart.values, 'line');\n  \n  config = {\n    type: 'line',\n    data: {\n      labels: chart.labels,\n      datasets: datasets\n    },\n    options: {\n      responsive: true,\n      title: { display: true, text: chart.titulo },\n      legend: { position: 'top', display: true },\n      scales: {\n        yAxes: [{ ticks: { beginAtZero: true } }] // Garante que o eixo Y comece do 0\n      }\n    }\n  };\n}\n\n// === 2. GRÁFICO DE PIZZA (COM DADOS NA LEGENDA E DECIMAIS) ===\nelse if (chart.tipo === 'pizza') {\n  // Garante que values seja um array simples\n  const dataValues = Array.isArray(chart.values) ? chart.values : Object.values(chart.values)[0];\n  \n  // 1. Calcula o Total\n  const total = dataValues.reduce((a, b) => a + b, 0);\n\n  // 2. Cria \"Labels Ricos\" com 1 casa decimal (Ex: \"Feminino: 317 (35,8%)\")\n  const richLabels = chart.labels.map((label, i) => {\n      const value = dataValues[i];\n      \n      // MUDANÇA AQUI:\n      // toFixed(1) garante 1 casa decimal.\n      // replace('.', ',') troca ponto por vírgula para formato BR.\n      const percent = total > 0 \n        ? ((value / total) * 100).toFixed(1).replace('.', ',') \n        : '0,0';\n\n      return `${label}: ${value} (${percent}%)`;\n  });\n\n  datasets = [{\n    data: dataValues,\n    backgroundColor: colors.slice(0, chart.labels.length),\n    borderColor: 'white',\n    borderWidth: 2\n  }];\n\n  config = {\n    type: 'pie',\n    data: {\n      labels: richLabels, \n      datasets: datasets\n    },\n    options: {\n      responsive: true,\n      title: { display: true, text: chart.titulo },\n      legend: { \n          position: 'right',\n          labels: { \n            boxWidth: 12, \n            fontSize: 11,\n            padding: 15\n          } \n      },\n      plugins: {\n        datalabels: { \n            display: true, \n            color: 'white', \n            font: { weight: 'bold', size: 14 },\n            anchor: 'center',\n            align: 'center',\n                    }\n      }\n    }\n  };\n}\n\n// === 3. GRÁFICO HORIZONTAL (Correção v2.8.0) ===\nelse if (chart.tipo === 'horizontal') {\n  datasets = buildDatasets(chart.values, 'bar');\n\n  config = {\n    type: 'horizontalBar', // <--- CORREÇÃO CRÍTICA PARA CHART.JS 2.X\n    data: {\n      labels: chart.labels,\n      datasets: datasets\n    },\n    options: {\n      responsive: true,\n      title: { display: true, text: chart.titulo },\n      legend: { position: 'right', display: datasets.length > 1 }, // Esconde legenda se for só 1 série\n      scales: {\n        xAxes: [{ ticks: { beginAtZero: true } }]\n      }\n    }\n  };\n}\n\n// === 4. GRÁFICO DE BARRAS VERTICAIS (Padrão) ===\nelse {\n  datasets = buildDatasets(chart.values, 'bar');\n\n  config = {\n    type: 'bar',\n    data: {\n      labels: chart.labels,\n      datasets: datasets\n    },\n    options: {\n      responsive: true,\n      title: { display: true, text: chart.titulo },\n      legend: { position: 'top', display: datasets.length > 1 },\n      scales: {\n        yAxes: [{ ticks: { beginAtZero: true } }]\n      }\n    }\n  };\n}\n\n// === GERAR URL ===\n// Adicionando encodeURIComponent para garantir que caracteres especiais não quebrem a URL\nconst jsonConfig = encodeURIComponent(JSON.stringify(config));\nconst url = `${baseUrl}?bkg=${background}&c=${jsonConfig}`;\n\nreturn [{\n  json: { url, chart }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        176
+      ],
+      "id": "1ff8bff0-37cc-485c-8d9b-6df9b3b8d001",
+      "name": "Prepara a url de requisição da api"
+    },
+    {
+      "parameters": {
+        "url": "={{$json[\"url\"]}}",
+        "responseFormat": "file",
+        "options": {}
+      },
+      "name": "Chama a api Image-Chart",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1168,
+        176
+      ],
+      "id": "0dd10d3c-e9f2-4d44-9ca3-57882d2a3e4c"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Você é um especialista em visualização de dados de RH (Saúde e Segurança) e geração de configurações JSON para a API **Image-Charts**.\n\n**ENTRADA RECEBIDA:**\n- `pergunta`: \"{{ $json.pergunta }}\"\n- `filtros`: {{ JSON.stringify($json.filtros) }}\n- `dados`: {{ JSON.stringify($json.dados) }}\n- `analise_previa`: {{ JSON.stringify($json.resposta) }}\n\n**SUA MISSÃO:**\nAnalisar a estrutura dos dados e gerar o JSON de configuração visual perfeito.\nUse a `analise_previa` para enriquecer o `titulo` e a `descricao` (ex: se a análise diz \"Tendência de alta\", coloque isso no título).\n\n---\n\n### 1. MAPEAMENTO INTELIGENTE DE COLUNAS\n\nAnalise o array `dados` e identifique os papéis das colunas:\n\n* **EIXO X (Rótulos):**\n    * **Prioridade 1 (Tempo - Previsão/Evolução):** Procure por `Mes`, `Data`, `Mes_Ano`.\n        * *Ação:* Se encontrar, o gráfico será de **LINHA** (Evolução Temporal).\n        * *Ordenação:* Mantenha a ordem cronológica dos dados.\n    * **Prioridade 2 (Categorias Longas):** `Grupo_CID`, `Descricao_Doenca`, `Medico`, `Colaborador`, `Filial`.\n        * *Ação:* Prefira **BARRAS HORIZONTAIS** para não cortar os textos.\n    * **Prioridade 3 (Categorias Curtas):** `Status`, `Sexo`, `Tipo_Beneficio` (B31/B91).\n\n* **EIXO Y (Valores):**\n    * Procure a métrica numérica principal.\n    * **Prioridade:** `Total_Ativos_Acumulado` (Estoque) > `Qtd_Atestados` > `Total_Dias` > `Custo_Total` > `Qtd`.\n\n* **SÉRIE (Agrupamento - Multi-linhas ou Multi-barras):**\n    * Se os dados tiverem colunas extras numéricas como `Qtd_Novos` E `Qtd_Retornos`, plotaremos ambas.\n\n---\n\n### 2. SELEÇÃO DO TIPO DE GRÁFICO (Regras de Decisão)\n\n1.  **LINHA (Evolução e Previsão) [PRIORIDADE MÁXIMA PARA TEMPO]**\n    * **Condição:** Se houver coluna de **Tempo** (`Mes`).\n    * **Caso Especial (Previsão/Estoque):** Se tiver `Total_Ativos_Acumulado`, plote essa métrica principal. Se tiver `Qtd_Novos` e `Qtd_Retornos`, use o formato de objeto em `values` para criar múltiplas linhas.\n    * **Estrutura:** `tipo: \"linha\"`.\n\n2.  **HORIZONTAL (Rankings e CIDs)**\n    * **Condição:** Se a categoria for **Texto Longo** (ex: \"M54 - Dorsalgia\", \"Dr. João da Silva\").\n    * **Objetivo:** Facilitar a leitura dos nomes das doenças ou médicos.\n    * **Estrutura:** `tipo: \"horizontal\"`.\n\n3.  **PIZZA (Distribuições e Proporções)**\n    * **Condição:** Se for uma análise de **composição/fração** em um único momento.\n    * **Casos Obrigatórios:**\n        * Distribuição por **Sexo** (Masculino/Feminino).\n        * Distribuição por **Status** (Ativo/Cessado/Pendente).\n        * Distribuição por **Tipo** (Acidentário vs Previdenciário).\n    * **Trava de Segurança:** Se houver **mais de 5 categorias**, force o uso de **HORIZONTAL** ou **BARRAS** (Pizza fica ilegível com muitas fatias).\n    * **Estrutura:** `tipo: \"pizza\"`.\n\n4.  **BARRAS VERTICAIS**\n    * **Condição:** Comparativo simples com rótulos curtos (ex: \"Por Filial\", \"Por Centro de Custo\").\n    * **Estrutura:** `tipo: \"barras\"`.\n\n---\n\n### 3. PROCESSAMENTO DE DADOS (CRÍTICO)\n\nLabels com no máximo 16 caracteres\n1.  **Limpeza de Labels (CIDs):**\n    * **REGRA DE OURO:** Se a categoria for `Grupo_CID` ou `CID` (ex: \"M00-M99 - Doenças do sistema...\"), use **APENAS O CÓDIGO** no label (ex: \"M00-M99\"). Corte todo o texto após o hífen. Isso é vital para o gráfico não quebrar.\n\n1.  **Escala Monetária:**\n    * Se a coluna de valor for `Custo_Total` e os valores forem > 1.000, divida por 1.000 e adicione \"(em milhares de R$)\" no título.\n\n2.  **Múltiplas Séries (Previsão Completa):**\n    * Se o JSON de dados tiver: `[{ Mes: \"Jan\", Novos: 10, Retornos: 5, Saldo: 15 }]`.\n    * O campo `values` deve ser: `{ \"Novos\": [10], \"Retornos\": [5], \"Saldo Ativo\": [15] }`.\n    * Isso gerará um gráfico com 3 linhas comparativas.\n\n---\n\n### 4. FORMATO DE SAÍDA (JSON)\n\nRetorne APENAS este JSON:\n\n```json\n{\n  \"tipo\": \"linha\" | \"barras\" | \"horizontal\" | \"pizza\",\n  \"labels\": [\"Jan/26\", \"Fev/26\"] OU [\"M54\", \"J00\", \"Z00\"],\n  \"values\": [10, 20, 30] OU { \"Novos\": [10, 12], \"Ativos\": [50, 52] },\n  \"titulo\": \"Título curto (ex: Evolução do Saldo de Afastados) (Máx 50 caracteres)\",\n  \"descricao\": \"Unidade ou resumo (ex: 'Qtd de Colaboradores' ou 'Valores em R$') maximo de 32 caracteres\"\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        512,
+        176
+      ],
+      "id": "f60a80eb-7a21-4bfa-87c5-1d4e86f24a2f",
+      "name": "Define o tipo de gráfico que vai ser gerado"
+    },
+    {
+      "parameters": {
+        "inputSource": "jsonExample",
+        "jsonExample": "{\n  \"pergunta\": \"{{ $json.pergunta }}\",\n  \"dados\": \"{{ $json.resultados }}\", \n  \"filtros\": \"{{ $json.filtros }}\",\n  \"resposta\": \"{{ $json.resposta }}\"\n}"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        304,
+        176
+      ],
+      "id": "5c9b25f4-d653-478e-915e-528d4117f5ae",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        304,
+        -128
+      ],
+      "id": "9525206b-0a07-434d-94c7-72a99add61fd",
+      "name": "When clicking ‘Execute workflow’",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e7510c9a-4e61-4b54-bdcc-c8c9061fc1c3",
+              "name": "url_img",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1328,
+        176
+      ],
+      "id": "f45db805-b37f-4050-a20e-dccf610de7f1",
+      "name": "Retorna a url da img"
+    }
+  ],
+  "connections": {
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Define o tipo de gráfico que vai ser gerado",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara a url de requisição da api": {
+      "main": [
+        [
+          {
+            "node": "Chama a api Image-Chart",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chama a api Image-Chart": {
+      "main": [
+        [
+          {
+            "node": "Retorna a url da img",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define o tipo de gráfico que vai ser gerado": {
+      "main": [
+        [
+          {
+            "node": "Prepara a url de requisição da api",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Define o tipo de gráfico que vai ser gerado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "pergunta": "Ranking de CIDs que mais geraram afastamentos no último semestre fechado, empresa toda.",
+          "dados": "[\n  {\n    \"CID_Exato\": \"M54.1 - Radiculopatia\",\n    \"Empresa\": \"Supermercado Paraná\",\n    \"Qtd_Casos\": 1\n  },\n  {\n    \"CID_Exato\": \"000.0 - NA\",\n    \"Empresa\": \"Supermercado Paraná\",\n    \"Qtd_Casos\": 1\n  },\n  {\n    \"CID_Exato\": \"F06.0 - Alucinose orgânica\",\n    \"Empresa\": \"Supermercado Paraná\",\n    \"Qtd_Casos\": 1\n  }\n]",
+          "filtros": "{\n  \"intencao\": \"saude\",\n  \"metrica\": \"ranking\",\n  \"tipo_calculo\": \"quantidade\",\n  \"ranking_tipo\": \"cid\",\n  \"agrupamento\": [\n    \"cid\"\n  ],\n  \"mes_inicio\": \"10/2025\",\n  \"mes_fim\": \"03/2026\",\n  \"empresa\": \"1446\",\n  \"filial\": null,\n  \"cargo\": null,\n  \"centro_de_custo\": null,\n  \"logica_aplicada\": \"Ranking dos CIDs que mais geraram afastamentos pelo INSS na empresa inteira nos últimos 6 meses fechados, considerando o período retroativo de 04/2026.\"\n}",
+          "resposta": "As principais causas de afastamento no último semestre para toda a empresa foram: \n\n- **M54.1 - Radiculopatia:** 1 afastamento registrado. \n- **000.0 - NA:** 1 afastamento registrado. \n- **F06.0 - Alucinose orgânica:** 1 afastamento registrado. \n\nOs dados sugerem que não há uma concentração significativa em um único tipo de CID, o que pode indicar a diversidade dos motivos que levam aos afastamentos. Entretanto, é importante monitorar ergonomia e saúde mental, dado que doenças osteomusculares e transtornos mentais costumam ter impacto relevante no ambiente de trabalho."
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "versionId": "b32fe738-2f1f-432d-b0de-7203d1676750",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-01-27T12:29:51.903Z",
+      "createdAt": "2026-01-27T12:29:51.903Z",
+      "role": "workflow:owner",
+      "workflowId": "F9tlBgq16WsWAtkY",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
