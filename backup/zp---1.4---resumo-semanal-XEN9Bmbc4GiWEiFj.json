@@ -1,0 +1,394 @@
+{
+  "updatedAt": "2025-12-23T12:53:03.751Z",
+  "createdAt": "2025-11-25T04:52:12.066Z",
+  "id": "XEN9Bmbc4GiWEiFj",
+  "name": "ZP - 1.4 - Resumo Semanal",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1,
+                4
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        48,
+        224
+      ],
+      "id": "3686ab88-9e29-43dd-8b8a-90d739987dd8",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1Ze1MFqVlu21qakfTTE5ECfAu4iFOoeQMygOCjPW5nek",
+          "mode": "list",
+          "cachedResultName": "Controle Radar do Corretor",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1Ze1MFqVlu21qakfTTE5ECfAu4iFOoeQMygOCjPW5nek/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "base",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1Ze1MFqVlu21qakfTTE5ECfAu4iFOoeQMygOCjPW5nek/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "postado"
+            },
+            {
+              "lookupColumn": "last_4_days",
+              "lookupValue": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        368,
+        224
+      ],
+      "id": "ffde15ac-5d81-4e6d-9158-d1f5bb0e8d0b",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// hoje em America/Sao_Paulo\nconst hoje = new Date();\n\n// fim = ontem\nconst fim = new Date(hoje);\nfim.setDate(fim.getDate() - 1);\n\n// início depende do dia da semana\nconst ini = new Date(fim);\n\nif (hoje.getDay() === 1) {\n  // Hoje é segunda → pega de quinta a domingo\n  ini.setDate(fim.getDate() - 3);  // quinta\n} else if (hoje.getDay() === 4) {\n  // Hoje é quinta → pega de segunda a quarta\n  ini.setDate(fim.getDate() - 2);  // segunda\n} else {\n  // fallback: últimos 3 dias\n  ini.setDate(fim.getDate() - 2);\n}\n\n// formatador dd/mm/yyyy\nconst fmt = d => String(d.getDate()).padStart(2,'0') + '/' +\n                 String(d.getMonth()+1).padStart(2,'0') + '/' +\n                 d.getFullYear();\n\nreturn {\n  data_ini: fmt(ini),\n  data_fim: fmt(fim)\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        224
+      ],
+      "id": "6980a76f-ae62-44a8-bdbe-0daf524a99d5",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        912,
+        448
+      ],
+      "id": "dd79011a-97b4-423c-847e-c1cb8411899e",
+      "name": "OpenRouter Chat Model1",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (!items.length) {\n  return [{ json: { prompt: \"Nenhuma notícia encontrada no período.\" } }];\n}\n\n// datas vindas do primeiro node \"Code\" (ajuste o nome se o seu node tiver outro nome)\nconst { data_ini, data_fim } = $item(0).$node[\"Code\"].json;\n\n// Limita texto da legenda para não estourar token\nconst MAX = 500;\nconst cut = s => (s ?? '').toString().trim().slice(0, MAX);\n\n// Monta contexto com título + legenda reduzida\nconst contexto = items.map(it => {\n  const titulo  = (it.json.titulo  ?? '').toString().trim();\n  const legenda = cut(it.json.legenda);\n  return `• ${titulo}\\n${legenda}`;\n}).join(\"\\n\\n\");\n\n// Cabeçalhos\nconst header1 = `*Bom dia comunidade Radar Corretor!* 📰\\n\\n`;\nconst header2 = `Segue *resumo das notícias da semana*:\\n\\n`;\nconst header3 = `Acompanhe a nossa página no Instagram:\\nhttps://www.instagram.com/radarcorretor\\n\\n`;\n\n// Opcional: rodapé (deixe vazio se não precisar)\nconst footer = ``;\n\nconst prompt = `\nVocê é editor do briefing matinal da comunidade Radar Corretor (WhatsApp).\nProduza UMA mensagem concisa, didática e visual, com base nas notícias entre ${data_ini} e ${data_fim}.\nNão liste notícia por notícia. Não inclua links (além do Instagram já fornecido). Não invente fatos.\n\nBASE (referência; não copie literalmente):\n${contexto}\n\nFORMATO EXATO DA SAÍDA (mantenha as linhas fixas e a ordem):\n${header1}${header2}${header3}[RESUMO CONECTADO EM BLOCOS]\n- Estruture em 2 a 3 blocos, cada um com título em negrito (use negrito do WhatsApp: *texto* - apenas um asterisco, nunca dois)+ emoji na mesma linha (ex.: 📈 Economia, 🏠 Imobiliário, 🤖 Tech/Empresas).\n- Cada bloco deve ter 2 a 3 frases curtas, explicando o que aconteceu e por que importa para o corretor.\n- Separe os blocos com uma linha em branco.\n\nO que muda para o corretor:\n- (emoji) Bullets práticos\n\n[INSIRA AQUI uma ÚNICA linha com **uma frase motivacional de vendas em itálico com autor, formato exato: _\"frase\" — Autor_]\n\n${footer}\n\nREGRAS:\n- PT-BR, claro e objetivo; sem jargão.\n- Priorize números/dados quando existirem; se faltarem, não invente.\n- Obrigatório: a citação deve vir em itálico (use sublinhados do WhatsApp: _texto_).\n- Não adicione seções além das especificadas.\n- Mantenha um limite de 1524 caracteres\n`.trim();\n\nreturn [{ json: { prompt } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        224
+      ],
+      "id": "9bbc77d4-9c3e-4a93-a4a3-1612eb428cd5",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "content": "# Fluxo de Envio do Resumo Semanal para comunidade Whatsapp\n### Esse fluxo roda todo dia de manhã as 08am\n### Envia um resumo das notícias processadas no dia anterior",
+        "height": 640,
+        "width": 2352,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -16,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "69f4e9ee-cdbd-42da-ab4b-f3ff707ea8b2",
+      "name": "Sticky Note15"
+    },
+    {
+      "parameters": {
+        "jsCode": "const parseBR = (s) => {\n  if (!s) return NaN;\n  const [dd, mm, yyyy] = s.split('/');\n  return new Date(`${yyyy}-${mm}-${dd}T00:00:00-03:00`).getTime();\n};\n\n// pega o intervalo vindo do primeiro Code\nconst data_ini = $item(0).$node[\"Code\"].json.data_ini;\nconst data_fim = $item(0).$node[\"Code\"].json.data_fim;\nconst tIni = parseBR(data_ini);\nconst tFim = parseBR(data_fim);\n\nconst out = $input.all().filter(it => {\n  const st = (it.json.status || '').toLowerCase();\n  const t  = parseBR(it.json.data_processamento);\n  return st === 'postado' && !Number.isNaN(t) && t >= tIni && t <= tFim;\n});\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        224
+      ],
+      "id": "53b9581a-ee4c-4ef1-9d8a-df87baaf1ce8",
+      "name": "Code2"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1888,
+        208
+      ],
+      "id": "97e2930c-eb3f-48b5-b936-8dbfcdc6c04e",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "operation": "send-image",
+        "instanceName": "ZP-RADAR-CORRETOR",
+        "remoteJid": "120363418028617728@g.us",
+        "media": "={{$json.base64Image}}",
+        "caption": "={{ $item(0).$node[\"AI Agent\"].json.output }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2128,
+        224
+      ],
+      "id": "63e39d14-b15b-43b3-88e9-e520cdb7998a",
+      "name": "Envio do post - Whatsapp",
+      "credentials": {
+        "evolutionApi": {
+          "id": "XN6ZGLmhb9RQbeHq",
+          "name": "ZP-RADAR-CORRETOR"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "1etDnHoDaidl2KZmBpw4Z9RAs8FO18kCq",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1344,
+        48
+      ],
+      "id": "a5a4818c-7176-45c0-a36a-023f878e49e4",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// n8n Code node – pega o base64 do arquivo baixado no \"Download file\"\n\nconst binAll = $input.item.binary || {};\n\n// tenta 'imagem_final', depois 'data', depois a 1ª chave disponível\nconst key =\n  binAll.imagem_final ? 'imagem_final' :\n  (binAll.data ? 'data' : Object.keys(binAll)[0]);\n\nif (!key) throw new Error('Nenhum binário encontrado no item.');\n\nconst bin = binAll[key];\nif (!bin?.data) throw new Error(`Binário na chave \"${key}\" não possui .data.`);\n\n// já vem em base64; não reconverta\nconst base64 = bin.data;\n\nreturn {\n  json: {\n    base64Image: base64,                          // use isto no Evolution (media)\n    mimeType: bin.mimeType || 'application/octet-stream',\n    fileName: bin.fileName || 'arquivo'\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        48
+      ],
+      "id": "862c5c45-b2c3-414c-8c21-10992b42c73f",
+      "name": "Code3"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        912,
+        224
+      ],
+      "id": "a5e6f093-2af4-4e8a-bf38-49d0e59c5b41",
+      "name": "AI Agent",
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Code2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code2": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Envio do post - Whatsapp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envio do post - Whatsapp": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Code3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code3": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "6eed6600-b9e2-4b54-83ae-df8e7f77e473",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2025-11-25T04:52:12.066Z",
+      "createdAt": "2025-11-25T04:52:12.066Z",
+      "role": "workflow:owner",
+      "workflowId": "XEN9Bmbc4GiWEiFj",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
