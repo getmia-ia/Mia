@@ -1,0 +1,1220 @@
+{
+  "updatedAt": "2026-01-17T15:10:00.371Z",
+  "createdAt": "2025-11-25T10:14:48.165Z",
+  "id": "UBkrt4TEKcfVOBSi",
+  "name": "BMS - 1.4 - Journal IA - Disparo Journal List",
+  "active": false,
+  "isArchived": true,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# Fluxo de Aprovação dos Posts\n\n### Esse fluxo roda sempre que existe uma alteracao no sheets de controle do journal\n### O AI Agent define se aprova ou rejeita um post baseado em sua imagem e se ja foi postado alguma vez um tema similar",
+        "height": 1072,
+        "width": 4864,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        112
+      ],
+      "typeVersion": 1,
+      "id": "ff23c21b-b754-464c-a564-9314f2ac4a40",
+      "name": "Sticky Note13"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "=name = '{{ $json.arquivo_base64 }}' and trashed = false\n",
+        "limit": 1,
+        "filter": {},
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1424,
+        576
+      ],
+      "id": "f3962f01-991c-4fc7-98f2-495829bfb045",
+      "name": "Search files and folders",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1632,
+        576
+      ],
+      "id": "635df648-20c8-468a-b2a7-01a60d39f963",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// 1) Buscar dados do Sheets\nconst noticia = $('Encontra a Próxima Notícia Válida').item.json;\nconst legenda = noticia.legenda || '';\nconst param_2 = noticia.param_2 || null;\nconst param_3 = noticia.param_3 || null;\nconst param_4 = noticia.param_4 || null;\nconst imagem_url = noticia.imagem_url || null;\n\n// 2) Pegar o dado binário cru do n8n\nconst inputBinaryData = $input.item?.binary?.data?.data;\nif (!inputBinaryData) {\n  throw new Error('Binário do arquivo não encontrado no node \"Download file\".');\n}\n\nlet finalBase64 = null;\nlet finalMime = null;\n\n// 3) Tentar decodificar como TEXTO primeiro\n// Se for um arquivo .txt contendo a string \"/9j/...\", isso vai revelar essa string.\nconst asText = Buffer.from(inputBinaryData, 'base64').toString('utf8').trim();\n\n// Regex para verificar se o texto decodificado PARECE ser um base64 de imagem\n// (Começa com /9j/ para JPG, iVBOR para PNG, ou data:image...)\nconst isTextContainingBase64 = /^(?:data:image\\/[a-zA-Z]+;base64,)?(?:\\/9j\\/|iVBOR|R0lG|UklGR|SUkq|TU0)/.test(asText);\n\nif (isTextContainingBase64) {\n  // CASO A: É um arquivo .txt que contém o texto da base64 dentro\n  // Usamos o texto decodificado, limpando quebras de linha ou espaços\n  let cleanContent = asText.replace(/\\s+/g, '');\n  \n  // Se tiver prefixo dataURI, removemos\n  const match = cleanContent.match(/^data:(.+);base64,(.+)$/i);\n  if (match) {\n    finalMime = match[1];\n    finalBase64 = match[2];\n  } else {\n    finalBase64 = cleanContent;\n  }\n} else {\n  // CASO B: É um arquivo de Imagem (Binário) salvo com extensão .txt\n  // O conteúdo do texto seria \"lixo\" (~)^+), então ignoramos o 'asText'.\n  // Usamos o binário original que o n8n nos entregou.\n  finalBase64 = inputBinaryData;\n}\n\n// 4) Detectar/Confirmar MIME type pelos \"magic bytes\" do base64 final\nif (!finalMime) {\n  const buf = Buffer.from(finalBase64, 'base64');\n  const sig = buf.slice(0, 4).toString('hex');\n  \n  if (sig.startsWith('ffd8')) finalMime = 'image/jpeg';\n  else if (sig === '89504e47') finalMime = 'image/png';\n  else if (sig.startsWith('474946')) finalMime = 'image/gif'; // GIF\n  else if (sig.startsWith('524946')) finalMime = 'image/webp'; // WebP\n  else finalMime = 'application/octet-stream';\n}\n\n// 5) Retorno\nreturn {\n  json: {\n    noticiaIndex: noticia.noticia_id,\n    legenda,\n    param_2,\n    param_3,\n    param_4,\n    imagem_url,\n    mimeType: finalMime,\n    base64: finalBase64\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1904,
+        496
+      ],
+      "id": "2f9d0d5d-df1b-49d3-ad47-48a013d55a1e",
+      "name": "Code3"
+    },
+    {
+      "parameters": {
+        "batchSize": "=1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        3520,
+        576
+      ],
+      "id": "ffda97d8-4444-42cb-85e5-cf391d4c9860",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "amount": "={{ 2 + Math.floor(Math.random() * 10) }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3968,
+        576
+      ],
+      "id": "afd969a6-6e25-4861-bd70-13b23528093c",
+      "name": "Wait",
+      "webhookId": "56291188-ec96-4e3f-ad03-920b5123e81a"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=5511992486507",
+        "messageText": "=**Journal BMS***\n\nMensagem para: {{ $('Wait').item.json.nome }} - {{ $('Wait').item.json.telefone }}\n\nTitulo: {{ $('Wait').item.json.param_2 }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        4448,
+        576
+      ],
+      "id": "a8bca2e0-94d4-4721-b54e-afed814aa659",
+      "name": "Envio do post - Journal List",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Normaliza o telefone do item atual\nconst raw = $json.telefone || \"\";\nlet clean = String(raw).replace(/\\D+/g, \"\"); // mantém só os dígitos\n\nif (clean.length === 11) {\n  clean = \"55\" + clean; // adiciona DDI se faltar\n} else if (clean.length === 13 && clean.startsWith(\"55\")) {\n  // já está ok\n}\n\n// Retorna o item original + o campo novo\nreturn {\n  json: {\n    ...$json,\n    telefoneAjustado: clean\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2352,
+        592
+      ],
+      "id": "0bef117b-d959-4c85-b205-c942ab6a888e",
+      "name": "Code4"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA",
+          "mode": "list",
+          "cachedResultName": "BMS - Controle Journal",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "base",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1Ze1MFqVlu21qakfTTE5ECfAu4iFOoeQMygOCjPW5nek/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status_WhatsApp",
+              "lookupValue": "aprovado"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        336,
+        592
+      ],
+      "id": "af8ec639-5d27-4e9b-9b65-c61337ad8f65",
+      "name": "base_noticias",
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combineBySql",
+        "query": "SELECT\n  b.nome AS nome,\n  b.telefone AS telefone,\n  a.legenda AS legenda,\n  a.param_2 AS param_2,\n  a.param_3 AS param_3,\n  a.param_4 AS param_4,\n  a.base64 AS base64,\n  a.imagem_url AS imagem_url,\n  a.mimeType AS mimeType,\n  a.noticiaIndex AS idx\nFROM input1 a\nCROSS JOIN input2 b",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2160,
+        592
+      ],
+      "id": "251bd605-a64b-492e-bf1c-31dec46b403d",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "tableId": "bms-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_usuario",
+              "fieldValue": "="
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Wait').item.json.legenda }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Wait').item.json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Wait').item.json.nome }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-BMS"
+            },
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Wait').item.json.telefone }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4672,
+        720
+      ],
+      "id": "09db5981-d08a-45b9-b47e-a5689b636801",
+      "name": "Cria Mensagem no Supabase1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "1mIJ3XxYMjb55Xua",
+          "name": "BMS - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "bms-historico_mensagens",
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2576,
+        464
+      ],
+      "id": "b56e5d1d-d9c8-46f4-a590-2ca88661a52b",
+      "name": "Get many rows",
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "1mIJ3XxYMjb55Xua",
+          "name": "BMS - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "23d972c0-0f5f-48b0-bd9d-488327b1c337",
+              "leftValue": "={{ $json.mensagens_hoje }}",
+              "rightValue": 4,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3728,
+        592
+      ],
+      "id": "3956378a-afb5-4708-8d89-c47bb05084d8",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1️⃣ Captura todas as mensagens do Supabase\nconst mensagens = $items(\"Get many rows\");\n\n// 2️⃣ Captura todos os números existentes no Code4 (para garantir que ninguém fique de fora)\nconst baseNumeros = $items(\"Code4\").map(item => String(item.json.telefoneAjustado || \"\").replace(/\\D+/g, \"\"));\n\n// 3️⃣ Pega a data de hoje em formato YYYY-MM-DD\nconst hoje = new Date().toISOString().slice(0, 10);\n\n// 4️⃣ Cria um dicionário para contar mensagens por telefone\nconst contagem = {};\n\nfor (const item of mensagens) {\n  const msg = item.json;\n  const telefone = String(msg.telefone || \"\").replace(/\\D+/g, \"\");\n  const dataMsg = msg.created_at ? msg.created_at.slice(0, 10) : \"\";\n\n  // Se for de hoje, incrementa a contagem\n  if (dataMsg === hoje && telefone) {\n    contagem[telefone] = (contagem[telefone] || 0) + 1;\n  }\n}\n\n// 5️⃣ Garante que todos os números da base venham com valor (0 se não tiver mensagens hoje)\nfor (const tel of baseNumeros) {\n  if (!contagem[tel]) contagem[tel] = 0;\n}\n\n// 6️⃣ Transforma o dicionário em array (como uma \"tabela\" pra merge)\nconst resultado = Object.entries(contagem).map(([telefone, mensagens_hoje]) => ({\n  json: { telefone, mensagens_hoje }\n}));\n\nreturn resultado;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2784,
+        464
+      ],
+      "id": "0500212c-2cd3-4686-84da-3a303b0f8926",
+      "name": "Code5"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "telefone",
+              "field2": "telefoneAjustado"
+            }
+          ]
+        },
+        "joinMode": "enrichInput2",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2992,
+        576
+      ],
+      "id": "08eaf629-829f-43e1-9ee8-3a5a01fec730",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cria um mapa para controlar quantas vezes cada telefone aparece\nconst contador = {};\n\n// Percorre todos os itens recebidos (Code7 está antes do Loop)\nreturn $input.all().map(item => {\n  const json = item.json;\n  const telefone = json.telefoneAjustado;\n\n  // Valor inicial vindo do Supabase\n  const mensagensHoje = json.mensagens_hoje || 0;\n\n  // Se o telefone ainda não foi visto neste lote, inicia com o valor atual do Supabase\n  if (!contador[telefone]) {\n    contador[telefone] = mensagensHoje;\n  }\n\n  // Incrementa 1 para esta ocorrência\n  contador[telefone]++;\n\n  // Retorna o item com o novo total\n  return {\n    json: {\n      ...json,\n      mensagens_hoje: contador[telefone],\n    },\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3216,
+        576
+      ],
+      "id": "2ff15fa6-c0e2-417b-aab0-dad9e0777973",
+      "name": "Code7"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * 1-6"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        80,
+        592
+      ],
+      "id": "ec026325-645e-4134-a20f-f65040913267",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/782664311604851/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $json.telefoneAjustado }}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"atualizacao_cliente\",\n    \"language\": {\n      \"code\": \"pt_BR\"\n    },\n    \"components\": [\n      {\n        \"type\": \"header\",\n        \"parameters\": [\n          {\n            \"type\": \"image\",\n            \"image\": {\n              \"link\": \"{{ $json.imagem_url }}\"\n            }\n          }\n        ]\n      },\n      {\n        \"type\": \"body\",\n        \"parameters\": [\n          { \"type\": \"text\", \"text\": \"{{ $json.nome }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $json.param_2 }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $json.param_3 }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $json.param_4 }}\" }\n        ]\n      }\n    ]\n  }\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4208,
+        576
+      ],
+      "id": "e863e74f-dad0-4957-8652-442b5bfbc3f9",
+      "name": "HTTP Request",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://chatwoot.miabuilder.com/api/v1/accounts/8/conversations/{{ $('Variáveis do Fluxo').item.json.message.chat_id }}/messages",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "api_access_token",
+              "value": "wr4beE6ke1EQNaaFqMVJWQmm"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json['output.mensagens'] }}"
+            },
+            {
+              "name": "message_type",
+              "value": "outgoing"
+            },
+            {
+              "name": "private",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3968,
+        176
+      ],
+      "id": "2cad065c-d0ea-4b91-8783-8202fe1a478b",
+      "name": "HTTP Request3",
+      "disabled": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dcdb56d1-ac07-4175-b2b8-aec30dec60c5",
+              "leftValue": "={{$json.titulo}}",
+              "rightValue": "undefined",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        944,
+        592
+      ],
+      "id": "fb4a1b6d-8244-4951-afbf-50338de0c0ea",
+      "name": "Verifica se há notícia"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1152,
+        688
+      ],
+      "id": "ba8057a9-2289-4311-a487-77080add4e53",
+      "name": "No Operation, do nothing1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA",
+          "mode": "list",
+          "cachedResultName": "BMS - Controle Journal",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "base",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "noticia_id"
+          ],
+          "schema": [
+            {
+              "id": "noticia_id",
+              "displayName": "noticia_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "data_processamento",
+              "displayName": "data_processamento",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "titulo",
+              "displayName": "titulo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "legenda",
+              "displayName": "legenda",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "legenda_x",
+              "displayName": "legenda_x",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "param_2",
+              "displayName": "param_2",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "param_3",
+              "displayName": "param_3",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "param_4",
+              "displayName": "param_4",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fonte",
+              "displayName": "fonte",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "imagem",
+              "displayName": "imagem",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "arquivo_base64",
+              "displayName": "arquivo_base64",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "arquivo2_base64",
+              "displayName": "arquivo2_base64",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "arquivo3_base64",
+              "displayName": "arquivo3_base64",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "imagem_url",
+              "displayName": "imagem_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "imagem_url2",
+              "displayName": "imagem_url2",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "imagem_url3",
+              "displayName": "imagem_url3",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status_WhatsApp",
+              "displayName": "status_WhatsApp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_X",
+              "displayName": "status_X",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "nota",
+              "displayName": "nota",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "justificativa",
+              "displayName": "justificativa",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "output",
+              "displayName": "output",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        3968,
+        368
+      ],
+      "id": "c9c8c7e7-008a-4b9b-921d-553510ccafdd",
+      "name": "Atualiza status do envio no whatsapp",
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f2c98e3a-ba6b-4df7-a0c9-96994c91a690",
+              "name": "noticia_id",
+              "value": "={{ $('Code3').first().json.noticiaIndex }}",
+              "type": "string"
+            },
+            {
+              "id": "a95682ad-ea9c-4d88-a370-0ffad2b3eea5",
+              "name": "status_WhatsApp",
+              "value": "postado",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3728,
+        368
+      ],
+      "id": "3616bac1-f289-4562-8a45-65f96ba34171",
+      "name": "Prepara os campos a serem atualizados na planilha"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code Node: Ordena e seleciona a mais recente das NÃO ENVIADAS\nconst items = $input.all();\n\nconst parseBR = (s) => {\n  if (!s) return null;\n  const parts = s.split(/[\\/\\s:]+/);\n  if (parts.length < 3) return null;\n  const [dd, mm, yyyy] = parts.map(p => parseInt(p, 10));\n  return new Date(yyyy, mm - 1, dd); // cria data no fuso local\n};\n\nif (items.length === 0) return [];\n\nconst sortedItems = items.sort((a, b) => {\n  const dateA = parseBR(a.json.data_processamento) || new Date(0);\n  const dateB = parseBR(b.json.data_processamento) || new Date(0);\n\n  const diff = dateB - dateA;\n  if (diff !== 0) return diff;\n\n  return (b.json.row_number || 0) - (a.json.row_number || 0);\n});\n\n// Para depurar a ordem\nconsole.log(sortedItems.map(i => ({\n  data: i.json.data_processamento,\n  titulo: i.json.titulo\n})));\n\n// Retorna a mais recente\nreturn [{ json: sortedItems[0].json }];\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        592
+      ],
+      "id": "e5a7b250-97e1-41c8-8d1b-0c020d8778de",
+      "name": "Encontra a Próxima Notícia Válida"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1IDXSuMzMhUFDCmKkpS9qSfH3UuBKyoOD66M75UYcgSs",
+          "mode": "list",
+          "cachedResultName": "CRM - BMS",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1IDXSuMzMhUFDCmKkpS9qSfH3UuBKyoOD66M75UYcgSs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "journal_list",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1IDXSuMzMhUFDCmKkpS9qSfH3UuBKyoOD66M75UYcgSs/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "ativo"
+            },
+            {
+              "lookupColumn": "novo?",
+              "lookupValue": "cadastrado"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        1904,
+        704
+      ],
+      "id": "b7f665b7-0739-43b3-9b98-fbe2f0aca6f8",
+      "name": "Get row(s) in sheet",
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * 1-6"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        80,
+        832
+      ],
+      "id": "8453249a-4d29-4661-afd7-26d2be59dee2",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA",
+          "mode": "list",
+          "cachedResultName": "BMS - Controle Journal",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1833394607,
+          "mode": "list",
+          "cachedResultName": "social-media-bms",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA/edit#gid=1833394607"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status_whatsapp",
+              "lookupValue": "aprovado"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        336,
+        832
+      ],
+      "id": "650f05fd-09cd-4a50-8f42-22ebbbc6b73e",
+      "name": "base_noticias1",
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    }
+  ],
+  "connections": {
+    "Search files and folders": {
+      "main": [
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Code3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code3": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [
+          {
+            "node": "Prepara os campos a serem atualizados na planilha",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envio do post - Journal List": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cria Mensagem no Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code4": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "base_noticias": {
+      "main": [
+        [
+          {
+            "node": "Encontra a Próxima Notícia Válida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Code4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows": {
+      "main": [
+        [
+          {
+            "node": "Code5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code5": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "Code7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code7": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "base_noticias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Envio do post - Journal List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se há notícia": {
+      "main": [
+        [
+          {
+            "node": "Search files and folders",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Operation, do nothing1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara os campos a serem atualizados na planilha": {
+      "main": [
+        [
+          {
+            "node": "Atualiza status do envio no whatsapp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encontra a Próxima Notícia Válida": {
+      "main": [
+        [
+          {
+            "node": "Verifica se há notícia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "base_noticias1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "base_noticias1": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "executionTimeout": -1
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    },
+    "node:Schedule Trigger1": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "775c7c16-181a-4e09-9edf-857210e00c75",
+  "activeVersionId": null,
+  "triggerCount": 2,
+  "shared": [
+    {
+      "updatedAt": "2025-11-25T10:14:48.165Z",
+      "createdAt": "2025-11-25T10:14:48.165Z",
+      "role": "workflow:owner",
+      "workflowId": "UBkrt4TEKcfVOBSi",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
