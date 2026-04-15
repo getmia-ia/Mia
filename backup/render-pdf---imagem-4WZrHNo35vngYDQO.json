@@ -1,0 +1,217 @@
+{
+  "updatedAt": "2026-01-30T18:56:18.848Z",
+  "createdAt": "2026-01-30T16:07:39.034Z",
+  "id": "4WZrHNo35vngYDQO",
+  "name": "Render PDF --> IMAGEM",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1312,
+        -160
+      ],
+      "id": "a8c4cb39-ea35-44a3-ad5e-c9622af93823",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "content": "## URL --> COM RECORTE  -->  BASE64\n",
+        "height": 288,
+        "width": 992
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -384,
+        896
+      ],
+      "typeVersion": 1,
+      "id": "dd71b571-b602-44e2-b8f0-fd98ca00b72a",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "executeOnce": false,
+        "command": "=# =================================================\n# INPUTS (n8n variables / parâmetros simples)\n# =================================================\n\n# --- PDF ---\nPDF_URL=\"https://cdn.miabuilder.com/MIA/SADM/imgpdf1.pdf\"\n\n# --- Render ---\nDPI={{ $json['DPI  (150 | 300 | 400)'] }}                # 150 | 300 | 400\nIMAGE_FORMAT=\"{{ $json['IMAGE_FORMAT ( png | jpg ) '] }}\"      # png | jpg\nQUALITY={{ $json['QUALITY (usado apenas para jpg)'] }}             # usado apenas para jpg\n\n# --- Pages ---\nPAGE_MODE=\"{{ $json['PAGE_MODE (all | single | range)'] }}\"         # all | single | range\nPAGE_FROM=\"{{ $json['PAGE_FROM (ex:1)'] }}\"            # ex: 1\nPAGE_TO=\"{{ $json['PAGE_TO (ex:2)'] }}\"              # ex: 2\n\n# --- Output ---\nOUTPUT_TYPE=\"{{ $json['OUTPUT_TYPE (local | base64)'] }}\"     # local | base64\nOUT_DIR=\"{{ $json.OUT_DIR }}\"\nBASE64_PREFIX={{ $json.BASE64_PREFIX }}     # true | false\n\n# --- Limits ---\nMAX_PAGES={{ $json.MAX_PAGES }}\n\n# =================================================\n# Paths\n# =================================================\nPDF=\"{{ $json.PDF_DOWNLOAD_PATH }}\"\nPY=\"/tmp/pdf_to_images.py\"\n\nmkdir -p \"$OUT_DIR\"\n\n# =================================================\n# Download PDF (mantido como no script funcional)\n# =================================================\nwget -q -O \"$PDF\" \"$PDF_URL\" || exit 1\n\n# =================================================\n# Python script (embedded)\n# =================================================\ncat > \"$PY\" << 'EOF'\nimport subprocess\nimport sys\nimport os\nimport json\nimport base64\n\nPDF_PATH      = sys.argv[1]\nOUT_DIR       = sys.argv[2]\nDPI           = int(sys.argv[3])\nFORMAT        = sys.argv[4]\nQUALITY       = int(sys.argv[5])\nPAGE_MODE     = sys.argv[6]\nPAGE_FROM     = sys.argv[7] or None\nPAGE_TO       = sys.argv[8] or None\nOUTPUT_TYPE   = sys.argv[9]\nBASE64_PREFIX = sys.argv[10].lower() == \"true\"\nMAX_PAGES     = int(sys.argv[11])\n\nPREFIX = os.path.join(OUT_DIR, \"page\")\n\n# -------------------------------\n# Build pdftoppm command\n# -------------------------------\ncmd = [\"pdftoppm\", \"-r\", str(DPI)]\n\nif FORMAT == \"png\":\n    cmd.append(\"-png\")\nelif FORMAT in (\"jpg\", \"jpeg\"):\n    cmd.append(\"-jpeg\")\n    cmd += [\"-jpegopt\", f\"quality={QUALITY}\"]\nelse:\n    raise Exception(\"Invalid image format\")\n\nif PAGE_MODE == \"single\" and PAGE_FROM:\n    cmd += [\"-f\", PAGE_FROM, \"-l\", PAGE_FROM]\nelif PAGE_MODE == \"range\" and PAGE_FROM and PAGE_TO:\n    cmd += [\"-f\", PAGE_FROM, \"-l\", PAGE_TO]\n# PAGE_MODE == all → nada\n\ncmd += [PDF_PATH, PREFIX]\n\nsubprocess.check_call(cmd)\n\n# -------------------------------\n# Collect files\n# -------------------------------\next = \"png\" if FORMAT == \"png\" else \"jpg\"\n\nfiles = sorted(\n    f for f in os.listdir(OUT_DIR)\n    if f.startswith(\"page-\") and f.endswith(\".\" + ext)\n)\n\nif len(files) == 0:\n    raise Exception(\"No pages generated\")\n\nif len(files) > MAX_PAGES:\n    raise Exception(\"Max pages limit exceeded\")\n\nresult_files = []\n\nfor f in files:\n    fpath = os.path.join(OUT_DIR, f)\n    entry = {\"path\": fpath}\n\n    if OUTPUT_TYPE == \"base64\":\n        with open(fpath, \"rb\") as img:\n            b64 = base64.b64encode(img.read()).decode()\n            if BASE64_PREFIX:\n                mime = \"image/png\" if FORMAT == \"png\" else \"image/jpeg\"\n                b64 = f\"data:{mime};base64,\" + b64\n            entry[\"base64\"] = b64\n\n    result_files.append(entry)\n\n# -------------------------------\n# Output JSON\n# -------------------------------\nresult = {\n    \"status\": \"success\",\n    \"url\": PDF_PATH,\n    \"dpi\": DPI,\n    \"format\": FORMAT,\n    \"page_mode\": PAGE_MODE,\n    \"pages\": len(result_files),\n    \"files\": result_files\n}\n\nprint(json.dumps(result))\nEOF\n\n# =================================================\n# Execute\n# =================================================\npython3 \"$PY\" \\\n  \"$PDF\" \\\n  \"$OUT_DIR\" \\\n  \"$DPI\" \\\n  \"$IMAGE_FORMAT\" \\\n  \"$QUALITY\" \\\n  \"$PAGE_MODE\" \\\n  \"$PAGE_FROM\" \\\n  \"$PAGE_TO\" \\\n  \"$OUTPUT_TYPE\" \\\n  \"$BASE64_PREFIX\" \\\n  \"$MAX_PAGES\" \\\n  2>/dev/null\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -896,
+        -160
+      ],
+      "id": "71912b4e-c5eb-4fa7-ab3a-95812ef5d174",
+      "name": "Execute Command"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "880539c6-1e4f-414f-9e38-6749ed79ed7b",
+              "name": "PDF_URL",
+              "value": "https://cdn.miabuilder.com/MIA/SADM/imgpdf1.pdf",
+              "type": "string"
+            },
+            {
+              "id": "793cd99e-764e-4a2b-92f4-d6c5a7d25383",
+              "name": "DPI  (150 | 300 | 400)",
+              "value": "300",
+              "type": "string"
+            },
+            {
+              "id": "8db37e72-9c93-4031-91c5-fd319991e793",
+              "name": "IMAGE_FORMAT ( png | jpg ) ",
+              "value": "png",
+              "type": "string"
+            },
+            {
+              "id": "daf72b8a-a462-43b3-b97b-d5be78646319",
+              "name": "QUALITY (usado apenas para jpg)",
+              "value": "95",
+              "type": "string"
+            },
+            {
+              "id": "06592d23-984c-43a5-8391-2e9358e3fa15",
+              "name": "PAGE_MODE (all | single | range)",
+              "value": "all",
+              "type": "string"
+            },
+            {
+              "id": "9a292541-4777-4f99-9d8b-455a7b6729fe",
+              "name": "PAGE_FROM (ex:1)",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "c2e3a7eb-afa7-4915-bac1-1f3faf1e9498",
+              "name": "PAGE_TO (ex:2)",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "8565d454-a324-4ab9-b7ea-623f8e80b634",
+              "name": "OUT_DIR",
+              "value": "/n8n_data/pdf_pages",
+              "type": "string"
+            },
+            {
+              "id": "7245761f-5cde-43c8-9bc1-4dd48f2183d4",
+              "name": "OUTPUT_TYPE (local | base64)",
+              "value": "local",
+              "type": "string"
+            },
+            {
+              "id": "3eb39634-a877-496b-86e8-2f00ca5fe27b",
+              "name": "BASE64_PREFIX",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "109c8006-acb4-466e-8391-d0fb209e427f",
+              "name": "MAX_PAGES",
+              "value": 10,
+              "type": "number"
+            },
+            {
+              "id": "05c351ee-b62c-4bd4-a111-6439578aad73",
+              "name": "PDF_DOWNLOAD_PATH",
+              "value": "/n8n_data/input.pdf",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1088,
+        -160
+      ],
+      "id": "3913ddb8-a073-4645-a81b-c44995265edd",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "fileSelector": "={{ JSON.parse($json.stdout).files[0].path }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        -160
+      ],
+      "id": "2f2acb01-2898-4a75-a67d-cc8cb89d6443",
+      "name": "Read/Write Files from Disk"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Execute Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Command": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "7a0a277a-6245-4311-962a-2639cfb568ff",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-01-30T16:07:39.034Z",
+      "createdAt": "2026-01-30T16:07:39.034Z",
+      "role": "workflow:owner",
+      "workflowId": "4WZrHNo35vngYDQO",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
