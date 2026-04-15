@@ -1,1 +1,1516 @@
-{"updatedAt":"2026-03-18T22:02:40.136Z","createdAt":"2025-11-25T18:09:11.560Z","id":"aT6nX1Y0aBKg6ojy","name":"EMI - 3.08 - SDR Luana IA - Reminder","active":true,"isArchived":false,"nodes":[{"parameters":{"resource":"databasePage","operation":"getAll","databaseId":{"__rl":true,"value":"287c103b-58ba-8057-bd3f-e2b83606d543","mode":"list","cachedResultName":"Leads","cachedResultUrl":"https://www.notion.so/287c103b58ba8057bd3fe2b83606d543"},"returnAll":true,"filterType":"manual","matchType":"allFilters","filters":{"conditions":[{"key":"Etapa|status","condition":"equals","statusValue":"Reunião"}]},"options":{}},"type":"n8n-nodes-base.notion","typeVersion":2.2,"position":[48,64],"id":"c543ea83-d9a5-4ea5-89dc-22e6c0332bab","name":"Pega os leads do Notion","credentials":{"notionApi":{"id":"jmIIz8ORpI5khHQI","name":"EMI - Notion"}}},{"parameters":{"jsCode":"function ajustarTelefone(raw) {\n  if (!raw) return null;\n\n  let t = raw.toString().replace(/\\D/g, \"\");\n\n  if (t.length === 11) t = \"55\" + t;\n  if (t.length === 10) t = \"55\" + t;\n  if (t.startsWith(\"55\")) return t;\n  if (t.startsWith(\"+\")) return t.replace(\"+\", \"\");\n\n  return t;\n}\n\n// ========================================\n// Identificar gatilho real (9h ou 10min)\n// ========================================\nlet gatilho = null;\n\n// tenta pegar dos possíveis nodes Set\ntry {\n  gatilho = $('Seta o gatilho').first().json.gatilho || null;\n} catch {}\n\ntry {\n  gatilho = $('Seta o gatilho1').first().json.gatilho || gatilho;\n} catch {}\n\ntry {\n  gatilho = $('Seta o gatilho2').first().json.gatilho || gatilho;\n} catch {}\n\nif (!gatilho) {\n  // fallback opcional\n  gatilho = \"10min\"; \n}\n\n// Lista final\nconst filtrados = [];\n\n// ========================================================\n// CASO 0 → Execução das 19h (Lembrete do dia anterior)\n// ========================================================\nif (gatilho === \"19h\") {\n  const agora = new Date();\n  \n  // Cria uma data representando \"Amanhã\"\n  const amanha = new Date(agora);\n  amanha.setDate(amanha.getDate() + 1);\n  \n  // Formata para YYYY-MM-DD (ex: 2025-12-24)\n  const dataAmanha = amanha.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.property_contato;\n    const reuniao = lead.property_data_de_reuni_o?.start;\n\n    if (!reuniao) continue;\n\n    // Pega a data da reunião (YYYY-MM-DD)\n    const dataReuniao = reuniao.split(\"T\")[0];\n\n    // Se a data da reunião for igual a data de amanhã\n    if (dataReuniao === dataAmanha) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_amanha\" // Use isso no Switch para mandar msg de \"é amanhã\"\n        }\n      });\n    }\n  }\n\n  return filtrados;\n}\n\n// ========================================\n// CASO 1 → Execução das 9h (gatilho = \"9h\")\n// ========================================\nif (gatilho === \"9h\") {\n  const agora = new Date();\n  const hoje = agora.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.property_contato;\n    const reuniao = lead.property_data_de_reuni_o?.start;\n\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\"T\")[0];\n\n    if (dataReuniao === hoje) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_hoje\"\n        }\n      });\n    }\n  }\n\n  return filtrados;\n}\n\n// ========================================\n// CASO 2 → Execução dos 21/51 min (10 min antes)\n// ========================================\nconst agoraUTC = Date.now();\nconst min7 = agoraUTC + 7 * 60 * 1000;\nconst min12 = agoraUTC + 12 * 60 * 1000;\n\nfor (const item of items) {\n  const lead = item.json;\n  const telefone = lead.property_contato;\n  const reuniao = lead.property_data_de_reuni_o?.start;\n\n  if (!reuniao) continue;\n\n  const timestampReuniao = new Date(reuniao).getTime();\n\n  if (timestampReuniao >= min7 && timestampReuniao <= min12) {\n    filtrados.push({\n      json: {\n        ...lead,\n        telefonePadronizado: ajustarTelefone(telefone),\n        motivo: \"reuniao_proximos_10min\"\n      }\n    });\n  }\n}\n\nreturn filtrados;\n"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[256,64],"id":"6a14ebda-e7d3-4daa-9a4d-556e20cbdaa8","name":"Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min"},{"parameters":{"tableId":"finamob-historico_mensagens","fieldsUi":{"fieldValues":[{"fieldId":"mensagem_agente","fieldValue":"={{ $('Montar o body da requisição').item.json.mensagem_visual }}"},{"fieldId":"telefone","fieldValue":"={{ $('Preparar variáveis do lead').item.json.telefone }}"},{"fieldId":"nome_usuario","fieldValue":"={{ $('Preparar variáveis do lead').item.json.name }}"},{"fieldId":"message_type","fieldValue":"text"},{"fieldId":"ativo","fieldValue":"true"},{"fieldId":"nome_app","fieldValue":"SDR-LUANA"}]}},"type":"n8n-nodes-base.supabase","typeVersion":1,"position":[2208,304],"id":"a51c4a69-62c8-4c7e-a970-a6dc8ac9c0ae","name":"Cria Mensagem no Supabase","credentials":{"supabaseApi":{"id":"J2ITvTeT2ru3SEdo","name":"EMI - Supabase"}},"onError":"continueRegularOutput","notes":"Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"},{"parameters":{"resource":"messages-api","instanceName":"MIA-LOGS","remoteJid":"=5511992486507","messageText":"=Erro ao disparar mensagem de reminder para {{ $('Preparar variáveis do lead').item.json.name }}\n\n{{ $('Preparar variáveis do lead').item.json.url }}","options_message":{}},"type":"n8n-nodes-evolution-api.evolutionApi","typeVersion":1,"position":[1856,256],"id":"27d7131e-cf56-4b59-8857-7ba6f6ad7390","name":"Aviso de erro ao disparar mensagem1","credentials":{"evolutionApi":{"id":"jhxyikodw5k2TTr1","name":"MIA-LOGS"}},"onError":"continueErrorOutput"},{"parameters":{"conditions":{"options":{"caseSensitive":true,"leftValue":"","typeValidation":"strict","version":2},"conditions":[{"id":"b5296455-2292-4b5d-8e75-0b156471af30","leftValue":"={{ $json.messages[0].message_status }}","rightValue":"accepted","operator":{"type":"string","operation":"equals","name":"filter.operator.equals"}}],"combinator":"and"},"options":{}},"type":"n8n-nodes-base.if","typeVersion":2.2,"position":[1664,64],"id":"4c29389e-5230-432b-a7e2-1cc983ef6165","name":"Verifica se a msg foi enviada"},{"parameters":{"resource":"messages-api","instanceName":"MIA-LOGS","remoteJid":"=5511992486507","messageText":"=Reminder disparado para {{ $('Preparar variáveis do lead').item.json.name }}\n\n{{ $('Preparar variáveis do lead').item.json.url }}","options_message":{}},"type":"n8n-nodes-evolution-api.evolutionApi","typeVersion":1,"position":[1920,48],"id":"7a2b779f-576f-49e0-b5f2-a9925d31124f","name":"Confirmação Reminder","credentials":{"evolutionApi":{"id":"jhxyikodw5k2TTr1","name":"MIA-LOGS"}},"onError":"continueErrorOutput"},{"parameters":{"operation":"get","calendar":{"__rl":true,"value":"contato@monteferrario.com.br","mode":"id"},"eventId":"={{ $json.id_calendar }}","options":{}},"type":"n8n-nodes-base.googleCalendar","typeVersion":1.3,"position":[928,80],"id":"145f611c-86b6-4d00-a3d6-f44243fc6132","name":"Pega o link do meet","alwaysOutputData":false,"credentials":{"googleCalendarOAuth2Api":{"id":"dJZwMOEsZu29HT9y","name":"Google Calendar account"}},"onError":"continueRegularOutput"},{"parameters":{"content":"## Enviar mensagem de lembrete da reunião","height":704,"width":2800},"type":"n8n-nodes-base.stickyNote","typeVersion":1,"position":[-432,-192],"id":"738401ef-c9f7-4cbd-8ec0-4944e8e19826","name":"Sticky Note"},{"parameters":{"jsCode":"// ==========================\n// 1. DEFINIÇÃO DOS TEMPLATES\n// ==========================\nconst templates = {\n  // --- 10 MINUTOS ANTES ---\n  reminder_reuniao: {\n    name: \"reminder_reuniao\",\n    vars: 2, // {{1}}=Nome, {{2}}=Link\n    text: \"Opa, {{1}}! Tudo certo por aí? \\n\\n Em 10 minutinhos a gente começa. Vou deixar o link aqui de novo pra facilitar: \\n\\n {{2}} \\n\\n Até já!\"\n  },\n  reminder_reuniao_sem_link: {\n    name: \"reminder_reuniao_sem_link\",\n    vars: 1, // {{1}}=Nome\n    text: \"Oi, {{1}}! Tudo pronto aí? \\n\\n Nossa reunião começa em *10 minutos*. Te aguardo!\"\n  },\n\n  // --- 9H DA MANHÃ (HOJE) ---\n  reminder_reuniao2: {\n    name: \"reminder_reuniao2\",\n    vars: 3, // {{1}}=Nome, {{2}}=Horário, {{3}}=Link\n    text: \"Bom dia, {{1}}! Tudo bem? \\n\\n Passando só pra lembrar do nosso papo hoje às *{{2}}*. \\n\\n Já vou deixar o link aqui pra você se organizar: {{3}} \\n\\n Combinado? Até mais tarde!\"\n  },\n  reminder_reuniao_sem_link2: {\n    name: \"reminder_reuniao_sem_link2\",\n    vars: 2, // {{1}}=Nome, {{2}}=Horário\n    text: \"Bom dia, {{1}}! Tudo bem? \\n\\n Passando pra lembrar da nossa reunião hoje às *{{2}}*. \\n\\n  Tudo certo pra gente conversar? Qualquer imprevisto me avisa!\"\n  },\n\n  // --- 19H (DIA ANTERIOR - NOVO) ---\n  reminder_reuniao_amanha: {\n    name: \"reminder_reuniao_amanha\",\n    vars: 2, // {{1}}=Nome, {{2}}=Horário\n    text: \"Boa noite, {{1}}!\\n\\nSó passando pra deixar no radar nossa reunião de amanhã às *{{2}}*.\\n\\nPodemos manter confirmado? Abs!\"\n  }\n};\n\n// ==========================\n// 2. DADOS DO LEAD E ENTRADA\n// ==========================\n// A estrutura do 'items' pode variar dependendo do node anterior. \n// Assumindo que o node anterior retorna um array e estamos processando item a item ou o primeiro.\nconst leadData = items[0].json; \n\n// Tenta pegar dados enriquecidos do node anterior 'Preparar variáveis do lead' se existir\nlet origem = {};\ntry {\n    origem = $('Preparar variáveis do lead').first().json;\n} catch (e) {\n    // Se falhar (ex: teste manual), usa o próprio json atual como fallback\n    origem = leadData; \n}\n\n// Dados básicos\nconst name = origem.name || leadData.name || \"Visitante\";\nconst telefone = String(origem.telefone || leadData.telefone || \"\");\nconst motivo = origem.motivo || leadData.motivo; // \"reuniao_hoje\", \"reuniao_amanha\", \"reuniao_proximos_10min\"\n\n// Link da Reunião (Tenta pegar do Google Calendar ou Zoom)\nconst linkReuniao = \n  leadData.hangoutLink || \n  leadData.conferenceData?.entryPoints?.[0]?.uri || \n  leadData.location || // Às vezes o link tá no location\n  null;\n\n// Horário da Reunião (Formatado HH:MM)\nconst horarioReuniaoISO = leadData.start?.dateTime || leadData.start?.date || null;\nlet horarioFormatado = \"\";\n\nif (horarioReuniaoISO) {\n  const dt = new Date(horarioReuniaoISO);\n  // Ajuste de fuso se necessário (o n8n geralmente traz ISO UTC ou com offset)\n  // Se o servidor for UTC e a data vier com offset (-03:00), getHours pega hora local do servidor.\n  // Para garantir hora do Brasil:\n  const options = { timeZone: \"America/Sao_Paulo\", hour: '2-digit', minute: '2-digit', hour12: false };\n  horarioFormatado = new Intl.DateTimeFormat('pt-BR', options).format(dt);\n}\n\n// ==========================\n// 3. ESCOLHER O TEMPLATE CORRETO\n// ==========================\nlet templateEscolhido = null;\n\nif (motivo === \"reuniao_amanha\") {\n    // Caso 19h (Dia anterior)\n    templateEscolhido = templates.reminder_reuniao_amanha;\n} \nelse if (motivo === \"reuniao_hoje\") {\n    // Caso 9h (Mesmo dia)\n    templateEscolhido = linkReuniao \n        ? templates.reminder_reuniao2 \n        : templates.reminder_reuniao_sem_link2;\n} \nelse {\n    // Caso Default (10 min antes)\n    templateEscolhido = linkReuniao \n        ? templates.reminder_reuniao \n        : templates.reminder_reuniao_sem_link;\n}\n\n// Se não achou template (erro de lógica), para aqui\nif (!templateEscolhido) {\n    throw new Error(`Nenhum template encontrado para o motivo: ${motivo}`);\n}\n\n// ==========================\n// 4. MONTAR VARIÁVEIS (PARAMETERS)\n// ==========================\nconst parameters = [];\n\n// Variável {{1}} é SEMPRE o Nome\nparameters.push({ type: \"text\", text: name });\n\n// Lógica de variáveis adicionais baseada no Motivo\nif (motivo === \"reuniao_amanha\") {\n    // Template Amanhã: {{1}}=Nome, {{2}}=Horário\n    parameters.push({ type: \"text\", text: horarioFormatado });\n} \nelse if (motivo === \"reuniao_hoje\") {\n    // Template Hoje: {{1}}=Nome, {{2}}=Horário, {{3}}=Link (opcional)\n    parameters.push({ type: \"text\", text: horarioFormatado });\n    \n    if (linkReuniao && templateEscolhido.vars >= 3) {\n        parameters.push({ type: \"text\", text: linkReuniao });\n    }\n} \nelse {\n    // Template 10min: {{1}}=Nome, {{2}}=Link (se tiver link)\n    if (linkReuniao && templateEscolhido.vars >= 2) {\n        parameters.push({ type: \"text\", text: linkReuniao });\n    }\n}\n\n// ==========================\n// 5. MONTAR O PAYLOAD FINAL\n// ==========================\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: telefone,\n  type: \"template\",\n  template: {\n    name: templateEscolhido.name,\n    language: { code: \"pt_BR\" },\n    components: [\n      {\n        type: \"body\",\n        parameters: parameters\n      }\n    ]\n  }\n};\n\n// ==========================\n// 6. SIMULAR TEXTO FINAL (PARA LOG/DEBUG)\n// ==========================\nlet textoSimulado = templateEscolhido.text;\ntextoSimulado = textoSimulado.replace(\"{{1}}\", name);\n\nif (motivo === \"reuniao_amanha\") {\n    textoSimulado = textoSimulado.replace(\"{{2}}\", horarioFormatado);\n} \nelse if (motivo === \"reuniao_hoje\") {\n    textoSimulado = textoSimulado.replace(\"{{2}}\", horarioFormatado);\n    if (linkReuniao) textoSimulado = textoSimulado.replace(\"{{3}}\", linkReuniao);\n} \nelse {\n    if (linkReuniao) textoSimulado = textoSimulado.replace(\"{{2}}\", linkReuniao);\n}\n\n// Limpa sobras de variáveis não preenchidas visualmente\ntextoSimulado = textoSimulado.replace(/{{[0-9]+}}/g, \"\");\n\n// ==========================\n// RETORNO\n// ==========================\nreturn {\n  json: {\n    resultado_api: body,\n    mensagem_visual: textoSimulado,\n    template_name: templateEscolhido.name,\n    motivo_disparo: motivo,\n    lead_nome: name,\n    lead_telefone: telefone\n  }\n};"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[1136,80],"id":"d265a3cd-957a-4f73-b31d-b23d8d35c1d9","name":"Montar o body da requisição"},{"parameters":{"rule":{"interval":[{"field":"cronExpression","expression":"21,51 9-20 * * *"}]}},"type":"n8n-nodes-base.scheduleTrigger","typeVersion":1.2,"position":[-384,-112],"id":"cccb7d90-4083-47b3-b163-38751b70bb7c","name":"Gatilho de verificação periódica"},{"parameters":{"batchSize":"=1","options":{}},"type":"n8n-nodes-base.splitInBatches","typeVersion":3,"position":[496,64],"id":"b71ee08a-534d-4bcd-8018-f3add2a06f38","name":"Rodar lembrete por lead"},{"parameters":{"assignments":{"assignments":[{"id":"940b2951-9c80-4163-ad9f-fd5296a59997","name":"database_page","value":"={{ $json.id }}","type":"string"},{"id":"5b6ca92b-2cff-4c1f-ade0-9a600c0fc251","name":"name","value":"={{ $json.name.split(' ')[0] }}","type":"string"},{"id":"cfcf4634-e2fa-48a3-8824-e01715f5648e","name":"etapa","value":"={{ $json.property_etapa }}","type":"string"},{"id":"901826dc-2d94-4924-b751-d89417652c38","name":"telefone","value":"={{ $json.property_contato }}","type":"string"},{"id":"9cfacdf3-f4b4-4fe4-b03b-a73ec3e9f07c","name":"var_1","value":"={{ $json.name.split(' ')[0] }}","type":"string"},{"id":"1cc3014b-f284-429a-aa2e-9ecb0c55daec","name":"url","value":"={{ $json.url }}","type":"string"},{"id":"fcac981c-23b1-43ad-8608-af0f8bc7283a","name":"id_calendar","value":"={{ $json.property_id_calendar }}","type":"string"},{"id":"fe65c0f9-980d-48bc-80dd-d4d38ac05de3","name":"motivo","value":"={{ $('Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min').item.json.motivo }}","type":"string"}]},"options":{}},"type":"n8n-nodes-base.set","typeVersion":3.4,"position":[720,80],"id":"d82b7a74-821a-4a21-b992-e10001db6668","name":"Preparar variáveis do lead"},{"parameters":{"method":"POST","url":"https://graph.facebook.com/v22.0/869722152886578/messages","authentication":"genericCredentialType","genericAuthType":"httpBearerAuth","sendHeaders":true,"headerParameters":{"parameters":[{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"specifyBody":"json","jsonBody":"={{ $json.resultado_api }}","options":{}},"type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[1360,80],"id":"cebe41b8-3f09-4248-a60a-504ca4f3ff1d","name":"Enviar mensagem via WhatsApp","retryOnFail":true,"credentials":{"httpBearerAuth":{"id":"VEIaezW6GjDeSS3w","name":"Meta Business Manager"}},"onError":"continueErrorOutput"},{"parameters":{"rule":{"interval":[{"triggerAtHour":9}]}},"type":"n8n-nodes-base.scheduleTrigger","typeVersion":1.2,"position":[-384,64],"id":"033f931d-4f99-46b4-9252-f981d3207654","name":"Gatilho para as 9h"},{"parameters":{"rule":{"interval":[{"triggerAtHour":19}]}},"type":"n8n-nodes-base.scheduleTrigger","typeVersion":1.2,"position":[-384,256],"id":"7d45d2be-fcf2-424c-a65e-3abcbf43f06d","name":"Gatilho para as 19h"},{"parameters":{"assignments":{"assignments":[{"id":"dc4a1831-d002-4c08-8e52-3faefb08e90f","name":"gatilho","value":"10min","type":"string"}]},"options":{}},"type":"n8n-nodes-base.set","typeVersion":3.4,"position":[-176,-112],"id":"6cf1f0f4-e373-4428-93de-26c180f7160e","name":"Seta o gatilho"},{"parameters":{"assignments":{"assignments":[{"id":"7969398c-4c48-4029-8aad-7a00eafc7531","name":"gatilho","value":"9h","type":"string"}]},"options":{}},"type":"n8n-nodes-base.set","typeVersion":3.4,"position":[-176,64],"id":"4552e923-5751-4d78-a0d9-d550b26d8301","name":"Seta o gatilho1"},{"parameters":{"assignments":{"assignments":[{"id":"7969398c-4c48-4029-8aad-7a00eafc7531","name":"gatilho","value":"19h","type":"string"}]},"options":{}},"type":"n8n-nodes-base.set","typeVersion":3.4,"position":[-176,256],"id":"efc23b9b-3580-468f-a87a-d1f0a1e1fc21","name":"Seta o gatilho2"}],"connections":{"Pega os leads do Notion":{"main":[[{"node":"Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min","type":"main","index":0}]]},"Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min":{"main":[[{"node":"Rodar lembrete por lead","type":"main","index":0}]]},"Aviso de erro ao disparar mensagem1":{"main":[[{"node":"Rodar lembrete por lead","type":"main","index":0}],[{"node":"Rodar lembrete por lead","type":"main","index":0}]]},"Cria Mensagem no Supabase":{"main":[[{"node":"Rodar lembrete por lead","type":"main","index":0}]]},"Verifica se a msg foi enviada":{"main":[[{"node":"Confirmação Reminder","type":"main","index":0}],[{"node":"Aviso de erro ao disparar mensagem1","type":"main","index":0}]]},"Confirmação Reminder":{"main":[[{"node":"Cria Mensagem no Supabase","type":"main","index":0}],[{"node":"Cria Mensagem no Supabase","type":"main","index":0}]]},"Pega o link do meet":{"main":[[{"node":"Montar o body da requisição","type":"main","index":0}]]},"Montar o body da requisição":{"main":[[{"node":"Enviar mensagem via WhatsApp","type":"main","index":0}]]},"Gatilho de verificação periódica":{"main":[[{"node":"Seta o gatilho","type":"main","index":0}]]},"Rodar lembrete por lead":{"main":[[],[{"node":"Preparar variáveis do lead","type":"main","index":0}]]},"Preparar variáveis do lead":{"main":[[{"node":"Pega o link do meet","type":"main","index":0}]]},"Enviar mensagem via WhatsApp":{"main":[[{"node":"Verifica se a msg foi enviada","type":"main","index":0}],[{"node":"Aviso de erro ao disparar mensagem1","type":"main","index":0}]]},"Gatilho para as 9h":{"main":[[{"node":"Seta o gatilho1","type":"main","index":0}]]},"Seta o gatilho":{"main":[[{"node":"Pega os leads do Notion","type":"main","index":0}]]},"Seta o gatilho1":{"main":[[{"node":"Pega os leads do Notion","type":"main","index":0}]]},"Gatilho para as 19h":{"main":[[{"node":"Seta o gatilho2","type":"main","index":0}]]},"Seta o gatilho2":{"main":[[{"node":"Pega os leads do Notion","type":"main","index":0}]]}},"settings":{"executionOrder":"v1","saveDataSuccessExecution":"all","callerPolicy":"workflowsFromSameOwner","availableInMCP":false,"saveExecutionProgress":false,"errorWorkflow":"xfondpEOYdGLoDo4","saveDataErrorExecution":"all","saveManualExecutions":true},"staticData":{"node:Schedule Trigger":{"recurrenceRules":[]},"node:Gatilho de verificação periódica":{"recurrenceRules":[]},"node:Gatilho para as 9h":{"recurrenceRules":[]},"node:Gatilho para as 19h":{"recurrenceRules":[]}},"meta":{"templateCredsSetupCompleted":true},"pinData":{"Gatilho para as 9h":[{"json":{"timestamp":"2025-11-27T16:51:00.027-03:00","Readable date":"November 27th 2025, 4:51:00 pm","Readable time":"4:51:00 pm","Day of week":"Thursday","Year":"2025","Month":"November","Day of month":"27","Hour":"16","Minute":"51","Second":"00","Timezone":"America/Sao_Paulo (UTC-03:00)"}}],"Gatilho de verificação periódica":[{"json":{"timestamp":"2025-12-09T10:21:00.022-03:00","Readable date":"December 9th 2025, 10:21:00 am","Readable time":"10:21:00 am","Day of week":"Tuesday","Year":"2025","Month":"December","Day of month":"09","Hour":"10","Minute":"21","Second":"00","Timezone":"America/Sao_Paulo (UTC-03:00)"}}],"Gatilho para as 19h":[{"json":{"timestamp":"2025-11-27T16:51:00.027-03:00","Readable date":"November 27th 2025, 4:51:00 pm","Readable time":"4:51:00 pm","Day of week":"Thursday","Year":"2025","Month":"November","Day of month":"27","Hour":"16","Minute":"51","Second":"00","Timezone":"America/Sao_Paulo (UTC-03:00)"}}]},"versionId":"805444ae-434f-4f4e-b203-c81a2fc38832","activeVersionId":"805444ae-434f-4f4e-b203-c81a2fc38832","triggerCount":3,"shared":[{"updatedAt":"2025-11-25T18:09:11.560Z","createdAt":"2025-11-25T18:09:11.560Z","role":"workflow:owner","workflowId":"aT6nX1Y0aBKg6ojy","projectId":"nRxOu1L1N41Jyveq"}],"activeVersion":{"updatedAt":"2026-03-18T22:02:40.139Z","createdAt":"2026-03-18T22:02:40.139Z","versionId":"805444ae-434f-4f4e-b203-c81a2fc38832","workflowId":"aT6nX1Y0aBKg6ojy","nodes":[{"parameters":{"resource":"databasePage","operation":"getAll","databaseId":{"__rl":true,"value":"287c103b-58ba-8057-bd3f-e2b83606d543","mode":"list","cachedResultName":"Leads","cachedResultUrl":"https://www.notion.so/287c103b58ba8057bd3fe2b83606d543"},"returnAll":true,"filterType":"manual","matchType":"allFilters","filters":{"conditions":[{"key":"Etapa|status","condition":"equals","statusValue":"Reunião"}]},"options":{}},"type":"n8n-nodes-base.notion","typeVersion":2.2,"position":[48,64],"id":"c543ea83-d9a5-4ea5-89dc-22e6c0332bab","name":"Pega os leads do Notion","credentials":{"notionApi":{"id":"jmIIz8ORpI5khHQI","name":"EMI - Notion"}}},{"parameters":{"jsCode":"function ajustarTelefone(raw) {\n  if (!raw) return null;\n\n  let t = raw.toString().replace(/\\D/g, \"\");\n\n  if (t.length === 11) t = \"55\" + t;\n  if (t.length === 10) t = \"55\" + t;\n  if (t.startsWith(\"55\")) return t;\n  if (t.startsWith(\"+\")) return t.replace(\"+\", \"\");\n\n  return t;\n}\n\n// ========================================\n// Identificar gatilho real (9h ou 10min)\n// ========================================\nlet gatilho = null;\n\n// tenta pegar dos possíveis nodes Set\ntry {\n  gatilho = $('Seta o gatilho').first().json.gatilho || null;\n} catch {}\n\ntry {\n  gatilho = $('Seta o gatilho1').first().json.gatilho || gatilho;\n} catch {}\n\ntry {\n  gatilho = $('Seta o gatilho2').first().json.gatilho || gatilho;\n} catch {}\n\nif (!gatilho) {\n  // fallback opcional\n  gatilho = \"10min\"; \n}\n\n// Lista final\nconst filtrados = [];\n\n// ========================================================\n// CASO 0 → Execução das 19h (Lembrete do dia anterior)\n// ========================================================\nif (gatilho === \"19h\") {\n  const agora = new Date();\n  \n  // Cria uma data representando \"Amanhã\"\n  const amanha = new Date(agora);\n  amanha.setDate(amanha.getDate() + 1);\n  \n  // Formata para YYYY-MM-DD (ex: 2025-12-24)\n  const dataAmanha = amanha.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.property_contato;\n    const reuniao = lead.property_data_de_reuni_o?.start;\n\n    if (!reuniao) continue;\n\n    // Pega a data da reunião (YYYY-MM-DD)\n    const dataReuniao = reuniao.split(\"T\")[0];\n\n    // Se a data da reunião for igual a data de amanhã\n    if (dataReuniao === dataAmanha) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_amanha\" // Use isso no Switch para mandar msg de \"é amanhã\"\n        }\n      });\n    }\n  }\n\n  return filtrados;\n}\n\n// ========================================\n// CASO 1 → Execução das 9h (gatilho = \"9h\")\n// ========================================\nif (gatilho === \"9h\") {\n  const agora = new Date();\n  const hoje = agora.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.property_contato;\n    const reuniao = lead.property_data_de_reuni_o?.start;\n\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\"T\")[0];\n\n    if (dataReuniao === hoje) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_hoje\"\n        }\n      });\n    }\n  }\n\n  return filtrados;\n}\n\n// ========================================\n// CASO 2 → Execução dos 21/51 min (10 min antes)\n// ========================================\nconst agoraUTC = Date.now();\nconst min7 = agoraUTC + 7 * 60 * 1000;\nconst min12 = agoraUTC + 12 * 60 * 1000;\n\nfor (const item of items) {\n  const lead = item.json;\n  const telefone = lead.property_contato;\n  const reuniao = lead.property_data_de_reuni_o?.start;\n\n  if (!reuniao) continue;\n\n  const timestampReuniao = new Date(reuniao).getTime();\n\n  if (timestampReuniao >= min7 && timestampReuniao <= min12) {\n    filtrados.push({\n      json: {\n        ...lead,\n        telefonePadronizado: ajustarTelefone(telefone),\n        motivo: \"reuniao_proximos_10min\"\n      }\n    });\n  }\n}\n\nreturn filtrados;\n"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[256,64],"id":"6a14ebda-e7d3-4daa-9a4d-556e20cbdaa8","name":"Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min"},{"parameters":{"tableId":"finamob-historico_mensagens","fieldsUi":{"fieldValues":[{"fieldId":"mensagem_agente","fieldValue":"={{ $('Montar o body da requisição').item.json.mensagem_visual }}"},{"fieldId":"telefone","fieldValue":"={{ $('Preparar variáveis do lead').item.json.telefone }}"},{"fieldId":"nome_usuario","fieldValue":"={{ $('Preparar variáveis do lead').item.json.name }}"},{"fieldId":"message_type","fieldValue":"text"},{"fieldId":"ativo","fieldValue":"true"},{"fieldId":"nome_app","fieldValue":"SDR-LUANA"}]}},"type":"n8n-nodes-base.supabase","typeVersion":1,"position":[2208,304],"id":"a51c4a69-62c8-4c7e-a970-a6dc8ac9c0ae","name":"Cria Mensagem no Supabase","credentials":{"supabaseApi":{"id":"J2ITvTeT2ru3SEdo","name":"EMI - Supabase"}},"onError":"continueRegularOutput","notes":"Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"},{"parameters":{"resource":"messages-api","instanceName":"MIA-LOGS","remoteJid":"=5511992486507","messageText":"=Erro ao disparar mensagem de reminder para {{ $('Preparar variáveis do lead').item.json.name }}\n\n{{ $('Preparar variáveis do lead').item.json.url }}","options_message":{}},"type":"n8n-nodes-evolution-api.evolutionApi","typeVersion":1,"position":[1856,256],"id":"27d7131e-cf56-4b59-8857-7ba6f6ad7390","name":"Aviso de erro ao disparar mensagem1","credentials":{"evolutionApi":{"id":"jhxyikodw5k2TTr1","name":"MIA-LOGS"}},"onError":"continueErrorOutput"},{"parameters":{"conditions":{"options":{"caseSensitive":true,"leftValue":"","typeValidation":"strict","version":2},"conditions":[{"id":"b5296455-2292-4b5d-8e75-0b156471af30","leftValue":"={{ $json.messages[0].message_status }}","rightValue":"accepted","operator":{"type":"string","operation":"equals","name":"filter.operator.equals"}}],"combinator":"and"},"options":{}},"type":"n8n-nodes-base.if","typeVersion":2.2,"position":[1664,64],"id":"4c29389e-5230-432b-a7e2-1cc983ef6165","name":"Verifica se a msg foi enviada"},{"parameters":{"resource":"messages-api","instanceName":"MIA-LOGS","remoteJid":"=5511992486507","messageText":"=Reminder disparado para {{ $('Preparar variáveis do lead').item.json.name }}\n\n{{ $('Preparar variáveis do lead').item.json.url }}","options_message":{}},"type":"n8n-nodes-evolution-api.evolutionApi","typeVersion":1,"position":[1920,48],"id":"7a2b779f-576f-49e0-b5f2-a9925d31124f","name":"Confirmação Reminder","credentials":{"evolutionApi":{"id":"jhxyikodw5k2TTr1","name":"MIA-LOGS"}},"onError":"continueErrorOutput"},{"parameters":{"operation":"get","calendar":{"__rl":true,"value":"contato@monteferrario.com.br","mode":"id"},"eventId":"={{ $json.id_calendar }}","options":{}},"type":"n8n-nodes-base.googleCalendar","typeVersion":1.3,"position":[928,80],"id":"145f611c-86b6-4d00-a3d6-f44243fc6132","name":"Pega o link do meet","alwaysOutputData":false,"credentials":{"googleCalendarOAuth2Api":{"id":"dJZwMOEsZu29HT9y","name":"Google Calendar account"}},"onError":"continueRegularOutput"},{"parameters":{"content":"## Enviar mensagem de lembrete da reunião","height":704,"width":2800},"type":"n8n-nodes-base.stickyNote","typeVersion":1,"position":[-432,-192],"id":"738401ef-c9f7-4cbd-8ec0-4944e8e19826","name":"Sticky Note"},{"parameters":{"jsCode":"// ==========================\n// 1. DEFINIÇÃO DOS TEMPLATES\n// ==========================\nconst templates = {\n  // --- 10 MINUTOS ANTES ---\n  reminder_reuniao: {\n    name: \"reminder_reuniao\",\n    vars: 2, // {{1}}=Nome, {{2}}=Link\n    text: \"Opa, {{1}}! Tudo certo por aí? \\n\\n Em 10 minutinhos a gente começa. Vou deixar o link aqui de novo pra facilitar: \\n\\n {{2}} \\n\\n Até já!\"\n  },\n  reminder_reuniao_sem_link: {\n    name: \"reminder_reuniao_sem_link\",\n    vars: 1, // {{1}}=Nome\n    text: \"Oi, {{1}}! Tudo pronto aí? \\n\\n Nossa reunião começa em *10 minutos*. Te aguardo!\"\n  },\n\n  // --- 9H DA MANHÃ (HOJE) ---\n  reminder_reuniao2: {\n    name: \"reminder_reuniao2\",\n    vars: 3, // {{1}}=Nome, {{2}}=Horário, {{3}}=Link\n    text: \"Bom dia, {{1}}! Tudo bem? \\n\\n Passando só pra lembrar do nosso papo hoje às *{{2}}*. \\n\\n Já vou deixar o link aqui pra você se organizar: {{3}} \\n\\n Combinado? Até mais tarde!\"\n  },\n  reminder_reuniao_sem_link2: {\n    name: \"reminder_reuniao_sem_link2\",\n    vars: 2, // {{1}}=Nome, {{2}}=Horário\n    text: \"Bom dia, {{1}}! Tudo bem? \\n\\n Passando pra lembrar da nossa reunião hoje às *{{2}}*. \\n\\n  Tudo certo pra gente conversar? Qualquer imprevisto me avisa!\"\n  },\n\n  // --- 19H (DIA ANTERIOR - NOVO) ---\n  reminder_reuniao_amanha: {\n    name: \"reminder_reuniao_amanha\",\n    vars: 2, // {{1}}=Nome, {{2}}=Horário\n    text: \"Boa noite, {{1}}!\\n\\nSó passando pra deixar no radar nossa reunião de amanhã às *{{2}}*.\\n\\nPodemos manter confirmado? Abs!\"\n  }\n};\n\n// ==========================\n// 2. DADOS DO LEAD E ENTRADA\n// ==========================\n// A estrutura do 'items' pode variar dependendo do node anterior. \n// Assumindo que o node anterior retorna um array e estamos processando item a item ou o primeiro.\nconst leadData = items[0].json; \n\n// Tenta pegar dados enriquecidos do node anterior 'Preparar variáveis do lead' se existir\nlet origem = {};\ntry {\n    origem = $('Preparar variáveis do lead').first().json;\n} catch (e) {\n    // Se falhar (ex: teste manual), usa o próprio json atual como fallback\n    origem = leadData; \n}\n\n// Dados básicos\nconst name = origem.name || leadData.name || \"Visitante\";\nconst telefone = String(origem.telefone || leadData.telefone || \"\");\nconst motivo = origem.motivo || leadData.motivo; // \"reuniao_hoje\", \"reuniao_amanha\", \"reuniao_proximos_10min\"\n\n// Link da Reunião (Tenta pegar do Google Calendar ou Zoom)\nconst linkReuniao = \n  leadData.hangoutLink || \n  leadData.conferenceData?.entryPoints?.[0]?.uri || \n  leadData.location || // Às vezes o link tá no location\n  null;\n\n// Horário da Reunião (Formatado HH:MM)\nconst horarioReuniaoISO = leadData.start?.dateTime || leadData.start?.date || null;\nlet horarioFormatado = \"\";\n\nif (horarioReuniaoISO) {\n  const dt = new Date(horarioReuniaoISO);\n  // Ajuste de fuso se necessário (o n8n geralmente traz ISO UTC ou com offset)\n  // Se o servidor for UTC e a data vier com offset (-03:00), getHours pega hora local do servidor.\n  // Para garantir hora do Brasil:\n  const options = { timeZone: \"America/Sao_Paulo\", hour: '2-digit', minute: '2-digit', hour12: false };\n  horarioFormatado = new Intl.DateTimeFormat('pt-BR', options).format(dt);\n}\n\n// ==========================\n// 3. ESCOLHER O TEMPLATE CORRETO\n// ==========================\nlet templateEscolhido = null;\n\nif (motivo === \"reuniao_amanha\") {\n    // Caso 19h (Dia anterior)\n    templateEscolhido = templates.reminder_reuniao_amanha;\n} \nelse if (motivo === \"reuniao_hoje\") {\n    // Caso 9h (Mesmo dia)\n    templateEscolhido = linkReuniao \n        ? templates.reminder_reuniao2 \n        : templates.reminder_reuniao_sem_link2;\n} \nelse {\n    // Caso Default (10 min antes)\n    templateEscolhido = linkReuniao \n        ? templates.reminder_reuniao \n        : templates.reminder_reuniao_sem_link;\n}\n\n// Se não achou template (erro de lógica), para aqui\nif (!templateEscolhido) {\n    throw new Error(`Nenhum template encontrado para o motivo: ${motivo}`);\n}\n\n// ==========================\n// 4. MONTAR VARIÁVEIS (PARAMETERS)\n// ==========================\nconst parameters = [];\n\n// Variável {{1}} é SEMPRE o Nome\nparameters.push({ type: \"text\", text: name });\n\n// Lógica de variáveis adicionais baseada no Motivo\nif (motivo === \"reuniao_amanha\") {\n    // Template Amanhã: {{1}}=Nome, {{2}}=Horário\n    parameters.push({ type: \"text\", text: horarioFormatado });\n} \nelse if (motivo === \"reuniao_hoje\") {\n    // Template Hoje: {{1}}=Nome, {{2}}=Horário, {{3}}=Link (opcional)\n    parameters.push({ type: \"text\", text: horarioFormatado });\n    \n    if (linkReuniao && templateEscolhido.vars >= 3) {\n        parameters.push({ type: \"text\", text: linkReuniao });\n    }\n} \nelse {\n    // Template 10min: {{1}}=Nome, {{2}}=Link (se tiver link)\n    if (linkReuniao && templateEscolhido.vars >= 2) {\n        parameters.push({ type: \"text\", text: linkReuniao });\n    }\n}\n\n// ==========================\n// 5. MONTAR O PAYLOAD FINAL\n// ==========================\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: telefone,\n  type: \"template\",\n  template: {\n    name: templateEscolhido.name,\n    language: { code: \"pt_BR\" },\n    components: [\n      {\n        type: \"body\",\n        parameters: parameters\n      }\n    ]\n  }\n};\n\n// ==========================\n// 6. SIMULAR TEXTO FINAL (PARA LOG/DEBUG)\n// ==========================\nlet textoSimulado = templateEscolhido.text;\ntextoSimulado = textoSimulado.replace(\"{{1}}\", name);\n\nif (motivo === \"reuniao_amanha\") {\n    textoSimulado = textoSimulado.replace(\"{{2}}\", horarioFormatado);\n} \nelse if (motivo === \"reuniao_hoje\") {\n    textoSimulado = textoSimulado.replace(\"{{2}}\", horarioFormatado);\n    if (linkReuniao) textoSimulado = textoSimulado.replace(\"{{3}}\", linkReuniao);\n} \nelse {\n    if (linkReuniao) textoSimulado = textoSimulado.replace(\"{{2}}\", linkReuniao);\n}\n\n// Limpa sobras de variáveis não preenchidas visualmente\ntextoSimulado = textoSimulado.replace(/{{[0-9]+}}/g, \"\");\n\n// ==========================\n// RETORNO\n// ==========================\nreturn {\n  json: {\n    resultado_api: body,\n    mensagem_visual: textoSimulado,\n    template_name: templateEscolhido.name,\n    motivo_disparo: motivo,\n    lead_nome: name,\n    lead_telefone: telefone\n  }\n};"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[1136,80],"id":"d265a3cd-957a-4f73-b31d-b23d8d35c1d9","name":"Montar o body da requisição"},{"parameters":{"rule":{"interval":[{"field":"cronExpression","expression":"21,51 9-20 * * *"}]}},"type":"n8n-nodes-base.scheduleTrigger","typeVersion":1.2,"position":[-384,-112],"id":"cccb7d90-4083-47b3-b163-38751b70bb7c","name":"Gatilho de verificação periódica"},{"parameters":{"batchSize":"=1","options":{}},"type":"n8n-nodes-base.splitInBatches","typeVersion":3,"position":[496,64],"id":"b71ee08a-534d-4bcd-8018-f3add2a06f38","name":"Rodar lembrete por lead"},{"parameters":{"assignments":{"assignments":[{"id":"940b2951-9c80-4163-ad9f-fd5296a59997","name":"database_page","value":"={{ $json.id }}","type":"string"},{"id":"5b6ca92b-2cff-4c1f-ade0-9a600c0fc251","name":"name","value":"={{ $json.name.split(' ')[0] }}","type":"string"},{"id":"cfcf4634-e2fa-48a3-8824-e01715f5648e","name":"etapa","value":"={{ $json.property_etapa }}","type":"string"},{"id":"901826dc-2d94-4924-b751-d89417652c38","name":"telefone","value":"={{ $json.property_contato }}","type":"string"},{"id":"9cfacdf3-f4b4-4fe4-b03b-a73ec3e9f07c","name":"var_1","value":"={{ $json.name.split(' ')[0] }}","type":"string"},{"id":"1cc3014b-f284-429a-aa2e-9ecb0c55daec","name":"url","value":"={{ $json.url }}","type":"string"},{"id":"fcac981c-23b1-43ad-8608-af0f8bc7283a","name":"id_calendar","value":"={{ $json.property_id_calendar }}","type":"string"},{"id":"fe65c0f9-980d-48bc-80dd-d4d38ac05de3","name":"motivo","value":"={{ $('Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min').item.json.motivo }}","type":"string"}]},"options":{}},"type":"n8n-nodes-base.set","typeVersion":3.4,"position":[720,80],"id":"d82b7a74-821a-4a21-b992-e10001db6668","name":"Preparar variáveis do lead"},{"parameters":{"method":"POST","url":"https://graph.facebook.com/v22.0/869722152886578/messages","authentication":"genericCredentialType","genericAuthType":"httpBearerAuth","sendHeaders":true,"headerParameters":{"parameters":[{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"specifyBody":"json","jsonBody":"={{ $json.resultado_api }}","options":{}},"type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[1360,80],"id":"cebe41b8-3f09-4248-a60a-504ca4f3ff1d","name":"Enviar mensagem via WhatsApp","retryOnFail":true,"credentials":{"httpBearerAuth":{"id":"VEIaezW6GjDeSS3w","name":"Meta Business Manager"}},"onError":"continueErrorOutput"},{"parameters":{"rule":{"interval":[{"triggerAtHour":9}]}},"type":"n8n-nodes-base.scheduleTrigger","typeVersion":1.2,"position":[-384,64],"id":"033f931d-4f99-46b4-9252-f981d3207654","name":"Gatilho para as 9h"},{"parameters":{"rule":{"interval":[{"triggerAtHour":19}]}},"type":"n8n-nodes-base.scheduleTrigger","typeVersion":1.2,"position":[-384,256],"id":"7d45d2be-fcf2-424c-a65e-3abcbf43f06d","name":"Gatilho para as 19h"},{"parameters":{"assignments":{"assignments":[{"id":"dc4a1831-d002-4c08-8e52-3faefb08e90f","name":"gatilho","value":"10min","type":"string"}]},"options":{}},"type":"n8n-nodes-base.set","typeVersion":3.4,"position":[-176,-112],"id":"6cf1f0f4-e373-4428-93de-26c180f7160e","name":"Seta o gatilho"},{"parameters":{"assignments":{"assignments":[{"id":"7969398c-4c48-4029-8aad-7a00eafc7531","name":"gatilho","value":"9h","type":"string"}]},"options":{}},"type":"n8n-nodes-base.set","typeVersion":3.4,"position":[-176,64],"id":"4552e923-5751-4d78-a0d9-d550b26d8301","name":"Seta o gatilho1"},{"parameters":{"assignments":{"assignments":[{"id":"7969398c-4c48-4029-8aad-7a00eafc7531","name":"gatilho","value":"19h","type":"string"}]},"options":{}},"type":"n8n-nodes-base.set","typeVersion":3.4,"position":[-176,256],"id":"efc23b9b-3580-468f-a87a-d1f0a1e1fc21","name":"Seta o gatilho2"}],"connections":{"Pega os leads do Notion":{"main":[[{"node":"Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min","type":"main","index":0}]]},"Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min":{"main":[[{"node":"Rodar lembrete por lead","type":"main","index":0}]]},"Aviso de erro ao disparar mensagem1":{"main":[[{"node":"Rodar lembrete por lead","type":"main","index":0}],[{"node":"Rodar lembrete por lead","type":"main","index":0}]]},"Cria Mensagem no Supabase":{"main":[[{"node":"Rodar lembrete por lead","type":"main","index":0}]]},"Verifica se a msg foi enviada":{"main":[[{"node":"Confirmação Reminder","type":"main","index":0}],[{"node":"Aviso de erro ao disparar mensagem1","type":"main","index":0}]]},"Confirmação Reminder":{"main":[[{"node":"Cria Mensagem no Supabase","type":"main","index":0}],[{"node":"Cria Mensagem no Supabase","type":"main","index":0}]]},"Pega o link do meet":{"main":[[{"node":"Montar o body da requisição","type":"main","index":0}]]},"Montar o body da requisição":{"main":[[{"node":"Enviar mensagem via WhatsApp","type":"main","index":0}]]},"Gatilho de verificação periódica":{"main":[[{"node":"Seta o gatilho","type":"main","index":0}]]},"Rodar lembrete por lead":{"main":[[],[{"node":"Preparar variáveis do lead","type":"main","index":0}]]},"Preparar variáveis do lead":{"main":[[{"node":"Pega o link do meet","type":"main","index":0}]]},"Enviar mensagem via WhatsApp":{"main":[[{"node":"Verifica se a msg foi enviada","type":"main","index":0}],[{"node":"Aviso de erro ao disparar mensagem1","type":"main","index":0}]]},"Gatilho para as 9h":{"main":[[{"node":"Seta o gatilho1","type":"main","index":0}]]},"Seta o gatilho":{"main":[[{"node":"Pega os leads do Notion","type":"main","index":0}]]},"Seta o gatilho1":{"main":[[{"node":"Pega os leads do Notion","type":"main","index":0}]]},"Gatilho para as 19h":{"main":[[{"node":"Seta o gatilho2","type":"main","index":0}]]},"Seta o gatilho2":{"main":[[{"node":"Pega os leads do Notion","type":"main","index":0}]]}},"authors":"Lucas Andrade","name":null,"description":null},"tags":[]}
+{
+  "updatedAt": "2026-03-18T22:02:40.136Z",
+  "createdAt": "2025-11-25T18:09:11.560Z",
+  "id": "aT6nX1Y0aBKg6ojy",
+  "name": "EMI - 3.08 - SDR Luana IA - Reminder",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "databaseId": {
+          "__rl": true,
+          "value": "287c103b-58ba-8057-bd3f-e2b83606d543",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://www.notion.so/287c103b58ba8057bd3fe2b83606d543"
+        },
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Etapa|status",
+              "condition": "equals",
+              "statusValue": "Reunião"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        48,
+        64
+      ],
+      "id": "c543ea83-d9a5-4ea5-89dc-22e6c0332bab",
+      "name": "Pega os leads do Notion",
+      "credentials": {
+        "notionApi": {
+          "id": "jmIIz8ORpI5khHQI",
+          "name": "EMI - Notion"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function ajustarTelefone(raw) {\n  if (!raw) return null;\n\n  let t = raw.toString().replace(/\\D/g, \"\");\n\n  if (t.length === 11) t = \"55\" + t;\n  if (t.length === 10) t = \"55\" + t;\n  if (t.startsWith(\"55\")) return t;\n  if (t.startsWith(\"+\")) return t.replace(\"+\", \"\");\n\n  return t;\n}\n\n// ========================================\n// Identificar gatilho real (9h ou 10min)\n// ========================================\nlet gatilho = null;\n\n// tenta pegar dos possíveis nodes Set\ntry {\n  gatilho = $('Seta o gatilho').first().json.gatilho || null;\n} catch {}\n\ntry {\n  gatilho = $('Seta o gatilho1').first().json.gatilho || gatilho;\n} catch {}\n\ntry {\n  gatilho = $('Seta o gatilho2').first().json.gatilho || gatilho;\n} catch {}\n\nif (!gatilho) {\n  // fallback opcional\n  gatilho = \"10min\"; \n}\n\n// Lista final\nconst filtrados = [];\n\n// ========================================================\n// CASO 0 → Execução das 19h (Lembrete do dia anterior)\n// ========================================================\nif (gatilho === \"19h\") {\n  const agora = new Date();\n  \n  // Cria uma data representando \"Amanhã\"\n  const amanha = new Date(agora);\n  amanha.setDate(amanha.getDate() + 1);\n  \n  // Formata para YYYY-MM-DD (ex: 2025-12-24)\n  const dataAmanha = amanha.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.property_contato;\n    const reuniao = lead.property_data_de_reuni_o?.start;\n\n    if (!reuniao) continue;\n\n    // Pega a data da reunião (YYYY-MM-DD)\n    const dataReuniao = reuniao.split(\"T\")[0];\n\n    // Se a data da reunião for igual a data de amanhã\n    if (dataReuniao === dataAmanha) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_amanha\" // Use isso no Switch para mandar msg de \"é amanhã\"\n        }\n      });\n    }\n  }\n\n  return filtrados;\n}\n\n// ========================================\n// CASO 1 → Execução das 9h (gatilho = \"9h\")\n// ========================================\nif (gatilho === \"9h\") {\n  const agora = new Date();\n  const hoje = agora.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.property_contato;\n    const reuniao = lead.property_data_de_reuni_o?.start;\n\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\"T\")[0];\n\n    if (dataReuniao === hoje) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_hoje\"\n        }\n      });\n    }\n  }\n\n  return filtrados;\n}\n\n// ========================================\n// CASO 2 → Execução dos 21/51 min (10 min antes)\n// ========================================\nconst agoraUTC = Date.now();\nconst min7 = agoraUTC + 7 * 60 * 1000;\nconst min12 = agoraUTC + 12 * 60 * 1000;\n\nfor (const item of items) {\n  const lead = item.json;\n  const telefone = lead.property_contato;\n  const reuniao = lead.property_data_de_reuni_o?.start;\n\n  if (!reuniao) continue;\n\n  const timestampReuniao = new Date(reuniao).getTime();\n\n  if (timestampReuniao >= min7 && timestampReuniao <= min12) {\n    filtrados.push({\n      json: {\n        ...lead,\n        telefonePadronizado: ajustarTelefone(telefone),\n        motivo: \"reuniao_proximos_10min\"\n      }\n    });\n  }\n}\n\nreturn filtrados;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        64
+      ],
+      "id": "6a14ebda-e7d3-4daa-9a4d-556e20cbdaa8",
+      "name": "Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min"
+    },
+    {
+      "parameters": {
+        "tableId": "finamob-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Montar o body da requisição').item.json.mensagem_visual }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Preparar variáveis do lead').item.json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Preparar variáveis do lead').item.json.name }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-LUANA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2208,
+        304
+      ],
+      "id": "a51c4a69-62c8-4c7e-a970-a6dc8ac9c0ae",
+      "name": "Cria Mensagem no Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=5511992486507",
+        "messageText": "=Erro ao disparar mensagem de reminder para {{ $('Preparar variáveis do lead').item.json.name }}\n\n{{ $('Preparar variáveis do lead').item.json.url }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1856,
+        256
+      ],
+      "id": "27d7131e-cf56-4b59-8857-7ba6f6ad7390",
+      "name": "Aviso de erro ao disparar mensagem1",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b5296455-2292-4b5d-8e75-0b156471af30",
+              "leftValue": "={{ $json.messages[0].message_status }}",
+              "rightValue": "accepted",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1664,
+        64
+      ],
+      "id": "4c29389e-5230-432b-a7e2-1cc983ef6165",
+      "name": "Verifica se a msg foi enviada"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=5511992486507",
+        "messageText": "=Reminder disparado para {{ $('Preparar variáveis do lead').item.json.name }}\n\n{{ $('Preparar variáveis do lead').item.json.url }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        48
+      ],
+      "id": "7a2b779f-576f-49e0-b5f2-a9925d31124f",
+      "name": "Confirmação Reminder",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "calendar": {
+          "__rl": true,
+          "value": "contato@monteferrario.com.br",
+          "mode": "id"
+        },
+        "eventId": "={{ $json.id_calendar }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        928,
+        80
+      ],
+      "id": "145f611c-86b6-4d00-a3d6-f44243fc6132",
+      "name": "Pega o link do meet",
+      "alwaysOutputData": false,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "dJZwMOEsZu29HT9y",
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Enviar mensagem de lembrete da reunião",
+        "height": 704,
+        "width": 2800
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -432,
+        -192
+      ],
+      "id": "738401ef-c9f7-4cbd-8ec0-4944e8e19826",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ==========================\n// 1. DEFINIÇÃO DOS TEMPLATES\n// ==========================\nconst templates = {\n  // --- 10 MINUTOS ANTES ---\n  reminder_reuniao: {\n    name: \"reminder_reuniao\",\n    vars: 2, // {{1}}=Nome, {{2}}=Link\n    text: \"Opa, {{1}}! Tudo certo por aí? \\n\\n Em 10 minutinhos a gente começa. Vou deixar o link aqui de novo pra facilitar: \\n\\n {{2}} \\n\\n Até já!\"\n  },\n  reminder_reuniao_sem_link: {\n    name: \"reminder_reuniao_sem_link\",\n    vars: 1, // {{1}}=Nome\n    text: \"Oi, {{1}}! Tudo pronto aí? \\n\\n Nossa reunião começa em *10 minutos*. Te aguardo!\"\n  },\n\n  // --- 9H DA MANHÃ (HOJE) ---\n  reminder_reuniao2: {\n    name: \"reminder_reuniao2\",\n    vars: 3, // {{1}}=Nome, {{2}}=Horário, {{3}}=Link\n    text: \"Bom dia, {{1}}! Tudo bem? \\n\\n Passando só pra lembrar do nosso papo hoje às *{{2}}*. \\n\\n Já vou deixar o link aqui pra você se organizar: {{3}} \\n\\n Combinado? Até mais tarde!\"\n  },\n  reminder_reuniao_sem_link2: {\n    name: \"reminder_reuniao_sem_link2\",\n    vars: 2, // {{1}}=Nome, {{2}}=Horário\n    text: \"Bom dia, {{1}}! Tudo bem? \\n\\n Passando pra lembrar da nossa reunião hoje às *{{2}}*. \\n\\n  Tudo certo pra gente conversar? Qualquer imprevisto me avisa!\"\n  },\n\n  // --- 19H (DIA ANTERIOR - NOVO) ---\n  reminder_reuniao_amanha: {\n    name: \"reminder_reuniao_amanha\",\n    vars: 2, // {{1}}=Nome, {{2}}=Horário\n    text: \"Boa noite, {{1}}!\\n\\nSó passando pra deixar no radar nossa reunião de amanhã às *{{2}}*.\\n\\nPodemos manter confirmado? Abs!\"\n  }\n};\n\n// ==========================\n// 2. DADOS DO LEAD E ENTRADA\n// ==========================\n// A estrutura do 'items' pode variar dependendo do node anterior. \n// Assumindo que o node anterior retorna um array e estamos processando item a item ou o primeiro.\nconst leadData = items[0].json; \n\n// Tenta pegar dados enriquecidos do node anterior 'Preparar variáveis do lead' se existir\nlet origem = {};\ntry {\n    origem = $('Preparar variáveis do lead').first().json;\n} catch (e) {\n    // Se falhar (ex: teste manual), usa o próprio json atual como fallback\n    origem = leadData; \n}\n\n// Dados básicos\nconst name = origem.name || leadData.name || \"Visitante\";\nconst telefone = String(origem.telefone || leadData.telefone || \"\");\nconst motivo = origem.motivo || leadData.motivo; // \"reuniao_hoje\", \"reuniao_amanha\", \"reuniao_proximos_10min\"\n\n// Link da Reunião (Tenta pegar do Google Calendar ou Zoom)\nconst linkReuniao = \n  leadData.hangoutLink || \n  leadData.conferenceData?.entryPoints?.[0]?.uri || \n  leadData.location || // Às vezes o link tá no location\n  null;\n\n// Horário da Reunião (Formatado HH:MM)\nconst horarioReuniaoISO = leadData.start?.dateTime || leadData.start?.date || null;\nlet horarioFormatado = \"\";\n\nif (horarioReuniaoISO) {\n  const dt = new Date(horarioReuniaoISO);\n  // Ajuste de fuso se necessário (o n8n geralmente traz ISO UTC ou com offset)\n  // Se o servidor for UTC e a data vier com offset (-03:00), getHours pega hora local do servidor.\n  // Para garantir hora do Brasil:\n  const options = { timeZone: \"America/Sao_Paulo\", hour: '2-digit', minute: '2-digit', hour12: false };\n  horarioFormatado = new Intl.DateTimeFormat('pt-BR', options).format(dt);\n}\n\n// ==========================\n// 3. ESCOLHER O TEMPLATE CORRETO\n// ==========================\nlet templateEscolhido = null;\n\nif (motivo === \"reuniao_amanha\") {\n    // Caso 19h (Dia anterior)\n    templateEscolhido = templates.reminder_reuniao_amanha;\n} \nelse if (motivo === \"reuniao_hoje\") {\n    // Caso 9h (Mesmo dia)\n    templateEscolhido = linkReuniao \n        ? templates.reminder_reuniao2 \n        : templates.reminder_reuniao_sem_link2;\n} \nelse {\n    // Caso Default (10 min antes)\n    templateEscolhido = linkReuniao \n        ? templates.reminder_reuniao \n        : templates.reminder_reuniao_sem_link;\n}\n\n// Se não achou template (erro de lógica), para aqui\nif (!templateEscolhido) {\n    throw new Error(`Nenhum template encontrado para o motivo: ${motivo}`);\n}\n\n// ==========================\n// 4. MONTAR VARIÁVEIS (PARAMETERS)\n// ==========================\nconst parameters = [];\n\n// Variável {{1}} é SEMPRE o Nome\nparameters.push({ type: \"text\", text: name });\n\n// Lógica de variáveis adicionais baseada no Motivo\nif (motivo === \"reuniao_amanha\") {\n    // Template Amanhã: {{1}}=Nome, {{2}}=Horário\n    parameters.push({ type: \"text\", text: horarioFormatado });\n} \nelse if (motivo === \"reuniao_hoje\") {\n    // Template Hoje: {{1}}=Nome, {{2}}=Horário, {{3}}=Link (opcional)\n    parameters.push({ type: \"text\", text: horarioFormatado });\n    \n    if (linkReuniao && templateEscolhido.vars >= 3) {\n        parameters.push({ type: \"text\", text: linkReuniao });\n    }\n} \nelse {\n    // Template 10min: {{1}}=Nome, {{2}}=Link (se tiver link)\n    if (linkReuniao && templateEscolhido.vars >= 2) {\n        parameters.push({ type: \"text\", text: linkReuniao });\n    }\n}\n\n// ==========================\n// 5. MONTAR O PAYLOAD FINAL\n// ==========================\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: telefone,\n  type: \"template\",\n  template: {\n    name: templateEscolhido.name,\n    language: { code: \"pt_BR\" },\n    components: [\n      {\n        type: \"body\",\n        parameters: parameters\n      }\n    ]\n  }\n};\n\n// ==========================\n// 6. SIMULAR TEXTO FINAL (PARA LOG/DEBUG)\n// ==========================\nlet textoSimulado = templateEscolhido.text;\ntextoSimulado = textoSimulado.replace(\"{{1}}\", name);\n\nif (motivo === \"reuniao_amanha\") {\n    textoSimulado = textoSimulado.replace(\"{{2}}\", horarioFormatado);\n} \nelse if (motivo === \"reuniao_hoje\") {\n    textoSimulado = textoSimulado.replace(\"{{2}}\", horarioFormatado);\n    if (linkReuniao) textoSimulado = textoSimulado.replace(\"{{3}}\", linkReuniao);\n} \nelse {\n    if (linkReuniao) textoSimulado = textoSimulado.replace(\"{{2}}\", linkReuniao);\n}\n\n// Limpa sobras de variáveis não preenchidas visualmente\ntextoSimulado = textoSimulado.replace(/{{[0-9]+}}/g, \"\");\n\n// ==========================\n// RETORNO\n// ==========================\nreturn {\n  json: {\n    resultado_api: body,\n    mensagem_visual: textoSimulado,\n    template_name: templateEscolhido.name,\n    motivo_disparo: motivo,\n    lead_nome: name,\n    lead_telefone: telefone\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        80
+      ],
+      "id": "d265a3cd-957a-4f73-b31d-b23d8d35c1d9",
+      "name": "Montar o body da requisição"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "21,51 9-20 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -384,
+        -112
+      ],
+      "id": "cccb7d90-4083-47b3-b163-38751b70bb7c",
+      "name": "Gatilho de verificação periódica"
+    },
+    {
+      "parameters": {
+        "batchSize": "=1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        496,
+        64
+      ],
+      "id": "b71ee08a-534d-4bcd-8018-f3add2a06f38",
+      "name": "Rodar lembrete por lead"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "940b2951-9c80-4163-ad9f-fd5296a59997",
+              "name": "database_page",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "5b6ca92b-2cff-4c1f-ade0-9a600c0fc251",
+              "name": "name",
+              "value": "={{ $json.name.split(' ')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "cfcf4634-e2fa-48a3-8824-e01715f5648e",
+              "name": "etapa",
+              "value": "={{ $json.property_etapa }}",
+              "type": "string"
+            },
+            {
+              "id": "901826dc-2d94-4924-b751-d89417652c38",
+              "name": "telefone",
+              "value": "={{ $json.property_contato }}",
+              "type": "string"
+            },
+            {
+              "id": "9cfacdf3-f4b4-4fe4-b03b-a73ec3e9f07c",
+              "name": "var_1",
+              "value": "={{ $json.name.split(' ')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "1cc3014b-f284-429a-aa2e-9ecb0c55daec",
+              "name": "url",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "fcac981c-23b1-43ad-8608-af0f8bc7283a",
+              "name": "id_calendar",
+              "value": "={{ $json.property_id_calendar }}",
+              "type": "string"
+            },
+            {
+              "id": "fe65c0f9-980d-48bc-80dd-d4d38ac05de3",
+              "name": "motivo",
+              "value": "={{ $('Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min').item.json.motivo }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        80
+      ],
+      "id": "d82b7a74-821a-4a21-b992-e10001db6668",
+      "name": "Preparar variáveis do lead"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/869722152886578/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.resultado_api }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        80
+      ],
+      "id": "cebe41b8-3f09-4248-a60a-504ca4f3ff1d",
+      "name": "Enviar mensagem via WhatsApp",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "VEIaezW6GjDeSS3w",
+          "name": "Meta Business Manager"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -384,
+        64
+      ],
+      "id": "033f931d-4f99-46b4-9252-f981d3207654",
+      "name": "Gatilho para as 9h"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 19
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -384,
+        256
+      ],
+      "id": "7d45d2be-fcf2-424c-a65e-3abcbf43f06d",
+      "name": "Gatilho para as 19h"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dc4a1831-d002-4c08-8e52-3faefb08e90f",
+              "name": "gatilho",
+              "value": "10min",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -176,
+        -112
+      ],
+      "id": "6cf1f0f4-e373-4428-93de-26c180f7160e",
+      "name": "Seta o gatilho"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7969398c-4c48-4029-8aad-7a00eafc7531",
+              "name": "gatilho",
+              "value": "9h",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -176,
+        64
+      ],
+      "id": "4552e923-5751-4d78-a0d9-d550b26d8301",
+      "name": "Seta o gatilho1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7969398c-4c48-4029-8aad-7a00eafc7531",
+              "name": "gatilho",
+              "value": "19h",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -176,
+        256
+      ],
+      "id": "efc23b9b-3580-468f-a87a-d1f0a1e1fc21",
+      "name": "Seta o gatilho2"
+    }
+  ],
+  "connections": {
+    "Pega os leads do Notion": {
+      "main": [
+        [
+          {
+            "node": "Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min": {
+      "main": [
+        [
+          {
+            "node": "Rodar lembrete por lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aviso de erro ao disparar mensagem1": {
+      "main": [
+        [
+          {
+            "node": "Rodar lembrete por lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rodar lembrete por lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase": {
+      "main": [
+        [
+          {
+            "node": "Rodar lembrete por lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se a msg foi enviada": {
+      "main": [
+        [
+          {
+            "node": "Confirmação Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso de erro ao disparar mensagem1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmação Reminder": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pega o link do meet": {
+      "main": [
+        [
+          {
+            "node": "Montar o body da requisição",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar o body da requisição": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagem via WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gatilho de verificação periódica": {
+      "main": [
+        [
+          {
+            "node": "Seta o gatilho",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rodar lembrete por lead": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar variáveis do lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar variáveis do lead": {
+      "main": [
+        [
+          {
+            "node": "Pega o link do meet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagem via WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Verifica se a msg foi enviada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso de erro ao disparar mensagem1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gatilho para as 9h": {
+      "main": [
+        [
+          {
+            "node": "Seta o gatilho1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seta o gatilho": {
+      "main": [
+        [
+          {
+            "node": "Pega os leads do Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seta o gatilho1": {
+      "main": [
+        [
+          {
+            "node": "Pega os leads do Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gatilho para as 19h": {
+      "main": [
+        [
+          {
+            "node": "Seta o gatilho2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seta o gatilho2": {
+      "main": [
+        [
+          {
+            "node": "Pega os leads do Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "saveExecutionProgress": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    },
+    "node:Gatilho de verificação periódica": {
+      "recurrenceRules": []
+    },
+    "node:Gatilho para as 9h": {
+      "recurrenceRules": []
+    },
+    "node:Gatilho para as 19h": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {
+    "Gatilho para as 9h": [
+      {
+        "json": {
+          "timestamp": "2025-11-27T16:51:00.027-03:00",
+          "Readable date": "November 27th 2025, 4:51:00 pm",
+          "Readable time": "4:51:00 pm",
+          "Day of week": "Thursday",
+          "Year": "2025",
+          "Month": "November",
+          "Day of month": "27",
+          "Hour": "16",
+          "Minute": "51",
+          "Second": "00",
+          "Timezone": "America/Sao_Paulo (UTC-03:00)"
+        }
+      }
+    ],
+    "Gatilho de verificação periódica": [
+      {
+        "json": {
+          "timestamp": "2025-12-09T10:21:00.022-03:00",
+          "Readable date": "December 9th 2025, 10:21:00 am",
+          "Readable time": "10:21:00 am",
+          "Day of week": "Tuesday",
+          "Year": "2025",
+          "Month": "December",
+          "Day of month": "09",
+          "Hour": "10",
+          "Minute": "21",
+          "Second": "00",
+          "Timezone": "America/Sao_Paulo (UTC-03:00)"
+        }
+      }
+    ],
+    "Gatilho para as 19h": [
+      {
+        "json": {
+          "timestamp": "2025-11-27T16:51:00.027-03:00",
+          "Readable date": "November 27th 2025, 4:51:00 pm",
+          "Readable time": "4:51:00 pm",
+          "Day of week": "Thursday",
+          "Year": "2025",
+          "Month": "November",
+          "Day of month": "27",
+          "Hour": "16",
+          "Minute": "51",
+          "Second": "00",
+          "Timezone": "America/Sao_Paulo (UTC-03:00)"
+        }
+      }
+    ]
+  },
+  "versionId": "805444ae-434f-4f4e-b203-c81a2fc38832",
+  "activeVersionId": "805444ae-434f-4f4e-b203-c81a2fc38832",
+  "triggerCount": 3,
+  "shared": [
+    {
+      "updatedAt": "2025-11-25T18:09:11.560Z",
+      "createdAt": "2025-11-25T18:09:11.560Z",
+      "role": "workflow:owner",
+      "workflowId": "aT6nX1Y0aBKg6ojy",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-03-18T22:02:40.139Z",
+    "createdAt": "2026-03-18T22:02:40.139Z",
+    "versionId": "805444ae-434f-4f4e-b203-c81a2fc38832",
+    "workflowId": "aT6nX1Y0aBKg6ojy",
+    "nodes": [
+      {
+        "parameters": {
+          "resource": "databasePage",
+          "operation": "getAll",
+          "databaseId": {
+            "__rl": true,
+            "value": "287c103b-58ba-8057-bd3f-e2b83606d543",
+            "mode": "list",
+            "cachedResultName": "Leads",
+            "cachedResultUrl": "https://www.notion.so/287c103b58ba8057bd3fe2b83606d543"
+          },
+          "returnAll": true,
+          "filterType": "manual",
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "key": "Etapa|status",
+                "condition": "equals",
+                "statusValue": "Reunião"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.notion",
+        "typeVersion": 2.2,
+        "position": [
+          48,
+          64
+        ],
+        "id": "c543ea83-d9a5-4ea5-89dc-22e6c0332bab",
+        "name": "Pega os leads do Notion",
+        "credentials": {
+          "notionApi": {
+            "id": "jmIIz8ORpI5khHQI",
+            "name": "EMI - Notion"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "function ajustarTelefone(raw) {\n  if (!raw) return null;\n\n  let t = raw.toString().replace(/\\D/g, \"\");\n\n  if (t.length === 11) t = \"55\" + t;\n  if (t.length === 10) t = \"55\" + t;\n  if (t.startsWith(\"55\")) return t;\n  if (t.startsWith(\"+\")) return t.replace(\"+\", \"\");\n\n  return t;\n}\n\n// ========================================\n// Identificar gatilho real (9h ou 10min)\n// ========================================\nlet gatilho = null;\n\n// tenta pegar dos possíveis nodes Set\ntry {\n  gatilho = $('Seta o gatilho').first().json.gatilho || null;\n} catch {}\n\ntry {\n  gatilho = $('Seta o gatilho1').first().json.gatilho || gatilho;\n} catch {}\n\ntry {\n  gatilho = $('Seta o gatilho2').first().json.gatilho || gatilho;\n} catch {}\n\nif (!gatilho) {\n  // fallback opcional\n  gatilho = \"10min\"; \n}\n\n// Lista final\nconst filtrados = [];\n\n// ========================================================\n// CASO 0 → Execução das 19h (Lembrete do dia anterior)\n// ========================================================\nif (gatilho === \"19h\") {\n  const agora = new Date();\n  \n  // Cria uma data representando \"Amanhã\"\n  const amanha = new Date(agora);\n  amanha.setDate(amanha.getDate() + 1);\n  \n  // Formata para YYYY-MM-DD (ex: 2025-12-24)\n  const dataAmanha = amanha.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.property_contato;\n    const reuniao = lead.property_data_de_reuni_o?.start;\n\n    if (!reuniao) continue;\n\n    // Pega a data da reunião (YYYY-MM-DD)\n    const dataReuniao = reuniao.split(\"T\")[0];\n\n    // Se a data da reunião for igual a data de amanhã\n    if (dataReuniao === dataAmanha) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_amanha\" // Use isso no Switch para mandar msg de \"é amanhã\"\n        }\n      });\n    }\n  }\n\n  return filtrados;\n}\n\n// ========================================\n// CASO 1 → Execução das 9h (gatilho = \"9h\")\n// ========================================\nif (gatilho === \"9h\") {\n  const agora = new Date();\n  const hoje = agora.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.property_contato;\n    const reuniao = lead.property_data_de_reuni_o?.start;\n\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\"T\")[0];\n\n    if (dataReuniao === hoje) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_hoje\"\n        }\n      });\n    }\n  }\n\n  return filtrados;\n}\n\n// ========================================\n// CASO 2 → Execução dos 21/51 min (10 min antes)\n// ========================================\nconst agoraUTC = Date.now();\nconst min7 = agoraUTC + 7 * 60 * 1000;\nconst min12 = agoraUTC + 12 * 60 * 1000;\n\nfor (const item of items) {\n  const lead = item.json;\n  const telefone = lead.property_contato;\n  const reuniao = lead.property_data_de_reuni_o?.start;\n\n  if (!reuniao) continue;\n\n  const timestampReuniao = new Date(reuniao).getTime();\n\n  if (timestampReuniao >= min7 && timestampReuniao <= min12) {\n    filtrados.push({\n      json: {\n        ...lead,\n        telefonePadronizado: ajustarTelefone(telefone),\n        motivo: \"reuniao_proximos_10min\"\n      }\n    });\n  }\n}\n\nreturn filtrados;\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          256,
+          64
+        ],
+        "id": "6a14ebda-e7d3-4daa-9a4d-556e20cbdaa8",
+        "name": "Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min"
+      },
+      {
+        "parameters": {
+          "tableId": "finamob-historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "={{ $('Montar o body da requisição').item.json.mensagem_visual }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Preparar variáveis do lead').item.json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $('Preparar variáveis do lead').item.json.name }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "text"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "SDR-LUANA"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2208,
+          304
+        ],
+        "id": "a51c4a69-62c8-4c7e-a970-a6dc8ac9c0ae",
+        "name": "Cria Mensagem no Supabase",
+        "credentials": {
+          "supabaseApi": {
+            "id": "J2ITvTeT2ru3SEdo",
+            "name": "EMI - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "MIA-LOGS",
+          "remoteJid": "=5511992486507",
+          "messageText": "=Erro ao disparar mensagem de reminder para {{ $('Preparar variáveis do lead').item.json.name }}\n\n{{ $('Preparar variáveis do lead').item.json.url }}",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1856,
+          256
+        ],
+        "id": "27d7131e-cf56-4b59-8857-7ba6f6ad7390",
+        "name": "Aviso de erro ao disparar mensagem1",
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "b5296455-2292-4b5d-8e75-0b156471af30",
+                "leftValue": "={{ $json.messages[0].message_status }}",
+                "rightValue": "accepted",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1664,
+          64
+        ],
+        "id": "4c29389e-5230-432b-a7e2-1cc983ef6165",
+        "name": "Verifica se a msg foi enviada"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "MIA-LOGS",
+          "remoteJid": "=5511992486507",
+          "messageText": "=Reminder disparado para {{ $('Preparar variáveis do lead').item.json.name }}\n\n{{ $('Preparar variáveis do lead').item.json.url }}",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1920,
+          48
+        ],
+        "id": "7a2b779f-576f-49e0-b5f2-a9925d31124f",
+        "name": "Confirmação Reminder",
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "operation": "get",
+          "calendar": {
+            "__rl": true,
+            "value": "contato@monteferrario.com.br",
+            "mode": "id"
+          },
+          "eventId": "={{ $json.id_calendar }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.googleCalendar",
+        "typeVersion": 1.3,
+        "position": [
+          928,
+          80
+        ],
+        "id": "145f611c-86b6-4d00-a3d6-f44243fc6132",
+        "name": "Pega o link do meet",
+        "alwaysOutputData": false,
+        "credentials": {
+          "googleCalendarOAuth2Api": {
+            "id": "dJZwMOEsZu29HT9y",
+            "name": "Google Calendar account"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "content": "## Enviar mensagem de lembrete da reunião",
+          "height": 704,
+          "width": 2800
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -432,
+          -192
+        ],
+        "id": "738401ef-c9f7-4cbd-8ec0-4944e8e19826",
+        "name": "Sticky Note"
+      },
+      {
+        "parameters": {
+          "jsCode": "// ==========================\n// 1. DEFINIÇÃO DOS TEMPLATES\n// ==========================\nconst templates = {\n  // --- 10 MINUTOS ANTES ---\n  reminder_reuniao: {\n    name: \"reminder_reuniao\",\n    vars: 2, // {{1}}=Nome, {{2}}=Link\n    text: \"Opa, {{1}}! Tudo certo por aí? \\n\\n Em 10 minutinhos a gente começa. Vou deixar o link aqui de novo pra facilitar: \\n\\n {{2}} \\n\\n Até já!\"\n  },\n  reminder_reuniao_sem_link: {\n    name: \"reminder_reuniao_sem_link\",\n    vars: 1, // {{1}}=Nome\n    text: \"Oi, {{1}}! Tudo pronto aí? \\n\\n Nossa reunião começa em *10 minutos*. Te aguardo!\"\n  },\n\n  // --- 9H DA MANHÃ (HOJE) ---\n  reminder_reuniao2: {\n    name: \"reminder_reuniao2\",\n    vars: 3, // {{1}}=Nome, {{2}}=Horário, {{3}}=Link\n    text: \"Bom dia, {{1}}! Tudo bem? \\n\\n Passando só pra lembrar do nosso papo hoje às *{{2}}*. \\n\\n Já vou deixar o link aqui pra você se organizar: {{3}} \\n\\n Combinado? Até mais tarde!\"\n  },\n  reminder_reuniao_sem_link2: {\n    name: \"reminder_reuniao_sem_link2\",\n    vars: 2, // {{1}}=Nome, {{2}}=Horário\n    text: \"Bom dia, {{1}}! Tudo bem? \\n\\n Passando pra lembrar da nossa reunião hoje às *{{2}}*. \\n\\n  Tudo certo pra gente conversar? Qualquer imprevisto me avisa!\"\n  },\n\n  // --- 19H (DIA ANTERIOR - NOVO) ---\n  reminder_reuniao_amanha: {\n    name: \"reminder_reuniao_amanha\",\n    vars: 2, // {{1}}=Nome, {{2}}=Horário\n    text: \"Boa noite, {{1}}!\\n\\nSó passando pra deixar no radar nossa reunião de amanhã às *{{2}}*.\\n\\nPodemos manter confirmado? Abs!\"\n  }\n};\n\n// ==========================\n// 2. DADOS DO LEAD E ENTRADA\n// ==========================\n// A estrutura do 'items' pode variar dependendo do node anterior. \n// Assumindo que o node anterior retorna um array e estamos processando item a item ou o primeiro.\nconst leadData = items[0].json; \n\n// Tenta pegar dados enriquecidos do node anterior 'Preparar variáveis do lead' se existir\nlet origem = {};\ntry {\n    origem = $('Preparar variáveis do lead').first().json;\n} catch (e) {\n    // Se falhar (ex: teste manual), usa o próprio json atual como fallback\n    origem = leadData; \n}\n\n// Dados básicos\nconst name = origem.name || leadData.name || \"Visitante\";\nconst telefone = String(origem.telefone || leadData.telefone || \"\");\nconst motivo = origem.motivo || leadData.motivo; // \"reuniao_hoje\", \"reuniao_amanha\", \"reuniao_proximos_10min\"\n\n// Link da Reunião (Tenta pegar do Google Calendar ou Zoom)\nconst linkReuniao = \n  leadData.hangoutLink || \n  leadData.conferenceData?.entryPoints?.[0]?.uri || \n  leadData.location || // Às vezes o link tá no location\n  null;\n\n// Horário da Reunião (Formatado HH:MM)\nconst horarioReuniaoISO = leadData.start?.dateTime || leadData.start?.date || null;\nlet horarioFormatado = \"\";\n\nif (horarioReuniaoISO) {\n  const dt = new Date(horarioReuniaoISO);\n  // Ajuste de fuso se necessário (o n8n geralmente traz ISO UTC ou com offset)\n  // Se o servidor for UTC e a data vier com offset (-03:00), getHours pega hora local do servidor.\n  // Para garantir hora do Brasil:\n  const options = { timeZone: \"America/Sao_Paulo\", hour: '2-digit', minute: '2-digit', hour12: false };\n  horarioFormatado = new Intl.DateTimeFormat('pt-BR', options).format(dt);\n}\n\n// ==========================\n// 3. ESCOLHER O TEMPLATE CORRETO\n// ==========================\nlet templateEscolhido = null;\n\nif (motivo === \"reuniao_amanha\") {\n    // Caso 19h (Dia anterior)\n    templateEscolhido = templates.reminder_reuniao_amanha;\n} \nelse if (motivo === \"reuniao_hoje\") {\n    // Caso 9h (Mesmo dia)\n    templateEscolhido = linkReuniao \n        ? templates.reminder_reuniao2 \n        : templates.reminder_reuniao_sem_link2;\n} \nelse {\n    // Caso Default (10 min antes)\n    templateEscolhido = linkReuniao \n        ? templates.reminder_reuniao \n        : templates.reminder_reuniao_sem_link;\n}\n\n// Se não achou template (erro de lógica), para aqui\nif (!templateEscolhido) {\n    throw new Error(`Nenhum template encontrado para o motivo: ${motivo}`);\n}\n\n// ==========================\n// 4. MONTAR VARIÁVEIS (PARAMETERS)\n// ==========================\nconst parameters = [];\n\n// Variável {{1}} é SEMPRE o Nome\nparameters.push({ type: \"text\", text: name });\n\n// Lógica de variáveis adicionais baseada no Motivo\nif (motivo === \"reuniao_amanha\") {\n    // Template Amanhã: {{1}}=Nome, {{2}}=Horário\n    parameters.push({ type: \"text\", text: horarioFormatado });\n} \nelse if (motivo === \"reuniao_hoje\") {\n    // Template Hoje: {{1}}=Nome, {{2}}=Horário, {{3}}=Link (opcional)\n    parameters.push({ type: \"text\", text: horarioFormatado });\n    \n    if (linkReuniao && templateEscolhido.vars >= 3) {\n        parameters.push({ type: \"text\", text: linkReuniao });\n    }\n} \nelse {\n    // Template 10min: {{1}}=Nome, {{2}}=Link (se tiver link)\n    if (linkReuniao && templateEscolhido.vars >= 2) {\n        parameters.push({ type: \"text\", text: linkReuniao });\n    }\n}\n\n// ==========================\n// 5. MONTAR O PAYLOAD FINAL\n// ==========================\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: telefone,\n  type: \"template\",\n  template: {\n    name: templateEscolhido.name,\n    language: { code: \"pt_BR\" },\n    components: [\n      {\n        type: \"body\",\n        parameters: parameters\n      }\n    ]\n  }\n};\n\n// ==========================\n// 6. SIMULAR TEXTO FINAL (PARA LOG/DEBUG)\n// ==========================\nlet textoSimulado = templateEscolhido.text;\ntextoSimulado = textoSimulado.replace(\"{{1}}\", name);\n\nif (motivo === \"reuniao_amanha\") {\n    textoSimulado = textoSimulado.replace(\"{{2}}\", horarioFormatado);\n} \nelse if (motivo === \"reuniao_hoje\") {\n    textoSimulado = textoSimulado.replace(\"{{2}}\", horarioFormatado);\n    if (linkReuniao) textoSimulado = textoSimulado.replace(\"{{3}}\", linkReuniao);\n} \nelse {\n    if (linkReuniao) textoSimulado = textoSimulado.replace(\"{{2}}\", linkReuniao);\n}\n\n// Limpa sobras de variáveis não preenchidas visualmente\ntextoSimulado = textoSimulado.replace(/{{[0-9]+}}/g, \"\");\n\n// ==========================\n// RETORNO\n// ==========================\nreturn {\n  json: {\n    resultado_api: body,\n    mensagem_visual: textoSimulado,\n    template_name: templateEscolhido.name,\n    motivo_disparo: motivo,\n    lead_nome: name,\n    lead_telefone: telefone\n  }\n};"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1136,
+          80
+        ],
+        "id": "d265a3cd-957a-4f73-b31d-b23d8d35c1d9",
+        "name": "Montar o body da requisição"
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "21,51 9-20 * * *"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -384,
+          -112
+        ],
+        "id": "cccb7d90-4083-47b3-b163-38751b70bb7c",
+        "name": "Gatilho de verificação periódica"
+      },
+      {
+        "parameters": {
+          "batchSize": "=1",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          496,
+          64
+        ],
+        "id": "b71ee08a-534d-4bcd-8018-f3add2a06f38",
+        "name": "Rodar lembrete por lead"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "940b2951-9c80-4163-ad9f-fd5296a59997",
+                "name": "database_page",
+                "value": "={{ $json.id }}",
+                "type": "string"
+              },
+              {
+                "id": "5b6ca92b-2cff-4c1f-ade0-9a600c0fc251",
+                "name": "name",
+                "value": "={{ $json.name.split(' ')[0] }}",
+                "type": "string"
+              },
+              {
+                "id": "cfcf4634-e2fa-48a3-8824-e01715f5648e",
+                "name": "etapa",
+                "value": "={{ $json.property_etapa }}",
+                "type": "string"
+              },
+              {
+                "id": "901826dc-2d94-4924-b751-d89417652c38",
+                "name": "telefone",
+                "value": "={{ $json.property_contato }}",
+                "type": "string"
+              },
+              {
+                "id": "9cfacdf3-f4b4-4fe4-b03b-a73ec3e9f07c",
+                "name": "var_1",
+                "value": "={{ $json.name.split(' ')[0] }}",
+                "type": "string"
+              },
+              {
+                "id": "1cc3014b-f284-429a-aa2e-9ecb0c55daec",
+                "name": "url",
+                "value": "={{ $json.url }}",
+                "type": "string"
+              },
+              {
+                "id": "fcac981c-23b1-43ad-8608-af0f8bc7283a",
+                "name": "id_calendar",
+                "value": "={{ $json.property_id_calendar }}",
+                "type": "string"
+              },
+              {
+                "id": "fe65c0f9-980d-48bc-80dd-d4d38ac05de3",
+                "name": "motivo",
+                "value": "={{ $('Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min').item.json.motivo }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          720,
+          80
+        ],
+        "id": "d82b7a74-821a-4a21-b992-e10001db6668",
+        "name": "Preparar variáveis do lead"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://graph.facebook.com/v22.0/869722152886578/messages",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ $json.resultado_api }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1360,
+          80
+        ],
+        "id": "cebe41b8-3f09-4248-a60a-504ca4f3ff1d",
+        "name": "Enviar mensagem via WhatsApp",
+        "retryOnFail": true,
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "VEIaezW6GjDeSS3w",
+            "name": "Meta Business Manager"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 9
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -384,
+          64
+        ],
+        "id": "033f931d-4f99-46b4-9252-f981d3207654",
+        "name": "Gatilho para as 9h"
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 19
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -384,
+          256
+        ],
+        "id": "7d45d2be-fcf2-424c-a65e-3abcbf43f06d",
+        "name": "Gatilho para as 19h"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "dc4a1831-d002-4c08-8e52-3faefb08e90f",
+                "name": "gatilho",
+                "value": "10min",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -176,
+          -112
+        ],
+        "id": "6cf1f0f4-e373-4428-93de-26c180f7160e",
+        "name": "Seta o gatilho"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "7969398c-4c48-4029-8aad-7a00eafc7531",
+                "name": "gatilho",
+                "value": "9h",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -176,
+          64
+        ],
+        "id": "4552e923-5751-4d78-a0d9-d550b26d8301",
+        "name": "Seta o gatilho1"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "7969398c-4c48-4029-8aad-7a00eafc7531",
+                "name": "gatilho",
+                "value": "19h",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -176,
+          256
+        ],
+        "id": "efc23b9b-3580-468f-a87a-d1f0a1e1fc21",
+        "name": "Seta o gatilho2"
+      }
+    ],
+    "connections": {
+      "Pega os leads do Notion": {
+        "main": [
+          [
+            {
+              "node": "Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min": {
+        "main": [
+          [
+            {
+              "node": "Rodar lembrete por lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Aviso de erro ao disparar mensagem1": {
+        "main": [
+          [
+            {
+              "node": "Rodar lembrete por lead",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Rodar lembrete por lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cria Mensagem no Supabase": {
+        "main": [
+          [
+            {
+              "node": "Rodar lembrete por lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se a msg foi enviada": {
+        "main": [
+          [
+            {
+              "node": "Confirmação Reminder",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Aviso de erro ao disparar mensagem1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Confirmação Reminder": {
+        "main": [
+          [
+            {
+              "node": "Cria Mensagem no Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Cria Mensagem no Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pega o link do meet": {
+        "main": [
+          [
+            {
+              "node": "Montar o body da requisição",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar o body da requisição": {
+        "main": [
+          [
+            {
+              "node": "Enviar mensagem via WhatsApp",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gatilho de verificação periódica": {
+        "main": [
+          [
+            {
+              "node": "Seta o gatilho",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Rodar lembrete por lead": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Preparar variáveis do lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Preparar variáveis do lead": {
+        "main": [
+          [
+            {
+              "node": "Pega o link do meet",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar mensagem via WhatsApp": {
+        "main": [
+          [
+            {
+              "node": "Verifica se a msg foi enviada",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Aviso de erro ao disparar mensagem1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gatilho para as 9h": {
+        "main": [
+          [
+            {
+              "node": "Seta o gatilho1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Seta o gatilho": {
+        "main": [
+          [
+            {
+              "node": "Pega os leads do Notion",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Seta o gatilho1": {
+        "main": [
+          [
+            {
+              "node": "Pega os leads do Notion",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gatilho para as 19h": {
+        "main": [
+          [
+            {
+              "node": "Seta o gatilho2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Seta o gatilho2": {
+        "main": [
+          [
+            {
+              "node": "Pega os leads do Notion",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Lucas Andrade",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
