@@ -1,0 +1,1114 @@
+{
+  "updatedAt": "2026-03-06T15:45:47.561Z",
+  "createdAt": "2026-03-05T13:58:39.995Z",
+  "id": "vTM69oI9mmqya3S2",
+  "name": "Webhook - Atualizar Estoque PostgreSQL",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tiny.com.br/api2/pedidos.pesquisa.php",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "ff9b5fae6814d00a5cb01fff72c1633c01144da8"
+            },
+            {
+              "name": "formato",
+              "value": "JSON"
+            },
+            {
+              "name": "pagina",
+              "value": "1"
+            },
+            {
+              "name": "dataInicial",
+              "value": "=25/12/2025"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "51cbe7d8-bdb0-4189-9f3f-cd70c39eab4c",
+      "name": "Buscar Lista de Pedidos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        416,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw;\n\nif (body?.retorno?.status !== 'OK') {\n  throw new Error('Erro na API V2: ' + JSON.stringify(body?.retorno));\n}\n\nconst pedidos = (body?.retorno?.pedidos || []).map(p => p.pedido || p);\nconst numeroPaginas = parseInt(body?.retorno?.numero_paginas || 1);\nconst paginaAtual = parseInt(body?.retorno?.pagina || 1);\n\n// Salva info de paginação em cada item\nreturn pedidos.map(p => ({ \n  json: { \n    id: p.id, \n    numero: p.numero,\n    _pagina_atual: paginaAtual,\n    _numero_paginas: numeroPaginas\n  } \n}));"
+      },
+      "id": "5fff585f-1e9a-4e0c-8f1b-edcd53e4eb3b",
+      "name": "Extrair IDs dos Pedidos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tiny.com.br/api2/pedido.obter.php",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "ff9b5fae6814d00a5cb01fff72c1633c01144da8"
+            },
+            {
+              "name": "formato",
+              "value": "JSON"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "24b47f5f-ed64-4747-8c3c-9bcfc402ac78",
+      "name": "Buscar Detalhes do Pedido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        864,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw;\n\nif (body?.retorno?.status !== 'OK') {\n  throw new Error('Erro ao obter pedido: ' + JSON.stringify(body?.retorno));\n}\n\nconst p = body?.retorno?.pedido || {};\nconst cliente = p.cliente || {};\nconst itens = p.itens || [];\n\nfunction formatDateBRtoISO(input) {\n  if (!input || typeof input !== 'string') return null;\n  const [day, month, year] = input.split('/');\n  if (!day || !month || !year) return null;\n  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;\n}\n\nfunction formatNumber(input) {\n  if (input === null || input === undefined || input === '') return null;\n  // API V2 já usa ponto decimal (\"26.01000000\"), só faz parseFloat\n  const num = parseFloat(String(input).replace(/\\s+/g, ''));\n  return isNaN(num) ? null : num;\n}\n\nconst totalProdutos  = formatNumber(p.total_produtos) || 0;\nconst valorFrete     = formatNumber(p.valor_frete) || 0;\nconst valorDesconto  = formatNumber(p.valor_desconto) || 0;\nconst outrasDespesas = formatNumber(p.outras_despesas) || 0;\n\nconst itensParsed = itens.map(i => {\n  const item  = i.item || i;\n  const qtd   = formatNumber(item.quantidade) || 1;\n  const vUnit = formatNumber(item.valor_unitario) || 0;\n  return { ...item, qtd, vUnit, subtotal: parseFloat((qtd * vUnit).toFixed(2)) };\n});\n\nconst totalSubtotal = itensParsed.reduce((acc, i) => acc + i.subtotal, 0);\n\nconst orders = itensParsed.map(produto => {\n  const proporcao       = totalSubtotal > 0 ? produto.subtotal / totalSubtotal : 0;\n  const descontoItem    = parseFloat((produto.subtotal - totalProdutos * proporcao).toFixed(2));\n  const freteRateado    = parseFloat((valorFrete * proporcao).toFixed(2));\n  const descontoRateado = parseFloat((valorDesconto * proporcao).toFixed(2));\n  const despesasRateado = parseFloat((outrasDespesas * proporcao).toFixed(2));\n\n  return {\n    id:                                  p.id || null,\n    numero_do_pedido:                    p.numero || null,\n    data:                                formatDateBRtoISO(p.data_pedido),\n    data_prevista:                       formatDateBRtoISO(p.data_prevista) || null,\n    id_contato:                          cliente.id || null,\n    nome_do_contato:                     cliente.nome || null,\n    tipo_de_pessoa:                      cliente.tipo_pessoa || null,\n    cpf_cnpj:                            cliente.cpf_cnpj || null,\n    rg_ie:                               cliente.ie || cliente.rg || null,\n    cep:                                 cliente.cep || null,\n    municipio:                           cliente.cidade || null,\n    uf:                                  cliente.uf || null,\n    endereco:                            cliente.endereco || null,\n    endereco_nro:                        cliente.numero || null,\n    complemento:                         cliente.complemento || null,\n    bairro:                              cliente.bairro || null,\n    fone:                                cliente.fone || null,\n    celular:                             cliente.celular || null,\n    email:                               cliente.email || null,\n    desconto_do_pedido_porcento_ou_valor: valorDesconto,\n    frete_pedido:                        valorFrete,\n    observacoes:                         p.obs || null,\n    situacao:                            p.situacao || null,\n    id_produto:                          produto.id_produto || null,\n    descricao:                           produto.descricao || null,\n    quantidade:                          produto.qtd,\n    valor_unitario:                      produto.vUnit,\n    desconto_item:                       descontoItem,\n    codigo_de_rastreamento:              p.codigo_rastreamento || null,\n    numero_da_ordem_de_compra:           p.numero_ordem_compra || null,\n    vendedor:                            p.id_vendedor ? String(p.id_vendedor) : null,\n    despesas_pedido:                     outrasDespesas,\n    desconto_pedido_rateado:             descontoRateado,\n    frete_pedido_rateado:                freteRateado,\n    despesas_pedido_rateado:             despesasRateado,\n    destinatario:                        null,\n    cpf_cnpj_entrega:                    null,\n    cep_entrega:                         null,\n    municipio_entrega:                   null,\n    uf_entrega:                          null,\n    endereco_entrega:                    null,\n    endereco_nro_entrega:                null,\n    complemento_entrega:                 null,\n    bairro_entrega:                      null,\n    fone_entrega:                        null,\n    codigo_sku:                          produto.codigo || null,\n    filial:                              '001'\n  };\n});\n\nreturn orders.map(row => ({ json: row }));"
+      },
+      "id": "5f353a7f-361e-4818-9f41-13e486512a19",
+      "name": "Transformar Dados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pantynova.orders (\n  id, numero_do_pedido, data, data_prevista,\n  id_contato, nome_do_contato, tipo_de_pessoa, cpf_cnpj, rg_ie,\n  cep, municipio, uf, endereco, endereco_nro, complemento, bairro,\n  fone, celular, email,\n  desconto_do_pedido_porcento_ou_valor, frete_pedido, observacoes, situacao,\n  id_produto, descricao, quantidade, valor_unitario, desconto_item,\n  codigo_de_rastreamento, numero_da_ordem_de_compra, vendedor,\n  despesas_pedido, desconto_pedido_rateado, frete_pedido_rateado, despesas_pedido_rateado,\n  destinatario, cpf_cnpj_entrega, cep_entrega, municipio_entrega, uf_entrega,\n  endereco_entrega, endereco_nro_entrega, complemento_entrega, bairro_entrega, fone_entrega,\n  codigo_sku, filial\n)\nSELECT\n  {{ $json.id ? `'${$json.id}'` : 'NULL' }},\n  {{ $json.numero_do_pedido ? `'${String($json.numero_do_pedido).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.data ? `'${$json.data}'` : 'NULL' }},\n  {{ $json.data_prevista ? `'${$json.data_prevista}'` : 'NULL' }},\n  {{ $json.id_contato ? `'${$json.id_contato}'` : 'NULL' }},\n  {{ $json.nome_do_contato ? `'${String($json.nome_do_contato).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.tipo_de_pessoa ? `'${$json.tipo_de_pessoa}'` : 'NULL' }},\n  {{ $json.cpf_cnpj ? `'${$json.cpf_cnpj}'` : 'NULL' }},\n  {{ $json.rg_ie ? `'${$json.rg_ie}'` : 'NULL' }},\n  {{ $json.cep ? `'${$json.cep}'` : 'NULL' }},\n  {{ $json.municipio ? `'${String($json.municipio).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.uf ? `'${$json.uf}'` : 'NULL' }},\n  {{ $json.endereco ? `'${String($json.endereco).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.endereco_nro ? `'${$json.endereco_nro}'` : 'NULL' }},\n  {{ $json.complemento ? `'${String($json.complemento).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.bairro ? `'${String($json.bairro).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.fone ? `'${$json.fone}'` : 'NULL' }},\n  {{ $json.celular ? `'${$json.celular}'` : 'NULL' }},\n  {{ $json.email ? `'${$json.email}'` : 'NULL' }},\n  {{ $json.desconto_do_pedido_porcento_ou_valor ?? 0 }},\n  {{ $json.frete_pedido ?? 0 }},\n  {{ $json.observacoes ? `'${String($json.observacoes).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.situacao ? `'${String($json.situacao).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.id_produto ? `'${$json.id_produto}'` : 'NULL' }},\n  {{ $json.descricao ? `'${String($json.descricao).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.quantidade ?? 1 }},\n  {{ $json.valor_unitario ?? 0 }},\n  {{ $json.desconto_item ?? 0 }},\n  {{ $json.codigo_de_rastreamento ? `'${$json.codigo_de_rastreamento}'` : 'NULL' }},\n  {{ $json.numero_da_ordem_de_compra ? `'${$json.numero_da_ordem_de_compra}'` : 'NULL' }},\n  {{ $json.vendedor ? `'${String($json.vendedor).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.despesas_pedido ?? 0 }},\n  {{ $json.desconto_pedido_rateado ?? 0 }},\n  {{ $json.frete_pedido_rateado ?? 0 }},\n  {{ $json.despesas_pedido_rateado ?? 0 }},\n  {{ $json.destinatario ? `'${String($json.destinatario).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.cpf_cnpj_entrega ? `'${$json.cpf_cnpj_entrega}'` : 'NULL' }},\n  {{ $json.cep_entrega ? `'${$json.cep_entrega}'` : 'NULL' }},\n  {{ $json.municipio_entrega ? `'${String($json.municipio_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.uf_entrega ? `'${$json.uf_entrega}'` : 'NULL' }},\n  {{ $json.endereco_entrega ? `'${String($json.endereco_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.endereco_nro_entrega ? `'${$json.endereco_nro_entrega}'` : 'NULL' }},\n  {{ $json.complemento_entrega ? `'${String($json.complemento_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.bairro_entrega ? `'${String($json.bairro_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.fone_entrega ? `'${$json.fone_entrega}'` : 'NULL' }},\n  {{ $json.codigo_sku ? `'${$json.codigo_sku}'` : 'NULL' }},\n  '{{ $json.filial }}'\nWHERE NOT EXISTS (\n  SELECT 1 FROM pantynova.orders\n  WHERE id = '{{ $json.id }}'\n  AND id_produto = '{{ $json.id_produto }}'\n);",
+        "options": {}
+      },
+      "id": "4becdbaf-bc10-4320-ae91-74941d7b6f81",
+      "name": "Inserir → orders",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1280,
+        224
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## LOJA 01",
+        "height": 224,
+        "width": 1168
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        320,
+        176
+      ],
+      "typeVersion": 1,
+      "id": "815ae1d6-9a51-4a09-96f7-2195041deab1",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tiny.com.br/api2/pedidos.pesquisa.php",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "24aac3fa01ca10aa0ea8c8240cb7950f4993069a484a13cc29e0cbdb4a60f61f"
+            },
+            {
+              "name": "formato",
+              "value": "JSON"
+            },
+            {
+              "name": "pagina",
+              "value": "1"
+            },
+            {
+              "name": "dataInicial",
+              "value": "=25/12/2025"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "07f35ae4-94d0-4964-8e30-5e650695e9f8",
+      "name": "Buscar Lista de Pedidos1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        416,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw;\n\nif (body?.retorno?.status !== 'OK') {\n  throw new Error('Erro na API V2: ' + JSON.stringify(body?.retorno));\n}\n\nconst pedidos = (body?.retorno?.pedidos || []).map(p => p.pedido || p);\nconst numeroPaginas = parseInt(body?.retorno?.numero_paginas || 1);\nconst paginaAtual = parseInt(body?.retorno?.pagina || 1);\n\n// Salva info de paginação em cada item\nreturn pedidos.map(p => ({ \n  json: { \n    id: p.id, \n    numero: p.numero,\n    _pagina_atual: paginaAtual,\n    _numero_paginas: numeroPaginas\n  } \n}));"
+      },
+      "id": "829e27a9-849e-4ab2-9510-9a0b59c1754e",
+      "name": "Extrair IDs dos Pedidos1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tiny.com.br/api2/pedido.obter.php",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "24aac3fa01ca10aa0ea8c8240cb7950f4993069a484a13cc29e0cbdb4a60f61f"
+            },
+            {
+              "name": "formato",
+              "value": "JSON"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e8e275d9-e9cc-4429-8aac-50add5e6025c",
+      "name": "Buscar Detalhes do Pedido1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        864,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw;\n\nif (body?.retorno?.status !== 'OK') {\n  throw new Error('Erro ao obter pedido: ' + JSON.stringify(body?.retorno));\n}\n\nconst p = body?.retorno?.pedido || {};\nconst cliente = p.cliente || {};\nconst itens = p.itens || [];\n\nfunction formatDateBRtoISO(input) {\n  if (!input || typeof input !== 'string') return null;\n  const [day, month, year] = input.split('/');\n  if (!day || !month || !year) return null;\n  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;\n}\n\nfunction formatNumber(input) {\n  if (input === null || input === undefined || input === '') return null;\n  // API V2 já usa ponto decimal (\"26.01000000\"), só faz parseFloat\n  const num = parseFloat(String(input).replace(/\\s+/g, ''));\n  return isNaN(num) ? null : num;\n}\n\nconst totalProdutos  = formatNumber(p.total_produtos) || 0;\nconst valorFrete     = formatNumber(p.valor_frete) || 0;\nconst valorDesconto  = formatNumber(p.valor_desconto) || 0;\nconst outrasDespesas = formatNumber(p.outras_despesas) || 0;\n\nconst itensParsed = itens.map(i => {\n  const item  = i.item || i;\n  const qtd   = formatNumber(item.quantidade) || 1;\n  const vUnit = formatNumber(item.valor_unitario) || 0;\n  return { ...item, qtd, vUnit, subtotal: parseFloat((qtd * vUnit).toFixed(2)) };\n});\n\nconst totalSubtotal = itensParsed.reduce((acc, i) => acc + i.subtotal, 0);\n\nconst orders = itensParsed.map(produto => {\n  const proporcao       = totalSubtotal > 0 ? produto.subtotal / totalSubtotal : 0;\n  const descontoItem    = parseFloat((produto.subtotal - totalProdutos * proporcao).toFixed(2));\n  const freteRateado    = parseFloat((valorFrete * proporcao).toFixed(2));\n  const descontoRateado = parseFloat((valorDesconto * proporcao).toFixed(2));\n  const despesasRateado = parseFloat((outrasDespesas * proporcao).toFixed(2));\n\n  return {\n    id:                                  p.id || null,\n    numero_do_pedido:                    p.numero || null,\n    data:                                formatDateBRtoISO(p.data_pedido),\n    data_prevista:                       formatDateBRtoISO(p.data_prevista) || null,\n    id_contato:                          cliente.id || null,\n    nome_do_contato:                     cliente.nome || null,\n    tipo_de_pessoa:                      cliente.tipo_pessoa || null,\n    cpf_cnpj:                            cliente.cpf_cnpj || null,\n    rg_ie:                               cliente.ie || cliente.rg || null,\n    cep:                                 cliente.cep || null,\n    municipio:                           cliente.cidade || null,\n    uf:                                  cliente.uf || null,\n    endereco:                            cliente.endereco || null,\n    endereco_nro:                        cliente.numero || null,\n    complemento:                         cliente.complemento || null,\n    bairro:                              cliente.bairro || null,\n    fone:                                cliente.fone || null,\n    celular:                             cliente.celular || null,\n    email:                               cliente.email || null,\n    desconto_do_pedido_porcento_ou_valor: valorDesconto,\n    frete_pedido:                        valorFrete,\n    observacoes:                         p.obs || null,\n    situacao:                            p.situacao || null,\n    id_produto:                          produto.id_produto || null,\n    descricao:                           produto.descricao || null,\n    quantidade:                          produto.qtd,\n    valor_unitario:                      produto.vUnit,\n    desconto_item:                       descontoItem,\n    codigo_de_rastreamento:              p.codigo_rastreamento || null,\n    numero_da_ordem_de_compra:           p.numero_ordem_compra || null,\n    vendedor:                            p.id_vendedor ? String(p.id_vendedor) : null,\n    despesas_pedido:                     outrasDespesas,\n    desconto_pedido_rateado:             descontoRateado,\n    frete_pedido_rateado:                freteRateado,\n    despesas_pedido_rateado:             despesasRateado,\n    destinatario:                        null,\n    cpf_cnpj_entrega:                    null,\n    cep_entrega:                         null,\n    municipio_entrega:                   null,\n    uf_entrega:                          null,\n    endereco_entrega:                    null,\n    endereco_nro_entrega:                null,\n    complemento_entrega:                 null,\n    bairro_entrega:                      null,\n    fone_entrega:                        null,\n    codigo_sku:                          produto.codigo || null,\n    filial:                              '001'\n  };\n});\n\nreturn orders.map(row => ({ json: row }));"
+      },
+      "id": "b4a4ab6a-2097-4d47-8328-3a282fd1f791",
+      "name": "Transformar Dados1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pantynova.orders (\n  id, numero_do_pedido, data, data_prevista,\n  id_contato, nome_do_contato, tipo_de_pessoa, cpf_cnpj, rg_ie,\n  cep, municipio, uf, endereco, endereco_nro, complemento, bairro,\n  fone, celular, email,\n  desconto_do_pedido_porcento_ou_valor, frete_pedido, observacoes, situacao,\n  id_produto, descricao, quantidade, valor_unitario, desconto_item,\n  codigo_de_rastreamento, numero_da_ordem_de_compra, vendedor,\n  despesas_pedido, desconto_pedido_rateado, frete_pedido_rateado, despesas_pedido_rateado,\n  destinatario, cpf_cnpj_entrega, cep_entrega, municipio_entrega, uf_entrega,\n  endereco_entrega, endereco_nro_entrega, complemento_entrega, bairro_entrega, fone_entrega,\n  codigo_sku, filial\n)\nSELECT\n  {{ $json.id ? `'${$json.id}'` : 'NULL' }},\n  {{ $json.numero_do_pedido ? `'${String($json.numero_do_pedido).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.data ? `'${$json.data}'` : 'NULL' }},\n  {{ $json.data_prevista ? `'${$json.data_prevista}'` : 'NULL' }},\n  {{ $json.id_contato ? `'${$json.id_contato}'` : 'NULL' }},\n  {{ $json.nome_do_contato ? `'${String($json.nome_do_contato).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.tipo_de_pessoa ? `'${$json.tipo_de_pessoa}'` : 'NULL' }},\n  {{ $json.cpf_cnpj ? `'${$json.cpf_cnpj}'` : 'NULL' }},\n  {{ $json.rg_ie ? `'${$json.rg_ie}'` : 'NULL' }},\n  {{ $json.cep ? `'${$json.cep}'` : 'NULL' }},\n  {{ $json.municipio ? `'${String($json.municipio).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.uf ? `'${$json.uf}'` : 'NULL' }},\n  {{ $json.endereco ? `'${String($json.endereco).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.endereco_nro ? `'${$json.endereco_nro}'` : 'NULL' }},\n  {{ $json.complemento ? `'${String($json.complemento).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.bairro ? `'${String($json.bairro).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.fone ? `'${$json.fone}'` : 'NULL' }},\n  {{ $json.celular ? `'${$json.celular}'` : 'NULL' }},\n  {{ $json.email ? `'${$json.email}'` : 'NULL' }},\n  {{ $json.desconto_do_pedido_porcento_ou_valor ?? 0 }},\n  {{ $json.frete_pedido ?? 0 }},\n  {{ $json.observacoes ? `'${String($json.observacoes).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.situacao ? `'${String($json.situacao).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.id_produto ? `'${$json.id_produto}'` : 'NULL' }},\n  {{ $json.descricao ? `'${String($json.descricao).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.quantidade ?? 1 }},\n  {{ $json.valor_unitario ?? 0 }},\n  {{ $json.desconto_item ?? 0 }},\n  {{ $json.codigo_de_rastreamento ? `'${$json.codigo_de_rastreamento}'` : 'NULL' }},\n  {{ $json.numero_da_ordem_de_compra ? `'${$json.numero_da_ordem_de_compra}'` : 'NULL' }},\n  {{ $json.vendedor ? `'${String($json.vendedor).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.despesas_pedido ?? 0 }},\n  {{ $json.desconto_pedido_rateado ?? 0 }},\n  {{ $json.frete_pedido_rateado ?? 0 }},\n  {{ $json.despesas_pedido_rateado ?? 0 }},\n  {{ $json.destinatario ? `'${String($json.destinatario).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.cpf_cnpj_entrega ? `'${$json.cpf_cnpj_entrega}'` : 'NULL' }},\n  {{ $json.cep_entrega ? `'${$json.cep_entrega}'` : 'NULL' }},\n  {{ $json.municipio_entrega ? `'${String($json.municipio_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.uf_entrega ? `'${$json.uf_entrega}'` : 'NULL' }},\n  {{ $json.endereco_entrega ? `'${String($json.endereco_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.endereco_nro_entrega ? `'${$json.endereco_nro_entrega}'` : 'NULL' }},\n  {{ $json.complemento_entrega ? `'${String($json.complemento_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.bairro_entrega ? `'${String($json.bairro_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.fone_entrega ? `'${$json.fone_entrega}'` : 'NULL' }},\n  {{ $json.codigo_sku ? `'${$json.codigo_sku}'` : 'NULL' }},\n  '{{ $json.filial }}'\nWHERE NOT EXISTS (\n  SELECT 1 FROM pantynova.orders\n  WHERE id = '{{ $json.id }}'\n  AND id_produto = '{{ $json.id_produto }}'\n);",
+        "options": {}
+      },
+      "id": "418b4dcd-9867-4df9-a51c-b82742b5f978",
+      "name": "Inserir → orders1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1280,
+        480
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## LOJA 02 - SP e Atacado",
+        "height": 224,
+        "width": 1168
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        320,
+        432
+      ],
+      "typeVersion": 1,
+      "id": "49f05f24-5c8c-42e9-9778-205b6127b071",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tiny.com.br/api2/pedidos.pesquisa.php",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "ff9b5fae6814d00a5cb01fff72c1633c01144da8"
+            },
+            {
+              "name": "formato",
+              "value": "JSON"
+            },
+            {
+              "name": "pagina",
+              "value": "1"
+            },
+            {
+              "name": "dataInicial",
+              "value": "=25/12/2025"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4ef97d03-9a60-453d-bbbb-c977e131869e",
+      "name": "Buscar Lista de Pedidos2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        416,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw;\n\nif (body?.retorno?.status !== 'OK') {\n  throw new Error('Erro na API V2: ' + JSON.stringify(body?.retorno));\n}\n\nconst pedidos = (body?.retorno?.pedidos || []).map(p => p.pedido || p);\nconst numeroPaginas = parseInt(body?.retorno?.numero_paginas || 1);\nconst paginaAtual = parseInt(body?.retorno?.pagina || 1);\n\n// Salva info de paginação em cada item\nreturn pedidos.map(p => ({ \n  json: { \n    id: p.id, \n    numero: p.numero,\n    _pagina_atual: paginaAtual,\n    _numero_paginas: numeroPaginas\n  } \n}));"
+      },
+      "id": "7ef53dd1-9644-4870-b555-d8bd0fe84950",
+      "name": "Extrair IDs dos Pedidos2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tiny.com.br/api2/pedido.obter.php",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "ff9b5fae6814d00a5cb01fff72c1633c01144da8"
+            },
+            {
+              "name": "formato",
+              "value": "JSON"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "add56f19-73dc-4eb7-a86c-a90ce25d5733",
+      "name": "Buscar Detalhes do Pedido2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        864,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw;\n\nif (body?.retorno?.status !== 'OK') {\n  throw new Error('Erro ao obter pedido: ' + JSON.stringify(body?.retorno));\n}\n\nconst p = body?.retorno?.pedido || {};\nconst cliente = p.cliente || {};\nconst itens = p.itens || [];\n\nfunction formatDateBRtoISO(input) {\n  if (!input || typeof input !== 'string') return null;\n  const [day, month, year] = input.split('/');\n  if (!day || !month || !year) return null;\n  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;\n}\n\nfunction formatNumber(input) {\n  if (input === null || input === undefined || input === '') return null;\n  // API V2 já usa ponto decimal (\"26.01000000\"), só faz parseFloat\n  const num = parseFloat(String(input).replace(/\\s+/g, ''));\n  return isNaN(num) ? null : num;\n}\n\nconst totalProdutos  = formatNumber(p.total_produtos) || 0;\nconst valorFrete     = formatNumber(p.valor_frete) || 0;\nconst valorDesconto  = formatNumber(p.valor_desconto) || 0;\nconst outrasDespesas = formatNumber(p.outras_despesas) || 0;\n\nconst itensParsed = itens.map(i => {\n  const item  = i.item || i;\n  const qtd   = formatNumber(item.quantidade) || 1;\n  const vUnit = formatNumber(item.valor_unitario) || 0;\n  return { ...item, qtd, vUnit, subtotal: parseFloat((qtd * vUnit).toFixed(2)) };\n});\n\nconst totalSubtotal = itensParsed.reduce((acc, i) => acc + i.subtotal, 0);\n\nconst orders = itensParsed.map(produto => {\n  const proporcao       = totalSubtotal > 0 ? produto.subtotal / totalSubtotal : 0;\n  const descontoItem    = parseFloat((produto.subtotal - totalProdutos * proporcao).toFixed(2));\n  const freteRateado    = parseFloat((valorFrete * proporcao).toFixed(2));\n  const descontoRateado = parseFloat((valorDesconto * proporcao).toFixed(2));\n  const despesasRateado = parseFloat((outrasDespesas * proporcao).toFixed(2));\n\n  return {\n    id:                                  p.id || null,\n    numero_do_pedido:                    p.numero || null,\n    data:                                formatDateBRtoISO(p.data_pedido),\n    data_prevista:                       formatDateBRtoISO(p.data_prevista) || null,\n    id_contato:                          cliente.id || null,\n    nome_do_contato:                     cliente.nome || null,\n    tipo_de_pessoa:                      cliente.tipo_pessoa || null,\n    cpf_cnpj:                            cliente.cpf_cnpj || null,\n    rg_ie:                               cliente.ie || cliente.rg || null,\n    cep:                                 cliente.cep || null,\n    municipio:                           cliente.cidade || null,\n    uf:                                  cliente.uf || null,\n    endereco:                            cliente.endereco || null,\n    endereco_nro:                        cliente.numero || null,\n    complemento:                         cliente.complemento || null,\n    bairro:                              cliente.bairro || null,\n    fone:                                cliente.fone || null,\n    celular:                             cliente.celular || null,\n    email:                               cliente.email || null,\n    desconto_do_pedido_porcento_ou_valor: valorDesconto,\n    frete_pedido:                        valorFrete,\n    observacoes:                         p.obs || null,\n    situacao:                            p.situacao || null,\n    id_produto:                          produto.id_produto || null,\n    descricao:                           produto.descricao || null,\n    quantidade:                          produto.qtd,\n    valor_unitario:                      produto.vUnit,\n    desconto_item:                       descontoItem,\n    codigo_de_rastreamento:              p.codigo_rastreamento || null,\n    numero_da_ordem_de_compra:           p.numero_ordem_compra || null,\n    vendedor:                            p.id_vendedor ? String(p.id_vendedor) : null,\n    despesas_pedido:                     outrasDespesas,\n    desconto_pedido_rateado:             descontoRateado,\n    frete_pedido_rateado:                freteRateado,\n    despesas_pedido_rateado:             despesasRateado,\n    destinatario:                        null,\n    cpf_cnpj_entrega:                    null,\n    cep_entrega:                         null,\n    municipio_entrega:                   null,\n    uf_entrega:                          null,\n    endereco_entrega:                    null,\n    endereco_nro_entrega:                null,\n    complemento_entrega:                 null,\n    bairro_entrega:                      null,\n    fone_entrega:                        null,\n    codigo_sku:                          produto.codigo || null,\n    filial:                              '001'\n  };\n});\n\nreturn orders.map(row => ({ json: row }));"
+      },
+      "id": "4b0566dc-c210-45a8-a1f0-12445bdc4c22",
+      "name": "Transformar Dados2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pantynova.orders (\n  id, numero_do_pedido, data, data_prevista,\n  id_contato, nome_do_contato, tipo_de_pessoa, cpf_cnpj, rg_ie,\n  cep, municipio, uf, endereco, endereco_nro, complemento, bairro,\n  fone, celular, email,\n  desconto_do_pedido_porcento_ou_valor, frete_pedido, observacoes, situacao,\n  id_produto, descricao, quantidade, valor_unitario, desconto_item,\n  codigo_de_rastreamento, numero_da_ordem_de_compra, vendedor,\n  despesas_pedido, desconto_pedido_rateado, frete_pedido_rateado, despesas_pedido_rateado,\n  destinatario, cpf_cnpj_entrega, cep_entrega, municipio_entrega, uf_entrega,\n  endereco_entrega, endereco_nro_entrega, complemento_entrega, bairro_entrega, fone_entrega,\n  codigo_sku, filial\n)\nSELECT\n  {{ $json.id ? `'${$json.id}'` : 'NULL' }},\n  {{ $json.numero_do_pedido ? `'${String($json.numero_do_pedido).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.data ? `'${$json.data}'` : 'NULL' }},\n  {{ $json.data_prevista ? `'${$json.data_prevista}'` : 'NULL' }},\n  {{ $json.id_contato ? `'${$json.id_contato}'` : 'NULL' }},\n  {{ $json.nome_do_contato ? `'${String($json.nome_do_contato).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.tipo_de_pessoa ? `'${$json.tipo_de_pessoa}'` : 'NULL' }},\n  {{ $json.cpf_cnpj ? `'${$json.cpf_cnpj}'` : 'NULL' }},\n  {{ $json.rg_ie ? `'${$json.rg_ie}'` : 'NULL' }},\n  {{ $json.cep ? `'${$json.cep}'` : 'NULL' }},\n  {{ $json.municipio ? `'${String($json.municipio).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.uf ? `'${$json.uf}'` : 'NULL' }},\n  {{ $json.endereco ? `'${String($json.endereco).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.endereco_nro ? `'${$json.endereco_nro}'` : 'NULL' }},\n  {{ $json.complemento ? `'${String($json.complemento).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.bairro ? `'${String($json.bairro).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.fone ? `'${$json.fone}'` : 'NULL' }},\n  {{ $json.celular ? `'${$json.celular}'` : 'NULL' }},\n  {{ $json.email ? `'${$json.email}'` : 'NULL' }},\n  {{ $json.desconto_do_pedido_porcento_ou_valor ?? 0 }},\n  {{ $json.frete_pedido ?? 0 }},\n  {{ $json.observacoes ? `'${String($json.observacoes).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.situacao ? `'${String($json.situacao).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.id_produto ? `'${$json.id_produto}'` : 'NULL' }},\n  {{ $json.descricao ? `'${String($json.descricao).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.quantidade ?? 1 }},\n  {{ $json.valor_unitario ?? 0 }},\n  {{ $json.desconto_item ?? 0 }},\n  {{ $json.codigo_de_rastreamento ? `'${$json.codigo_de_rastreamento}'` : 'NULL' }},\n  {{ $json.numero_da_ordem_de_compra ? `'${$json.numero_da_ordem_de_compra}'` : 'NULL' }},\n  {{ $json.vendedor ? `'${String($json.vendedor).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.despesas_pedido ?? 0 }},\n  {{ $json.desconto_pedido_rateado ?? 0 }},\n  {{ $json.frete_pedido_rateado ?? 0 }},\n  {{ $json.despesas_pedido_rateado ?? 0 }},\n  {{ $json.destinatario ? `'${String($json.destinatario).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.cpf_cnpj_entrega ? `'${$json.cpf_cnpj_entrega}'` : 'NULL' }},\n  {{ $json.cep_entrega ? `'${$json.cep_entrega}'` : 'NULL' }},\n  {{ $json.municipio_entrega ? `'${String($json.municipio_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.uf_entrega ? `'${$json.uf_entrega}'` : 'NULL' }},\n  {{ $json.endereco_entrega ? `'${String($json.endereco_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.endereco_nro_entrega ? `'${$json.endereco_nro_entrega}'` : 'NULL' }},\n  {{ $json.complemento_entrega ? `'${String($json.complemento_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.bairro_entrega ? `'${String($json.bairro_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.fone_entrega ? `'${$json.fone_entrega}'` : 'NULL' }},\n  {{ $json.codigo_sku ? `'${$json.codigo_sku}'` : 'NULL' }},\n  '{{ $json.filial }}'\nWHERE NOT EXISTS (\n  SELECT 1 FROM pantynova.orders\n  WHERE id = '{{ $json.id }}'\n  AND id_produto = '{{ $json.id_produto }}'\n);",
+        "options": {}
+      },
+      "id": "e47d1e09-af1c-48c4-87bc-6e1b5e8e5ca7",
+      "name": "Inserir → orders2",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1280,
+        736
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## LOJA 03 - ECO",
+        "height": 224,
+        "width": 1168
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        320,
+        688
+      ],
+      "typeVersion": 1,
+      "id": "66e87f7a-075c-4c6f-b66c-81dd9cbbf3a1",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw;\n\nif (body?.retorno?.status !== 'OK') {\n  throw new Error('Erro na API V2: ' + JSON.stringify(body?.retorno));\n}\n\nconst pedidos = (body?.retorno?.pedidos || []).map(p => p.pedido || p);\nconst numeroPaginas = parseInt(body?.retorno?.numero_paginas || 1);\nconst paginaAtual = parseInt(body?.retorno?.pagina || 1);\n\n// Salva info de paginação em cada item\nreturn pedidos.map(p => ({ \n  json: { \n    id: p.id, \n    numero: p.numero,\n    _pagina_atual: paginaAtual,\n    _numero_paginas: numeroPaginas\n  } \n}));"
+      },
+      "id": "05d91204-39bd-4e77-ad01-86cd31913ffb",
+      "name": "Extrair IDs dos Pedidos3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tiny.com.br/api2/pedido.obter.php",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "5a539d0955409d70bd23d7a4d82716fb1da86cf81fc5472d7cd80ac7a996d729"
+            },
+            {
+              "name": "formato",
+              "value": "JSON"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "16594108-688d-41c5-8b55-0a492a4c6415",
+      "name": "Buscar Detalhes do Pedido3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        864,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw;\n\nif (body?.retorno?.status !== 'OK') {\n  throw new Error('Erro ao obter pedido: ' + JSON.stringify(body?.retorno));\n}\n\nconst p = body?.retorno?.pedido || {};\nconst cliente = p.cliente || {};\nconst itens = p.itens || [];\n\nfunction formatDateBRtoISO(input) {\n  if (!input || typeof input !== 'string') return null;\n  const [day, month, year] = input.split('/');\n  if (!day || !month || !year) return null;\n  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;\n}\n\nfunction formatNumber(input) {\n  if (input === null || input === undefined || input === '') return null;\n  // API V2 já usa ponto decimal (\"26.01000000\"), só faz parseFloat\n  const num = parseFloat(String(input).replace(/\\s+/g, ''));\n  return isNaN(num) ? null : num;\n}\n\nconst totalProdutos  = formatNumber(p.total_produtos) || 0;\nconst valorFrete     = formatNumber(p.valor_frete) || 0;\nconst valorDesconto  = formatNumber(p.valor_desconto) || 0;\nconst outrasDespesas = formatNumber(p.outras_despesas) || 0;\n\nconst itensParsed = itens.map(i => {\n  const item  = i.item || i;\n  const qtd   = formatNumber(item.quantidade) || 1;\n  const vUnit = formatNumber(item.valor_unitario) || 0;\n  return { ...item, qtd, vUnit, subtotal: parseFloat((qtd * vUnit).toFixed(2)) };\n});\n\nconst totalSubtotal = itensParsed.reduce((acc, i) => acc + i.subtotal, 0);\n\nconst orders = itensParsed.map(produto => {\n  const proporcao       = totalSubtotal > 0 ? produto.subtotal / totalSubtotal : 0;\n  const descontoItem    = parseFloat((produto.subtotal - totalProdutos * proporcao).toFixed(2));\n  const freteRateado    = parseFloat((valorFrete * proporcao).toFixed(2));\n  const descontoRateado = parseFloat((valorDesconto * proporcao).toFixed(2));\n  const despesasRateado = parseFloat((outrasDespesas * proporcao).toFixed(2));\n\n  return {\n    id:                                  p.id || null,\n    numero_do_pedido:                    p.numero || null,\n    data:                                formatDateBRtoISO(p.data_pedido),\n    data_prevista:                       formatDateBRtoISO(p.data_prevista) || null,\n    id_contato:                          cliente.id || null,\n    nome_do_contato:                     cliente.nome || null,\n    tipo_de_pessoa:                      cliente.tipo_pessoa || null,\n    cpf_cnpj:                            cliente.cpf_cnpj || null,\n    rg_ie:                               cliente.ie || cliente.rg || null,\n    cep:                                 cliente.cep || null,\n    municipio:                           cliente.cidade || null,\n    uf:                                  cliente.uf || null,\n    endereco:                            cliente.endereco || null,\n    endereco_nro:                        cliente.numero || null,\n    complemento:                         cliente.complemento || null,\n    bairro:                              cliente.bairro || null,\n    fone:                                cliente.fone || null,\n    celular:                             cliente.celular || null,\n    email:                               cliente.email || null,\n    desconto_do_pedido_porcento_ou_valor: valorDesconto,\n    frete_pedido:                        valorFrete,\n    observacoes:                         p.obs || null,\n    situacao:                            p.situacao || null,\n    id_produto:                          produto.id_produto || null,\n    descricao:                           produto.descricao || null,\n    quantidade:                          produto.qtd,\n    valor_unitario:                      produto.vUnit,\n    desconto_item:                       descontoItem,\n    codigo_de_rastreamento:              p.codigo_rastreamento || null,\n    numero_da_ordem_de_compra:           p.numero_ordem_compra || null,\n    vendedor:                            p.id_vendedor ? String(p.id_vendedor) : null,\n    despesas_pedido:                     outrasDespesas,\n    desconto_pedido_rateado:             descontoRateado,\n    frete_pedido_rateado:                freteRateado,\n    despesas_pedido_rateado:             despesasRateado,\n    destinatario:                        null,\n    cpf_cnpj_entrega:                    null,\n    cep_entrega:                         null,\n    municipio_entrega:                   null,\n    uf_entrega:                          null,\n    endereco_entrega:                    null,\n    endereco_nro_entrega:                null,\n    complemento_entrega:                 null,\n    bairro_entrega:                      null,\n    fone_entrega:                        null,\n    codigo_sku:                          produto.codigo || null,\n    filial:                              '001'\n  };\n});\n\nreturn orders.map(row => ({ json: row }));"
+      },
+      "id": "7ef07b9a-9a94-4bc3-867d-99e06d3c578e",
+      "name": "Transformar Dados3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pantynova.orders (\n  id, numero_do_pedido, data, data_prevista,\n  id_contato, nome_do_contato, tipo_de_pessoa, cpf_cnpj, rg_ie,\n  cep, municipio, uf, endereco, endereco_nro, complemento, bairro,\n  fone, celular, email,\n  desconto_do_pedido_porcento_ou_valor, frete_pedido, observacoes, situacao,\n  id_produto, descricao, quantidade, valor_unitario, desconto_item,\n  codigo_de_rastreamento, numero_da_ordem_de_compra, vendedor,\n  despesas_pedido, desconto_pedido_rateado, frete_pedido_rateado, despesas_pedido_rateado,\n  destinatario, cpf_cnpj_entrega, cep_entrega, municipio_entrega, uf_entrega,\n  endereco_entrega, endereco_nro_entrega, complemento_entrega, bairro_entrega, fone_entrega,\n  codigo_sku, filial\n)\nSELECT\n  {{ $json.id ? `'${$json.id}'` : 'NULL' }},\n  {{ $json.numero_do_pedido ? `'${String($json.numero_do_pedido).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.data ? `'${$json.data}'` : 'NULL' }},\n  {{ $json.data_prevista ? `'${$json.data_prevista}'` : 'NULL' }},\n  {{ $json.id_contato ? `'${$json.id_contato}'` : 'NULL' }},\n  {{ $json.nome_do_contato ? `'${String($json.nome_do_contato).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.tipo_de_pessoa ? `'${$json.tipo_de_pessoa}'` : 'NULL' }},\n  {{ $json.cpf_cnpj ? `'${$json.cpf_cnpj}'` : 'NULL' }},\n  {{ $json.rg_ie ? `'${$json.rg_ie}'` : 'NULL' }},\n  {{ $json.cep ? `'${$json.cep}'` : 'NULL' }},\n  {{ $json.municipio ? `'${String($json.municipio).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.uf ? `'${$json.uf}'` : 'NULL' }},\n  {{ $json.endereco ? `'${String($json.endereco).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.endereco_nro ? `'${$json.endereco_nro}'` : 'NULL' }},\n  {{ $json.complemento ? `'${String($json.complemento).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.bairro ? `'${String($json.bairro).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.fone ? `'${$json.fone}'` : 'NULL' }},\n  {{ $json.celular ? `'${$json.celular}'` : 'NULL' }},\n  {{ $json.email ? `'${$json.email}'` : 'NULL' }},\n  {{ $json.desconto_do_pedido_porcento_ou_valor ?? 0 }},\n  {{ $json.frete_pedido ?? 0 }},\n  {{ $json.observacoes ? `'${String($json.observacoes).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.situacao ? `'${String($json.situacao).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.id_produto ? `'${$json.id_produto}'` : 'NULL' }},\n  {{ $json.descricao ? `'${String($json.descricao).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.quantidade ?? 1 }},\n  {{ $json.valor_unitario ?? 0 }},\n  {{ $json.desconto_item ?? 0 }},\n  {{ $json.codigo_de_rastreamento ? `'${$json.codigo_de_rastreamento}'` : 'NULL' }},\n  {{ $json.numero_da_ordem_de_compra ? `'${$json.numero_da_ordem_de_compra}'` : 'NULL' }},\n  {{ $json.vendedor ? `'${String($json.vendedor).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.despesas_pedido ?? 0 }},\n  {{ $json.desconto_pedido_rateado ?? 0 }},\n  {{ $json.frete_pedido_rateado ?? 0 }},\n  {{ $json.despesas_pedido_rateado ?? 0 }},\n  {{ $json.destinatario ? `'${String($json.destinatario).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.cpf_cnpj_entrega ? `'${$json.cpf_cnpj_entrega}'` : 'NULL' }},\n  {{ $json.cep_entrega ? `'${$json.cep_entrega}'` : 'NULL' }},\n  {{ $json.municipio_entrega ? `'${String($json.municipio_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.uf_entrega ? `'${$json.uf_entrega}'` : 'NULL' }},\n  {{ $json.endereco_entrega ? `'${String($json.endereco_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.endereco_nro_entrega ? `'${$json.endereco_nro_entrega}'` : 'NULL' }},\n  {{ $json.complemento_entrega ? `'${String($json.complemento_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.bairro_entrega ? `'${String($json.bairro_entrega).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.fone_entrega ? `'${$json.fone_entrega}'` : 'NULL' }},\n  {{ $json.codigo_sku ? `'${$json.codigo_sku}'` : 'NULL' }},\n  '{{ $json.filial }}'\nWHERE NOT EXISTS (\n  SELECT 1 FROM pantynova.orders\n  WHERE id = '{{ $json.id }}'\n  AND id_produto = '{{ $json.id_produto }}'\n);",
+        "options": {}
+      },
+      "id": "e6392777-e3d6-4f7f-a9fd-a9b99ba1d7b5",
+      "name": "Inserir → orders3",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1280,
+        992
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## LOJA 04 - LOJA BH",
+        "height": 224,
+        "width": 1168
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        320,
+        944
+      ],
+      "typeVersion": 1,
+      "id": "92a588a0-c170-4ee5-9188-77ec7a92a199",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "TRUNCATE TABLE pantynova.inventory;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        368,
+        1296
+      ],
+      "id": "68966c58-bfa0-4595-9840-e493e81389a1",
+      "name": "Apagar Estoque Anterior",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tiny.com.br/api2/produtos.pesquisa.php",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "ff9b5fae6814d00a5cb01fff72c1633c01144da8"
+            },
+            {
+              "name": "formato",
+              "value": "JSON"
+            },
+            {
+              "name": "pagina",
+              "value": "={{ $json.pagina ?? 1 }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7d2c917a-e4cf-4e2b-a334-681c7db45bca",
+      "name": "Buscar Lista de Produtos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        576,
+        1280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw;\n\nif (body?.retorno?.status !== 'OK') {\n  throw new Error('Erro na API V2: ' + JSON.stringify(body?.retorno));\n}\n\nconst produtos = (body?.retorno?.produtos || []).map(p => p.produto || p);\nconst numeroPaginas = parseInt(body?.retorno?.numero_paginas || 1);\nconst paginaAtual = parseInt(body?.retorno?.pagina || 1);\n\nreturn produtos.map(p => ({\n  json: {\n    id: p.id,\n    codigo: p.codigo,\n    _pagina_atual: paginaAtual,\n    _numero_paginas: numeroPaginas\n  }\n}));"
+      },
+      "id": "ab684e51-d319-438b-a65f-f79515250554",
+      "name": "Extrair IDs dos Produtos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        1280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tiny.com.br/api2/produto.obter.php",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "ff9b5fae6814d00a5cb01fff72c1633c01144da8"
+            },
+            {
+              "name": "formato",
+              "value": "JSON"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "363d1b0e-f402-4577-b54e-b1f742bae386",
+      "name": "Buscar Detalhes do Produto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1024,
+        1280
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pantynova.inventory (\n  codigo_sku, produto, estoque_atual, estoque_disponivel,\n  preco, unidade, localizacao, filial\n)\nVALUES (\n  {{ $json.codigo_sku ? `'${String($json.codigo_sku).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.produto ? `'${String($json.produto).replace(/'/g,\"''\")}'` : 'NULL' }},\n  {{ $json.estoque_atual ?? 'NULL' }},\n  {{ $json.estoque_disponivel ?? 'NULL' }},\n  {{ $json.preco ?? 'NULL' }},\n  {{ $json.unidade ? `'${$json.unidade}'` : 'NULL' }},\n  {{ $json.localizacao ? `'${String($json.localizacao).replace(/'/g,\"''\")}'` : 'NULL' }},\n  '{{ $json.filial }}'\n)\nON CONFLICT (codigo_sku) DO UPDATE SET\n  produto            = EXCLUDED.produto,\n  estoque_atual      = EXCLUDED.estoque_atual,\n  estoque_disponivel = EXCLUDED.estoque_disponivel,\n  preco              = EXCLUDED.preco,\n  unidade            = EXCLUDED.unidade,\n  localizacao        = EXCLUDED.localizacao,\n  filial             = EXCLUDED.filial;",
+        "options": {}
+      },
+      "id": "5701ed03-5526-4a62-9e40-5f432aca7b29",
+      "name": "Upsert → inventory",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1456,
+        1280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw;\n\nif (body?.retorno?.status !== 'OK') {\n  throw new Error('Erro ao obter produto: ' + JSON.stringify(body?.retorno));\n}\n\nconst p = body?.retorno?.produto || {};\n\nfunction formatNumber(input) {\n  if (input === null || input === undefined || input === '') return null;\n  const num = parseFloat(String(input).replace(/\\s+/g, ''));\n  return isNaN(num) ? null : num;\n}\n\nreturn [{\n  json: {\n    codigo_sku:         p.codigo || null,\n    produto:            p.descricao || p.nome || null,\n    estoque_atual:      formatNumber(p.estoque?.saldoVirtual ?? p.saldoVirtual ?? p.estoque),\n    estoque_disponivel: formatNumber(p.estoque?.saldoDisponivel ?? p.saldoDisponivel),\n    preco:              formatNumber(p.preco),\n    unidade:            p.unidade || null,\n    localizacao:        p.localizacao || null,\n    filial:             '001'\n  }\n}];"
+      },
+      "id": "ce72c569-f5bd-4814-960a-78e8912335bd",
+      "name": "Transformar Dados4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        1280
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ESTOQUE",
+        "height": 224,
+        "width": 1328
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        320,
+        1232
+      ],
+      "typeVersion": 1,
+      "id": "0af1c0e2-21da-476d-b634-d62fcb036333",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -96,
+        720
+      ],
+      "id": "43263f28-14ff-40e2-bf15-a5801cfbfb1d",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tiny.com.br/api2/pedidos.pesquisa.php",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "5a539d0955409d70bd23d7a4d82716fb1da86cf81fc5472d7cd80ac7a996d729"
+            },
+            {
+              "name": "formato",
+              "value": "JSON"
+            },
+            {
+              "name": "pagina",
+              "value": "1"
+            },
+            {
+              "name": "dataInicial",
+              "value": "=25/12/2025"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d515acce-ec32-4981-ae3f-15b8c751bd0c",
+      "name": "Buscar Lista de Pedidos3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        416,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "nome_produto",
+              "value": "={{ $('Webhook - Receber Estoque1').first().json.body.dados.nome }}",
+              "type": "string"
+            },
+            {
+              "id": "field-002",
+              "name": "quantidade",
+              "value": "={{ $('Webhook - Receber Estoque1').first().json.body.dados.saldo }}",
+              "type": "number"
+            },
+            {
+              "id": "field-003",
+              "name": "sku",
+              "value": "={{ $('Webhook - Receber Estoque1').first().json.body.dados.sku }}",
+              "type": "string"
+            },
+            {
+              "id": "field-004",
+              "name": "id_produto",
+              "value": "={{ $('Webhook - Receber Estoque1').first().json.body.dados.idProduto }}",
+              "type": "number"
+            },
+            {
+              "id": "field-005",
+              "name": "preco",
+              "value": "={{ $json.price ?? null }}",
+              "type": "number"
+            },
+            {
+              "id": "field-006",
+              "name": "categoria",
+              "value": "={{ $json.category ?? null }}",
+              "type": "string"
+            },
+            {
+              "id": "field-007",
+              "name": "descricao",
+              "value": "={{ $json.description ?? null }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "da578f4f-1fc0-4fd3-bf46-d1c8830876cc",
+      "name": "Organizar Campos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        704,
+        2576
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "atualizar-estoque",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "f9bfd225-fc15-4f39-a697-acf1edb597d7",
+      "name": "Webhook - Receber Estoque1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        224,
+        2576
+      ],
+      "webhookId": "ae26f7e9-af82-4a2f-89a7-1b3953e34c73"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tiny.com.br/api2/produto.obter.php",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "24aac3fa01ca10aa0ea8c8240cb7950f4993069a484a13cc29e0cbdb4a60f61f"
+            },
+            {
+              "name": "formato",
+              "value": "JSON"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.body.dados.idProduto }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ccb91070-ecf0-43e5-8660-cc5522e40d18",
+      "name": "Buscar Detalhes do Produto1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        2576
+      ]
+    }
+  ],
+  "connections": {
+    "Buscar Lista de Pedidos": {
+      "main": [
+        [
+          {
+            "node": "Extrair IDs dos Pedidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair IDs dos Pedidos": {
+      "main": [
+        [
+          {
+            "node": "Buscar Detalhes do Pedido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Detalhes do Pedido": {
+      "main": [
+        [
+          {
+            "node": "Transformar Dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transformar Dados": {
+      "main": [
+        [
+          {
+            "node": "Inserir → orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Lista de Pedidos1": {
+      "main": [
+        [
+          {
+            "node": "Extrair IDs dos Pedidos1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair IDs dos Pedidos1": {
+      "main": [
+        [
+          {
+            "node": "Buscar Detalhes do Pedido1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Detalhes do Pedido1": {
+      "main": [
+        [
+          {
+            "node": "Transformar Dados1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transformar Dados1": {
+      "main": [
+        [
+          {
+            "node": "Inserir → orders1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Lista de Pedidos2": {
+      "main": [
+        [
+          {
+            "node": "Extrair IDs dos Pedidos2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair IDs dos Pedidos2": {
+      "main": [
+        [
+          {
+            "node": "Buscar Detalhes do Pedido2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Detalhes do Pedido2": {
+      "main": [
+        [
+          {
+            "node": "Transformar Dados2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transformar Dados2": {
+      "main": [
+        [
+          {
+            "node": "Inserir → orders2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair IDs dos Pedidos3": {
+      "main": [
+        [
+          {
+            "node": "Buscar Detalhes do Pedido3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Detalhes do Pedido3": {
+      "main": [
+        [
+          {
+            "node": "Transformar Dados3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transformar Dados3": {
+      "main": [
+        [
+          {
+            "node": "Inserir → orders3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Lista de Produtos": {
+      "main": [
+        [
+          {
+            "node": "Extrair IDs dos Produtos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair IDs dos Produtos": {
+      "main": [
+        [
+          {
+            "node": "Buscar Detalhes do Produto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Detalhes do Produto": {
+      "main": [
+        [
+          {
+            "node": "Transformar Dados4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transformar Dados4": {
+      "main": [
+        [
+          {
+            "node": "Upsert → inventory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Buscar Lista de Pedidos",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Buscar Lista de Pedidos1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Buscar Lista de Pedidos2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Apagar Estoque Anterior",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Buscar Lista de Pedidos3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apagar Estoque Anterior": {
+      "main": [
+        [
+          {
+            "node": "Buscar Lista de Produtos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Lista de Pedidos3": {
+      "main": [
+        [
+          {
+            "node": "Extrair IDs dos Pedidos3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Receber Estoque1": {
+      "main": [
+        [
+          {
+            "node": "Buscar Detalhes do Produto1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Detalhes do Produto1": {
+      "main": [
+        [
+          {
+            "node": "Organizar Campos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "90d1a9ff-a45b-4006-98f7-b1fcfdf8dc48",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-03-05T13:58:39.995Z",
+      "createdAt": "2026-03-05T13:58:39.995Z",
+      "role": "workflow:owner",
+      "workflowId": "vTM69oI9mmqya3S2",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
