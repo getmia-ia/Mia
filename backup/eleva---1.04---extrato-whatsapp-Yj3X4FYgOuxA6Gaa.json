@@ -1,0 +1,185 @@
+{
+  "updatedAt": "2026-04-02T19:48:35.130Z",
+  "createdAt": "2026-04-01T14:24:11.428Z",
+  "id": "Yj3X4FYgOuxA6Gaa",
+  "name": "Eleva - 1.04 - Extrato WhatsApp",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "let dados = {};\nconst input = $json.query;\n\nif (typeof input === 'string') {\n    // Função auxiliar para extrair o valor após um rótulo específico\n    // Ela procura pelo nome do campo, ignora espaços e pega tudo até o fim da linha ou próximo campo\n    const extrair = (campo) => {\n        const regex = new RegExp(`${campo}:\\\\s*([^\\\\n]+)`, 'i');\n        const match = input.match(regex);\n        return match ? match[1].trim() : null;\n    };\n\n    dados = {\n        url_arquivo: extrair('url_arquivo'),\n        tipo: extrair('tipo'),\n        accountId: extrair('accountId'),\n        bankName: extrair('bankName'),\n        accountName: extrair('accountName'),\n        userId: extrair('userId'),\n        ownerId: extrair('ownerId')\n    };\n\n    // Caso o Regex falhe e não encontre nada, cai no catch de segurança\n    if (!dados.url_arquivo && !dados.tipo) {\n        throw new Error(\"Não foi possível extrair os dados do texto da IA.\");\n    }\n} \nelse if (typeof input === 'object') {\n    dados = input;\n} \nelse {\n    dados = $json;\n}\n\nreturn [{ json: dados }];"
+      },
+      "id": "743cd5ae-8370-4006-9e46-53d21c7d75dd",
+      "name": "Extrair Variáveis da IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url_arquivo }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "89e17a1e-023f-4c91-ae74-e39a5a7ab6e4",
+      "name": "Baixar Arquivo do WhatsApp1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        48,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const binaryData = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst base64String = binaryData.toString('base64');\n\nconst mimeType = $input.item.binary.data.mimeType || 'application/pdf';\nconst fileExtension = mimeType.split('/')[1] || 'pdf';\n\n// Pega o nome original que veio com sujeira\nlet fileName = $input.item.binary.data.fileName || `documento_whatsapp.${fileExtension}`;\n\n// LIMPEZA: Remove o \"-filename*=\" e tudo que vier depois\nif (fileName.includes('-filename')) {\n    fileName = fileName.split('-filename')[0];\n}\n\n// LIMPEZA EXTRA (Opcional): Se o arquivo ficar com \".pdf.pdf\", corrige para um só\nif (fileName.endsWith('.pdf.pdf')) {\n    fileName = fileName.replace('.pdf.pdf', '.pdf');\n}\n\nreturn [{\n  json: {\n    base64File: base64String,\n    mimeType: mimeType,\n    fileName: fileName\n  }\n}];"
+      },
+      "id": "de1e4d68-e243-47fa-9ae7-dd91a55fd4ae",
+      "name": "Converte para Base",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        -224
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webhook.miabuilder.com/webhook/24fb8480-52b3-4a66-8574-882420172277",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"file\": \"{{ $json.base64File }}\",\n  \"fileName\": \"{{ $json.fileName }}\",\n  \"fileType\": \"{{ $json.mimeType }}\",\n  \"tipo\": \"{{ $('Extrair Variáveis da IA').item.json.tipo }}\",\n  \"accountId\": \"{{ $('Extrair Variáveis da IA').item.json.accountId }}\",\n  \"bankName\": \"{{ $('Extrair Variáveis da IA').item.json.bankName }}\",\n  \"accountName\": \"{{ $('Extrair Variáveis da IA').item.json.accountName }}\",\n  \"userId\": \"{{ $('Extrair Variáveis da IA').item.json.userId }}\",\n  \"ownerId\": \"{{ $('Extrair Variáveis da IA').item.json.ownerId }}\"\n}",
+        "options": {}
+      },
+      "id": "a7e8110e-0e0d-4f09-938c-d1ce3f37bb32",
+      "name": "Dispara para Fluxo Original1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8b51d8db-0c2d-4c3e-9c2b-10d54c86f082",
+              "name": "status",
+              "value": "Arquivo processado e enviado com sucesso para a fila de extração!",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "71138a47-f8b1-438c-8529-b81b5dab1568",
+      "name": "Resposta para o Agente1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        704,
+        -224
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "23830474-c473-49dd-8f58-fe7068089349",
+      "name": "Recebe Dados do Agente",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -352,
+        -224
+      ]
+    }
+  ],
+  "connections": {
+    "Extrair Variáveis da IA": {
+      "main": [
+        [
+          {
+            "node": "Baixar Arquivo do WhatsApp1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixar Arquivo do WhatsApp1": {
+      "main": [
+        [
+          {
+            "node": "Converte para Base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converte para Base": {
+      "main": [
+        [
+          {
+            "node": "Dispara para Fluxo Original1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispara para Fluxo Original1": {
+      "main": [
+        [
+          {
+            "node": "Resposta para o Agente1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recebe Dados do Agente": {
+      "main": [
+        [
+          {
+            "node": "Extrair Variáveis da IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "fa6e792d-0454-4536-8ee0-fcabe767aaec",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-04-01T14:24:11.428Z",
+      "createdAt": "2026-04-01T14:24:11.428Z",
+      "role": "workflow:owner",
+      "workflowId": "Yj3X4FYgOuxA6Gaa",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
