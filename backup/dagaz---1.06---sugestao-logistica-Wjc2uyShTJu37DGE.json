@@ -1,0 +1,897 @@
+{
+  "updatedAt": "2026-04-14T18:52:14.150Z",
+  "createdAt": "2026-01-16T16:42:05.456Z",
+  "id": "Wjc2uyShTJu37DGE",
+  "name": "DAGAZ - 1.06 - Sugestão Logística",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1296,
+        -176
+      ],
+      "id": "6b673fbf-e36d-4686-acae-61674e50826b",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://maps.googleapis.com/maps/api/geocode/json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "address",
+              "value": "={{ $json.endereco }}"
+            },
+            {
+              "name": "key",
+              "value": "***REMOVIDO***"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -656,
+        16
+      ],
+      "id": "e846d5d0-efae-4fd7-9b1f-5d6af09e9e71",
+      "name": "Converter Endereço em Latitude/Longitude"
+    },
+    {
+      "parameters": {
+        "url": "https://maps.googleapis.com/maps/api/place/nearbysearch/json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "=location",
+              "value": "={{ $node[\"Converter Endereço em Latitude/Longitude\"].json.results[0].geometry.location.lat }},{{ $node[\"Converter Endereço em Latitude/Longitude\"].json.results[0].geometry.location.lng }}"
+            },
+            {
+              "name": "key",
+              "value": "***REMOVIDO***"
+            },
+            {
+              "name": "type",
+              "value": "airport"
+            },
+            {
+              "name": "radius",
+              "value": "600000"
+            },
+            {
+              "name": "keyword",
+              "value": "aeroporto"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -112,
+        -176
+      ],
+      "id": "422df12f-0728-48c1-842a-2be9eb169818",
+      "name": "Encontrar o Aeroporto Mais Próximo"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=📍 DADOS DO PARTICIPANTE:\n- Endereço Base: {{ $node[\"Converter Endereço em Latitude/Longitude\"].json.results[0].formatted_address }}\n- Coordenadas: {{ $node[\"Converter Endereço em Latitude/Longitude\"].json.results[0].geometry.location.lat }}, {{ $node[\"Converter Endereço em Latitude/Longitude\"].json.results[0].geometry.location.lng }}\n- Destino da Viagem: {{ $('Organiza o input do AI Agent').first().json.destino || 'Não informado' }}\n- É Internacional? {{ $('Organiza o input do AI Agent').first().json.flag_internacional }}\n\n📦 DADOS LOGÍSTICOS DISPONÍVEIS (Analise qual lista contém dados):\n\n--- GRUPO AÉREO ---\nHub Global Prioritário (< 80km):\n{{ JSON.stringify($json.hub_global_prioritario || null) }}\n\nAeroportos Locais:\n{{ JSON.stringify($json.aeroportos_locais || []) }}\n\nHubs Calculados:\n{{ JSON.stringify($json.hubs_calculados || []) }}\n...\n\nHubs Calculados:\n{{ JSON.stringify($json.hubs_calculados || []) }}\n\n--- GRUPO RODOVIÁRIO ---\nRodoviárias Próximas:\n{{ JSON.stringify($json.rodoviarias_locais || []) }}\n\n--- GRUPO TRANSFER ---\nPontos de Encontro:\n{{ JSON.stringify($json.transfers_locais || []) }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=Você é o maior especialista em logística de viagens do Brasil.\n\nSua missão é selecionar A MELHOR OPÇÃO DE EMBARQUE para o usuário, adaptando sua análise rigorosamente ao tipo de dados que você recebeu (Aéreo, Rodoviário ou Transfer).\n\n---\n### 📥 ANÁLISE DE ENTRADA (Identifique o Cenário)\n\nO usuário enviou 3 grupos de dados, mas APENAS UM deles conterá informações reais. Os outros estarão vazios (`[]`).\n\n**CENÁRIO 1: LOGÍSTICA AÉREA ✈️**\n- Gatilho: A lista `aeroportos_locais` ou `hubs_calculados` contém dados.\n- Objetivo: Escolher o melhor aeroporto baseada na hierarquia global.\n\n**CENÁRIO 2: LOGÍSTICA RODOVIÁRIA 🚌**\n- Gatilho: A lista `rodoviarias_locais` contém dados.\n- Objetivo: Escolher a rodoviária mais próxima e relevante.\n\n**CENÁRIO 3: TRANSFER / VAN 🚐**\n- Gatilho: A lista `transfers_locais` contém dados.\n- Objetivo: Escolher o ponto de encontro mais próximo da casa do participante.\n\n---\n\n### 🧠 REGRAS DE DECISÃO (Por Cenário)\n\n#### > SE FOR CENÁRIO 1 (AÉREO)\nUse a hierarquia de aeroportos:\n* **Nível 1 (Global):** GRU, GIG, VCP, CNF, BSB, REC, FOR, SSA.\n* **Nível 2 (LatAm):** POA, FLN, CWB, BEL, MAO + Nível 1.\n* **Nível 3:** Regionais (Uberaba, Ribeirão, Londrina, etc).\n\n**Regra de Ouro Aérea (Prioridade Absoluta):**\n\n1. **CHECK DE PROXIMIDADE (Regra dos 80km):**\n   - Se o campo `hub_global_prioritario` estiver PREENCHIDO (não nulo) E o destino for INTERNACIONAL:\n   - **PARE TUDO.** Escolha IMEDIATAMENTE este Hub.\n   - *Motivo:* \"Como sua viagem é internacional e você mora a menos de 80km de um Hub Global ([Nome]), esta é a melhor opção.\"\n\n2. **CHECK DE CONFORTO (Se Hub Global for longe):**\n   - Se não houver hub perto (<80km), priorize o conforto de sair da própria cidade.\n   - Olhe a lista `aeroportos_locais`. Existe algum aeroporto na cidade do usuário?\n   - **SE SIM:** Escolha o **Aeroporto Local** (mesmo que seja Nível 3/Regional).\n     - *Motivo:* \"Como os aeroportos internacionais estão distantes (>80km), a melhor opção é embarcar no **[Nome do Local]** e fazer uma conexão, garantindo maior conforto.\"\n   - **SE NÃO:** Só então escolha o Hub mais próximo da lista `hubs_calculados`.\n\n#### > SE FOR CENÁRIO 2 (RODOVIÁRIO)\n1. Analise a lista `rodoviarias_locais`.\n2. Escolha a opção com a **MENOR `distancia_km`**.\n3. Em caso de empate técnico (< 5km), prefira a que tiver maior `rating_count`.\n\n#### > SE FOR CENÁRIO 3 (TRANSFER)\n1. Analise a lista `transfers_locais`.\n2. A regra é puramente matemática: **Escolha a MENOR `distancia_km`**.\n3. Não invente critérios de qualidade, apenas proximidade.\n\n---\n\n### 📤 SAÍDA OBRIGATÓRIA (JSON PURO)\n\nGere APENAS este JSON, sem texto adicional. Adapte os valores conforme o cenário identificado:\n\n```json\n{\n  \"encontrado\": true,\n  \"nome_aeroporto\": \"Nome oficial do Aeroporto, da Rodoviária ou do Ponto de Encontro escolhido\",\n  \"endereco_local\": \"O endereço completo do local escolhido (Copie o campo 'endereco' ou 'vicinity' do input)\",\n  \"codigo_iata\": \"Se for avião: Use o IATA real (ex: GRU). Se for ônibus: use 'RODO'. Se for transfer: use 'TRANSFER'.\",\n  \"tipo_transporte\": \"Aéreo / Rodoviário / Transfer\",\n  \"classificacao_destino\": \"Doméstico/LatAm/Global\",\n  \"origem_dado\": \"Lista Local (se veio da busca próxima) ou Hub Calculado (se veio da lista fixa)\",\n  \"distancia_usuario\": 00.0,\n  \"motivo\": \"Explique a decisão com números incluindo o ENDEREÇO entre parênteses. Ex: 'Como é um Transfer, selecionei o ponto [Nome] ([Endereço Completo]) pois é o mais próximo (3.5km) da sua residência, comparado à outra opção (150km)'.\"\n}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        992,
+        16
+      ],
+      "id": "3e3c153a-66b8-4ffb-a054-155efd901a8c",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolCalculator",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        352
+      ],
+      "id": "e2f57f91-b1ee-4e1a-8d38-243680f7cda3",
+      "name": "Calculator"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        992,
+        208
+      ],
+      "id": "e6816543-a045-4189-9dc6-513e28ac6ec5",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1312,
+        32
+      ],
+      "id": "18ee7452-09e5-4bbf-a024-29d67c821837",
+      "name": "Trigger"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "47ada17b-9c75-43f1-ab6c-1da92ef5fea5",
+              "name": "endereco",
+              "value": "Ribeirão preto, SP",
+              "type": "string"
+            },
+            {
+              "id": "f38b5a8e-3738-4eaa-9fc2-3980b43d41e8",
+              "name": "flag_internacional",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "81029040-d675-453c-adfb-1b03ca52347e",
+              "name": "destino",
+              "value": "Peru",
+              "type": "string"
+            },
+            {
+              "id": "dd016dbb-f8c9-48d5-95aa-5a4ea1834098",
+              "name": "opcoes_excluidas",
+              "value": "[\"VCP\"]",
+              "type": "array"
+            },
+            {
+              "id": "23035b4c-193e-4353-9635-4ed54461e915",
+              "name": "tipo_transporte",
+              "value": "van",
+              "type": "string"
+            },
+            {
+              "id": "29122772-f587-48c9-880d-c5f66bfe6f35",
+              "name": "event_id",
+              "value": "a18fc0d3-4140-45b1-a6ce-65833e0b4e35",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1040,
+        -176
+      ],
+      "id": "d2ae7fdb-3a3c-4612-bb53-653c69337c89",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- 1. CONFIGURAÇÃO INICIAL ---\nconst nodeUsuario = $('Converter Endereço em Latitude/Longitude').first().json.results[0].geometry.location;\nconst userLat = nodeUsuario.lat;\nconst userLng = nodeUsuario.lng;\n\n// LÊ A LISTA DE EXCLUÍDOS\nlet inputExcluidos = $('Organiza o input do AI Agent').first().json.aeroportos_excluidos || [];\nif (typeof inputExcluidos === 'string') {\n    inputExcluidos = inputExcluidos.split(',').map(s => s.trim());\n}\nconst listaExcluidos = inputExcluidos.map(item => item.toUpperCase());\n\n// --- 2. FUNÇÃO HAVERSINE ---\nfunction getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {\n  const R = 6371; \n  const dLat = deg2rad(lat2 - lat1);\n  const dLon = deg2rad(lon2 - lon1);\n  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +\n            Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2);\n  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));\n  return parseFloat((R * c).toFixed(2));\n}\nfunction deg2rad(deg) { return deg * (Math.PI/180); }\n\n// --- 3. TABELA FIXA DE HUBS ---\nconst HUBS_BRASIL = [\n    { iata: \"GRU\", nome: \"Guarulhos (SP)\", lat: -23.4323, lng: -46.4695, tipo: \"Global\" },\n    { iata: \"VCP\", nome: \"Viracopos (Campinas)\", lat: -23.0074, lng: -47.1345, tipo: \"Global\" },\n    { iata: \"GIG\", nome: \"Galeão (RJ)\", lat: -22.8093, lng: -43.2506, tipo: \"Global\" },\n    { iata: \"CNF\", nome: \"Confins (BH)\", lat: -19.6244, lng: -43.9719, tipo: \"Global\" },\n    { iata: \"BSB\", nome: \"Brasília (DF)\", lat: -15.8696, lng: -47.9208, tipo: \"Global\" },\n    { iata: \"REC\", nome: \"Recife (PE)\", lat: -8.1259, lng: -34.9240, tipo: \"Global/LatAm\" },\n    { iata: \"SSA\", nome: \"Salvador (BA)\", lat: -12.9069, lng: -38.3315, tipo: \"Global/LatAm\" },\n    { iata: \"FOR\", nome: \"Fortaleza (CE)\", lat: -3.7757, lng: -38.5326, tipo: \"Global/LatAm\" },\n    { iata: \"POA\", nome: \"Porto Alegre (RS)\", lat: -29.9934, lng: -51.1711, tipo: \"LatAm\" },\n    { iata: \"CWB\", nome: \"Curitiba (PR)\", lat: -25.5327, lng: -49.1758, tipo: \"LatAm\" },\n    { iata: \"FLN\", nome: \"Florianópolis (SC)\", lat: -27.6701, lng: -48.5459, tipo: \"LatAm\" },\n    { iata: \"MAO\", nome: \"Manaus (AM)\", lat: -3.0360, lng: -60.0520, tipo: \"LatAm\" },\n    { iata: \"BEL\", nome: \"Belém (PA)\", lat: -1.3792, lng: -48.4766, tipo: \"LatAm\" }\n];\n\n// --- 4. PROCESSAR HUBS ---\nlet hubsCalculados = HUBS_BRASIL.map(hub => {\n    return {\n        nome: hub.nome,\n        iata: hub.iata,\n        tipo: hub.tipo,\n        distancia_km: getDistanceFromLatLonInKm(userLat, userLng, hub.lat, hub.lng)\n    };\n});\n\n// Filtro de Exclusão\nhubsCalculados = hubsCalculados.filter(hub => !listaExcluidos.includes(hub.iata));\n\n// Ordenação\nhubsCalculados.sort((a, b) => a.distancia_km - b.distancia_km);\nconst topHubs = hubsCalculados.slice(0, 3);\n\n// --- 4.5 LÓGICA DOS 80KM (NOVO) ---\n// Verifica se o Hub mais próximo é Global/Internacional E está a menos de 80km\nlet hubGlobalPerto = null;\nconst hubMaisPerto = hubsCalculados[0]; // Como já está ordenado, o índice 0 é o mais perto\n\nif (hubMaisPerto && hubMaisPerto.distancia_km <= 80 && hubMaisPerto.tipo.includes(\"Global\")) {\n    hubGlobalPerto = hubMaisPerto;\n}\n\n// --- 5. PROCESSAR LOCAIS GOOGLE ---\nconst resultados = items[0].json.results || [];\nconst palavrasProibidas = [\"heliponto\", \"heliporto\", \"hangar\", \"aeroclube\", \"pista\", \"serviços\", \"taxi\", \"táxi\", \"pipas\", \"base aérea\", \"estacionamento\", \"park\", \"escola\"];\nconst RELEVANCIA_MINIMA_TOP = 2000; \n\nlet locaisGoogle = resultados.map(local => {\n    const dist = getDistanceFromLatLonInKm(userLat, userLng, local.geometry.location.lat, local.geometry.location.lng);\n    return {\n        nome: local.name,\n        endereco: local.vicinity,\n        rating: local.user_ratings_total || 0,\n        distancia_km: parseFloat(dist.toFixed(2)),\n        place_id: local.place_id,\n        origem_dado: \"Google Maps (Local)\"\n    };\n});\n\n// Filtros Locais\nlocaisGoogle = locaisGoogle.filter(c => {\n    const nomeLower = c.nome.toLowerCase();\n    if (palavrasProibidas.some(p => nomeLower.includes(p))) return false;\n    if (c.rating < 50) return false; \n    if (listaExcluidos.some(exc => c.nome.toUpperCase().includes(exc))) return false;\n    return true;\n});\n\nlocaisGoogle.sort((a, b) => {\n    const aIsBig = a.rating >= RELEVANCIA_MINIMA_TOP;\n    const bIsBig = b.rating >= RELEVANCIA_MINIMA_TOP;\n    if (aIsBig && bIsBig) return a.distancia_km - b.distancia_km; \n    if (aIsBig && !bIsBig) return -1;\n    if (!aIsBig && bIsBig) return 1;\n    return b.rating - a.rating; \n});\n\nconst finalistasLocais = locaisGoogle.slice(0, 5);\n\n// --- 6. RETORNO ---\nconst encontrouAlgo = finalistasLocais.length > 0 || topHubs.length > 0;\n\nreturn [{\n    json: {\n        encontrado: encontrouAlgo,\n        aeroportos_locais: finalistasLocais,\n        hubs_calculados: topHubs,\n        // Variável NOVA para o Prompt\n        hub_global_prioritario: hubGlobalPerto, \n        debug_excluidos: listaExcluidos\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        528,
+        -176
+      ],
+      "id": "dad7273f-2ee7-4eab-8e1c-88533e8b0541",
+      "name": "Filtra os resultados e calcula a distancia para grandes Hubs"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega o texto completo retornado pelo Agente\nconst textoCompleto = items[0].json.output;\n\nlet jsonFinal = {};\n\ntry {\n  // ESTRATÉGIA 1: Tentar extrair o conteúdo de dentro dos blocos de código Markdown (```json ... ```)\n  // A regex procura por ``` (opcionalmente seguido de json), pega tudo no meio, e termina com ```\n  const regexCodeBlock = /```(?:json)?\\s*([\\s\\S]*?)\\s*```/i;\n  const match = textoCompleto.match(regexCodeBlock);\n\n  let stringJson = \"\";\n\n  if (match && match[1]) {\n    // Se encontrou o bloco de código, usa o conteúdo dele\n    stringJson = match[1];\n  } else {\n    // ESTRATÉGIA 2 (Fallback): Se o agente esqueceu os ```, tenta achar o primeiro '{' e o último '}'\n    const inicio = textoCompleto.indexOf('{');\n    const fim = textoCompleto.lastIndexOf('}');\n    \n    if (inicio !== -1 && fim !== -1) {\n      stringJson = textoCompleto.substring(inicio, fim + 1);\n    } else {\n      throw new Error(\"Nenhum objeto JSON encontrado no texto.\");\n    }\n  }\n\n  // Converte a string limpa em um Objeto JavaScript real\n  jsonFinal = JSON.parse(stringJson);\n\n} catch (error) {\n  // Caso algo dê errado (ex: o agente não retornou JSON), devolve o erro e o texto original para debug\n  jsonFinal = {\n    encontrado: false,\n    erro_parse: error.message,\n    texto_bruto: textoCompleto\n  };\n}\n\n// Retorna o JSON limpo para o próximo node usar (ex: $json.nome_aeroporto)\nreturn [{\n  json: jsonFinal\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        16
+      ],
+      "id": "df42f0ef-03fe-4ebb-a861-a95da4a1692a",
+      "name": "Formata saída do agente"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"encontrado\": true,\n  \"nome_aeroporto\": \"Nome Oficial\",\n  \"endereco_local\": \"O endereço completo do local escolhido (Copie o campo 'endereco' ou 'vicinity' do input)\",\n  \"codigo_iata\": \"XXX\",\n  \"classificacao_destino\": \"Doméstico/LatAm/Global\",\n  \"origem_dado\": \"Lista Local\",\n  \"distancia_usuario\": 0,\n  \"motivo\": \"Explique usando os números (Ex: 'O destino é Global. O sistema calculou que Viracopos (380km) está mais próximo do que Guarulhos (460km), sendo a melhor opção').\"\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1056,
+        -304
+      ],
+      "id": "5bc5be99-a4fa-4bdc-be54-fe945bfe69bb",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        -144
+      ],
+      "id": "9562b00b-9d16-4dfd-bc53-362fcad00fca",
+      "name": "OpenRouter Chat Model1",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://maps.googleapis.com/maps/api/place/textsearch/json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "=location",
+              "value": "={{ $node[\"Converter Endereço em Latitude/Longitude\"].json.results[0].geometry.location.lat }},{{ $node[\"Converter Endereço em Latitude/Longitude\"].json.results[0].geometry.location.lng }}"
+            },
+            {
+              "name": "key",
+              "value": "***REMOVIDO***"
+            },
+            {
+              "name": "query",
+              "value": "=Rodoviária próximas a  {{ $('Organiza o input do AI Agent').item.json.endereco }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -112,
+        16
+      ],
+      "id": "cf15637c-52c8-4341-911f-2ba9bdf602d3",
+      "name": "Encontrar a rodoviaria Mais Próxima"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- 1. CONFIGURAÇÃO INICIAL ---\n// Pega a localização do usuário do node anterior (Garanta que o nome do node está certo)\nconst nodeUsuario = $('Converter Endereço em Latitude/Longitude').first().json.results[0].geometry.location;\nconst userLat = nodeUsuario.lat;\nconst userLng = nodeUsuario.lng;\n\n// LÊ A LISTA DE EXCLUÍDOS (Vindo do node que organiza o input)\n// Procura por 'opcoes_excluidas' (novo padrão) ou 'aeroportos_excluidos' (fallback)\nlet rawExcluidos = $('Organiza o input do AI Agent').first().json.opcoes_excluidas || [];\n\n// Garante que é array\nlet listaExcluidos = [];\nif (typeof rawExcluidos === 'string') {\n    listaExcluidos = rawExcluidos.split(',').map(s => s.trim().toUpperCase());\n} else if (Array.isArray(rawExcluidos)) {\n    listaExcluidos = rawExcluidos.map(s => s.toString().toUpperCase());\n}\n\n// --- 2. FUNÇÃO HAVERSINE (Cálculo de Distância) ---\nfunction getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {\n  const R = 6371; \n  const dLat = deg2rad(lat2 - lat1);\n  const dLon = deg2rad(lon2 - lon1);\n  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +\n            Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2);\n  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));\n  return parseFloat((R * c).toFixed(2));\n}\nfunction deg2rad(deg) { return deg * (Math.PI/180); }\n\n// --- 3. PROCESSAMENTO E FILTRAGEM (Lógica de Rodoviária) ---\nconst resultados = items[0].json.results || [];\n\n// PALAVRAS QUE INDICAM QUE O LOCAL NÃO É UMA RODOVIÁRIA REAL\nconst palavrasProibidas = [\n    \"ponto de\", \"parada\", \"bus stop\", \"ponto final\", // Pontos de rua\n    \"agência\", \"guichê\", \"loja\", \"ticket\", \"passagens\", // Lojas que vendem bilhete mas não embarcam\n    \"encomendas\", \"cargas\", \"logística\", // Terminais de carga\n    \"urbano\", \"circular\", \"metropolitano\", // Terminais locais (não viagem)\n    \"borracharia\", \"lanchonete\", \"hotel\" // Lixo do Google Maps\n];\n\n// Mínimo de avaliações para considerar que é um Terminal Relevante\n// Rodoviárias geralmente têm muitas avaliações. Pontos de rua têm poucas.\nconst RATING_COUNT_MINIMO = 30; \n\nlet rodoviariasGoogle = resultados.map(local => {\n    const dist = getDistanceFromLatLonInKm(userLat, userLng, local.geometry.location.lat, local.geometry.location.lng);\n    return {\n        nome: local.name,\n        endereco: local.vicinity || local.formatted_address,\n        rating_count: local.user_ratings_total || 0,\n        nota: local.rating || 0,\n        distancia_km: parseFloat(dist.toFixed(2)),\n        place_id: local.place_id,\n        types: local.types || [],\n        origem_dado: \"Google Maps (Rodoviária)\"\n    };\n});\n\n// --- 4. APLICANDO OS FILTROS ---\nrodoviariasGoogle = rodoviariasGoogle.filter(r => {\n    const nomeLower = r.nome.toLowerCase();\n    \n    // Filtro 1: Palavras proibidas (Remove \"Ponto de Onibus\", \"Agencia\", etc)\n    if (palavrasProibidas.some(p => nomeLower.includes(p))) return false;\n    \n    // Filtro 2: Rating Count (Remove locais fantasmas ou irrelevantes)\n    // Se tiver menos que X avaliações, provavelmente não é a rodoviária principal\n    if (r.rating_count < RATING_COUNT_MINIMO) return false; \n\n    // Filtro 3: Exclusão do usuário (Se ele já disse \"Não quero a Rodoviária X\")\n    if (listaExcluidos.some(exc => r.nome.toUpperCase().includes(exc))) return false;\n\n    // Filtro 4: Tipo Obrigatório (Segurança extra)\n    // O local DEVE ter tag 'bus_station' ou 'transit_station'\n    if (!r.types.includes('bus_station') && !r.types.includes('transit_station')) return false;\n\n    return true;\n});\n\n// --- 5. ORDENAÇÃO INTELIGENTE ---\nrodoviariasGoogle.sort((a, b) => {\n    // Para rodoviárias, distância é o rei.\n    // Mas se a diferença for pequena (< 5km), prioriza a que tem mais avaliações (provável terminal principal)\n    \n    const diffDistancia = Math.abs(a.distancia_km - b.distancia_km);\n    \n    if (diffDistancia < 5) {\n        return b.rating_count - a.rating_count; // Desempate por popularidade\n    }\n    \n    return a.distancia_km - b.distancia_km; // Ordena por mais perto\n});\n\n// Pega apenas as Top 3 candidatas\nconst finalistas = rodoviariasGoogle.slice(0, 3);\n\n// --- 6. RETORNO ---\nconst encontrouAlgo = finalistas.length > 0;\n\nreturn [{\n    json: {\n        encontrado: encontrouAlgo,\n        rodoviarias_locais: finalistas,\n        // Mantemos estrutura similar ao aeroporto para facilitar pro Agente\n        debug_excluidos: listaExcluidos,\n        total_analisado: resultados.length,\n        total_filtrado: rodoviariasGoogle.length\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        528,
+        16
+      ],
+      "id": "bfcbe9c5-1a55-43bd-93dd-6b5eb5cf864e",
+      "name": "Filtra os resultados e calcula a distancia para grandes rodoviarias"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a03726b6-cd46-4e01-916c-53ca11ad4a23",
+              "leftValue": "={{ $json.endereco }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "e9870ddb-7488-4d88-b139-edfb4a43e8ae",
+              "leftValue": "={{ $json.flag_internacional }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -864,
+        32
+      ],
+      "id": "5fd2d3af-944c-4b63-87f2-7e0fe5d35ae3",
+      "name": "Verifica se recebeu o endereço do participante"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  epf.id AS field_id,\n  epf.event_id,\n  epf.field_name,\n  epf.options AS meeting_points\nFROM event_participant_fields epf\nWHERE epf.event_id = '{{ $('Organiza o input do AI Agent').first().json.event_id }}'\n  AND epf.standard_key = 'meeting_point'\n  AND epf.is_enabled = true\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -112,
+        208
+      ],
+      "id": "6fd89b1f-9484-442d-aae2-dd533ba4da61",
+      "name": "Capta o endereço dos transfers",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "RbteCsnBdomXyIZi",
+          "name": "DAGAZ-Postgres"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://maps.googleapis.com/maps/api/geocode/json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "address",
+              "value": "={{ $json.meeting_points }}"
+            },
+            {
+              "name": "key",
+              "value": "***REMOVIDO***"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        304,
+        208
+      ],
+      "id": "3c417985-dc9a-4019-aa26-f0897f1ae6e8",
+      "name": "Converter Endereço em Latitude/Longitude1",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0829ef34-5213-4730-bec5-b8bdfde3c8bf",
+              "name": "error",
+              "value": "Campos obrigatórios ausentes para sugestão de logística: ",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -848,
+        288
+      ],
+      "id": "c61efa0a-e54c-4199-bcd7-f1720d09def3",
+      "name": "Feedback para o agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- 0. SANITIZAÇÃO (OBRIGATÓRIA PARA INPUT DE AI) ---\nfunction sanitizeJsonString(str) {\n  if (typeof str !== 'string') return str;\n  // Remove caracteres de controle invisíveis (U+0000 a U+001F)\n  return str.replace(/[\\u0000-\\u001F]+/g, '');\n}\n\n// Parse seguro com múltiplos níveis\nfunction safeDeepParse(input, maxDepth = 5) {\n  let current = input;\n\n  for (let i = 0; i < maxDepth; i++) {\n    if (typeof current === 'string') {\n      const cleaned = sanitizeJsonString(current).trim();\n      if (cleaned.startsWith('{') || cleaned.startsWith('[')) {\n        try {\n          current = JSON.parse(cleaned);\n          continue;\n        } catch {\n          return current;\n        }\n      }\n    }\n\n    if (\n      current &&\n      typeof current === 'object' &&\n      typeof current.query === 'string'\n    ) {\n      current = current.query;\n      continue;\n    }\n\n    break;\n  }\n\n  return current;\n}\n\n// --- 1. PREPARAÇÃO E PARSE INTELIGENTE ---\nconst jsonEntrada = items[0].json;\nlet dadosProcessados = {};\n\ntry {\n  if (jsonEntrada.query !== undefined) {\n    dadosProcessados = safeDeepParse(jsonEntrada.query);\n  } else if (jsonEntrada.body !== undefined) {\n    dadosProcessados = safeDeepParse(jsonEntrada.body);\n  } else {\n    dadosProcessados = safeDeepParse(jsonEntrada);\n  }\n} catch (e) {\n  dadosProcessados = jsonEntrada;\n}\n\n// Garante objeto final\nif (typeof dadosProcessados !== 'object' || dadosProcessados === null) {\n  dadosProcessados = {};\n}\n\n// --- 2. FUNÇÃO DE BUSCA INSENSÍVEL (Case Insensitive) ---\nfunction getValor(chave, obj) {\n  if (!obj) return null;\n  const chaveLower = chave.toLowerCase();\n  for (let k in obj) {\n    if (k.toLowerCase() === chaveLower) return obj[k];\n  }\n  return null;\n}\n\n// --- 3. FUNÇÃO DE NORMALIZAÇÃO DE TRANSPORTE ---\nfunction normalizarTransporte(valor) {\n  if (!valor) return \"aereo\";\n\n  const texto = valor\n    .toString()\n    .toLowerCase()\n    .normalize(\"NFD\")\n    .replace(/[\\u0300-\\u036f]/g, \"\");\n\n  if (texto.includes(\"aereo\") || texto.includes(\"aviao\") || texto.includes(\"voo\") || texto.includes(\"aeroporto\")) {\n    return \"aereo\";\n  }\n\n  if (texto.includes(\"rodoviari\") || texto.includes(\"onibus\") || texto.includes(\"bus\") || texto.includes(\"terminal\")) {\n    return \"rodoviario\";\n  }\n\n  if (texto.includes(\"transfer\") || texto.includes(\"van\") || texto.includes(\"encontro\") || texto.includes(\"shuttle\")) {\n    return \"transfer\";\n  }\n\n  if (\n    texto.includes(\"carro\") ||\n    texto.includes(\"proprio\") ||\n    texto.includes(\"carona\") ||\n    texto.includes(\"taxi\") ||\n    texto.includes(\"uber\") ||\n    texto.includes(\"99\") ||\n    texto.includes(\"aplicativo\")\n  ) {\n    return \"outro\";\n  }\n\n  return \"aereo\";\n}\n\n// --- 4. EXTRAÇÃO DAS VARIÁVEIS ---\n\nlet endereco = getValor('endereco', dadosProcessados) || getValor('address', dadosProcessados);\nlet destino = getValor('destino', dadosProcessados);\n\nlet rawFlag = getValor('flag_internacional', dadosProcessados);\nlet flagInt = (rawFlag === true || rawFlag === 'true');\n\nlet excluidos =\n  getValor('opcoes_excluidas', dadosProcessados) ||\n  getValor('aeroportos_excluidos', dadosProcessados);\n\nlet rawTipo = getValor('tipo_transporte', dadosProcessados);\nlet tipoTransporte = normalizarTransporte(rawTipo);\n\nlet event_id = getValor('event_id', dadosProcessados);\n\n// --- 5. VALIDAÇÃO E FALLBACKS ---\n\nif (!endereco) {\n  const cidade = getValor('cidade', dadosProcessados);\n  const estado = getValor('estado', dadosProcessados);\n  if (cidade && estado) endereco = `${cidade} - ${estado}`;\n}\n\nif (!endereco) {\n  return [{\n    json: {\n      erro: \"Endereço não encontrado.\",\n      debug_entrada: jsonEntrada\n    }\n  }];\n}\n\nif (!destino) destino = \"Destino Indefinido\";\nif (!excluidos) excluidos = [];\n\n// Normaliza excluídos\nif (typeof excluidos === 'string') {\n  try {\n    const clean = sanitizeJsonString(excluidos).trim();\n    if (clean.startsWith('[')) {\n      excluidos = JSON.parse(clean);\n    } else {\n      excluidos = clean\n        .replace(/[\\[\\]\"']/g, \"\")\n        .split(',')\n        .map(s => s.trim().toUpperCase())\n        .filter(Boolean);\n    }\n  } catch {\n    excluidos = [];\n  }\n}\n\n// --- 6. RETORNO FINAL ---\nreturn [{\n  json: {\n    endereco,\n    destino,\n    flag_internacional: flagInt,\n    aeroportos_excluidos: Array.isArray(excluidos) ? excluidos : [],\n    tipo_transporte: tipoTransporte,\n    event_id\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1072,
+        32
+      ],
+      "id": "16d19c3d-8ea3-4b06-aafa-0a4430c5ecc2",
+      "name": "Organiza o input do AI Agent"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "meeting_points",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        96,
+        208
+      ],
+      "id": "325f2847-45ff-445a-8302-ffca56256a19",
+      "name": "Separa Endereços",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- 1. CONFIGURAÇÃO INICIAL ---\n// Tenta pegar a localização do usuário com segurança\nlet userLat, userLng;\ntry {\n    const nodeUsuario = $('Converter Endereço em Latitude/Longitude').first().json.results[0].geometry.location;\n    userLat = nodeUsuario.lat;\n    userLng = nodeUsuario.lng;\n} catch (e) {\n    // Fallback de segurança caso o node anterior falhe\n    userLat = 0; userLng = 0;\n}\n\n// Função Haversine\nfunction getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {\n  const R = 6371; \n  const dLat = deg2rad(lat2 - lat1);\n  const dLon = deg2rad(lon2 - lon1);\n  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +\n            Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2);\n  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));\n  return parseFloat((R * c).toFixed(2));\n}\nfunction deg2rad(deg) { return deg * (Math.PI/180); }\n\n// --- 2. RECUPERAÇÃO DOS NOMES ORIGINAIS ---\n// IMPORTANTE: O nome dentro do $() deve ser IDÊNTICO ao nome do seu node no canvas.\n// Você disse que o node se chama \"Separa Endereços\". Se for \"Separar\" (com R), ajuste abaixo.\nlet dadosOriginais = [];\ntry {\n    dadosOriginais = $('Separa Endereços').all();\n} catch(e) {\n    // Se der erro, tenta pegar pelo outro nome comum\n    try { dadosOriginais = $('Separar Endereços').all(); } catch(e2) {}\n}\n\n// --- 3. PROCESSAMENTO ---\nlet transfersCalculados = [];\n\nfor (let i = 0; i < items.length; i++) {\n    const item = items[i];\n    const googleResult = item.json.results && item.json.results[0];\n    \n    // Tenta pegar a string original (Ex: \"SUCURSAL SOROCABA - Rua X...\")\n    // O Google Maps (items) mantém a mesma ordem do input (dadosOriginais)\n    let stringCompletaOriginal = \"\";\n    if (dadosOriginais.length > i) {\n        // Tenta pegar do campo endereco_para_geocoding ou meeting_points\n        stringCompletaOriginal = dadosOriginais[i].json.endereco_para_geocoding || dadosOriginais[i].json.meeting_points;\n    }\n\n    if (googleResult) {\n        const loc = googleResult.geometry.location;\n        const dist = getDistanceFromLatLonInKm(userLat, userLng, loc.lat, loc.lng);\n        \n        // EXTRAÇÃO DO NOME (Lógica do Hífen)\n        let nomeExtraido = \"Transfer\";\n        \n        if (stringCompletaOriginal && typeof stringCompletaOriginal === 'string') {\n            if (stringCompletaOriginal.includes('-')) {\n                // Pega tudo antes do primeiro hífen\n                nomeExtraido = stringCompletaOriginal.split('-')[0].trim();\n            } else {\n                // Se não tem hífen, usa o início da string ou um padrão\n                nomeExtraido = \"Transfer (\" + stringCompletaOriginal.substring(0, 10) + \"...)\";\n            }\n        } else {\n            // Se falhou em pegar o original, usa o nome do Google (geralmente é o endereço)\n            nomeExtraido = \"Ponto de Encontro\";\n        }\n\n        transfersCalculados.push({\n            nome: nomeExtraido, \n            endereco: googleResult.formatted_address, // Endereço limpo do Google\n            distancia_km: dist,\n            tipo: \"Transfer/Van\",\n            // DEBUG: Isso vai te mostrar de onde ele tentou tirar o nome\n            _debug_origem: stringCompletaOriginal\n        });\n    }\n}\n\n// --- 4. ORDENAÇÃO E RETORNO ---\ntransfersCalculados.sort((a, b) => a.distancia_km - b.distancia_km);\nconst topTransfers = transfersCalculados.slice(0, 3);\n\nreturn [{\n    json: {\n        encontrado: topTransfers.length > 0,\n        transfers_locais: topTransfers,\n        debug_total: transfersCalculados.length\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        528,
+        208
+      ],
+      "id": "104dcdca-d778-4def-a6d2-0c181751e824",
+      "name": "Calcular Melhores Transfers",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Organiza os parametros iniciais",
+        "height": 912,
+        "width": 1024,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1344,
+        -368
+      ],
+      "id": "5dd786e9-8353-4dc6-a5e0-b951d69f7a00",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Busca e filtra os locais de acordo com a logistica selecionada",
+        "height": 912,
+        "width": 1072
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -304,
+        -368
+      ],
+      "id": "7ca31993-c4c6-44e7-8a72-383c098c1586",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## Seleciona e prepara o retorno da tool",
+        "height": 912,
+        "width": 768,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        784,
+        -368
+      ],
+      "id": "cce1cf2c-b29f-4132-871b-93c70731663e",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Verifica se recebeu o endereço do participante').item.json.tipo_transporte }}",
+                    "rightValue": "aereo",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "8510874e-9a79-4126-b3a1-36da236cbe87"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "aereo"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "751920b0-f6ff-4d63-b278-2e28e0c71573",
+                    "leftValue": "={{ $('Verifica se recebeu o endereço do participante').item.json.tipo_transporte }}",
+                    "rightValue": "=rodoviario",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "rodoviario"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "56d6bff0-4de6-4ab7-8e25-a86246b87a34",
+                    "leftValue": "={{ $('Verifica se recebeu o endereço do participante').item.json.tipo_transporte }}",
+                    "rightValue": "transfer",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "transfer"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -384,
+        -544
+      ],
+      "id": "4532a80a-d2ca-4561-86d5-0b96c05883a6",
+      "name": "Switch",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 3,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        832,
+        0
+      ],
+      "id": "0464bcd4-67c3-4f79-922a-18494957c5ce",
+      "name": "Merge"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converter Endereço em Latitude/Longitude": {
+      "main": [
+        [
+          {
+            "node": "Encontrar o Aeroporto Mais Próximo",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Encontrar a rodoviaria Mais Próxima",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Capta o endereço dos transfers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encontrar o Aeroporto Mais Próximo": {
+      "main": [
+        [
+          {
+            "node": "Filtra os resultados e calcula a distancia para grandes Hubs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculator": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Organiza o input do AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Organiza o input do AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtra os resultados e calcula a distancia para grandes Hubs": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Formata saída do agente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structured Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encontrar a rodoviaria Mais Próxima": {
+      "main": [
+        [
+          {
+            "node": "Filtra os resultados e calcula a distancia para grandes rodoviarias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtra os resultados e calcula a distancia para grandes rodoviarias": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Verifica se recebeu o endereço do participante": {
+      "main": [
+        [
+          {
+            "node": "Converter Endereço em Latitude/Longitude",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Feedback para o agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capta o endereço dos transfers": {
+      "main": [
+        [
+          {
+            "node": "Separa Endereços",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converter Endereço em Latitude/Longitude1": {
+      "main": [
+        [
+          {
+            "node": "Calcular Melhores Transfers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Organiza o input do AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Verifica se recebeu o endereço do participante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separa Endereços": {
+      "main": [
+        [
+          {
+            "node": "Converter Endereço em Latitude/Longitude1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Melhores Transfers": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [],
+        [],
+        []
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataSuccessExecution": "all"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "d802deb1-a6d8-47c4-a633-bdad3c2e237e",
+  "activeVersionId": null,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-01-16T16:42:05.456Z",
+      "createdAt": "2026-01-16T16:42:05.456Z",
+      "role": "workflow:owner",
+      "workflowId": "Wjc2uyShTJu37DGE",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
