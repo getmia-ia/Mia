@@ -1,0 +1,225 @@
+{
+  "updatedAt": "2026-04-01T17:26:30.728Z",
+  "createdAt": "2026-03-17T16:51:28.422Z",
+  "id": "EuiHjdJArLGDvtDF",
+  "name": "BMS - 6.1.2 - Criar Disparo",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const dbData = $input.first().json;\n\n// 🔵 pega direto do trigger (workflow pai)\nlet raw = $node[\"When Executed by Another Workflow\"].json.query ?? {};\n\n// parse do JSON\nif (typeof raw === \"string\") {\n  raw = raw.replace(\n    /\"header_image_url\"\\s*:\\s*\"([^\"]+)\"\\s*:\\s*\"([^\"]+)\"/,\n    (_, a, b) => `\"header_image_url\":\"${b}\"`\n  );\n  raw = JSON.parse(raw);\n}\n\n// junta dados\nconst parsed = {\n  ...raw,     // dados da IA\n  ...dbData,  // dados do banco (sobrescreve id)\n};\n\n// Corrige *1* → {{1}}\nif (parsed.message) {\n  parsed.message = parsed.message.replace(/\\*1\\*/g, \"{{1}}\");\n}\n\n// Injeta variável\nif (\n  parsed.variables?.length > 0 &&\n  parsed.message &&\n  !parsed.message.includes(\"{{1}}\")\n) {\n  parsed.message = \"Olá {{1}}, \" + parsed.message;\n}\n\n// Força o horário para São Paulo (-03:00) se veio com Z ou sem offset\nlet scheduledAt = parsed.scheduled_at ?? null;\nif (scheduledAt) {\n  // Remove o Z e adiciona -03:00\n  // \"2026-03-25T15:15:00Z\"       → \"2026-03-25T15:15:00-03:00\"\n  // \"2026-03-25T15:15:00\"        → \"2026-03-25T15:15:00-03:00\"\n  // \"2026-03-25T15:15:00-03:00\"  → mantém (já tem offset)\n  if (!/[+-]\\d{2}:\\d{2}$/.test(scheduledAt)) {\n    scheduledAt = scheduledAt.replace(/Z$/, '') + '-03:00';\n  }\n}\n\nconst result = {\n  evento_id: parsed.id, // 👈 banco\n  name: parsed.name ?? \"Disparo via IA\",\n  send_mode: parsed.send_mode ?? \"all\",\n  target_status: parsed.target_status ?? null,\n  scheduled_at: scheduledAt,\n  message: parsed.message ?? null,\n  media_type: parsed.media_type ?? null,\n  header_image_url: parsed.header_image_url ?? null,\n  header_media_url: parsed.header_media_url ?? null,\n  nome_evento: parsed.nome_evento,\n  user_id: parsed.user_id,\n  whatsapp_number_id: parsed.whatsapp_number_id,\n};\n\n// variables\nif (result.message && result.message.includes(\"{{1}}\")) {\n  result.variables = parsed.variables ?? [\"nome_participante\"];\n  result.variable_samples = parsed.variable_samples ?? [\"João Silva\"];\n}\n\n// limpa null\nconst clean = Object.fromEntries(\n  Object.entries(result).filter(([_, v]) => v !== null && v !== undefined)\n);\n\nreturn { json: clean };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        336
+      ],
+      "id": "17217e15-ba6a-4bc1-a117-ae6256675e93",
+      "name": "Monta o body da requisição"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://xqyxalqwsxqndjetgzry.supabase.co/functions/v1/api-criar-disparo-evento",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "***REDACTED***"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        400,
+        336
+      ],
+      "id": "c16efb41-4c6b-4b0e-a6f0-77ddaa35055b",
+      "name": "Request para API do sistema BMS"
+    },
+    {
+      "parameters": {
+        "content": "### Input com o payload definido pelo agente",
+        "height": 272,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -512,
+        240
+      ],
+      "id": "005c346b-0061-4922-8469-7a0fb235c0b7",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "### Trata o payload montando o body da requisição e arrumando algumas possíveis inconsistências da IA como se vier link duplicado ou a variável montada errada",
+        "height": 272,
+        "width": 560
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -256,
+        240
+      ],
+      "id": "fa921d4e-60b4-4873-a4bc-8554b750f1de",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "### Request para nossa API de criação de disparo do sistema BMS",
+        "height": 272,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        320,
+        240
+      ],
+      "id": "a5fb0453-a972-4f38-a087-1ca9f52abc74",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, nome_evento, user_id, whatsapp_number_id\nFROM eventos\nWHERE unaccent(lower(nome_evento)) ILIKE ALL (\n  ARRAY[\n    {{ $json.palavras.map(p => \"'%\" + p + \"%'\").join(\",\") }}\n  ]\n)\nAND status IN ('ativo', 'concluido')\nORDER BY created_at DESC\nLIMIT 2",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -16,
+        336
+      ],
+      "id": "50b7d7a8-cf1e-4436-9dd6-5ae5b5b449c4",
+      "name": "Busca o evento",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let data = {};\n\n// 🔥 tenta lidar com qualquer formato\ntry {\n  if (typeof $json.query === \"string\") {\n    let q = $json.query.trim();\n\n    // tenta parse direto\n    try {\n      data = JSON.parse(q);\n    } catch {\n      // 🔥 tenta corrigir caracteres problemáticos\n      const safe = q\n        .replace(/\\n/g, \"\\\\n\")\n        .replace(/\\r/g, \"\\\\r\")\n        .replace(/\\t/g, \"\\\\t\");\n\n      try {\n        data = JSON.parse(safe);\n      } catch {\n        data = {};\n      }\n    }\n  } else if (typeof $json.query === \"object\" && $json.query !== null) {\n    data = $json.query;\n  }\n} catch (e) {\n  data = {};\n}\n\n// 🔥 fallback inteligente\nconst nome =\n  data.nome_evento ||\n  data.name ||\n  data.event_name ||\n  \"\";\n\n// 🔥 processamento\nconst palavras = nome\n  .toLowerCase()\n  .normalize(\"NFD\").replace(/[\\u0300-\\u036f]/g, \"\")\n  .replace(/[^\\w\\s]/g, \"\") // remove pontuação\n  .split(/\\s+/)\n  .filter(p => p.length > 3 || /\\d/.test(p));\n\nreturn {\n  palavras\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        336
+      ],
+      "id": "1bf4bfb6-f7c0-44f1-ae49-d244cbf70ac9",
+      "name": "Quebra as palavras que forma o nome do evento"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "c055762a-8fe7-4141-a639-df2372f30060",
+      "typeVersion": 1.1,
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        -448,
+        336
+      ]
+    }
+  ],
+  "connections": {
+    "Monta o body da requisição": {
+      "main": [
+        [
+          {
+            "node": "Request para API do sistema BMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca o evento": {
+      "main": [
+        [
+          {
+            "node": "Monta o body da requisição",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quebra as palavras que forma o nome do evento": {
+      "main": [
+        [
+          {
+            "node": "Busca o evento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Quebra as palavras que forma o nome do evento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "query": "{\n    \"evento_id\": \"2d7c3ab2-7efc-4d5e-b8ec-8c509ba1f1fe\",\n    \"name\": \"Convite para participantes - BMS On The Road Recife\",\n    \"send_mode\": \"by_status\",\n    \"target_status\": \"invited\",\n    \"scheduled_at\": \"2026-03-25T15:50:00\",\n    \"message\": \"Olá 👋 Você está convidado(a) para o evento BMS On The Road - Edição Recife. 📅 Data: 09/04/2026 ⏰ Horário: às 19:00 📍 Local: R. Barão de Santo Ângelo, 100 - Pina Demonstre interesse respondendo a esta mensagem. Esperamos você!\",\n    \"media_type\": \"image\",\n    \"header_image_url\": \"https://chat.miabuilder.com/rails/active_storage/blobs/redirect/eyJfcmFpbHMiOnsibWVzc2FnZSI6IkJBaHBBbzlTIiwiZXhwIjpudWxsLCJwdXIiOiJibG9iX2lkIn19--451465250ab03357c4308fcc3e8d48a659a002a1/File.jpg\",\n    \"nome_evento\": \"BMS On The Road - Edição Recife\"\n}"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "versionId": "bd7e636e-aa03-4847-9e82-b67b65d785ca",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-03-17T16:51:28.422Z",
+      "createdAt": "2026-03-17T16:51:28.422Z",
+      "role": "workflow:owner",
+      "workflowId": "EuiHjdJArLGDvtDF",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
