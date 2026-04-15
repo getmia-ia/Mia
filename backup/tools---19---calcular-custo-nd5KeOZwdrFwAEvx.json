@@ -1,0 +1,212 @@
+{
+  "updatedAt": "2026-04-14T18:26:54.668Z",
+  "createdAt": "2026-04-13T20:56:10.624Z",
+  "id": "nd5KeOZwdrFwAEvx",
+  "name": "Tools - 19 - Calcular Custo",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "calcular_custo_fluxo",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -32,
+        -32
+      ],
+      "id": "80cfd551-b3ea-42fc-8ec9-89603476aa96",
+      "name": "Webhook",
+      "webhookId": "f6f4122c-4fb4-46cc-ac44-7088214f18dd"
+    },
+    {
+      "parameters": {
+        "jsCode": "const PRICE = {\n  input:       1.1   / 1_000_000,\n  inputCached: 0.275 / 1_000_000,\n  output:      4.4   / 1_000_000,\n};\n\nfunction pickUsage(obj = {}) {\n  const v1 = obj.kwargs?.response_metadata?.usage;\n  if (v1) {\n    return {\n      prompt:       v1.prompt_tokens ?? 0,\n      completion:   v1.completion_tokens ?? 0,\n      cached:       v1.prompt_tokens_details?.cached_tokens ?? 0,\n    };\n  }\n\n  const v2 = obj.usage_metadata;\n  if (v2) {\n    return {\n      prompt:       v2.input_tokens ?? 0,\n      completion:   v2.output_tokens ?? 0,\n      cached:       v2.input_token_details?.cache_read ?? 0,\n    };\n  }\n\n  return { prompt: 0, completion: 0, cached: 0 };\n}\n\n// 🔥 FUNÇÃO RECURSIVA\nfunction processSteps(steps = []) {\n  let promptT = 0;\n  let completionT = 0;\n  let cachedT = 0;\n\n  for (const step of steps) {\n    if (!step.action) continue;\n\n    // 🔹 1. pega tokens do próprio step\n    const msg = step.action.messageLog?.[0];\n    if (msg) {\n      const u = pickUsage(msg);\n      promptT     += u.prompt;\n      completionT += u.completion;\n      cachedT     += u.cached;\n    }\n\n    // 🔹 2. tenta parsear observation (subagente)\n    if (step.observation) {\n      try {\n        let obs = step.observation;\n\n        // se for string, tenta converter\n        if (typeof obs === 'string') {\n          obs = JSON.parse(obs);\n        }\n\n        // se vier no formato [{ output, intermediateSteps }]\n        if (Array.isArray(obs)) {\n          for (const item of obs) {\n            if (item.intermediateSteps) {\n              const sub = processSteps(item.intermediateSteps);\n\n              promptT     += sub.promptT;\n              completionT += sub.completionT;\n              cachedT     += sub.cachedT;\n            }\n          }\n        }\n\n      } catch (e) {\n        // ignora erro de parse\n      }\n    }\n  }\n\n  return { promptT, completionT, cachedT };\n}\n\n// 🔥 MAIN\nlet totalPrompt = 0;\nlet totalCompletion = 0;\nlet totalCached = 0;\n\nconst executionDataRaw = $json.body?.executionData;\n\n// pega direto os steps corretos\nconst rootSteps = executionDataRaw?.intermediateSteps ?? [];\n\nconst result = processSteps(rootSteps);\n\ntotalPrompt     += result.promptT;\ntotalCompletion += result.completionT;\ntotalCached     += result.cachedT;\n\n// 🔥 custo final\nconst nonCached = totalPrompt - totalCached;\n\nconst totalCost =\n  (nonCached * PRICE.input) +\n  (totalCached * PRICE.inputCached) +\n  (totalCompletion * PRICE.output);\n\nreturn [{\n  json: {\n    totalCostUSD: +totalCost.toFixed(6),\n    totalTokens: totalPrompt + totalCompletion,\n    promptTokens: totalPrompt,\n    completionTokens: totalCompletion,\n    cachedTokens: totalCached\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        -32
+      ],
+      "id": "b84a3c7e-cad3-44d2-929b-82dbf522a469",
+      "name": "Calcular Custo"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "bms-custo_tokens",
+          "mode": "list",
+          "cachedResultName": "bms-custo_tokens"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false,
+              "removed": true
+            },
+            {
+              "id": "Workflow",
+              "displayName": "Workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Input",
+              "displayName": "Input",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Output",
+              "displayName": "Output",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "PromptTokens",
+              "displayName": "PromptTokens",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "CompletationTokens",
+              "displayName": "CompletationTokens",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "CachedTokens",
+              "displayName": "CachedTokens",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Cost",
+              "displayName": "Cost",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        384,
+        -32
+      ],
+      "id": "56fbc233-d0e6-4556-a951-62eb1da7b97e",
+      "name": "Insert or update rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Calcular Custo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Custo": {
+      "main": [
+        [
+          {
+            "node": "Insert or update rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "d3cf099f-9145-493f-b47b-0d756bc16be4",
+  "activeVersionId": null,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-04-13T20:56:10.624Z",
+      "createdAt": "2026-04-13T20:56:10.624Z",
+      "role": "workflow:owner",
+      "workflowId": "nd5KeOZwdrFwAEvx",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
