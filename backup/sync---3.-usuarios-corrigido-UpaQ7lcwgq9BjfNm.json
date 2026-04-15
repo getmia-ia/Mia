@@ -1,0 +1,349 @@
+{
+  "updatedAt": "2026-03-26T19:05:30.880Z",
+  "createdAt": "2026-03-25T19:28:19.691Z",
+  "id": "UpaQ7lcwgq9BjfNm",
+  "name": "Sync - 3. Usuários (Corrigido)",
+  "active": false,
+  "isArchived": true,
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "delete",
+        "tableId": "indicadores_usuarios",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "profile_id",
+              "condition": "gt",
+              "keyValue": "0"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "id": "56cbf9cc-4af3-4ee2-b453-df6f6214b777",
+      "name": "Limpar Usuarios",
+      "position": [
+        1424,
+        816
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "qF5T2ej3TiWXL4jk",
+          "name": "Agronegociar - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webhook.miabuilder.com/webhook/users-dashboard",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "fromStart",
+              "value": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "id": "171cfefb-6786-4aae-9ed7-c68e5477cebb",
+      "name": "Disparar Webhook",
+      "position": [
+        1648,
+        816
+      ],
+      "typeVersion": 4.3
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "users-dashboard",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "id": "f8df2529-453d-491d-9ab1-7bc76a38221f",
+      "name": "Webhook Loop",
+      "webhookId": "sync-users-loop",
+      "position": [
+        1200,
+        1024
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Acessa a memória do workflow\nconst staticData = $getWorkflowStaticData('global');\n\n// 2. Verifica se a chamada veio do \"Disparar Webhook\" (início de tudo)\n// Usamos interrogação (?.) para evitar erro se o json estiver vazio\nconst isInitial = $input.first()?.json?.fromStart === true;\n\n// 3. Se for o início do dia, reseta o contador para zero\nif (isInitial) {\n  staticData.offset = 0;\n}\n\n// 4. Retorna o offset atual (ou 0 se for a primeira vez) para o Postgres usar\nreturn [{ \n  json: { \n    offset: staticData.offset || 0 \n  } \n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "id": "207f32e3-2eee-4984-971c-a83b172f2c71",
+      "name": "Ler Offset",
+      "position": [
+        1424,
+        1024
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM \"Agronegociar_Analytics\".vw_dashboard_indicadores \nLIMIT 500 \nOFFSET {{ $json.offset }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "id": "390fb774-cfb3-4b35-a210-73a4a2f1e788",
+      "name": "Postgres Usuarios",
+      "position": [
+        1648,
+        1024
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "indicadores_usuarios",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "id": "9c32a248-c592-4e39-8542-d945a8f880e9",
+      "name": "Supabase Users",
+      "position": [
+        1872,
+        928
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "qF5T2ej3TiWXL4jk",
+          "name": "Agronegociar - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "id": "03ae269d-74f3-4f97-a294-6624987fa5f4",
+      "name": "Avançar Estado",
+      "position": [
+        1872,
+        1120
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isDone }}",
+              "value2": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "id": "d830f624-3488-4c25-8d94-0f6e31b9bb84",
+      "name": "Acabou Tudo?",
+      "position": [
+        2080,
+        1120
+      ],
+      "typeVersion": 2.3
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webhook.miabuilder.com/webhook/users-dashboard",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "trigger",
+              "value": "next"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "id": "03b05efc-6954-4b8c-bcbd-e9d8b527cc03",
+      "name": "Próxima Página",
+      "position": [
+        2304,
+        1136
+      ],
+      "typeVersion": 4.3
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "id": "81f99e25-c4a1-4d4f-9e17-af603b4084c0",
+      "name": "1. Schedule",
+      "position": [
+        1120,
+        816
+      ]
+    }
+  ],
+  "connections": {
+    "Limpar Usuarios": {
+      "main": [
+        [
+          {
+            "node": "Disparar Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Loop": {
+      "main": [
+        [
+          {
+            "node": "Ler Offset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Offset": {
+      "main": [
+        [
+          {
+            "node": "Postgres Usuarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Usuarios": {
+      "main": [
+        [
+          {
+            "node": "Supabase Users",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Avançar Estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avançar Estado": {
+      "main": [
+        [
+          {
+            "node": "Acabou Tudo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acabou Tudo?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Próxima Página",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Schedule": {
+      "main": [
+        [
+          {
+            "node": "Limpar Usuarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "4amIEbV343sOAUFq",
+    "timeSavedPerExecution": 0,
+    "executionTimeout": 600,
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    },
+    "node:Schedule Trigger2": {
+      "recurrenceRules": []
+    },
+    "node:1. Schedule (11:25)": {
+      "recurrenceRules": []
+    },
+    "node:1. Schedule (11:25)1": {
+      "recurrenceRules": []
+    },
+    "global": {
+      "offset": 0,
+      "isDone": true,
+      "phase": "anuncios"
+    },
+    "node:1. Schedule (15:00)": {
+      "recurrenceRules": []
+    },
+    "node:1. Schedule": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "4ecf176b-6755-420b-9b84-feb360014155",
+  "activeVersionId": null,
+  "triggerCount": 2,
+  "shared": [
+    {
+      "updatedAt": "2026-03-25T19:28:19.691Z",
+      "createdAt": "2026-03-25T19:28:19.691Z",
+      "role": "workflow:owner",
+      "workflowId": "UpaQ7lcwgq9BjfNm",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
