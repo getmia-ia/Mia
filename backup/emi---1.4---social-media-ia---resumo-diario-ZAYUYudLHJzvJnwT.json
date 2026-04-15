@@ -1,0 +1,595 @@
+{
+  "updatedAt": "2026-01-12T13:22:18.112Z",
+  "createdAt": "2025-11-24T19:52:24.843Z",
+  "id": "ZAYUYudLHJzvJnwT",
+  "name": "EMI - 1.4 - Social Media IA - Resumo Diário",
+  "active": false,
+  "isArchived": true,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                2,
+                3,
+                4,
+                5,
+                6,
+                0,
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        64,
+        336
+      ],
+      "id": "718373ae-d786-4cfd-86b4-07dfc1af0de4",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "content": "# Fluxo de Envio do Resumo Diário para comunidade Whatsapp\n### Esse fluxo roda todo dia de manhã as 08am\n### Envia um resumo das notícias processadas no dia anterior",
+        "height": 752,
+        "width": 2944,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "2d29f9ad-41d1-40a9-ab28-338a1a972e09",
+      "name": "Sticky Note15"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "operation": "send-image",
+        "instanceName": "EMI-ESCOLA-DO-MERCADO-IMOBILIARIO",
+        "remoteJid": "={{ $json.e164 }}",
+        "media": "={{ $json.base64Image }}",
+        "caption": "={{ $('Baixar imagem da Finamob').item.json.output }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2752,
+        336
+      ],
+      "id": "034c0d74-bbf0-46b2-8730-5cf81161a98f",
+      "name": "Envio do Resumo",
+      "credentials": {
+        "evolutionApi": {
+          "id": "j13ijnTmSmdNNSUi",
+          "name": "EMI-ESCOLA-DO-MERCADO-IMOBILIARIO"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://api.stripe.com/v1/subscriptions?status=active&price=price_1S1SraRuKlw6o0HgiTFNxo5L&expand[]=data.customer",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1552,
+        -240
+      ],
+      "id": "1bc0f2d0-c61b-4ab1-bd2b-fa89d7208f60",
+      "name": "HTTP Request",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// items[0].json é o objeto \"list\" do Stripe com data=[...]\nconst list = items[0].json;\nconst subs = Array.isArray(list?.data) ? list.data : [];\nconst now = Math.floor(Date.now() / 1000);\n\n// Validação estrita de telefone BR -> E.164, sem completar DDD.\n// Aceita: \"+55\" + 10 ou 11 dígitos, ou \"55\" + 10/11 dígitos (sem +).\nfunction toE164StrictBR(raw) {\n  const s = String(raw || '').trim();\n  if (!s) return { e164: '', ok: false, motivo: 'sem_telefone' };\n\n  // \"+55\" + 10/11 dígitos\n  if (/^\\+55\\d{10,11}$/.test(s)) return { e164: s, ok: true, motivo: '' };\n\n  // \"55\" + 10/11 dígitos (sem \"+\")\n  if (/^55\\d{10,11}$/.test(s)) return { e164: `+${s}`, ok: true, motivo: '' };\n\n  // qualquer outra coisa = inválido / possivelmente sem DDD\n  return { e164: '', ok: false, motivo: 'telefone_mal_formatado_ou_sem_ddd' };\n}\n\nconst out = [];\n\nfor (const s of subs) {\n  const c = s.customer || {};\n  const phone_raw = c.phone || c.metadata?.whatsapp || '';\n\n  const { e164: phone_e164, ok: phone_ok, motivo: motivoFone } = toE164StrictBR(phone_raw);\n\n  const status_stripe = s.status || '';\n  const cancel_at     = s.cancel_at || null;\n  const period_end    = s.current_period_end || null;\n  const paid_until    = period_end ? new Date(period_end * 1000).toISOString().slice(0, 10) : '';\n\n  // Ativo no Stripe (sem considerar telefone)\n  const stripeAtivo = (status_stripe === 'active') &&\n                      (!cancel_at) &&\n                      (!period_end || period_end >= now);\n\n  // Derivação do status_final\n  let status_final = 'inativo';\n  let motivo = '';\n\n  if (!phone_raw) {\n    status_final = 'validar';\n    motivo = 'sem_telefone';\n  } else if (!phone_ok) {\n    status_final = 'validar';\n    motivo = motivoFone; // mal formatado / sem DDD\n  } else if (stripeAtivo) {\n    status_final = 'ativo';\n  } else {\n    status_final = 'inativo';\n    motivo = status_stripe !== 'active' ? `status_${status_stripe}` :\n             cancel_at ? 'cancelado_ao_fim_do_ciclo' :\n             (period_end && period_end < now) ? 'periodo_vencido' : '';\n  }\n\n  out.push({\n    json: {\n      name: c.name || '',\n      email: c.email || '',\n      phone_raw,              // exatamente como veio do Stripe\n      phone_e164,             // só se válido sem \"chute\"\n      stripe_customer_id: c.id || '',\n      stripe_subscription_id: s.id,\n      status_stripe,\n      cancel_at,\n      paid_until,\n      status_final,           // ativo | inativo | validar\n      motivo                  // ajuda a entender por que está \"validar\" ou \"inativo\"\n    }\n  });\n}\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -240
+      ],
+      "id": "36e3115c-9585-4f0e-9d22-e27b4c49f9e9",
+      "name": "Code4",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const COUNTRY = '55';\nconst onlyDigits = s => String(s ?? '').replace(/\\D/g, '').replace(/^0+/, '');\nconst toE164NoPlus = d => d ? (d.startsWith(COUNTRY) ? d : COUNTRY + d) : '';\nconst toJid = e164 => e164 ? `${e164}@s.whatsapp.net` : '';\n\nconst out = [];\nconst seen = new Set();\n\nfor (const { json } of items) {\n  // prioriza o já normalizado; cai para o bruto se precisar\n  const rawDigits = onlyDigits(json.phone_e164 || json.phone_raw);\n  if (!rawDigits) continue;\n\n  const e164 = toE164NoPlus(rawDigits); // sem sinal de +\n  if (!e164) continue;\n\n  if (seen.has(e164)) continue;\n  seen.add(e164);\n\n  const firstName = String(json.name || '').trim().split(/\\s+/)[0] || '';\n\n  out.push({\n    json: {\n      ...json,\n      e164,                  // ex: 5511999999999\n      jid: toJid(e164),      // ex: 5511999999999@s.whatsapp.net\n      firstName\n    }\n  });\n}\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        -240
+      ],
+      "id": "4a6d9d3f-7457-4f9d-b958-7680dc3e8733",
+      "name": "Normalizar telefone e criar JID1",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "height": 288,
+        "width": 704
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1472,
+        -320
+      ],
+      "typeVersion": 1,
+      "id": "8db4b358-b2ea-4ad8-a487-2176cc3d343e",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1JoARK3rKD-WHDk8LUDHRmo03eLMGdKWyN-msVFiygvQ",
+          "mode": "list",
+          "cachedResultName": "CRM - Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1JoARK3rKD-WHDk8LUDHRmo03eLMGdKWyN-msVFiygvQ/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 733349296,
+          "mode": "list",
+          "cachedResultName": "base_journal",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1JoARK3rKD-WHDk8LUDHRmo03eLMGdKWyN-msVFiygvQ/edit#gid=733349296"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "ativo"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1648,
+        176
+      ],
+      "id": "a33e1674-c2be-48db-ae0b-216b44557599",
+      "name": "Pegar Leads - base_journal",
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ontem = new Date();\nontem.setDate(ontem.getDate() - 1);\n\nconst dia = String(ontem.getDate()).padStart(2, '0');\nconst mes = String(ontem.getMonth() + 1).padStart(2, '0');\nconst ano = ontem.getFullYear();\n\nreturn {\n  data_processamento: `${dia}/${mes}/${ano}`\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        336
+      ],
+      "id": "3e228e7e-228d-470b-9520-f5e078474ae1",
+      "name": "Define data do dia anterior"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1fWo0JNzTrseQubx5O31tEJ5Yd4jHKUCGp_9xZMPfec0",
+          "mode": "list",
+          "cachedResultName": "Finamob - Controle Journal",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1fWo0JNzTrseQubx5O31tEJ5Yd4jHKUCGp_9xZMPfec0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "base",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1fWo0JNzTrseQubx5O31tEJ5Yd4jHKUCGp_9xZMPfec0/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "data_processamento",
+              "lookupValue": "={{ $json.data_processamento }}"
+            },
+            {
+              "lookupColumn": "status",
+              "lookupValue": "postado"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        480,
+        336
+      ],
+      "id": "79070ba6-4cda-4115-aa11-489c7371ab6d",
+      "name": "Captura as notícias postadas",
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (!items.length) {\n  return [{ json: { prompt: \"Nenhuma notícia foi processada.\" } }];\n}\n\nconst data = items[0]?.json?.data_processamento || \"DATA_NÃO_ENCONTRADA\";\n\n// Contexto curto para guiar o modelo (sem ficar gigantesco)\nconst MAX = 500;\nconst cut = s => (s || '').trim().slice(0, MAX);\nconst contexto = items.map(it => `• ${(it.json.titulo||'').trim()}\\n${cut(it.json.legenda)}`).join(\"\\n\\n\");\n\n// Linhas FIXAS (não alterar)\nconst header1 = ``;\nconst header2 = `Segue resumo de notícias do dia *${data}*:\\n\\n`;\nconst header3 = `Acompanhe a nossa página no Instagram:\\nhttps://www.instagram.com/imobjournal.ia\\n\\n`;\n\nconst prompt = `\nVocê é editor do briefing matinal da comunidade EMI (WhatsApp).\nProduza UMA mensagem concisa, didática e **visual**, com base nas notícias de *${data}*.\nNão liste notícia por notícia. Não inclua links (além do Instagram já fornecido). Não invente fatos.\n\nBASE (referência; não copie literalmente):\n${contexto}\n\nFORMATO EXATO DA SAÍDA (mantenha as linhas fixas e a ordem):\n${header1}${header2}${header3}[RESUMO CONECTADO EM BLOCOS]\n- Estruture em **2 a 3 blocos**, cada um com **título em negrito + emoji** \n- Cada bloco deve ter **2 a 3 frases curtas**, explicando *o que aconteceu* e *por que importa para o corretor*.\n- Use **1 emoji no título**. Separe os blocos com uma linha em branco.\n\n*Como isso impacta para o incorporador?:*\n\n- Escreva entre 1 e 2 paragrafos sobre como essas noticias impactam a vida do incorporador\n\n*Manchetes do dia:*\n- coloque em listas com emoji de 1️⃣,2️⃣, etc..\n\nREGRAS:\n- PT-BR, claro e objetivo; sem jargão.\n- Priorize números/dados quando existirem; se faltarem, não invente.\n- Não adicione seções além das especificadas.\n`.trim();\n\nreturn [{ json: { prompt } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        336
+      ],
+      "id": "48ddafff-0ee8-4921-8c71-4f0271f90644",
+      "name": "Gera prompt para resumo diário"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        912,
+        336
+      ],
+      "id": "e9a0ab03-d7ca-4dd7-8af2-ed9ba31f93f8",
+      "name": "AI Agent - Resumo",
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        912,
+        560
+      ],
+      "id": "5b21f0c8-0faf-4266-8274-d397cb09b6d3",
+      "name": "Criação do texto do resumo",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "19P4-Hrzc6ZaMUsfnC5fTT4uoduwGXGdt",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1232,
+        336
+      ],
+      "id": "0b7ca6e9-0d68-4e0c-90d6-6e88a458582e",
+      "name": "Baixar imagem da Finamob",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// n8n Code node – pega o base64 do arquivo baixado no \"Download file\"\nconst binAll = $input.item.binary || {};\n\nconst key =\n  binAll.imagem_final ? 'imagem_final' :\n  (binAll.data ? 'data' : Object.keys(binAll)[0]);\n\nif (!key) throw new Error(`Nenhum binário encontrado. Disponíveis: ${Object.keys(binAll).join(\", \")}`);\n\nconst bin = binAll[key];\nif (!bin?.data) throw new Error(`Binário na chave \"${key}\" não possui .data.`);\n\n// ✅ Correto para Filesystem-v2 – lê o buffer real e converte para base64\nconst buffer = await this.helpers.getBinaryDataBuffer(0, key);\nconst base64 = buffer.toString('base64');\n\nreturn {\n  json: {\n    base64Image: base64,\n    mimeType: bin.mimeType || 'application/octet-stream',\n    fileName: bin.fileName || 'arquivo'\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        336
+      ],
+      "id": "7fc974ed-8d29-4af5-9503-ec11e412b837",
+      "name": "Converter imagem para Base64"
+    },
+    {
+      "parameters": {
+        "jsCode": "const COUNTRY = '55';\nconst onlyDigits = s => String(s ?? '').replace(/\\D/g, '').replace(/^0+/, '');\nconst toE164NoPlus = d => d ? (d.startsWith(COUNTRY) ? d : COUNTRY + d) : '';\nconst toJid = e164 => e164 ? `${e164}@s.whatsapp.net` : '';\n\nconst out = [];\nconst seen = new Set();\n\nfor (const { json } of items) {\n\n  // captura telefone do JSON (número ou string)\n  const rawPhone = json.telefone ?? json.phone ?? json.phone_raw ?? '';\n  const rawDigits = onlyDigits(rawPhone);\n\n  if (!rawDigits) continue;\n\n  const e164 = toE164NoPlus(rawDigits);\n  if (!e164) continue;\n\n  // impede duplicados\n  if (seen.has(e164)) continue;\n  seen.add(e164);\n\n  const firstName = String(json.nome || json.name || '')\n    .trim()\n    .split(/\\s+/)[0] || '';\n\n  out.push({\n    json: {\n      ...json,\n      e164,               // 5511999999999\n      jid: toJid(e164),   // 5511999999999@s.whatsapp.net\n      firstName\n    }\n  });\n}\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1856,
+        176
+      ],
+      "id": "16cdce99-d9e9-498e-984a-9c55c5c2b0ba",
+      "name": "Preparar contatos para envio no WhatsApp"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2096,
+        320
+      ],
+      "id": "cc957d96-f759-4387-81ea-3a3fe41176b9",
+      "name": "Junta os contatos e a imagem"
+    },
+    {
+      "parameters": {
+        "batchSize": "=1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2320,
+        320
+      ],
+      "id": "f888fec7-c986-4ab6-a7fa-7ebbba519cf0",
+      "name": "Enviar mensagens individualmente"
+    },
+    {
+      "parameters": {
+        "amount": "={{ 3 + Math.floor(Math.random() * 5) }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2560,
+        336
+      ],
+      "id": "0f9ab424-cf7b-481a-8e51-8e7b4ab87844",
+      "name": "Aguardar intervalo entre envios",
+      "webhookId": "6686e364-432c-466f-ac33-321c79f8a8a1"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Define data do dia anterior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envio do Resumo": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagens individualmente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code4": {
+      "main": [
+        [
+          {
+            "node": "Normalizar telefone e criar JID1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar telefone e criar JID1": {
+      "main": [
+        []
+      ]
+    },
+    "Pegar Leads - base_journal": {
+      "main": [
+        [
+          {
+            "node": "Preparar contatos para envio no WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define data do dia anterior": {
+      "main": [
+        [
+          {
+            "node": "Captura as notícias postadas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Captura as notícias postadas": {
+      "main": [
+        [
+          {
+            "node": "Gera prompt para resumo diário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gera prompt para resumo diário": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Resumo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Resumo": {
+      "main": [
+        [
+          {
+            "node": "Baixar imagem da Finamob",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criação do texto do resumo": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent - Resumo",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixar imagem da Finamob": {
+      "main": [
+        [
+          {
+            "node": "Converter imagem para Base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converter imagem para Base64": {
+      "main": [
+        [
+          {
+            "node": "Pegar Leads - base_journal",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Junta os contatos e a imagem",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Preparar contatos para envio no WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Junta os contatos e a imagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Junta os contatos e a imagem": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagens individualmente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagens individualmente": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Aguardar intervalo entre envios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar intervalo entre envios": {
+      "main": [
+        [
+          {
+            "node": "Envio do Resumo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true
+  },
+  "staticData": {
+    "node:Schedule Trigger1": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "3ef6f82f-96e4-482b-b265-860955004782",
+  "activeVersionId": null,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2025-11-24T19:52:24.843Z",
+      "createdAt": "2025-11-24T19:52:24.843Z",
+      "role": "workflow:owner",
+      "workflowId": "ZAYUYudLHJzvJnwT",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
