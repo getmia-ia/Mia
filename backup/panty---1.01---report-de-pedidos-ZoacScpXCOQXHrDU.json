@@ -1,0 +1,1401 @@
+{
+  "updatedAt": "2026-02-27T18:08:19.526Z",
+  "createdAt": "2025-11-29T14:23:09.960Z",
+  "id": "ZoacScpXCOQXHrDU",
+  "name": "PANTY - 1.01 - Report de Pedidos",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        112
+      ],
+      "id": "196208a9-8342-47af-a422-782000860ed6",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        656,
+        -528
+      ],
+      "id": "8fa15765-87b5-4fbd-af99-e4da175482b4",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        416,
+        -544
+      ],
+      "id": "0a4acc00-19fe-4a3b-a7a3-cadd3d91a76a",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        848,
+        -528
+      ],
+      "id": "b4046c12-e4c1-4f63-95d4-39fcf0e771c6",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "const padKeys = {\n  \"id\": \"ID\",\n  \"numero_do_pedido\": \"Número do pedido\",\n  \"data\": \"Data\",\n  \"data_prevista\": \"Data prevista\",\n  \"id_contato\": \"ID contato\",\n  \"nome_do_contato\": \"Nome do contato\",\n  \"tipo_de_pessoa\": \"Tipo de Pessoa\",\n  \"cpf_cnpj\": \"CPF/CNPJ\",\n  \"rg_ie\": \"RG/IE\",\n  \"cep\": \"CEP\",\n  \"municipio\": \"Municí­pio\",\n  \"uf\": \"UF\",\n  \"endereco\": \"Endereço\",\n  \"endereco_nro\": \"Endereço Nro\",\n  \"complemento\": \"Complemento\",\n  \"bairro\": \"Bairro\",\n  \"fone\": \"Fone\",\n  \"celular\": \"Celular\",\n  \"email\": \"e-mail\",\n  \"desconto_do_pedido_porcento_ou_valor\": \"Desconto do pedido (% ou valor)\",\n  \"frete_pedido\": \"Frete pedido\",\n  \"observacoes\": \"Observações\",\n  \"situacao\": \"Situação\",\n  \"id_produto\": \"ID produto\",\n  \"descricao\": \"Descrição\",\n  \"quantidade\": \"Quantidade\",\n  \"valor_unitario\": \"Valor unitário\",\n  \"desconto_item\": \"Desconto item\",\n  \"codigo_de_rastreamento\": \"Código de rastreamento\",\n  \"numero_da_ordem_de_compra\": \"Número da ordem de compra\",\n  \"vendedor\": \"Vendedor\",\n  \"despesas_pedido\": \"Despesas pedido\",\n  \"desconto_pedido_rateado\": \"Desconto do pedido rateado\",\n  \"frete_pedido_rateado\": \"Frete pedido rateado\",\n  \"despesas_pedido_rateado\": \"Despesas pedido rateado\",\n  \"destinatario\": \"Destinatário\",\n  \"cpf_cnpj_entrega\": \"CPF/CNPJ entrega\",\n  \"cep_entrega\": \"CEP entrega\",\n  \"municipio_entrega\": \"Municí­pio entrega\",\n  \"uf_entrega\": \"UF entrega\",\n  \"endereco_entrega\": \"Endereço entrega\",\n  \"endereco_nro_entrega\": \"Endereço Nro entrega\",\n  \"complemento_entrega\": \"Complemento entrega\",\n  \"bairro_entrega\": \"Bairro entrega\",\n  \"fone_entrega\": \"Fone entrega\",\n  \"codigo_sku\": \"Código (SKU)\"\n};\n\n// Campos numéricos que precisam ser convertidos\nconst numericFields = [\n  \"desconto_do_pedido_porcento_ou_valor\",\n  \"frete_pedido\",\n  \"valor_unitario\",\n  \"desconto_item\",\n  \"despesas_pedido\",\n  \"desconto_pedido_rateado\",\n  \"frete_pedido_rateado\",\n  \"despesas_pedido_rateado\",\n  \"quantidade\"\n];\n\n// Converte data de DD/MM/YYYY → YYYY-MM-DD\nfunction formatDateBRtoISO(input) {\n  if (!input || typeof input !== 'string') return null;\n  const [day, month, year] = input.split('/');\n  if (!day || !month || !year) return null;\n  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;\n}\n\n// Converte valores numéricos com vírgula para ponto\nfunction formatNumber(input) {\n  if (!input || typeof input !== 'string') return input;\n\n  return input\n    .replace(/%/g, '')      // remove o %\n    .replace(/\\s+/g, '')    // remove espaços\n    .replace(/\\./g, '')     // remove milhar\n    .replace(',', '.');     // vírgula -> ponto\n}\n\nreturn $input.all().map(item => {\n  const raw = item.json;\n  const normalized = {};\n\n  for (const [key, originalName] of Object.entries(padKeys)) {\n    let value = raw[originalName] ?? '';\n\n    // Converte datas\n    if (key === 'data' || key === 'data_prevista') {\n      value = formatDateBRtoISO(value);\n    }\n\n    // Converte campos numéricos\n    if (numericFields.includes(key)) {\n      value = formatNumber(value);\n    }\n\n    normalized[key] = value;\n  }\n\n  // Adiciona campo fixo da filial\n  normalized.filial = \"01\";\n\n  return { json: normalized };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        -528
+      ],
+      "id": "a72d4a4f-946e-49d0-8a8d-018bf28ea4a1",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "1veKzx85o_mhvKagbiJ8X-0Vsf0bh4fp9"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        160,
+        -544
+      ],
+      "id": "68fe18b7-d440-4073-a11a-3068d2aacfc1",
+      "name": "Filial 01",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "11CY6INno7IHpYcndH9qTdiOI3ACZsT-D",
+            "mode": "id"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        160,
+        -128
+      ],
+      "id": "67c58d9f-8c85-45a8-b786-56f328a841e5",
+      "name": "Filial 02",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "1gYdJvsPORRnSuGfKhtV4anxI4hzEeRZ8",
+            "mode": "id"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        160,
+        304
+      ],
+      "id": "9e3342de-555e-4e31-8d48-3f44d32a3318",
+      "name": "Filial 03",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "1cqGzVgvnAsa_bc_84K_lEu81N6TwsYZ3",
+            "mode": "id"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        160,
+        736
+      ],
+      "id": "25a14603-c3a9-4a52-8161-d691ca5c71a3",
+      "name": "Filial 04",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1712,
+        -416
+      ],
+      "id": "76499be0-ff58-49f4-bca1-efec1c7711a1",
+      "name": "Wait",
+      "webhookId": "e9e2e9ef-5826-4c79-ac60-14def6923f4d"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        640,
+        -112
+      ],
+      "id": "14eda4de-484c-4051-8e35-51bb70785e88",
+      "name": "Download file1",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        400,
+        -128
+      ],
+      "id": "4b1af683-989b-42c8-8285-e42752329cbc",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        832,
+        -112
+      ],
+      "id": "5f6b9959-236d-4870-8ea9-1d649148f63d",
+      "name": "Extract from File1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const padKeys = {\n  \"id\": \"ID\",\n  \"numero_do_pedido\": \"Número do pedido\",\n  \"data\": \"Data\",\n  \"data_prevista\": \"Data prevista\",\n  \"id_contato\": \"ID contato\",\n  \"nome_do_contato\": \"Nome do contato\",\n  \"tipo_de_pessoa\": \"Tipo de Pessoa\",\n  \"cpf_cnpj\": \"CPF/CNPJ\",\n  \"rg_ie\": \"RG/IE\",\n  \"cep\": \"CEP\",\n  \"municipio\": \"Municí­pio\",\n  \"uf\": \"UF\",\n  \"endereco\": \"Endereço\",\n  \"endereco_nro\": \"Endereço Nro\",\n  \"complemento\": \"Complemento\",\n  \"bairro\": \"Bairro\",\n  \"fone\": \"Fone\",\n  \"celular\": \"Celular\",\n  \"email\": \"e-mail\",\n  \"desconto_do_pedido_porcento_ou_valor\": \"Desconto do pedido (% ou valor)\",\n  \"frete_pedido\": \"Frete pedido\",\n  \"observacoes\": \"Observações\",\n  \"situacao\": \"Situação\",\n  \"id_produto\": \"ID produto\",\n  \"descricao\": \"Descrição\",\n  \"quantidade\": \"Quantidade\",\n  \"valor_unitario\": \"Valor unitário\",\n  \"desconto_item\": \"Desconto item\",\n  \"codigo_de_rastreamento\": \"Código de rastreamento\",\n  \"numero_da_ordem_de_compra\": \"Número da ordem de compra\",\n  \"vendedor\": \"Vendedor\",\n  \"despesas_pedido\": \"Despesas pedido\",\n  \"desconto_pedido_rateado\": \"Desconto do pedido rateado\",\n  \"frete_pedido_rateado\": \"Frete pedido rateado\",\n  \"despesas_pedido_rateado\": \"Despesas pedido rateado\",\n  \"destinatario\": \"Destinatário\",\n  \"cpf_cnpj_entrega\": \"CPF/CNPJ entrega\",\n  \"cep_entrega\": \"CEP entrega\",\n  \"municipio_entrega\": \"Municí­pio entrega\",\n  \"uf_entrega\": \"UF entrega\",\n  \"endereco_entrega\": \"Endereço entrega\",\n  \"endereco_nro_entrega\": \"Endereço Nro entrega\",\n  \"complemento_entrega\": \"Complemento entrega\",\n  \"bairro_entrega\": \"Bairro entrega\",\n  \"fone_entrega\": \"Fone entrega\",\n  \"codigo_sku\": \"Código (SKU)\"\n};\n\n// Campos numéricos que precisam ser convertidos\nconst numericFields = [\n  \"desconto_do_pedido_porcento_ou_valor\",\n  \"frete_pedido\",\n  \"valor_unitario\",\n  \"desconto_item\",\n  \"despesas_pedido\",\n  \"desconto_pedido_rateado\",\n  \"frete_pedido_rateado\",\n  \"despesas_pedido_rateado\",\n  \"quantidade\"\n];\n\n// Converte data de DD/MM/YYYY → YYYY-MM-DD\nfunction formatDateBRtoISO(input) {\n  if (!input || typeof input !== 'string') return null;\n  const [day, month, year] = input.split('/');\n  if (!day || !month || !year) return null;\n  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;\n}\n\n// Converte valores numéricos com vírgula para ponto\nfunction formatNumber(input) {\n  if (!input || typeof input !== 'string') return input;\n\n  return input\n    .replace(/%/g, '')      // remove o %\n    .replace(/\\s+/g, '')    // remove espaços\n    .replace(/\\./g, '')     // remove milhar\n    .replace(',', '.');     // vírgula -> ponto\n}\n\nreturn $input.all().map(item => {\n  const raw = item.json;\n  const normalized = {};\n\n  for (const [key, originalName] of Object.entries(padKeys)) {\n    let value = raw[originalName] ?? '';\n\n    // Converte datas\n    if (key === 'data' || key === 'data_prevista') {\n      value = formatDateBRtoISO(value);\n    }\n\n    // Converte campos numéricos\n    if (numericFields.includes(key)) {\n      value = formatNumber(value);\n    }\n\n    normalized[key] = value;\n  }\n\n  // Adiciona campo fixo da filial\n  normalized.filial = \"02\";\n\n  return { json: normalized };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -112
+      ],
+      "id": "4a3b0398-a2c3-42fa-918d-06d9fb30c0eb",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1696,
+        0
+      ],
+      "id": "9dcbf3af-a902-4df1-a34f-b24d1abe6e63",
+      "name": "Wait1",
+      "webhookId": "e9e2e9ef-5826-4c79-ac60-14def6923f4d"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        640,
+        320
+      ],
+      "id": "1167295b-e6e6-437b-83ea-73d60cdc39a6",
+      "name": "Download file2",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        400,
+        304
+      ],
+      "id": "28d6fb4e-913c-401f-b392-24174599dc14",
+      "name": "Loop Over Items2"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        832,
+        320
+      ],
+      "id": "ccae9263-4db5-4cf9-b3bf-5baba0f58024",
+      "name": "Extract from File2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const padKeys = {\n  \"id\": \"ID\",\n  \"numero_do_pedido\": \"Número do pedido\",\n  \"data\": \"Data\",\n  \"data_prevista\": \"Data prevista\",\n  \"id_contato\": \"ID contato\",\n  \"nome_do_contato\": \"Nome do contato\",\n  \"tipo_de_pessoa\": \"Tipo de Pessoa\",\n  \"cpf_cnpj\": \"CPF/CNPJ\",\n  \"rg_ie\": \"RG/IE\",\n  \"cep\": \"CEP\",\n  \"municipio\": \"Municí­pio\",\n  \"uf\": \"UF\",\n  \"endereco\": \"Endereço\",\n  \"endereco_nro\": \"Endereço Nro\",\n  \"complemento\": \"Complemento\",\n  \"bairro\": \"Bairro\",\n  \"fone\": \"Fone\",\n  \"celular\": \"Celular\",\n  \"email\": \"e-mail\",\n  \"desconto_do_pedido_porcento_ou_valor\": \"Desconto do pedido (% ou valor)\",\n  \"frete_pedido\": \"Frete pedido\",\n  \"observacoes\": \"Observações\",\n  \"situacao\": \"Situação\",\n  \"id_produto\": \"ID produto\",\n  \"descricao\": \"Descrição\",\n  \"quantidade\": \"Quantidade\",\n  \"valor_unitario\": \"Valor unitário\",\n  \"desconto_item\": \"Desconto item\",\n  \"codigo_de_rastreamento\": \"Código de rastreamento\",\n  \"numero_da_ordem_de_compra\": \"Número da ordem de compra\",\n  \"vendedor\": \"Vendedor\",\n  \"despesas_pedido\": \"Despesas pedido\",\n  \"desconto_pedido_rateado\": \"Desconto do pedido rateado\",\n  \"frete_pedido_rateado\": \"Frete pedido rateado\",\n  \"despesas_pedido_rateado\": \"Despesas pedido rateado\",\n  \"destinatario\": \"Destinatário\",\n  \"cpf_cnpj_entrega\": \"CPF/CNPJ entrega\",\n  \"cep_entrega\": \"CEP entrega\",\n  \"municipio_entrega\": \"Municí­pio entrega\",\n  \"uf_entrega\": \"UF entrega\",\n  \"endereco_entrega\": \"Endereço entrega\",\n  \"endereco_nro_entrega\": \"Endereço Nro entrega\",\n  \"complemento_entrega\": \"Complemento entrega\",\n  \"bairro_entrega\": \"Bairro entrega\",\n  \"fone_entrega\": \"Fone entrega\",\n  \"codigo_sku\": \"Código (SKU)\"\n};\n\n// Campos numéricos que precisam ser convertidos\nconst numericFields = [\n  \"desconto_do_pedido_porcento_ou_valor\",\n  \"frete_pedido\",\n  \"valor_unitario\",\n  \"desconto_item\",\n  \"despesas_pedido\",\n  \"desconto_pedido_rateado\",\n  \"frete_pedido_rateado\",\n  \"despesas_pedido_rateado\",\n  \"quantidade\"\n];\n\n// Converte data de DD/MM/YYYY → YYYY-MM-DD\nfunction formatDateBRtoISO(input) {\n  if (!input || typeof input !== 'string') return null;\n  const [day, month, year] = input.split('/');\n  if (!day || !month || !year) return null;\n  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;\n}\n\n// Converte valores numéricos com vírgula para ponto\nfunction formatNumber(input) {\n  if (!input || typeof input !== 'string') return input;\n\n  return input\n    .replace(/%/g, '')      // remove o %\n    .replace(/\\s+/g, '')    // remove espaços\n    .replace(/\\./g, '')     // remove milhar\n    .replace(',', '.');     // vírgula -> ponto\n}\n\nreturn $input.all().map(item => {\n  const raw = item.json;\n  const normalized = {};\n\n  for (const [key, originalName] of Object.entries(padKeys)) {\n    let value = raw[originalName] ?? '';\n\n    // Converte datas\n    if (key === 'data' || key === 'data_prevista') {\n      value = formatDateBRtoISO(value);\n    }\n\n    // Converte campos numéricos\n    if (numericFields.includes(key)) {\n      value = formatNumber(value);\n    }\n\n    normalized[key] = value;\n  }\n\n  // Adiciona campo fixo da filial\n  normalized.filial = \"03\";\n\n  return { json: normalized };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        320
+      ],
+      "id": "2f54db8a-5e8e-4442-b4af-f2d5f2ba364c",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1696,
+        432
+      ],
+      "id": "23c6bf43-7245-4fad-8597-81dc2682d320",
+      "name": "Wait2",
+      "webhookId": "e9e2e9ef-5826-4c79-ac60-14def6923f4d"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        640,
+        752
+      ],
+      "id": "a92a0257-2708-4e45-ab83-45c8dd3c95d8",
+      "name": "Download file3",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        400,
+        736
+      ],
+      "id": "c6c42b5e-8afc-476c-b50d-eb6ae2d371d6",
+      "name": "Loop Over Items3"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        832,
+        752
+      ],
+      "id": "0806af49-f7c6-4231-b7b5-f060250141f7",
+      "name": "Extract from File3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const padKeys = {\n  \"id\": \"ID\",\n  \"numero_do_pedido\": \"Número do pedido\",\n  \"data\": \"Data\",\n  \"data_prevista\": \"Data prevista\",\n  \"id_contato\": \"ID contato\",\n  \"nome_do_contato\": \"Nome do contato\",\n  \"tipo_de_pessoa\": \"Tipo de Pessoa\",\n  \"cpf_cnpj\": \"CPF/CNPJ\",\n  \"rg_ie\": \"RG/IE\",\n  \"cep\": \"CEP\",\n  \"municipio\": \"Municí­pio\",\n  \"uf\": \"UF\",\n  \"endereco\": \"Endereço\",\n  \"endereco_nro\": \"Endereço Nro\",\n  \"complemento\": \"Complemento\",\n  \"bairro\": \"Bairro\",\n  \"fone\": \"Fone\",\n  \"celular\": \"Celular\",\n  \"email\": \"e-mail\",\n  \"desconto_do_pedido_porcento_ou_valor\": \"Desconto do pedido (% ou valor)\",\n  \"frete_pedido\": \"Frete pedido\",\n  \"observacoes\": \"Observações\",\n  \"situacao\": \"Situação\",\n  \"id_produto\": \"ID produto\",\n  \"descricao\": \"Descrição\",\n  \"quantidade\": \"Quantidade\",\n  \"valor_unitario\": \"Valor unitário\",\n  \"desconto_item\": \"Desconto item\",\n  \"codigo_de_rastreamento\": \"Código de rastreamento\",\n  \"numero_da_ordem_de_compra\": \"Número da ordem de compra\",\n  \"vendedor\": \"Vendedor\",\n  \"despesas_pedido\": \"Despesas pedido\",\n  \"desconto_pedido_rateado\": \"Desconto do pedido rateado\",\n  \"frete_pedido_rateado\": \"Frete pedido rateado\",\n  \"despesas_pedido_rateado\": \"Despesas pedido rateado\",\n  \"destinatario\": \"Destinatário\",\n  \"cpf_cnpj_entrega\": \"CPF/CNPJ entrega\",\n  \"cep_entrega\": \"CEP entrega\",\n  \"municipio_entrega\": \"Municí­pio entrega\",\n  \"uf_entrega\": \"UF entrega\",\n  \"endereco_entrega\": \"Endereço entrega\",\n  \"endereco_nro_entrega\": \"Endereço Nro entrega\",\n  \"complemento_entrega\": \"Complemento entrega\",\n  \"bairro_entrega\": \"Bairro entrega\",\n  \"fone_entrega\": \"Fone entrega\",\n  \"codigo_sku\": \"Código (SKU)\"\n};\n\n// Campos numéricos que precisam ser convertidos\nconst numericFields = [\n  \"desconto_do_pedido_porcento_ou_valor\",\n  \"frete_pedido\",\n  \"valor_unitario\",\n  \"desconto_item\",\n  \"despesas_pedido\",\n  \"desconto_pedido_rateado\",\n  \"frete_pedido_rateado\",\n  \"despesas_pedido_rateado\",\n  \"quantidade\"\n];\n\n// Converte data de DD/MM/YYYY → YYYY-MM-DD\nfunction formatDateBRtoISO(input) {\n  if (!input || typeof input !== 'string') return null;\n  const [day, month, year] = input.split('/');\n  if (!day || !month || !year) return null;\n  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;\n}\n\n// Converte valores numéricos com vírgula para ponto\nfunction formatNumber(input) {\n  if (!input || typeof input !== 'string') return input;\n\n  return input\n    .replace(/%/g, '')      // remove o %\n    .replace(/\\s+/g, '')    // remove espaços\n    .replace(/\\./g, '')     // remove milhar\n    .replace(',', '.');     // vírgula -> ponto\n}\n\nreturn $input.all().map(item => {\n  const raw = item.json;\n  const normalized = {};\n\n  for (const [key, originalName] of Object.entries(padKeys)) {\n    let value = raw[originalName] ?? '';\n\n    // Converte datas\n    if (key === 'data' || key === 'data_prevista') {\n      value = formatDateBRtoISO(value);\n    }\n\n    // Converte campos numéricos\n    if (numericFields.includes(key)) {\n      value = formatNumber(value);\n    }\n\n    normalized[key] = value;\n  }\n\n  // Adiciona campo fixo da filial\n  normalized.filial = \"04\";\n\n  return { json: normalized };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        752
+      ],
+      "id": "7b0ded23-9db4-4c57-a2eb-624096c3233b",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1696,
+        864
+      ],
+      "id": "61a786ee-3557-4a03-bbc1-cab2434c96b9",
+      "name": "Wait3",
+      "webhookId": "e9e2e9ef-5826-4c79-ac60-14def6923f4d"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Loop Over Items').item.json.id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "11wWYNIX1XQSiRZtKdWsoQV8kSgF100xr",
+          "mode": "list",
+          "cachedResultName": "01 - feito",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/11wWYNIX1XQSiRZtKdWsoQV8kSgF100xr"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1488,
+        -528
+      ],
+      "id": "08d050b8-faab-4871-83c7-e6ad37f3ea0c",
+      "name": "Move Filial 01",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Loop Over Items1').item.json.id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "15BRGr0X5FWqdPQvhdQvvjMscpgiB0-5O",
+          "mode": "list",
+          "cachedResultName": "02 - feito",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/15BRGr0X5FWqdPQvhdQvvjMscpgiB0-5O"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1472,
+        -112
+      ],
+      "id": "4e5ab1a3-f01b-450f-9a4e-aa9bcb47fc19",
+      "name": "Move Filial 02",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Loop Over Items2').item.json.id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1rnLjVsYeC09bBC9N2FY5CGKVgZ4TSxA6",
+          "mode": "list",
+          "cachedResultName": "03 - feito",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1rnLjVsYeC09bBC9N2FY5CGKVgZ4TSxA6"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1472,
+        320
+      ],
+      "id": "dcf3a384-af42-4229-a40c-8f59090910d6",
+      "name": "Move Filial 03",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Loop Over Items3').item.json.id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1WBsxwG8nW3ftlYWrcrAZH1VqBSIktydL",
+          "mode": "list",
+          "cachedResultName": "04 - feito",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1WBsxwG8nW3ftlYWrcrAZH1VqBSIktydL"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1472,
+        752
+      ],
+      "id": "c7c3ef6b-4400-4480-a995-c126416a214c",
+      "name": "Move Filial 04",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "height": 1792,
+        "width": 2240,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -304,
+        -608
+      ],
+      "typeVersion": 1,
+      "id": "d8a6935f-7ce2-4f39-a313-35a7ced2e412",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE pantynova.orders (\n    id_key SERIAL PRIMARY KEY,  \n    id TEXT,\n    numero_do_pedido TEXT,\n    data DATE,\n    data_prevista DATE,\n    id_contato TEXT,\n    nome_do_contato TEXT,\n    tipo_de_pessoa TEXT,\n    cpf_cnpj TEXT,\n    rg_ie TEXT,\n    cep TEXT,\n    municipio TEXT,\n    uf TEXT,\n    endereco TEXT,\n    endereco_nro TEXT,\n    complemento TEXT,\n    bairro TEXT,\n    fone TEXT,\n    celular TEXT,\n    email TEXT,\n\n    desconto_do_pedido_porcento_ou_valor NUMERIC,\n    frete_pedido NUMERIC,\n    observacoes TEXT,\n    situacao TEXT,\n\n    id_produto TEXT,\n    descricao TEXT,\n    quantidade NUMERIC,\n    valor_unitario NUMERIC,\n    desconto_item NUMERIC,\n\n    codigo_de_rastreamento TEXT,\n    numero_da_ordem_de_compra TEXT,\n    vendedor TEXT,\n\n    despesas_pedido NUMERIC,\n    desconto_pedido_rateado NUMERIC,\n    frete_pedido_rateado NUMERIC,\n    despesas_pedido_rateado NUMERIC,\n\n    destinatario TEXT,\n    cpf_cnpj_entrega TEXT,\n    cep_entrega TEXT,\n    municipio_entrega TEXT,\n    uf_entrega TEXT,\n    endereco_entrega TEXT,\n    endereco_nro_entrega TEXT,\n    complemento_entrega TEXT,\n    bairro_entrega TEXT,\n    fone_entrega TEXT,\n\n    codigo_sku TEXT,\n\n    filial TEXT NOT NULL\n);\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -208,
+        320
+      ],
+      "id": "2279c1de-d263-49ea-a7fb-1794476eb602",
+      "name": "Cria a tabela se não existir",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "pantynova"
+        },
+        "table": {
+          "__rl": true,
+          "value": "orders",
+          "mode": "list",
+          "cachedResultName": "orders"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "id": "={{ $json.id }}",
+            "coluna1": "={{ $json.coluna1 }}",
+            "coluna2": "={{ $json.coluna2 }}",
+            "coluna3": "={{ $json.coluna3 }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "coluna1",
+              "displayName": "coluna1",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "coluna2",
+              "displayName": "coluna2",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "coluna3",
+              "displayName": "coluna3",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "criado_em",
+              "displayName": "criado_em",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1264,
+        -528
+      ],
+      "id": "2fb79192-bf13-491f-b313-85ef82444464",
+      "name": "Insert rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "pantynova"
+        },
+        "table": {
+          "__rl": true,
+          "value": "orders",
+          "mode": "list",
+          "cachedResultName": "orders"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "id": "={{ $json.id }}",
+            "coluna1": "={{ $json.coluna1 }}",
+            "coluna2": "={{ $json.coluna2 }}",
+            "coluna3": "={{ $json.coluna3 }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "coluna1",
+              "displayName": "coluna1",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "coluna2",
+              "displayName": "coluna2",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "coluna3",
+              "displayName": "coluna3",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "criado_em",
+              "displayName": "criado_em",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1264,
+        -112
+      ],
+      "id": "b51ce96d-b7b3-4e5a-8b1e-8881d8e1d549",
+      "name": "Insert rows in a table1",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "pantynova"
+        },
+        "table": {
+          "__rl": true,
+          "value": "orders",
+          "mode": "list",
+          "cachedResultName": "orders"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "id": "={{ $json.id }}",
+            "coluna1": "={{ $json.coluna1 }}",
+            "coluna2": "={{ $json.coluna2 }}",
+            "coluna3": "={{ $json.coluna3 }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "coluna1",
+              "displayName": "coluna1",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "coluna2",
+              "displayName": "coluna2",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "coluna3",
+              "displayName": "coluna3",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "criado_em",
+              "displayName": "criado_em",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1264,
+        320
+      ],
+      "id": "67db0af2-9f77-463c-9918-703ba8154817",
+      "name": "Insert rows in a table2",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "pantynova"
+        },
+        "table": {
+          "__rl": true,
+          "value": "orders",
+          "mode": "list",
+          "cachedResultName": "orders"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "id": "={{ $json.id }}",
+            "coluna1": "={{ $json.coluna1 }}",
+            "coluna2": "={{ $json.coluna2 }}",
+            "coluna3": "={{ $json.coluna3 }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "coluna1",
+              "displayName": "coluna1",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "coluna2",
+              "displayName": "coluna2",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "coluna3",
+              "displayName": "coluna3",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "criado_em",
+              "displayName": "criado_em",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1280,
+        752
+      ],
+      "id": "60a164ae-73dd-4ea0-96b0-4baf620d9bf0",
+      "name": "Insert rows in a table3",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Loop Over Items3').item.json.id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1WBsxwG8nW3ftlYWrcrAZH1VqBSIktydL",
+          "mode": "id"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -208,
+        560
+      ],
+      "id": "317fd282-c99a-43bc-8e4e-85459d0ed1a8",
+      "name": "Move Filial ",
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      },
+      "disabled": true
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Filial 01",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filial 02",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filial 03",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filial 04",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filial 01": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file1": {
+      "main": [
+        [
+          {
+            "node": "Extract from File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Download file1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filial 02": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file2": {
+      "main": [
+        [
+          {
+            "node": "Extract from File2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items2": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Download file2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait2": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filial 03": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file3": {
+      "main": [
+        [
+          {
+            "node": "Extract from File3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items3": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Download file3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait3": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filial 04": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move Filial 01": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move Filial 02": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move Filial 03": {
+      "main": [
+        [
+          {
+            "node": "Wait2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move Filial 04": {
+      "main": [
+        [
+          {
+            "node": "Wait3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert rows in a table": {
+      "main": [
+        [
+          {
+            "node": "Move Filial 01",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert rows in a table1": {
+      "main": [
+        [
+          {
+            "node": "Move Filial 02",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert rows in a table2": {
+      "main": [
+        [
+          {
+            "node": "Move Filial 03",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert rows in a table3": {
+      "main": [
+        [
+          {
+            "node": "Move Filial 04",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": -1,
+    "availableInMCP": false,
+    "errorWorkflow": "ZY72QRGZkwPF29aG"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "2e400f3b-4de8-4841-b7dc-211a1a7be2a7",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2025-11-29T14:23:09.960Z",
+      "createdAt": "2025-11-29T14:23:09.960Z",
+      "role": "workflow:owner",
+      "workflowId": "ZoacScpXCOQXHrDU",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
