@@ -1311,6 +1311,9 @@
       "id": "2ccf5af4-4a3d-4400-91c5-4f7c6bddbd07",
       "name": "Pega status do cliente",
       "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
       "onError": "continueRegularOutput"
     },
     {
@@ -1816,7 +1819,10 @@
         3200
       ],
       "id": "74dc1658-0595-4eea-a24e-7c209874d2ea",
-      "name": "Salva dados na planilha"
+      "name": "Salva dados na planilha",
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
     },
     {
       "parameters": {
@@ -2233,7 +2239,10 @@
         3200
       ],
       "id": "eaaa8abb-04e9-4cff-9cc0-a4aec56bb0a5",
-      "name": "Atualiza status e atribui nota"
+      "name": "Atualiza status e atribui nota",
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
     },
     {
       "parameters": {
@@ -2491,7 +2500,10 @@
       "id": "8575f233-4f73-4c8f-9821-3ada0147afb2",
       "name": "Pega dados fixos do cliente",
       "alwaysOutputData": true,
-      "executeOnce": true
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
     },
     {
       "parameters": {
@@ -2572,7 +2584,10 @@
       ],
       "id": "5f41d31e-6fd1-4be5-9500-990e5ef5d41e",
       "name": "Info dos posts agendados",
-      "executeOnce": true
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
     },
     {
       "parameters": {
@@ -2678,7 +2693,7 @@
     },
     {
       "parameters": {
-        "jsCode": "***REDACTED***"
+        "jsCode": "// === Parâmetros ===\nconst THRESHOLD = 50;           // mínimo para aprovar\nconst MAX_ITENS = 30;           // máximo a retornar\nconst DECAY_HALF_LIFE_H = 48;   // meia-vida da recência (horas)\nconst DEDUPE_SIMILARITY = 0.85; // similaridade p/ dedupe (0..1)\nconst KEEP_SCORE_IN_OUTPUT = false; // true só p/ debug\n\n// === Dicionários de relevância (tema tributário focado em empresas) ===\nconst KW = {\n  forte: [\n    // Básicos\n    'tributo','tributos','tributário','tributária','tributárias','tributários',\n    'imposto','impostos',\n\n    // Impostos específicos (PJ)\n    'icms','ipi','iss','irpj','csll','pis','cofins','iof','cide',\n\n    // Reforma e mudanças\n    'reforma tributária','sistema tributário','código tributário','ctn',\n\n    // Fisco e fiscalização\n    'fisco','arrecadação','fiscalização','autuação','execução fiscal',\n    'notificação fiscal','cobrança tributária',\n\n    // Planejamento e elisão\n    'planejamento tributário','elisão fiscal','evasão fiscal','sonegação',\n\n    // Incentivos e créditos\n    'incentivo fiscal','incentivos fiscais','benefício fiscal','benefícios fiscais',\n    'crédito tributário','compensação tributária','recuperação de crédito',\n\n    // Órgãos e julgamentos\n    'carf','stf','stj','receita federal','sefaz','pgfn',\n\n    // Regimes e enquadramentos\n    'simples nacional','lucro presumido','lucro real','lucro arbitrado',\n\n    // Obrigações acessórias\n    'sped','efd','ecf','dctf','dirf','perdcomp','nf-e','nota fiscal',\n    'obrigações acessórias','bloco k'\n  ],\n  medio: [\n    'contabilidade','contador','auditoria','compliance',\n    'fraude fiscal','due diligence','jurisprudência','acórdão',\n    'consulta tributária','instrução normativa','solução de consulta'\n  ],\n  fracos: [\n    'jogos','game','celebridade','famoso','esporte','entretenimento',\n    'show','cantor','cantora','filme','série','bbb','futebol',\n    'meme','tiktok','gadget','smartphone'\n  ],\n  brasil: [\n    'brasil','receita federal','carf','stf','stj',\n    'sefaz','pgfn','procuradoria da fazenda nacional',\n    'governo federal','congresso','câmara','senado'\n  ],\n  contextoEco: [\n    'tributação','carga tributária empresarial','arrecadação','orçamento',\n    'déficit fiscal','responsabilidade fiscal','economia','pib',\n    'reforma','política fiscal','isenção','renúncia fiscal',\n    'impacto tributário nos negócios','regime tributário empresas'\n  ],\n  pf: [ // lista para penalizar notícias de PF\n    'irpf','iptu','ipva','pessoa física',\n    'imposto de renda pessoa física','cpf','mei'\n  ]\n};\n\n// === Funções auxiliares ===\nconst norm = (s='') =>\n  String(s).toLowerCase()\n    .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')\n    .replace(/https?:\\/\\/\\S+/g,' ')\n    .replace(/[^\\p{L}\\p{N}\\s]/gu,' ')\n    .replace(/\\s+/g,' ')\n    .trim();\n\nconst tokens = s => new Set(norm(s).split(' ').filter(t => t.length > 2));\n\nconst tokenSimilarity = (a,b) => {\n  const A = tokens(a), B = tokens(b);\n  const inter = [...A].filter(t => B.has(t)).length;\n  return inter / (Math.max(A.size, B.size) || 1);\n};\n\nconst hasAny = (text, list) => {\n  const t = norm(text);\n  return list.some(k => t.includes(norm(k)));\n};\n\nconst hoursSince = (d) => {\n  if (!d) return 1e9;\n  const ts = new Date(d).getTime();\n  return isNaN(ts) ? 1e9 : (Date.now() - ts) / 36e5;\n};\n\nconst recencyMultiplier = (h) => {\n  const lambda = Math.log(2) / DECAY_HALF_LIFE_H;\n  return Math.exp(-lambda * h);\n};\n\nconst scoreItem = (j) => {\n  const title = j.title || '';\n  const body = j['content:encoded'] || j.content || '';\n  const snippet = j.contentSnippet || '';\n  const cats = Array.isArray(j.categories)\n    ? j.categories.map(c => typeof c === 'string' ? c : JSON.stringify(c)).join(' ')\n    : (typeof j.categories === 'string' ? j.categories : '');\n  const text = `${title} ${snippet} ${body} ${cats}`;\n\n  let score = 0;\n  const forte = hasAny(text, KW.forte);\n  const contexto = hasAny(text, KW.contextoEco);\n\n  if (forte) score += 40;\n  if (hasAny(text, KW.medio)) score += 20;\n  if (hasAny(text, KW.brasil)) score += 10;\n  if (hasAny(text, KW.fracos)) score -= 50;\n  if (hasAny(text, KW.pf)) score -= 40; // penaliza PF\n\n  if (forte && contexto) score += 30;\n\n  const hasNumber = /\\b\\d+([.,]\\d+)?\\b/.test(text);\n  const hasPercent = /%\\b/.test(text);\n  if (contexto && hasPercent) score += 15;\n  else if (contexto && hasNumber) score += 5;\n\n  score *= recencyMultiplier(hoursSince(j.isoDate || j.pubDate));\n  return Math.max(0, Math.min(100, Math.round(score)));\n};\n\n// === Pipeline ===\nconst seenTitles = [];\nconst scoredItems = [];\n\nfor (const item of items) {\n  const j = { ...item.json };\n  // 🚀 REGRA PRIORITÁRIA: se for do blog BMS, aprova direto\n  const isBMS = (j.link || '').includes('bmsprojetos.com');\n\n  if (isBMS) {\n    seenTitles.push(j.title || '');\n    scoredItems.push({ json: j, _score: 999 }); // score alto só pra ordenar no topo\n    continue;\n  }\n  \n  const s = scoreItem(j);\n  \n  let dup = false;\n  for (const prevTitle of seenTitles) {\n    if (tokenSimilarity(prevTitle, j.title || '') >= DEDUPE_SIMILARITY) {\n      dup = true; break;\n    }\n  }\n  if (dup) continue;\n\n  if (s >= THRESHOLD) {\n    seenTitles.push(j.title || '');\n    if (KEEP_SCORE_IN_OUTPUT) j._score = s;\n    scoredItems.push({ json: j, _score: s });\n  }\n}\n\nscoredItems.sort((a,b) => b._score - a._score);\nreturn scoredItems.slice(0, MAX_ITENS).map(i => ({ json: i.json }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -3750,28 +3765,6 @@
   },
   "meta": {
     "templateCredsSetupCompleted": true
-  },
-  "pinData": {
-    "Schedule Trigger": [
-      {
-        "json": {
-          "timestamp": "2026-03-31T09:30:25.013-03:00",
-          "Readable date": "March 31st 2026, 9:30:25 am",
-          "Readable time": "9:30:25 am",
-          "Day of week": "Tuesday",
-          "Year": "2026",
-          "Month": "March",
-          "Day of month": "31",
-          "Hour": "09",
-          "Minute": "30",
-          "Second": "25",
-          "Timezone": "America/Sao_Paulo (UTC-03:00)"
-        },
-        "pairedItem": {
-          "item": 0
-        }
-      }
-    ]
   },
   "versionId": "6dd522b9-9ca0-4664-8c22-0f7a9189f2ca",
   "activeVersionId": "6dd522b9-9ca0-4664-8c22-0f7a9189f2ca",
@@ -5096,6 +5089,9 @@
         "id": "2ccf5af4-4a3d-4400-91c5-4f7c6bddbd07",
         "name": "Pega status do cliente",
         "executeOnce": true,
+        "credentials": {
+          "googleSheetsOAuth2Api": "***REMOVIDO***"
+        },
         "onError": "continueRegularOutput"
       },
       {
@@ -5601,7 +5597,10 @@
           3200
         ],
         "id": "74dc1658-0595-4eea-a24e-7c209874d2ea",
-        "name": "Salva dados na planilha"
+        "name": "Salva dados na planilha",
+        "credentials": {
+          "googleSheetsOAuth2Api": "***REMOVIDO***"
+        }
       },
       {
         "parameters": {
@@ -6018,7 +6017,10 @@
           3200
         ],
         "id": "eaaa8abb-04e9-4cff-9cc0-a4aec56bb0a5",
-        "name": "Atualiza status e atribui nota"
+        "name": "Atualiza status e atribui nota",
+        "credentials": {
+          "googleSheetsOAuth2Api": "***REMOVIDO***"
+        }
       },
       {
         "parameters": {
@@ -6276,7 +6278,10 @@
         "id": "8575f233-4f73-4c8f-9821-3ada0147afb2",
         "name": "Pega dados fixos do cliente",
         "alwaysOutputData": true,
-        "executeOnce": true
+        "executeOnce": true,
+        "credentials": {
+          "googleSheetsOAuth2Api": "***REMOVIDO***"
+        }
       },
       {
         "parameters": {
@@ -6357,7 +6362,10 @@
         ],
         "id": "5f41d31e-6fd1-4be5-9500-990e5ef5d41e",
         "name": "Info dos posts agendados",
-        "executeOnce": true
+        "executeOnce": true,
+        "credentials": {
+          "googleSheetsOAuth2Api": "***REMOVIDO***"
+        }
       },
       {
         "parameters": {
@@ -6463,7 +6471,7 @@
       },
       {
         "parameters": {
-          "jsCode": "***REDACTED***"
+          "jsCode": "// === Parâmetros ===\nconst THRESHOLD = 50;           // mínimo para aprovar\nconst MAX_ITENS = 30;           // máximo a retornar\nconst DECAY_HALF_LIFE_H = 48;   // meia-vida da recência (horas)\nconst DEDUPE_SIMILARITY = 0.85; // similaridade p/ dedupe (0..1)\nconst KEEP_SCORE_IN_OUTPUT = false; // true só p/ debug\n\n// === Dicionários de relevância (tema tributário focado em empresas) ===\nconst KW = {\n  forte: [\n    // Básicos\n    'tributo','tributos','tributário','tributária','tributárias','tributários',\n    'imposto','impostos',\n\n    // Impostos específicos (PJ)\n    'icms','ipi','iss','irpj','csll','pis','cofins','iof','cide',\n\n    // Reforma e mudanças\n    'reforma tributária','sistema tributário','código tributário','ctn',\n\n    // Fisco e fiscalização\n    'fisco','arrecadação','fiscalização','autuação','execução fiscal',\n    'notificação fiscal','cobrança tributária',\n\n    // Planejamento e elisão\n    'planejamento tributário','elisão fiscal','evasão fiscal','sonegação',\n\n    // Incentivos e créditos\n    'incentivo fiscal','incentivos fiscais','benefício fiscal','benefícios fiscais',\n    'crédito tributário','compensação tributária','recuperação de crédito',\n\n    // Órgãos e julgamentos\n    'carf','stf','stj','receita federal','sefaz','pgfn',\n\n    // Regimes e enquadramentos\n    'simples nacional','lucro presumido','lucro real','lucro arbitrado',\n\n    // Obrigações acessórias\n    'sped','efd','ecf','dctf','dirf','perdcomp','nf-e','nota fiscal',\n    'obrigações acessórias','bloco k'\n  ],\n  medio: [\n    'contabilidade','contador','auditoria','compliance',\n    'fraude fiscal','due diligence','jurisprudência','acórdão',\n    'consulta tributária','instrução normativa','solução de consulta'\n  ],\n  fracos: [\n    'jogos','game','celebridade','famoso','esporte','entretenimento',\n    'show','cantor','cantora','filme','série','bbb','futebol',\n    'meme','tiktok','gadget','smartphone'\n  ],\n  brasil: [\n    'brasil','receita federal','carf','stf','stj',\n    'sefaz','pgfn','procuradoria da fazenda nacional',\n    'governo federal','congresso','câmara','senado'\n  ],\n  contextoEco: [\n    'tributação','carga tributária empresarial','arrecadação','orçamento',\n    'déficit fiscal','responsabilidade fiscal','economia','pib',\n    'reforma','política fiscal','isenção','renúncia fiscal',\n    'impacto tributário nos negócios','regime tributário empresas'\n  ],\n  pf: [ // lista para penalizar notícias de PF\n    'irpf','iptu','ipva','pessoa física',\n    'imposto de renda pessoa física','cpf','mei'\n  ]\n};\n\n// === Funções auxiliares ===\nconst norm = (s='') =>\n  String(s).toLowerCase()\n    .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')\n    .replace(/https?:\\/\\/\\S+/g,' ')\n    .replace(/[^\\p{L}\\p{N}\\s]/gu,' ')\n    .replace(/\\s+/g,' ')\n    .trim();\n\nconst tokens = s => new Set(norm(s).split(' ').filter(t => t.length > 2));\n\nconst tokenSimilarity = (a,b) => {\n  const A = tokens(a), B = tokens(b);\n  const inter = [...A].filter(t => B.has(t)).length;\n  return inter / (Math.max(A.size, B.size) || 1);\n};\n\nconst hasAny = (text, list) => {\n  const t = norm(text);\n  return list.some(k => t.includes(norm(k)));\n};\n\nconst hoursSince = (d) => {\n  if (!d) return 1e9;\n  const ts = new Date(d).getTime();\n  return isNaN(ts) ? 1e9 : (Date.now() - ts) / 36e5;\n};\n\nconst recencyMultiplier = (h) => {\n  const lambda = Math.log(2) / DECAY_HALF_LIFE_H;\n  return Math.exp(-lambda * h);\n};\n\nconst scoreItem = (j) => {\n  const title = j.title || '';\n  const body = j['content:encoded'] || j.content || '';\n  const snippet = j.contentSnippet || '';\n  const cats = Array.isArray(j.categories)\n    ? j.categories.map(c => typeof c === 'string' ? c : JSON.stringify(c)).join(' ')\n    : (typeof j.categories === 'string' ? j.categories : '');\n  const text = `${title} ${snippet} ${body} ${cats}`;\n\n  let score = 0;\n  const forte = hasAny(text, KW.forte);\n  const contexto = hasAny(text, KW.contextoEco);\n\n  if (forte) score += 40;\n  if (hasAny(text, KW.medio)) score += 20;\n  if (hasAny(text, KW.brasil)) score += 10;\n  if (hasAny(text, KW.fracos)) score -= 50;\n  if (hasAny(text, KW.pf)) score -= 40; // penaliza PF\n\n  if (forte && contexto) score += 30;\n\n  const hasNumber = /\\b\\d+([.,]\\d+)?\\b/.test(text);\n  const hasPercent = /%\\b/.test(text);\n  if (contexto && hasPercent) score += 15;\n  else if (contexto && hasNumber) score += 5;\n\n  score *= recencyMultiplier(hoursSince(j.isoDate || j.pubDate));\n  return Math.max(0, Math.min(100, Math.round(score)));\n};\n\n// === Pipeline ===\nconst seenTitles = [];\nconst scoredItems = [];\n\nfor (const item of items) {\n  const j = { ...item.json };\n  // 🚀 REGRA PRIORITÁRIA: se for do blog BMS, aprova direto\n  const isBMS = (j.link || '').includes('bmsprojetos.com');\n\n  if (isBMS) {\n    seenTitles.push(j.title || '');\n    scoredItems.push({ json: j, _score: 999 }); // score alto só pra ordenar no topo\n    continue;\n  }\n  \n  const s = scoreItem(j);\n  \n  let dup = false;\n  for (const prevTitle of seenTitles) {\n    if (tokenSimilarity(prevTitle, j.title || '') >= DEDUPE_SIMILARITY) {\n      dup = true; break;\n    }\n  }\n  if (dup) continue;\n\n  if (s >= THRESHOLD) {\n    seenTitles.push(j.title || '');\n    if (KEEP_SCORE_IN_OUTPUT) j._score = s;\n    scoredItems.push({ json: j, _score: s });\n  }\n}\n\nscoredItems.sort((a,b) => b._score - a._score);\nreturn scoredItems.slice(0, MAX_ITENS).map(i => ({ json: i.json }));"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -7517,7 +7525,7 @@
         ]
       }
     },
-    "authors": "Lucas Andrade",
+    "authors": "***REMOVIDO***",
     "name": null,
     "description": null
   },
