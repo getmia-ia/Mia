@@ -1,0 +1,914 @@
+{
+  "updatedAt": "2026-03-27T18:37:58.072Z",
+  "createdAt": "2025-12-04T22:04:34.947Z",
+  "id": "DSkNwJNvjurtVRWM",
+  "name": "EMI - 3.12 - SDR Luana IA - Cobrança de pagamento",
+  "active": false,
+  "isArchived": true,
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "finamob-historico_mensagens",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $json.telefone }}"
+            },
+            {
+              "keyName": "nome_app",
+              "condition": "eq",
+              "keyValue": "SDR-LUANA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -2432,
+        304
+      ],
+      "id": "3de687e9-13d0-49f4-b460-d57ddfb1c874",
+      "name": "Pega histórico de mensagens",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ordena as mensagens pela data\nitems.sort((a, b) =>\n  new Date(a.json.created_at).getTime() - new Date(b.json.created_at).getTime()\n);\n\nfunction formatarData(isoDate) {\n  const d = new Date(isoDate);\n  const dia = String(d.getDate()).padStart(2, \"0\");\n  const mes = String(d.getMonth() + 1).padStart(2, \"0\");\n  const ano = d.getFullYear();\n  return `${dia}/${mes}/${ano}`;\n}\n\nconst historico = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const data = formatarData(row.created_at);\n\n  if (row.mensagem_usuario?.trim()) {\n    historico.push({\n      autor: \"Usuário\",\n      mensagem: row.mensagem_usuario.trim(),\n      data\n    });\n  }\n\n  if (row.mensagem_agente?.trim()) {\n    historico.push({\n      autor: \"Agente\",\n      mensagem: row.mensagem_agente.trim(),\n      data\n    });\n  }\n}\n\n// =====================================================\n// NOVO TRECHO → Conta mensagens seguidas do agente\n// =====================================================\nlet qtd_mensagens_sem_resposta = 0;\n\nfor (let i = historico.length - 1; i >= 0; i--) {\n  if (historico[i].autor === \"Agente\") {\n    qtd_mensagens_sem_resposta++;\n  } else {\n    break; // usuário falou → reset\n  }\n}\n// =====================================================\n\nreturn [\n  {\n    json: {\n      historico_conversa: historico,\n      qtd_mensagens_sem_resposta\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2208,
+        304
+      ],
+      "id": "f590dfb6-39e7-4c8e-972d-c2139e9f7aee",
+      "name": "Formata histórico de mensagens"
+    },
+    {
+      "parameters": {
+        "tableId": "finamob-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_usuario",
+              "fieldValue": "="
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Estruturação do JSON de saída').item.json.mensagem_template }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Preparar campos do lead').item.json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Preparar campos do lead').item.json.name }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-LUANA"
+            },
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Pega histórico de mensagens').first().json.id_usuario }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        992,
+        592
+      ],
+      "id": "63c94df2-8a58-4499-b3f7-f0852aac8e4d",
+      "name": "Cria Mensagem no Supabase",
+      "onError": "continueRegularOutput",
+      "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=120363421884092746@g.us",
+        "messageText": "=Erro ao realizar Follow up com {{ $('Estruturação do JSON de saída').item.json.var_1 }}\n\n{{ $('Preparar campos do lead').item.json.url }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        512
+      ],
+      "id": "3218616c-664f-47e7-a833-aec82ee317da",
+      "name": "Aviso de erro ao disparar mensagem1",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -1472,
+        288
+      ],
+      "id": "0b9f660b-25d2-4f67-9891-d977e2e10365",
+      "name": "OpenRouter Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  let raw = item.json.output || \"\";\n  let cleaned = raw;\n\n  // 1. Remove blocos de código tipo ```json ... ```\n  cleaned = cleaned.replace(/```json/gi, \"\");\n  cleaned = cleaned.replace(/```/g, \"\");\n  cleaned = cleaned.trim();\n\n  let respostaIA = {};\n\n  // 2. Parse seguro\n  try {\n    respostaIA = JSON.parse(cleaned);\n  } catch (e) {\n    respostaIA = {\n      template: \"erro\",\n      var_1: item.json.name || \"\",\n      telefone: item.json.telefone || \"\",\n    };\n  }\n\n  // 3. Mapa de templates oficiais (Cobrança — IA Luana)\n  const templates = {\n    lembrar_pagamento_amigavel:\n      \"Oi *{{1}}*! Vi aqui que a inscrição não rodou. O link não abriu ou foi só correria aí mesmo?\",\n\n    reforco_pagamento_duvida:\n      \"Tudo bem, *{{1}}*? Vi que sua inscrição ainda não foi confirmada. Ficou alguma dúvida?\",\n\n    acompanhamento_processo:\n      \"Opa *{{1}}*. Tô de olho aqui e vi que parou na etapa final. Falta alguma informação pra fechar ou tá tranquilo?\",\n\n    reforco_valor_investimento:\n      \"Fala *{{1}}*! Só pra não deixar passar esse conteúdo muda o jogo, não queria que você perdesse. Bora garantir?\",\n\n    gentle_followup_pagamento:\n      \"Oi *{{1}}*! A sua inscrição ainda tá em aberto aqui. Se tiver alguma dúvida ou dificuldade, me chama que a gente resolve rápido.\",\n\n    reforco_presenca_turma:\n      \"Olá *{{1}}*! \\n\\n A turma tá quase fechada e senti sua falta na lista. Posso te ajudar com algum detalhe pra você não ficar de fora?\",\n\n    reforco_continuidade:\n      \"E aí *{{1}}*! Bora finalizar essa inscrição? \\n\\n Falta só a confirmação do pagamento pra você entrar na turma.\",\n\n    urgencia_suave_vaga:\n      \"Tudo certo, *{{1}}*? Tô segurando sua vaga, mas as inscrições continuam rodando. Quer ajuda pra fechar logo?\",\n\n    reforco_final_amigavel:\n      \"Oi *{{1}}*. Não quero ser chata, rsrs. É só pra você não perder o prazo mesmo. Tá dando certo para finalizar a inscrição?\",\n\n    ultimo_followup_pagamento:\n      \"Oi *{{1}}*. Conseguiu finalizar sua inscrição? Se tiver desistido, me avisa que eu libero a vaga pra fila de espera, sem problemas.\",\n\n    despedida_encerramento_pagamento:\n      \"Oi *{{1}}*. Como não tive retorno, vou encerrar por aqui pra não te incomodar. Se quiser voltar depois, é só chamar!\"\n  };\n\n  // 4. Seleciona template e faz substituição das variáveis\n  const templateName = respostaIA.template;\n  const textoTemplate = templates[templateName] || \"Template não encontrado.\";\n\n  const mensagemFinal = textoTemplate\n    .replace(\"{{1}}\", respostaIA.var_1 || \"\");\n\n  // 5. Retorno final do node\n  return {\n    json: {\n      ...respostaIA,\n      mensagem_template: mensagemFinal,\n    },\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1088,
+        240
+      ],
+      "id": "41231c3c-5485-43a5-8b63-b4f0fe878082",
+      "name": "Estruturação do JSON de saída",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "databaseId": {
+          "__rl": true,
+          "value": "287c103b-58ba-8057-bd3f-e2b83606d543",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://www.notion.so/287c103b58ba8057bd3fe2b83606d543"
+        },
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Etapa|status",
+              "condition": "equals",
+              "statusValue": "Aguardando pagamento"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        -3136,
+        96
+      ],
+      "id": "47c7f637-e98b-4ef9-9bf0-e464cd4d4343",
+      "name": "Pega os leads do Notion"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "de3f2786-345e-401b-a958-6adb5d1ccf09",
+              "leftValue": "={{ $('Estruturação do JSON de saída').first().json.template }}",
+              "rightValue": "despedida_encerramento_pagamento",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -96,
+        224
+      ],
+      "id": "dc61131c-c4ff-4605-928b-4803e205aceb",
+      "name": "Verifica se foi mensagem de despedida"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=5511992486507",
+        "messageText": "=Follow up realizado com {{ $('Estruturação do JSON de saída').item.json.var_1 }}\n\n{{ $('Preparar campos do lead').item.json.url }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        656,
+        240
+      ],
+      "id": "10528d92-5d30-40bd-9307-b1968c30ab08",
+      "name": "Confirmação FLU Contato1",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const templates = {\n  lembrar_pagamento_amigavel:\n    \"Oi *{{1}}*! Tudo bem?  \\n\\nNotei que sua inscrição ainda está pendente e quis confirmar se deu tudo certo por aí. \\nSe precisar de alguma ajuda pra concluir, posso te orientar rapidinho!\",\n\n  reforco_pagamento_duvida:\n    \"Oi *{{1}}*! Tudo tranquilo? \\n\\nPassando só pra lembrar da sua inscrição — às vezes o processo pode travar em algum detalhe, e posso te ajudar a resolver agora mesmo se quiser.\",\n\n  acompanhamento_processo:\n    \"Opa *{{1}}*, tudo bem? \\n\\nTô acompanhando seu cadastro e vi que o pagamento ainda não foi finalizado. \\nTá tudo certo com o processo ou quer que eu te ajude a revisar juntos?\",\n\n  reforco_valor_investimento:\n    \"Oi *{{1}}*! Tudo bem? \\n\\nA sua inscrição garante acesso a um conteúdo que realmente faz diferença pra quem quer crescer no mercado. \\nSe quiser, posso te ajudar a finalizar tudo hoje pra garantir sua vaga com tranquilidade\",\n\n  gentle_followup_pagamento:\n    \"Oi *{{1}}*! Tudo bem? \\n\\nSó passando pra lembrar que sua inscrição ainda está em aberto. \\nSe precisar de ajuda pra concluir, me chama aqui — é rapidinho de resolver\",\n\n  reforco_presenca_turma:\n    \"Olá *{{1}}*, tudo bem? \\n\\nA turma está se organizando e percebi que o seu pagamento ainda não foi confirmado. \\nPosso te ajudar pra que consiga garantir sua vaga junto com o grupo?\",\n\n  reforco_continuidade:\n    \"Oi *{{1}}*! Tudo bem? \\n\\nSó passando pra lembrar de concluir o pagamento da sua inscrição. \\nAssim você já garante o acesso completo ao conteúdo e não perde o início das aulas!\",\n\n  urgencia_suave_vaga:\n    \"Oi *{{1}}*, tudo certo? \\n\\nAs vagas estão quase encerrando e ainda não identificamos seu pagamento. \\nSe quiser, posso te ajudar agora mesmo pra garantir que tudo fique certinho.\",\n\n  reforco_final_amigavel:\n    \"Oi *{{1}}*! Tudo bem? \\n\\nVi que sua inscrição continua pendente e quis reforçar pra não deixar passar o prazo. \\nQualquer detalhe que eu possa te ajudar a ajustar, é só me chamar\",\n\n  ultimo_followup_pagamento:\n    \"Oi *{{1}}*! Tudo bem? \\n\\nPassando pra confirmar se conseguiu concluir o pagamento da inscrição. \\nTô por aqui pra te ajudar com o que for preciso pra finalizar tudo direitinho\",\n\n  despedida_encerramento_pagamento:\n    \"Oi *{{1}}*, tudo bem? \\n\\nComo não tivemos retorno nas últimas mensagens, vou encerrar nosso acompanhamento por aqui, combinado? \\nSe precisar de ajuda mais pra frente, estarei por aqui pra te apoiar\"\n};\n\n// --- PROCESSADOR ---\nconst entrada = items[0].json;\nconst textoTemplate = templates[entrada.template];\n\nif (!textoTemplate) {\n  return [{ json: { erro: \"Template não encontrado\" } }];\n}\n\nconst possuiVar1 = textoTemplate.includes(\"{{1}}\");\n\n// monta estrutura da API do WhatsApp\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: String(entrada.telefone),\n  type: \"template\",\n  template: {\n    name: entrada.template,\n    language: { code: \"pt_BR\" }\n  }\n};\n\nif (possuiVar1) {\n  body.template.components = [\n    {\n      type: \"body\",\n      parameters: [\n        { type: \"text\", text: entrada.var_1 }\n      ]\n    }\n  ];\n}\n\n// RETORNO NO FORMATO EXATO QUE VOCÊ QUER\nreturn [\n  {\n    json: {\n      resultado: body\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        240
+      ],
+      "id": "3e0aa57d-3fa9-4872-8443-979b9e6dd6e2",
+      "name": "Montar o body da requisição"
+    },
+    {
+      "parameters": {
+        "batchSize": "=1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -2880,
+        96
+      ],
+      "id": "ef7e9b20-c9fd-4a99-b352-3211a179bc82",
+      "name": "Iterar sobre cada lead"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "940b2951-9c80-4163-ad9f-fd5296a59997",
+              "name": "database_page",
+              "value": "={{ $('Pega os leads do Notion').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "5b6ca92b-2cff-4c1f-ade0-9a600c0fc251",
+              "name": "name",
+              "value": "={{ $json.name.split(' ')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "cfcf4634-e2fa-48a3-8824-e01715f5648e",
+              "name": "etapa",
+              "value": "={{ $json.property_etapa }}",
+              "type": "string"
+            },
+            {
+              "id": "901826dc-2d94-4924-b751-d89417652c38",
+              "name": "telefone",
+              "value": "={{ $json.property_contato }}",
+              "type": "string"
+            },
+            {
+              "id": "9cfacdf3-f4b4-4fe4-b03b-a73ec3e9f07c",
+              "name": "var_1",
+              "value": "={{ $json.name.split(' ')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "f32aea89-3a65-4736-a10f-12e4f7cafb8b",
+              "name": "var_2",
+              "value": "={{(() => {\n  const data = new Date($json.property_data_de_reuni_o.start);\n  const dia = String(data.getDate()).padStart(2, '0');\n  const mes = String(data.getMonth() + 1).padStart(2, '0');\n  const ano = data.getFullYear();\n  const hora = String(data.getHours()).padStart(2, '0');\n  const minuto = String(data.getMinutes()).padStart(2, '0');\n  return `${dia}/${mes}/${ano} ${hora}:${minuto}`;\n})()}}",
+              "type": "string"
+            },
+            {
+              "id": "1cc3014b-f284-429a-aa2e-9ecb0c55daec",
+              "name": "url",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2640,
+        112
+      ],
+      "id": "ada5c63a-8cdb-4054-9d9e-100a774d83d2",
+      "name": "Preparar campos do lead"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1968,
+        128
+      ],
+      "id": "a6506553-7ad5-4188-b062-b121d6714f76",
+      "name": "Combinar dados do lead + histórico"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=### Dia Atual: {{ $now.weekdayLong }},{{ $now.format('dd/MM/yyyy') }},{{ $now.hour.toString().padStart(2,'0') }}:{{ $now.minute.toString().padStart(2,'0') }}\n\nVocê é a **Luana**, responsável pelo comercial da Escola do Mercado Imobiliário.\nA partir de agora, **você NÃO escreve mensagens livres**.\nSeu trabalho é **analisar o histórico de conversa do lead e selecionar QUAL template oficial do WhatsApp deve ser usado**, conforme as regras abaixo.\n\nSeu trabalho é:\nAnalisar o histórico de conversa.\nIdentificar qual mensagem se aplica, o contexto atual da conversa:\nDetectar quais templates já foram enviados antes pelo histórico.\nEscolher um template apropriado que AINDA NÃO FOI USADO.\nSe todos os templates já foram usados, escolha o menos recentemente usado.\n\nAs mensagens correspondentes a cada template são:\n\n- lembrar_pagamento_amigavel:\n\"Oi *{{ $json.name }}*! Vi aqui que a inscrição não rodou. O link não abriu ou foi só correria aí mesmo?\"\n\n- reforco_pagamento_duvida:\n\"Oi {{ $json.name }}!\nTudo tranquilo?\nPassando só pra lembrar da sua inscrição — às vezes o processo pode travar em algum detalhe, e posso te ajudar a resolver agora mesmo se quiser.\"\n\n- acompanhamento_processo:\n\"Opa *{{ $json.name }}*. Tô de olho aqui e vi que parou na etapa final. Falta alguma informação pra fechar ou tá tranquilo?\"\n\n- reforco_valor_investimento:\n\"Fala *{{ $json.name }}*! Só pra não deixar passar esse conteúdo muda o jogo, não queria que você perdesse. Bora garantir?\"\n\n- gentle_followup_pagamento:\n\"Oi *{{ $json.name }}*! A sua inscrição ainda tá em aberto aqui. Se tiver alguma dúvida ou dificuldade, me chama que a gente resolve rápido.\"\n\n- reforco_presenca_turma:\n\"Olá *{{ $json.name }}*! \\n\\n A turma tá quase fechada e senti sua falta na lista. Posso te ajudar com algum detalhe pra você não ficar de fora?\"\n\n- reforco_continuidade:\n\"E aí *{{ $json.name }}*! Bora finalizar essa inscrição? \\n\\n Falta só a confirmação do pagamento pra você entrar na turma.\"\n\n- urgencia_suave_vaga:\n\"Tudo certo, *{{ $json.name }}*? Tô segurando sua vaga, mas as inscrições continuam rodando. Quer ajuda pra fechar logo?\"\n\n- reforco_final_amigavel:\n\"Oi *{{ $json.name }}*. Não quero ser chata, rsrs. É só pra você não perder o prazo mesmo. Tá dando certo para finalizar a inscrição?\"\n\n- ultimo_followup_pagamento:\n\"Oi *{{ $json.name }}*. Conseguiu finalizar sua inscrição? Se tiver desistido, me avisa que eu libero a vaga pra fila de espera, sem problemas.\"\n\n- despedida_encerramento_pagamento:\n\"Oi *{{ $json.name }}*. Como não tive retorno, vou encerrar por aqui pra não te incomodar. Se quiser voltar depois, é só chamar!\"\n\n---\n\n## DADOS RECEBIDOS\n\n- Nome do lead: {{ $json.name }}\n- Histórico completo:\n{{ JSON.stringify($json.historico_conversa, null, 2) }}\n\nRetorne apenas um JSON indicando **qual template usar** e confirmando a variável 1 (nome).\n\n---\n\n# 🧠 **REGRAS DE DECISÃO PARA ESCOLHER O TEMPLATE**\n\nVocê deve:\n\n- Verificar quais templates já foram enviados antes no Histórico completo.\n- Escolher um template apropriado que ainda não foi usado.\n- Tente seguir a ordem abaixo dos templates, voce tem a liberdade de alterar a ordem caso entenda Histórico completo de mensagens que outro template de mensagem seria melhor:\n\n1 - lembrar_pagamento_amigavel\n2 - reforco_pagamento_duvida \n3 - acompanhamento_processo\n4 - reforco_valor_investimento\n5 - gentil_followup_pagamento\n6 - reforco_presenca_turma\n7 - reforco_continuidade\n8 - urgencia_suave_vaga\n9 - reforco_final_amigavel\n10 - ultimo_followup_pagamento\n11 - despedida_encerramento_pagamento\n\n- Se todos já foram usados, escolher o menos recentemente usado (OBRIGATÓRIO).\n\n# Regra de Anti-Repetição (OBRIGATÓRIA)\n\nVocê DEVE:\n✔ Procurar no histórico se algum dos templates abaixo já foi enviado:\nlembrar_pagamento_amigavel\nreforco_pagamento_duvida\nacompanhamento_processo\nreforco_valor_investimento\ngentil_followup_pagamento\nreforco_presenca_turma\nreforco_continuidade\nurgencia_suave_vaga\nreforco_final_amigavel\nultimo_followup_pagamento\ndespedida_encerramento_pagamento\n\nNão escolher nenhum template já presente no histórico.\nSe todos os templates já foram usados:\nEscolha o menos recentemente utilizado dentro do grupo.\n\n\nFORMATO DE RESPOSTA OBRIGATÓRIO (JSON)\n\nRetorne apenas:\n\n{\n  \"template\": \"<nome_do_template_escolhido>\",\n  \"var_1\": \"{{ $json.name }}\",\n  \"telefone\": \"{{ $json.telefone }}\"\n}\n\n\n- Nenhum texto fora do JSON.\n- Nenhuma explicação.\n- Nenhuma mensagem criada.\n\n\nIMPORTANTE\n\n- Não criar mensagens novas.\n- Não reescrever textos dos templates.\n- Apenas escolher qual template existente deve ser usado conforme as regras.\n- Sempre verificar repetição e contexto antes de decidir.\n",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        -1472,
+        448
+      ],
+      "id": "08acbeae-14ff-4176-99b5-dfd5af0559f2",
+      "name": "Agente IA - Luana"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/869722152886578/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.resultado }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -640,
+        240
+      ],
+      "id": "b8be8fe8-e5e2-4c52-9168-4a667361d96c",
+      "name": "Enviar mensagem no WhatsApp",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b5296455-2292-4b5d-8e75-0b156471af30",
+              "leftValue": "={{ $json.messages[0].message_status }}",
+              "rightValue": "accepted",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -384,
+        240
+      ],
+      "id": "5ff2b544-75ea-4576-b20e-49fb6cff9732",
+      "name": "Verificar status do envio"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "databaseId": {
+          "__rl": true,
+          "value": "287c103b-58ba-8057-bd3f-e2b83606d543",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://www.notion.so/287c103b58ba8057bd3fe2b83606d543"
+        },
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Contato|phone_number",
+              "condition": "equals",
+              "phoneNumberValue": "={{ $('Preparar campos do lead').item.json.telefone }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        176,
+        -32
+      ],
+      "id": "d616bcef-119e-4a46-ba2b-8d53fd7535cb",
+      "name": "Localizar lead no Notion",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Etapa|status",
+              "statusValue": "Geladeira"
+            },
+            {
+              "key": "Motivo da perda|rich_text",
+              "textContent": "=Não conseguimos contato com o lead após mais do que 10 tentativas."
+            },
+            {
+              "key": "Ult. Atividade|date",
+              "date": "={{ $now }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        416,
+        -32
+      ],
+      "id": "21a7143a-3ae8-4837-ad74-bb1c42bc288e",
+      "name": "Atualizar status do lead",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "23ceaea6-4771-4623-a00f-a1bc01d0ad11",
+              "leftValue": "={{ $json.qtd_mensagens_sem_resposta }}",
+              "rightValue": 10,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1760,
+        128
+      ],
+      "id": "3e0ea58d-b881-49cf-a5aa-427dd67a6309",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=5511992486507",
+        "messageText": "=Despedida de aguardando pagamento realizada com {{ $('Estruturação do JSON de saída').item.json.var_1 }}\n\n{{ $('Preparar campos do lead').item.json.url }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        656,
+        -32
+      ],
+      "id": "9902d0a4-558b-4a47-8d94-fb1c6b63789b",
+      "name": "Confirmação FLU Contato",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Cobrança de pagamento",
+        "height": 1008,
+        "width": 4576
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -3408,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "fbbe4a3f-65a3-4af4-81a4-6de3401c9093",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "jsCode": "const template = `{\n  \"template\": \"despedida_encerramento_pagamento\",\n  \"var_1\": \"${$json.name}\",\n  \"telefone\": \"${$json.telefone}\"\n}`;\n\nreturn [\n  {\n    json: {\n      output: template\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1408,
+        32
+      ],
+      "id": "517126a0-fff3-4cb7-95d6-1471b72eafd8",
+      "name": "Pegar template de despedida após 10 tentativas"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 11
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -3344,
+        96
+      ],
+      "id": "b8c025c2-3f05-444f-9119-9f579327d16d",
+      "name": "Disparo diário às 11h"
+    }
+  ],
+  "connections": {
+    "Pega histórico de mensagens": {
+      "main": [
+        [
+          {
+            "node": "Formata histórico de mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formata histórico de mensagens": {
+      "main": [
+        [
+          {
+            "node": "Combinar dados do lead + histórico",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase": {
+      "main": [
+        [
+          {
+            "node": "Iterar sobre cada lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aviso de erro ao disparar mensagem1": {
+      "main": [
+        [
+          {
+            "node": "Iterar sobre cada lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Iterar sobre cada lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente IA - Luana",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estruturação do JSON de saída": {
+      "main": [
+        [
+          {
+            "node": "Montar o body da requisição",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pega os leads do Notion": {
+      "main": [
+        [
+          {
+            "node": "Iterar sobre cada lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se foi mensagem de despedida": {
+      "main": [
+        [
+          {
+            "node": "Localizar lead no Notion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Confirmação FLU Contato1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmação FLU Contato1": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar o body da requisição": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagem no WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Iterar sobre cada lead": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar campos do lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar campos do lead": {
+      "main": [
+        [
+          {
+            "node": "Pega histórico de mensagens",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Combinar dados do lead + histórico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combinar dados do lead + histórico": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente IA - Luana": {
+      "main": [
+        [
+          {
+            "node": "Estruturação do JSON de saída",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagem no WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Verificar status do envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar status do envio": {
+      "main": [
+        [
+          {
+            "node": "Verifica se foi mensagem de despedida",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso de erro ao disparar mensagem1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Localizar lead no Notion": {
+      "main": [
+        [
+          {
+            "node": "Atualizar status do lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualizar status do lead": {
+      "main": [
+        [
+          {
+            "node": "Confirmação FLU Contato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Pegar template de despedida após 10 tentativas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Agente IA - Luana",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmação FLU Contato": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pegar template de despedida após 10 tentativas": {
+      "main": [
+        [
+          {
+            "node": "Estruturação do JSON de saída",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Disparo diário às 11h": {
+      "main": [
+        [
+          {
+            "node": "Pega os leads do Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": {
+    "node:Disparo diário às 9h": {
+      "recurrenceRules": []
+    },
+    "node:Disparo diário às 11h": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "pinData": {},
+  "versionId": "c8134625-c055-4edb-be38-8530a682804d",
+  "activeVersionId": null,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2025-12-04T22:04:34.947Z",
+      "createdAt": "2025-12-04T22:04:34.947Z",
+      "role": "workflow:owner",
+      "workflowId": "DSkNwJNvjurtVRWM",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
