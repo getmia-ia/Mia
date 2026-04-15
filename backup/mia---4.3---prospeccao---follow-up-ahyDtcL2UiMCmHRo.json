@@ -1,1 +1,1715 @@
-{"updatedAt":"2026-03-19T11:19:30.163Z","createdAt":"2026-03-12T14:44:26.158Z","id":"ahyDtcL2UiMCmHRo","name":"Mia - 4.3- Prospecção - Follow-up","active":true,"isArchived":false,"nodes":[{"parameters":{"batchSize":"=1","options":{}},"type":"n8n-nodes-base.splitInBatches","typeVersion":3,"position":[384,-16],"id":"91ce5d34-653d-4a51-889e-9bfb2d4eda12","name":"Iterar sobre cada lead"},{"parameters":{"operation":"getAll","tableId":"mia-historico_mensagens","returnAll":true,"matchType":"allFilters","filters":{"conditions":[{"keyName":"telefone","condition":"eq","keyValue":"={{ $json.telefone }}"},{"keyName":"nome_app","condition":"eq","keyValue":"SDR-MIA"}]}},"type":"n8n-nodes-base.supabase","typeVersion":1,"position":[848,192],"id":"182f1e7f-3cd2-4708-be42-f29e65921559","name":"Pega histórico de mensagens","alwaysOutputData":true,"credentials":{"supabaseApi":{"id":"FsQeUlxQ7Q6O8mbE","name":"MIA - Supabase"}}},{"parameters":{"jsCode":"// Ordena as mensagens pela data\nitems.sort((a, b) =>\n  new Date(a.json.created_at).getTime() - new Date(b.json.created_at).getTime()\n);\n\nfunction formatarData(isoDate) {\n  const d = new Date(isoDate);\n  const dia = String(d.getDate()).padStart(2, \"0\");\n  const mes = String(d.getMonth() + 1).padStart(2, \"0\");\n  const ano = d.getFullYear();\n  return `${dia}/${mes}/${ano}`;\n}\n\nconst historico = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const data = formatarData(row.created_at);\n\n  if (row.mensagem_usuario?.trim()) {\n    historico.push({\n      autor: \"Usuário\",\n      mensagem: row.mensagem_usuario.trim(),\n      data\n    });\n  }\n\n  if (row.mensagem_agente?.trim()) {\n    historico.push({\n      autor: \"Agente\",\n      mensagem: row.mensagem_agente.trim(),\n      data\n    });\n  }\n}\n\n// =====================================================\n// NOVO TRECHO → Conta mensagens seguidas do agente\n// =====================================================\nlet qtd_mensagens_sem_resposta = 0;\n\nfor (let i = historico.length - 1; i >= 0; i--) {\n  if (historico[i].autor === \"Agente\") {\n    qtd_mensagens_sem_resposta++;\n  } else {\n    break; // usuário falou → reset\n  }\n}\n// =====================================================\n\nreturn [\n  {\n    json: {\n      historico_conversa: historico,\n      qtd_mensagens_sem_resposta\n    }\n  }\n];\n"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[1072,192],"id":"6d935554-56fe-4246-be25-8d2e7b0687b7","name":"Formata histórico de mensagens"},{"parameters":{"assignments":{"assignments":[{"id":"5b6ca92b-2cff-4c1f-ade0-9a600c0fc251","name":"name","value":"={{ $json.contact_name }}","type":"string"},{"id":"32ac25b1-b347-4117-8a37-c680328b151b","name":"empresa","value":"={{ $json.name }}","type":"string"},{"id":"cfcf4634-e2fa-48a3-8824-e01715f5648e","name":"etapa","value":"={{ $json.current_stage }}","type":"string"},{"id":"901826dc-2d94-4924-b751-d89417652c38","name":"telefone","value":"={{ $json.telefone_normalizado }}","type":"string"},{"id":"9cfacdf3-f4b4-4fe4-b03b-a73ec3e9f07c","name":"var_1","value":"={{ $json.contact_name }}","type":"string"},{"id":"30d1a21e-7ea8-4748-a4d4-f50384f2ddc0","name":"email","value":"={{ $json.email }}","type":"string"}]},"options":{}},"type":"n8n-nodes-base.set","typeVersion":3.4,"position":[640,0],"id":"6bd61276-f213-4064-85d7-01ad700119b2","name":"Preparar campos do lead"},{"parameters":{"mode":"combine","combineBy":"combineByPosition","options":{}},"type":"n8n-nodes-base.merge","typeVersion":3.2,"position":[1312,16],"id":"ec079b50-2e47-485d-9ce6-e166dc1caa24","name":"Combinar dados do lead + histórico"},{"parameters":{"conditions":{"options":{"caseSensitive":true,"leftValue":"","typeValidation":"strict","version":2},"conditions":[{"id":"d7a9ce51-a1d8-43e5-b217-5b510b72b907","leftValue":"={{ $json.qtd_mensagens_sem_resposta }}","rightValue":7,"operator":{"type":"number","operation":"gte"}}],"combinator":"and"},"options":{}},"type":"n8n-nodes-base.if","typeVersion":2.2,"position":[1520,16],"id":"17d2f3cc-dfae-4496-afcc-6257f58f30ea","name":"If"},{"parameters":{"options":{}},"type":"@n8n/n8n-nodes-langchain.lmChatOpenRouter","typeVersion":1,"position":[1824,80],"id":"dff0b1aa-17cb-4ef0-a996-90df37b556fc","name":"OpenRouter Chat Model","credentials":{"openRouterApi":{"id":"UwoliaFEOcW8kEZD","name":"OpenRouter account"}}},{"parameters":{"jsCode":"return items.map(item => {\n  let raw = item.json.output || \"\";\n  let cleaned = raw;\n\n  cleaned = cleaned.replace(/```json/gi, \"\");\n  cleaned = cleaned.replace(/```/g, \"\");\n  cleaned = cleaned.trim();\n\n  let respostaIA = {};\n\n  try {\n    respostaIA = JSON.parse(cleaned);\n  } catch (e) {\n    respostaIA = {\n      template: \"erro\",\n      var_1: item.json.name || \"\",\n      telefone: item.json.telefone || \"\"\n    };\n  }\n\n  const templates = {\n    mia_followup_1:\n      \"Oii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊\",\n\n    mia_followup_2:\n      \"Tudo bem, {{1}}? Tem um minutinho? 😄\",\n\n    mia_followup_3:\n      \"Opa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?\",\n\n    mia_followup_4:\n      \"Oi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?\",\n\n    mia_followup_5:\n      \"Olá {{1}}, estou organizando a agenda do nosso time para os próximos dias e queria reservar um horário exclusivo pra você antes de fechar. São só 30 minutos, as empresas que passaram por essa conversa saíram com um plano claro de como usar IA dentro delas. Ainda faz sentido pra você?\",\n\n    mia_followup_6:\n      \"Fala {{1}}, me desculpa insistir, mas não quero que você perca essa janela! Muitas empresas já estão usando IA pra sair na frente. Posso te mostrar como em 30 minutos. Topa?\",\n\n    mia_followup_7:\n      \"Tudo certo, {{1}}? Conseguimos um tempinho para trocar uma ideia rápida sobre IA em sua empresa? É coisa rápida. 😊\",\n\n    mia_despedida_encerramento:\n      \"Oi {{1}}! Por aqui é a Mia, da M[IA]. Como não tive seu retorno, vou encerrar nossa conversa por agora. Se quiser explorar como IA pode transformar sua empresa no futuro, é só me chamar. 😊\"\n  };\n\n  const templateName = respostaIA.template;\n  const textoTemplate = templates[templateName] || \"Template não encontrado.\";\n\n  const mensagemFinal = textoTemplate\n    .replace(\"{{1}}\", respostaIA.var_1 || \"\");\n\n  return {\n    json: {\n      ...respostaIA,\n      mensagem_template: mensagemFinal\n    }\n  };\n});"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[2224,32],"id":"7da8f556-2f73-485a-adc4-f79670ef94cc","name":"Estruturação do JSON de saída"},{"parameters":{"jsCode":"const entrada = $items(\"Estruturação do JSON de saída\")[0].json;\n\nif (!entrada.template || entrada.template === \"pausar\" || entrada.template === \"erro\") {\n  return [{ json: { erro: `Template inválido ou pausado: ${entrada.template}` } }];\n}\n\nif (!entrada.telefone) {\n  return [{ json: { erro: \"Telefone não informado\" } }];\n}\n\nconst templateVarsCount = {\n  mia_followup_1: 1,\n  mia_followup_2: 1,\n  mia_followup_3: 1,\n  mia_followup_4: 1,\n  mia_followup_5: 1,\n  mia_followup_6: 1,\n  mia_followup_7: 1,\n  mia_despedida_encerramento: 1\n};\n\nconst qtd = templateVarsCount[entrada.template] || 0;\nconst parametros = [];\n\nif (qtd >= 1 && entrada.var_1) {\n  parametros.push({ type: \"text\", text: String(entrada.var_1) });\n}\n\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: String(entrada.telefone),\n  type: \"template\",\n  template: {\n    name: entrada.template,\n    language: { code: \"pt_BR\" },\n    components: parametros.length > 0\n      ? [{ type: \"body\", parameters: parametros }]\n      : []\n  }\n};\n\nreturn [{ json: { resultado: body } }];"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[2448,32],"id":"f521b31e-3e08-4741-8058-8c18da42bb86","name":"Monta o body de requisição pra META"},{"parameters":{"method":"POST","url":"https://graph.facebook.com/v22.0/1099685786551688/messages","authentication":"genericCredentialType","genericAuthType":"httpBearerAuth","sendHeaders":true,"headerParameters":{"parameters":[{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"specifyBody":"json","jsonBody":"={{ $json.resultado }}","options":{}},"type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[2688,32],"id":"8ed5b68f-d8e5-41e4-8451-30941e0e87ae","name":"Enviar mensagem no WhatsApp","retryOnFail":true,"credentials":{"httpBearerAuth":{"id":"VEIaezW6GjDeSS3w","name":"Meta Business Manager"}},"onError":"continueErrorOutput"},{"parameters":{"conditions":{"options":{"caseSensitive":true,"leftValue":"","typeValidation":"strict","version":2},"conditions":[{"id":"de3f2786-345e-401b-a958-6adb5d1ccf09","leftValue":"={{ $('Estruturação do JSON de saída').first().json.template }}","rightValue":"mia_despedida_encerramento","operator":{"type":"string","operation":"equals","name":"filter.operator.equals"}}],"combinator":"and"},"options":{}},"type":"n8n-nodes-base.if","typeVersion":2.2,"position":[3248,0],"id":"3d5ea4b0-bc0b-4281-8e2d-709f6f2a9a1b","name":"Verifica se foi mensagem de despedida"},{"parameters":{"resource":"messages-api","instanceName":"MIA-LOGS","remoteJid":"=5538998634756","messageText":"=Erro ao realizar Follow up da Mia com *{{ $('Estruturação do JSON de saída').first().json.var_1 }}* da empresa *{{ $('Preparar campos do lead').first().json.empresa }}*\n\n","options_message":{}},"type":"n8n-nodes-evolution-api.evolutionApi","typeVersion":1,"position":[3168,336],"id":"0543263c-9cb8-414c-91c4-5d85d4897fee","name":"Aviso de erro ao disparar mensagem1","credentials":{"evolutionApi":{"id":"jhxyikodw5k2TTr1","name":"MIA-LOGS"}},"onError":"continueErrorOutput"},{"parameters":{"jsCode":"const lead = $input.first().json;\n\nlet telefone = lead.whatsapp || lead.phone || \"\";\n\n// Remove tudo que não é número\ntelefone = telefone.replace(/\\D/g, \"\");\n\n// Se começar com 0, remove\nif (telefone.startsWith(\"0\")) {\n  telefone = telefone.slice(1);\n}\n\n// Se tiver 10 dígitos (sem o 9), adiciona o 9 após o DDD\nif (telefone.length === 10) {\n  telefone = telefone.slice(0, 2) + \"9\" + telefone.slice(2);\n}\n\n// Adiciona DDI 55 se não tiver\nif (telefone.length === 11) {\n  telefone = \"55\" + telefone;\n}\n\nreturn [{\n  json: {\n    ...lead,\n    telefone_normalizado: telefone\n  }\n}];"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[128,-16],"id":"5f3002aa-b486-4b35-8942-41c35ae8a7d8","name":"Normaliza telefone"},{"parameters":{"resource":"messages-api","instanceName":"MIA-LOGS","remoteJid":"=5538998634756","messageText":"=Follow up da Mia realizado com *{{ $('Estruturação do JSON de saída').first().json.var_1 }}* da empresa *{{ $('Preparar campos do lead').first().json.empresa }}*\n","options_message":{}},"type":"n8n-nodes-evolution-api.evolutionApi","typeVersion":1,"position":[4016,16],"id":"4d0c89f5-69b5-4397-a296-62d18da8ac17","name":"Confirmação Follow-up","credentials":{"evolutionApi":{"id":"jhxyikodw5k2TTr1","name":"MIA-LOGS"}},"onError":"continueErrorOutput"},{"parameters":{"tableId":"mia-historico_mensagens","fieldsUi":{"fieldValues":[{"fieldId":"mensagem_usuario","fieldValue":"="},{"fieldId":"mensagem_agente","fieldValue":"={{ $('Estruturação do JSON de saída').first().json.mensagem_template }}"},{"fieldId":"telefone","fieldValue":"={{ $('Preparar campos do lead').first().json.telefone }}"},{"fieldId":"nome_usuario","fieldValue":"={{ $('Preparar campos do lead').first().json.name }}"},{"fieldId":"message_type","fieldValue":"text"},{"fieldId":"ativo","fieldValue":"true"},{"fieldId":"nome_app","fieldValue":"SDR-MIA"},{"fieldId":"id_usuario","fieldValue":"={{ $('Preparar campos do lead').first().json.telefone }}"}]}},"type":"n8n-nodes-base.supabase","typeVersion":1,"position":[4240,384],"id":"27df1052-a862-4729-b0a4-9d540e325b70","name":"Cria Mensagem no histórico da MIA","credentials":{"supabaseApi":{"id":"FsQeUlxQ7Q6O8mbE","name":"MIA - Supabase"}},"onError":"continueRegularOutput","notes":"Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"},{"parameters":{"rule":{"interval":[{"triggerAtHour":9}]}},"type":"n8n-nodes-base.scheduleTrigger","typeVersion":1.2,"position":[-336,-16],"id":"99ee1cdb-2629-430d-925a-847b5bef061f","name":"Disparo todo dia às 9h"},{"parameters":{"jsCode":"const template = `{\n  \"template\": \"mia_despedida_encerramento\",\n  \"var_1\": \"${$json.name}\",\n  \"telefone\": \"${$json.telefone}\"\n}`;\n\nreturn [\n  {\n    json: {\n      output: template\n    }\n  }\n];"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[1888,-176],"id":"b891bfd8-efe5-4e43-a8d5-9bb4a28b1c79","name":"Pegar template de despedida após 7 dias sem resposta"},{"parameters":{"promptType":"define","text":"=### Dia Atual: {{ $now.weekdayLong }}, {{ $now.format('dd/MM/yyyy') }}, {{ $now.hour.toString().padStart(2, '0') }}:{{ $now.minute.toString().padStart(2, '0') }}\n\nVocê é a **Mia**, SDR especialista em soluções de IA para empresas da M[IA].\nSeu trabalho é **analisar o histórico de conversa do lead e selecionar QUAL template oficial do WhatsApp deve ser usado**, conforme as regras abaixo.\n\nVocê NÃO escreve mensagens livres. Você apenas escolhe o próximo template da sequência.\n\n---\n\n# 📌 DADOS RECEBIDOS\n\n* Nome do lead: **{{ $json.name }}**\n* Histórico completo:\n{{ JSON.stringify($json.historico_conversa, null, 2) }}\n\nRetorne apenas um JSON indicando qual template usar e confirmando a variável 1 (nome).\n\n---\n\n# 📋 FLUXO DE FOLLOW-UP — 8 TEMPLATES SEQUENCIAIS\n\n> ⚠️ Sempre envie o próximo template da lista que ainda não foi usado. Não pule etapas.\n\n---\n\n// ======================================================\n// CONTATO 1 — Retomada leve\n// ======================================================\n**mia_followup_1**\nOii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊\n\n---\n\n// ======================================================\n// CONTATO 2 — Ping curto\n// ======================================================\n**mia_followup_2**\nTudo bem, {{1}}? Tem um minutinho? 😄\n\n---\n\n// ======================================================\n// CONTATO 3 — Valor e curiosidade\n// ======================================================\n**mia_followup_3**\nOpa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?\n\n---\n\n// ======================================================\n// CONTATO 4 — Prova social\n// ======================================================\n**mia_followup_4**\nOi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?\n\n---\n\n// ======================================================\n// CONTATO 5 — Escassez / agenda\n// ======================================================\n**mia_followup_5**\nOlá {{1}}, estou organizando a agenda do nosso time para os próximos dias e queria reservar um horário exclusivo pra você antes de fechar. São só 30 minutos, as empresas que passaram por essa conversa saíram com um plano claro de como usar IA dentro delas. Ainda faz sentido pra você?\n\n---\n\n// ======================================================\n// CONTATO 6 — Urgência suave\n// ======================================================\n**mia_followup_6**\nFala {{1}}, me desculpa insistir, mas não quero que você perca essa janela! Muitas empresas já estão usando IA pra sair na frente. Posso te mostrar como em 30 minutos. Topa?\n\n---\n\n// ======================================================\n// CONTATO 7 — Último contato\n// ======================================================\n**mia_followup_7**\nTudo certo, {{1}}? Conseguimos um tempinho para trocar uma ideia rápida sobre IA em sua empresa? É coisa rápida. 😊\n\n---\n\n// ======================================================\n// ENCERRAMENTO\n// ======================================================\n**mia_despedida_encerramento**\nOi {{1}}! Por aqui é a Mia, da M[IA]. Como não tive seu retorno, vou encerrar nossa conversa por agora. Se quiser explorar como IA pode transformar sua empresa no futuro, é só me chamar. 😊\n\n> Use somente após todos os anteriores terem sido enviados.\n\n---\n\n# 🧠 REGRAS DE DECISÃO\n\n### Sequência obrigatória:\n1. `mia_followup_1`\n2. `mia_followup_2`\n3. `mia_followup_3`\n4. `mia_followup_4`\n5. `mia_followup_5`\n6. `mia_followup_6`\n7. `mia_followup_7`\n8. `mia_despedida_encerramento` ← somente após todos os anteriores\n\n### Regras:\n- Verifique no histórico quais templates já foram enviados pelo Agente.\n- Envie sempre o **próximo da sequência** que ainda não foi utilizado.\n- **Nunca repita** um template já enviado.\n- Se o lead respondeu positivamente em qualquer etapa (demonstrou interesse real, pediu link, perguntou sobre valores), **pause o fluxo automático** e aguarde instrução ou intervenção humana.\n\n---\n\n# 📤 FORMATO DE RESPOSTA OBRIGATÓRIO (JSON)\n\n{\n  \"template\": \"<nome_do_template_escolhido>\",\n  \"var_1\": \"{{ $json.name }}\",\n  \"telefone\": \"{{ $json.telefone }}\"\n}\n\nNenhum texto fora do JSON.\nNenhuma explicação.\nNenhuma mensagem criada.","options":{}},"type":"@n8n/n8n-nodes-langchain.agent","typeVersion":3,"position":[1824,288],"id":"eecab3b5-d935-43e5-aa90-906710ac9a97","name":"AI Agent - Mia"},{"parameters":{"conditions":{"options":{"caseSensitive":true,"leftValue":"","typeValidation":"strict","version":2},"conditions":[{"id":"b5296455-2292-4b5d-8e75-0b156471af30","leftValue":"={{ $json.messages[0].message_status }}","rightValue":"accepted","operator":{"type":"string","operation":"equals","name":"filter.operator.equals"}}],"combinator":"and"},"options":{}},"type":"n8n-nodes-base.if","typeVersion":2.2,"position":[2960,16],"id":"02798cac-8a45-4a66-8430-c4779e832a74","name":"Verificar status do envio1"},{"parameters":{"operation":"update","tableId":"clients","filters":{"conditions":[{"keyName":"id","condition":"eq","keyValue":"={{ $('Pegar os leads que estão em Follow-up').first().json.id }}"}]},"fieldsUi":{"fieldValues":[{"fieldId":"current_stage","fieldValue":"Fechado - Perdeu"}]}},"type":"n8n-nodes-base.supabase","typeVersion":1,"position":[3616,-144],"id":"5933cdcd-df01-4d0f-b72b-429cbf176939","name":"Atualiza etapa do lead para Fechado - Perdeu","credentials":{"supabaseApi":{"id":"HnWiWrODTCTToBRD","name":"Flow - Supabase"}}},{"parameters":{"operation":"getAll","tableId":"clients","returnAll":true,"filters":{"conditions":[{"keyName":"current_stage","condition":"eq","keyValue":"Follow-up"}]}},"type":"n8n-nodes-base.supabase","typeVersion":1,"position":[-96,-16],"id":"daf65d82-a420-48fd-9517-63a5d396b847","name":"Pegar os leads que estão em Follow-up","credentials":{"supabaseApi":{"id":"HnWiWrODTCTToBRD","name":"Flow - Supabase"}}}],"connections":{"Pega histórico de mensagens":{"main":[[{"node":"Formata histórico de mensagens","type":"main","index":0}]]},"Formata histórico de mensagens":{"main":[[{"node":"Combinar dados do lead + histórico","type":"main","index":1}]]},"Preparar campos do lead":{"main":[[{"node":"Pega histórico de mensagens","type":"main","index":0},{"node":"Combinar dados do lead + histórico","type":"main","index":0}]]},"Combinar dados do lead + histórico":{"main":[[{"node":"If","type":"main","index":0}]]},"Iterar sobre cada lead":{"main":[[],[{"node":"Preparar campos do lead","type":"main","index":0}]]},"If":{"main":[[{"node":"Pegar template de despedida após 7 dias sem resposta","type":"main","index":0}],[{"node":"AI Agent - Mia","type":"main","index":0}]]},"OpenRouter Chat Model":{"ai_languageModel":[[{"node":"AI Agent - Mia","type":"ai_languageModel","index":0}]]},"Estruturação do JSON de saída":{"main":[[{"node":"Monta o body de requisição pra META","type":"main","index":0}]]},"Monta o body de requisição pra META":{"main":[[{"node":"Enviar mensagem no WhatsApp","type":"main","index":0}]]},"Enviar mensagem no WhatsApp":{"main":[[{"node":"Verificar status do envio1","type":"main","index":0}],[{"node":"Aviso de erro ao disparar mensagem1","type":"main","index":0}]]},"Verifica se foi mensagem de despedida":{"main":[[{"node":"Atualiza etapa do lead para Fechado - Perdeu","type":"main","index":0}],[{"node":"Confirmação Follow-up","type":"main","index":0}]]},"Normaliza telefone":{"main":[[{"node":"Iterar sobre cada lead","type":"main","index":0}]]},"Confirmação Follow-up":{"main":[[{"node":"Cria Mensagem no histórico da MIA","type":"main","index":0}],[{"node":"Cria Mensagem no histórico da MIA","type":"main","index":0}]]},"Aviso de erro ao disparar mensagem1":{"main":[[{"node":"Iterar sobre cada lead","type":"main","index":0}],[{"node":"Iterar sobre cada lead","type":"main","index":0}]]},"Cria Mensagem no histórico da MIA":{"main":[[{"node":"Iterar sobre cada lead","type":"main","index":0}]]},"Disparo todo dia às 9h":{"main":[[{"node":"Pegar os leads que estão em Follow-up","type":"main","index":0}]]},"Pegar template de despedida após 7 dias sem resposta":{"main":[[{"node":"Estruturação do JSON de saída","type":"main","index":0}]]},"AI Agent - Mia":{"main":[[{"node":"Estruturação do JSON de saída","type":"main","index":0}]]},"Atualiza etapa do lead para Fechado - Perdeu":{"main":[[{"node":"Confirmação Follow-up","type":"main","index":0}]]},"Pegar os leads que estão em Follow-up":{"main":[[{"node":"Normaliza telefone","type":"main","index":0}]]},"Verificar status do envio1":{"main":[[{"node":"Verifica se foi mensagem de despedida","type":"main","index":0}],[{"node":"Aviso de erro ao disparar mensagem1","type":"main","index":0}]]}},"settings":{"executionOrder":"v1","timeSavedMode":"fixed","saveDataErrorExecution":"all","saveDataSuccessExecution":"all","saveExecutionProgress":false,"saveManualExecutions":true,"callerPolicy":"workflowsFromSameOwner","availableInMCP":false},"staticData":{"node:Disparo a cada dia às 9h":{"recurrenceRules":[]},"node:Disparo a cada dois dias às 9h":{"recurrenceRules":[]},"node:Disparo todo dia às 9h":{"recurrenceRules":[]}},"meta":{"templateCredsSetupCompleted":true},"pinData":{},"versionId":"89135a95-440c-4e91-9dd6-415b863623f3","activeVersionId":"89135a95-440c-4e91-9dd6-415b863623f3","triggerCount":1,"shared":[{"updatedAt":"2026-03-12T14:44:26.158Z","createdAt":"2026-03-12T14:44:26.158Z","role":"workflow:owner","workflowId":"ahyDtcL2UiMCmHRo","projectId":"nRxOu1L1N41Jyveq"}],"activeVersion":{"updatedAt":"2026-03-19T11:19:30.165Z","createdAt":"2026-03-19T11:19:30.165Z","versionId":"89135a95-440c-4e91-9dd6-415b863623f3","workflowId":"ahyDtcL2UiMCmHRo","nodes":[{"parameters":{"batchSize":"=1","options":{}},"type":"n8n-nodes-base.splitInBatches","typeVersion":3,"position":[384,-16],"id":"91ce5d34-653d-4a51-889e-9bfb2d4eda12","name":"Iterar sobre cada lead"},{"parameters":{"operation":"getAll","tableId":"mia-historico_mensagens","returnAll":true,"matchType":"allFilters","filters":{"conditions":[{"keyName":"telefone","condition":"eq","keyValue":"={{ $json.telefone }}"},{"keyName":"nome_app","condition":"eq","keyValue":"SDR-MIA"}]}},"type":"n8n-nodes-base.supabase","typeVersion":1,"position":[848,192],"id":"182f1e7f-3cd2-4708-be42-f29e65921559","name":"Pega histórico de mensagens","alwaysOutputData":true,"credentials":{"supabaseApi":{"id":"FsQeUlxQ7Q6O8mbE","name":"MIA - Supabase"}}},{"parameters":{"jsCode":"// Ordena as mensagens pela data\nitems.sort((a, b) =>\n  new Date(a.json.created_at).getTime() - new Date(b.json.created_at).getTime()\n);\n\nfunction formatarData(isoDate) {\n  const d = new Date(isoDate);\n  const dia = String(d.getDate()).padStart(2, \"0\");\n  const mes = String(d.getMonth() + 1).padStart(2, \"0\");\n  const ano = d.getFullYear();\n  return `${dia}/${mes}/${ano}`;\n}\n\nconst historico = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const data = formatarData(row.created_at);\n\n  if (row.mensagem_usuario?.trim()) {\n    historico.push({\n      autor: \"Usuário\",\n      mensagem: row.mensagem_usuario.trim(),\n      data\n    });\n  }\n\n  if (row.mensagem_agente?.trim()) {\n    historico.push({\n      autor: \"Agente\",\n      mensagem: row.mensagem_agente.trim(),\n      data\n    });\n  }\n}\n\n// =====================================================\n// NOVO TRECHO → Conta mensagens seguidas do agente\n// =====================================================\nlet qtd_mensagens_sem_resposta = 0;\n\nfor (let i = historico.length - 1; i >= 0; i--) {\n  if (historico[i].autor === \"Agente\") {\n    qtd_mensagens_sem_resposta++;\n  } else {\n    break; // usuário falou → reset\n  }\n}\n// =====================================================\n\nreturn [\n  {\n    json: {\n      historico_conversa: historico,\n      qtd_mensagens_sem_resposta\n    }\n  }\n];\n"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[1072,192],"id":"6d935554-56fe-4246-be25-8d2e7b0687b7","name":"Formata histórico de mensagens"},{"parameters":{"assignments":{"assignments":[{"id":"5b6ca92b-2cff-4c1f-ade0-9a600c0fc251","name":"name","value":"={{ $json.contact_name }}","type":"string"},{"id":"32ac25b1-b347-4117-8a37-c680328b151b","name":"empresa","value":"={{ $json.name }}","type":"string"},{"id":"cfcf4634-e2fa-48a3-8824-e01715f5648e","name":"etapa","value":"={{ $json.current_stage }}","type":"string"},{"id":"901826dc-2d94-4924-b751-d89417652c38","name":"telefone","value":"={{ $json.telefone_normalizado }}","type":"string"},{"id":"9cfacdf3-f4b4-4fe4-b03b-a73ec3e9f07c","name":"var_1","value":"={{ $json.contact_name }}","type":"string"},{"id":"30d1a21e-7ea8-4748-a4d4-f50384f2ddc0","name":"email","value":"={{ $json.email }}","type":"string"}]},"options":{}},"type":"n8n-nodes-base.set","typeVersion":3.4,"position":[640,0],"id":"6bd61276-f213-4064-85d7-01ad700119b2","name":"Preparar campos do lead"},{"parameters":{"mode":"combine","combineBy":"combineByPosition","options":{}},"type":"n8n-nodes-base.merge","typeVersion":3.2,"position":[1312,16],"id":"ec079b50-2e47-485d-9ce6-e166dc1caa24","name":"Combinar dados do lead + histórico"},{"parameters":{"conditions":{"options":{"caseSensitive":true,"leftValue":"","typeValidation":"strict","version":2},"conditions":[{"id":"d7a9ce51-a1d8-43e5-b217-5b510b72b907","leftValue":"={{ $json.qtd_mensagens_sem_resposta }}","rightValue":7,"operator":{"type":"number","operation":"gte"}}],"combinator":"and"},"options":{}},"type":"n8n-nodes-base.if","typeVersion":2.2,"position":[1520,16],"id":"17d2f3cc-dfae-4496-afcc-6257f58f30ea","name":"If"},{"parameters":{"options":{}},"type":"@n8n/n8n-nodes-langchain.lmChatOpenRouter","typeVersion":1,"position":[1824,80],"id":"dff0b1aa-17cb-4ef0-a996-90df37b556fc","name":"OpenRouter Chat Model","credentials":{"openRouterApi":{"id":"UwoliaFEOcW8kEZD","name":"OpenRouter account"}}},{"parameters":{"jsCode":"return items.map(item => {\n  let raw = item.json.output || \"\";\n  let cleaned = raw;\n\n  cleaned = cleaned.replace(/```json/gi, \"\");\n  cleaned = cleaned.replace(/```/g, \"\");\n  cleaned = cleaned.trim();\n\n  let respostaIA = {};\n\n  try {\n    respostaIA = JSON.parse(cleaned);\n  } catch (e) {\n    respostaIA = {\n      template: \"erro\",\n      var_1: item.json.name || \"\",\n      telefone: item.json.telefone || \"\"\n    };\n  }\n\n  const templates = {\n    mia_followup_1:\n      \"Oii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊\",\n\n    mia_followup_2:\n      \"Tudo bem, {{1}}? Tem um minutinho? 😄\",\n\n    mia_followup_3:\n      \"Opa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?\",\n\n    mia_followup_4:\n      \"Oi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?\",\n\n    mia_followup_5:\n      \"Olá {{1}}, estou organizando a agenda do nosso time para os próximos dias e queria reservar um horário exclusivo pra você antes de fechar. São só 30 minutos, as empresas que passaram por essa conversa saíram com um plano claro de como usar IA dentro delas. Ainda faz sentido pra você?\",\n\n    mia_followup_6:\n      \"Fala {{1}}, me desculpa insistir, mas não quero que você perca essa janela! Muitas empresas já estão usando IA pra sair na frente. Posso te mostrar como em 30 minutos. Topa?\",\n\n    mia_followup_7:\n      \"Tudo certo, {{1}}? Conseguimos um tempinho para trocar uma ideia rápida sobre IA em sua empresa? É coisa rápida. 😊\",\n\n    mia_despedida_encerramento:\n      \"Oi {{1}}! Por aqui é a Mia, da M[IA]. Como não tive seu retorno, vou encerrar nossa conversa por agora. Se quiser explorar como IA pode transformar sua empresa no futuro, é só me chamar. 😊\"\n  };\n\n  const templateName = respostaIA.template;\n  const textoTemplate = templates[templateName] || \"Template não encontrado.\";\n\n  const mensagemFinal = textoTemplate\n    .replace(\"{{1}}\", respostaIA.var_1 || \"\");\n\n  return {\n    json: {\n      ...respostaIA,\n      mensagem_template: mensagemFinal\n    }\n  };\n});"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[2224,32],"id":"7da8f556-2f73-485a-adc4-f79670ef94cc","name":"Estruturação do JSON de saída"},{"parameters":{"jsCode":"const entrada = $items(\"Estruturação do JSON de saída\")[0].json;\n\nif (!entrada.template || entrada.template === \"pausar\" || entrada.template === \"erro\") {\n  return [{ json: { erro: `Template inválido ou pausado: ${entrada.template}` } }];\n}\n\nif (!entrada.telefone) {\n  return [{ json: { erro: \"Telefone não informado\" } }];\n}\n\nconst templateVarsCount = {\n  mia_followup_1: 1,\n  mia_followup_2: 1,\n  mia_followup_3: 1,\n  mia_followup_4: 1,\n  mia_followup_5: 1,\n  mia_followup_6: 1,\n  mia_followup_7: 1,\n  mia_despedida_encerramento: 1\n};\n\nconst qtd = templateVarsCount[entrada.template] || 0;\nconst parametros = [];\n\nif (qtd >= 1 && entrada.var_1) {\n  parametros.push({ type: \"text\", text: String(entrada.var_1) });\n}\n\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: String(entrada.telefone),\n  type: \"template\",\n  template: {\n    name: entrada.template,\n    language: { code: \"pt_BR\" },\n    components: parametros.length > 0\n      ? [{ type: \"body\", parameters: parametros }]\n      : []\n  }\n};\n\nreturn [{ json: { resultado: body } }];"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[2448,32],"id":"f521b31e-3e08-4741-8058-8c18da42bb86","name":"Monta o body de requisição pra META"},{"parameters":{"method":"POST","url":"https://graph.facebook.com/v22.0/1099685786551688/messages","authentication":"genericCredentialType","genericAuthType":"httpBearerAuth","sendHeaders":true,"headerParameters":{"parameters":[{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"specifyBody":"json","jsonBody":"={{ $json.resultado }}","options":{}},"type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[2688,32],"id":"8ed5b68f-d8e5-41e4-8451-30941e0e87ae","name":"Enviar mensagem no WhatsApp","retryOnFail":true,"credentials":{"httpBearerAuth":{"id":"VEIaezW6GjDeSS3w","name":"Meta Business Manager"}},"onError":"continueErrorOutput"},{"parameters":{"conditions":{"options":{"caseSensitive":true,"leftValue":"","typeValidation":"strict","version":2},"conditions":[{"id":"de3f2786-345e-401b-a958-6adb5d1ccf09","leftValue":"={{ $('Estruturação do JSON de saída').first().json.template }}","rightValue":"mia_despedida_encerramento","operator":{"type":"string","operation":"equals","name":"filter.operator.equals"}}],"combinator":"and"},"options":{}},"type":"n8n-nodes-base.if","typeVersion":2.2,"position":[3248,0],"id":"3d5ea4b0-bc0b-4281-8e2d-709f6f2a9a1b","name":"Verifica se foi mensagem de despedida"},{"parameters":{"resource":"messages-api","instanceName":"MIA-LOGS","remoteJid":"=5538998634756","messageText":"=Erro ao realizar Follow up da Mia com *{{ $('Estruturação do JSON de saída').first().json.var_1 }}* da empresa *{{ $('Preparar campos do lead').first().json.empresa }}*\n\n","options_message":{}},"type":"n8n-nodes-evolution-api.evolutionApi","typeVersion":1,"position":[3168,336],"id":"0543263c-9cb8-414c-91c4-5d85d4897fee","name":"Aviso de erro ao disparar mensagem1","credentials":{"evolutionApi":{"id":"jhxyikodw5k2TTr1","name":"MIA-LOGS"}},"onError":"continueErrorOutput"},{"parameters":{"jsCode":"const lead = $input.first().json;\n\nlet telefone = lead.whatsapp || lead.phone || \"\";\n\n// Remove tudo que não é número\ntelefone = telefone.replace(/\\D/g, \"\");\n\n// Se começar com 0, remove\nif (telefone.startsWith(\"0\")) {\n  telefone = telefone.slice(1);\n}\n\n// Se tiver 10 dígitos (sem o 9), adiciona o 9 após o DDD\nif (telefone.length === 10) {\n  telefone = telefone.slice(0, 2) + \"9\" + telefone.slice(2);\n}\n\n// Adiciona DDI 55 se não tiver\nif (telefone.length === 11) {\n  telefone = \"55\" + telefone;\n}\n\nreturn [{\n  json: {\n    ...lead,\n    telefone_normalizado: telefone\n  }\n}];"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[128,-16],"id":"5f3002aa-b486-4b35-8942-41c35ae8a7d8","name":"Normaliza telefone"},{"parameters":{"resource":"messages-api","instanceName":"MIA-LOGS","remoteJid":"=5538998634756","messageText":"=Follow up da Mia realizado com *{{ $('Estruturação do JSON de saída').first().json.var_1 }}* da empresa *{{ $('Preparar campos do lead').first().json.empresa }}*\n","options_message":{}},"type":"n8n-nodes-evolution-api.evolutionApi","typeVersion":1,"position":[4016,16],"id":"4d0c89f5-69b5-4397-a296-62d18da8ac17","name":"Confirmação Follow-up","credentials":{"evolutionApi":{"id":"jhxyikodw5k2TTr1","name":"MIA-LOGS"}},"onError":"continueErrorOutput"},{"parameters":{"tableId":"mia-historico_mensagens","fieldsUi":{"fieldValues":[{"fieldId":"mensagem_usuario","fieldValue":"="},{"fieldId":"mensagem_agente","fieldValue":"={{ $('Estruturação do JSON de saída').first().json.mensagem_template }}"},{"fieldId":"telefone","fieldValue":"={{ $('Preparar campos do lead').first().json.telefone }}"},{"fieldId":"nome_usuario","fieldValue":"={{ $('Preparar campos do lead').first().json.name }}"},{"fieldId":"message_type","fieldValue":"text"},{"fieldId":"ativo","fieldValue":"true"},{"fieldId":"nome_app","fieldValue":"SDR-MIA"},{"fieldId":"id_usuario","fieldValue":"={{ $('Preparar campos do lead').first().json.telefone }}"}]}},"type":"n8n-nodes-base.supabase","typeVersion":1,"position":[4240,384],"id":"27df1052-a862-4729-b0a4-9d540e325b70","name":"Cria Mensagem no histórico da MIA","credentials":{"supabaseApi":{"id":"FsQeUlxQ7Q6O8mbE","name":"MIA - Supabase"}},"onError":"continueRegularOutput","notes":"Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"},{"parameters":{"rule":{"interval":[{"triggerAtHour":9}]}},"type":"n8n-nodes-base.scheduleTrigger","typeVersion":1.2,"position":[-336,-16],"id":"99ee1cdb-2629-430d-925a-847b5bef061f","name":"Disparo todo dia às 9h"},{"parameters":{"jsCode":"const template = `{\n  \"template\": \"mia_despedida_encerramento\",\n  \"var_1\": \"${$json.name}\",\n  \"telefone\": \"${$json.telefone}\"\n}`;\n\nreturn [\n  {\n    json: {\n      output: template\n    }\n  }\n];"},"type":"n8n-nodes-base.code","typeVersion":2,"position":[1888,-176],"id":"b891bfd8-efe5-4e43-a8d5-9bb4a28b1c79","name":"Pegar template de despedida após 7 dias sem resposta"},{"parameters":{"promptType":"define","text":"=### Dia Atual: {{ $now.weekdayLong }}, {{ $now.format('dd/MM/yyyy') }}, {{ $now.hour.toString().padStart(2, '0') }}:{{ $now.minute.toString().padStart(2, '0') }}\n\nVocê é a **Mia**, SDR especialista em soluções de IA para empresas da M[IA].\nSeu trabalho é **analisar o histórico de conversa do lead e selecionar QUAL template oficial do WhatsApp deve ser usado**, conforme as regras abaixo.\n\nVocê NÃO escreve mensagens livres. Você apenas escolhe o próximo template da sequência.\n\n---\n\n# 📌 DADOS RECEBIDOS\n\n* Nome do lead: **{{ $json.name }}**\n* Histórico completo:\n{{ JSON.stringify($json.historico_conversa, null, 2) }}\n\nRetorne apenas um JSON indicando qual template usar e confirmando a variável 1 (nome).\n\n---\n\n# 📋 FLUXO DE FOLLOW-UP — 8 TEMPLATES SEQUENCIAIS\n\n> ⚠️ Sempre envie o próximo template da lista que ainda não foi usado. Não pule etapas.\n\n---\n\n// ======================================================\n// CONTATO 1 — Retomada leve\n// ======================================================\n**mia_followup_1**\nOii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊\n\n---\n\n// ======================================================\n// CONTATO 2 — Ping curto\n// ======================================================\n**mia_followup_2**\nTudo bem, {{1}}? Tem um minutinho? 😄\n\n---\n\n// ======================================================\n// CONTATO 3 — Valor e curiosidade\n// ======================================================\n**mia_followup_3**\nOpa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?\n\n---\n\n// ======================================================\n// CONTATO 4 — Prova social\n// ======================================================\n**mia_followup_4**\nOi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?\n\n---\n\n// ======================================================\n// CONTATO 5 — Escassez / agenda\n// ======================================================\n**mia_followup_5**\nOlá {{1}}, estou organizando a agenda do nosso time para os próximos dias e queria reservar um horário exclusivo pra você antes de fechar. São só 30 minutos, as empresas que passaram por essa conversa saíram com um plano claro de como usar IA dentro delas. Ainda faz sentido pra você?\n\n---\n\n// ======================================================\n// CONTATO 6 — Urgência suave\n// ======================================================\n**mia_followup_6**\nFala {{1}}, me desculpa insistir, mas não quero que você perca essa janela! Muitas empresas já estão usando IA pra sair na frente. Posso te mostrar como em 30 minutos. Topa?\n\n---\n\n// ======================================================\n// CONTATO 7 — Último contato\n// ======================================================\n**mia_followup_7**\nTudo certo, {{1}}? Conseguimos um tempinho para trocar uma ideia rápida sobre IA em sua empresa? É coisa rápida. 😊\n\n---\n\n// ======================================================\n// ENCERRAMENTO\n// ======================================================\n**mia_despedida_encerramento**\nOi {{1}}! Por aqui é a Mia, da M[IA]. Como não tive seu retorno, vou encerrar nossa conversa por agora. Se quiser explorar como IA pode transformar sua empresa no futuro, é só me chamar. 😊\n\n> Use somente após todos os anteriores terem sido enviados.\n\n---\n\n# 🧠 REGRAS DE DECISÃO\n\n### Sequência obrigatória:\n1. `mia_followup_1`\n2. `mia_followup_2`\n3. `mia_followup_3`\n4. `mia_followup_4`\n5. `mia_followup_5`\n6. `mia_followup_6`\n7. `mia_followup_7`\n8. `mia_despedida_encerramento` ← somente após todos os anteriores\n\n### Regras:\n- Verifique no histórico quais templates já foram enviados pelo Agente.\n- Envie sempre o **próximo da sequência** que ainda não foi utilizado.\n- **Nunca repita** um template já enviado.\n- Se o lead respondeu positivamente em qualquer etapa (demonstrou interesse real, pediu link, perguntou sobre valores), **pause o fluxo automático** e aguarde instrução ou intervenção humana.\n\n---\n\n# 📤 FORMATO DE RESPOSTA OBRIGATÓRIO (JSON)\n\n{\n  \"template\": \"<nome_do_template_escolhido>\",\n  \"var_1\": \"{{ $json.name }}\",\n  \"telefone\": \"{{ $json.telefone }}\"\n}\n\nNenhum texto fora do JSON.\nNenhuma explicação.\nNenhuma mensagem criada.","options":{}},"type":"@n8n/n8n-nodes-langchain.agent","typeVersion":3,"position":[1824,288],"id":"eecab3b5-d935-43e5-aa90-906710ac9a97","name":"AI Agent - Mia"},{"parameters":{"conditions":{"options":{"caseSensitive":true,"leftValue":"","typeValidation":"strict","version":2},"conditions":[{"id":"b5296455-2292-4b5d-8e75-0b156471af30","leftValue":"={{ $json.messages[0].message_status }}","rightValue":"accepted","operator":{"type":"string","operation":"equals","name":"filter.operator.equals"}}],"combinator":"and"},"options":{}},"type":"n8n-nodes-base.if","typeVersion":2.2,"position":[2960,16],"id":"02798cac-8a45-4a66-8430-c4779e832a74","name":"Verificar status do envio1"},{"parameters":{"operation":"update","tableId":"clients","filters":{"conditions":[{"keyName":"id","condition":"eq","keyValue":"={{ $('Pegar os leads que estão em Follow-up').first().json.id }}"}]},"fieldsUi":{"fieldValues":[{"fieldId":"current_stage","fieldValue":"Fechado - Perdeu"}]}},"type":"n8n-nodes-base.supabase","typeVersion":1,"position":[3616,-144],"id":"5933cdcd-df01-4d0f-b72b-429cbf176939","name":"Atualiza etapa do lead para Fechado - Perdeu","credentials":{"supabaseApi":{"id":"HnWiWrODTCTToBRD","name":"Flow - Supabase"}}},{"parameters":{"operation":"getAll","tableId":"clients","returnAll":true,"filters":{"conditions":[{"keyName":"current_stage","condition":"eq","keyValue":"Follow-up"}]}},"type":"n8n-nodes-base.supabase","typeVersion":1,"position":[-96,-16],"id":"daf65d82-a420-48fd-9517-63a5d396b847","name":"Pegar os leads que estão em Follow-up","credentials":{"supabaseApi":{"id":"HnWiWrODTCTToBRD","name":"Flow - Supabase"}}}],"connections":{"Pega histórico de mensagens":{"main":[[{"node":"Formata histórico de mensagens","type":"main","index":0}]]},"Formata histórico de mensagens":{"main":[[{"node":"Combinar dados do lead + histórico","type":"main","index":1}]]},"Preparar campos do lead":{"main":[[{"node":"Pega histórico de mensagens","type":"main","index":0},{"node":"Combinar dados do lead + histórico","type":"main","index":0}]]},"Combinar dados do lead + histórico":{"main":[[{"node":"If","type":"main","index":0}]]},"Iterar sobre cada lead":{"main":[[],[{"node":"Preparar campos do lead","type":"main","index":0}]]},"If":{"main":[[{"node":"Pegar template de despedida após 7 dias sem resposta","type":"main","index":0}],[{"node":"AI Agent - Mia","type":"main","index":0}]]},"OpenRouter Chat Model":{"ai_languageModel":[[{"node":"AI Agent - Mia","type":"ai_languageModel","index":0}]]},"Estruturação do JSON de saída":{"main":[[{"node":"Monta o body de requisição pra META","type":"main","index":0}]]},"Monta o body de requisição pra META":{"main":[[{"node":"Enviar mensagem no WhatsApp","type":"main","index":0}]]},"Enviar mensagem no WhatsApp":{"main":[[{"node":"Verificar status do envio1","type":"main","index":0}],[{"node":"Aviso de erro ao disparar mensagem1","type":"main","index":0}]]},"Verifica se foi mensagem de despedida":{"main":[[{"node":"Atualiza etapa do lead para Fechado - Perdeu","type":"main","index":0}],[{"node":"Confirmação Follow-up","type":"main","index":0}]]},"Normaliza telefone":{"main":[[{"node":"Iterar sobre cada lead","type":"main","index":0}]]},"Confirmação Follow-up":{"main":[[{"node":"Cria Mensagem no histórico da MIA","type":"main","index":0}],[{"node":"Cria Mensagem no histórico da MIA","type":"main","index":0}]]},"Aviso de erro ao disparar mensagem1":{"main":[[{"node":"Iterar sobre cada lead","type":"main","index":0}],[{"node":"Iterar sobre cada lead","type":"main","index":0}]]},"Cria Mensagem no histórico da MIA":{"main":[[{"node":"Iterar sobre cada lead","type":"main","index":0}]]},"Disparo todo dia às 9h":{"main":[[{"node":"Pegar os leads que estão em Follow-up","type":"main","index":0}]]},"Pegar template de despedida após 7 dias sem resposta":{"main":[[{"node":"Estruturação do JSON de saída","type":"main","index":0}]]},"AI Agent - Mia":{"main":[[{"node":"Estruturação do JSON de saída","type":"main","index":0}]]},"Atualiza etapa do lead para Fechado - Perdeu":{"main":[[{"node":"Confirmação Follow-up","type":"main","index":0}]]},"Pegar os leads que estão em Follow-up":{"main":[[{"node":"Normaliza telefone","type":"main","index":0}]]},"Verificar status do envio1":{"main":[[{"node":"Verifica se foi mensagem de despedida","type":"main","index":0}],[{"node":"Aviso de erro ao disparar mensagem1","type":"main","index":0}]]}},"authors":"Lucas Andrade","name":null,"description":null},"tags":[]}
+{
+  "updatedAt": "2026-03-19T11:19:30.163Z",
+  "createdAt": "2026-03-12T14:44:26.158Z",
+  "id": "ahyDtcL2UiMCmHRo",
+  "name": "Mia - 4.3- Prospecção - Follow-up",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "batchSize": "=1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        384,
+        -16
+      ],
+      "id": "91ce5d34-653d-4a51-889e-9bfb2d4eda12",
+      "name": "Iterar sobre cada lead"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "mia-historico_mensagens",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $json.telefone }}"
+            },
+            {
+              "keyName": "nome_app",
+              "condition": "eq",
+              "keyValue": "SDR-MIA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        848,
+        192
+      ],
+      "id": "182f1e7f-3cd2-4708-be42-f29e65921559",
+      "name": "Pega histórico de mensagens",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "FsQeUlxQ7Q6O8mbE",
+          "name": "MIA - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ordena as mensagens pela data\nitems.sort((a, b) =>\n  new Date(a.json.created_at).getTime() - new Date(b.json.created_at).getTime()\n);\n\nfunction formatarData(isoDate) {\n  const d = new Date(isoDate);\n  const dia = String(d.getDate()).padStart(2, \"0\");\n  const mes = String(d.getMonth() + 1).padStart(2, \"0\");\n  const ano = d.getFullYear();\n  return `${dia}/${mes}/${ano}`;\n}\n\nconst historico = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const data = formatarData(row.created_at);\n\n  if (row.mensagem_usuario?.trim()) {\n    historico.push({\n      autor: \"Usuário\",\n      mensagem: row.mensagem_usuario.trim(),\n      data\n    });\n  }\n\n  if (row.mensagem_agente?.trim()) {\n    historico.push({\n      autor: \"Agente\",\n      mensagem: row.mensagem_agente.trim(),\n      data\n    });\n  }\n}\n\n// =====================================================\n// NOVO TRECHO → Conta mensagens seguidas do agente\n// =====================================================\nlet qtd_mensagens_sem_resposta = 0;\n\nfor (let i = historico.length - 1; i >= 0; i--) {\n  if (historico[i].autor === \"Agente\") {\n    qtd_mensagens_sem_resposta++;\n  } else {\n    break; // usuário falou → reset\n  }\n}\n// =====================================================\n\nreturn [\n  {\n    json: {\n      historico_conversa: historico,\n      qtd_mensagens_sem_resposta\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        192
+      ],
+      "id": "6d935554-56fe-4246-be25-8d2e7b0687b7",
+      "name": "Formata histórico de mensagens"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5b6ca92b-2cff-4c1f-ade0-9a600c0fc251",
+              "name": "name",
+              "value": "={{ $json.contact_name }}",
+              "type": "string"
+            },
+            {
+              "id": "32ac25b1-b347-4117-8a37-c680328b151b",
+              "name": "empresa",
+              "value": "={{ $json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "cfcf4634-e2fa-48a3-8824-e01715f5648e",
+              "name": "etapa",
+              "value": "={{ $json.current_stage }}",
+              "type": "string"
+            },
+            {
+              "id": "901826dc-2d94-4924-b751-d89417652c38",
+              "name": "telefone",
+              "value": "={{ $json.telefone_normalizado }}",
+              "type": "string"
+            },
+            {
+              "id": "9cfacdf3-f4b4-4fe4-b03b-a73ec3e9f07c",
+              "name": "var_1",
+              "value": "={{ $json.contact_name }}",
+              "type": "string"
+            },
+            {
+              "id": "30d1a21e-7ea8-4748-a4d4-f50384f2ddc0",
+              "name": "email",
+              "value": "={{ $json.email }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        640,
+        0
+      ],
+      "id": "6bd61276-f213-4064-85d7-01ad700119b2",
+      "name": "Preparar campos do lead"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1312,
+        16
+      ],
+      "id": "ec079b50-2e47-485d-9ce6-e166dc1caa24",
+      "name": "Combinar dados do lead + histórico"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d7a9ce51-a1d8-43e5-b217-5b510b72b907",
+              "leftValue": "={{ $json.qtd_mensagens_sem_resposta }}",
+              "rightValue": 7,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1520,
+        16
+      ],
+      "id": "17d2f3cc-dfae-4496-afcc-6257f58f30ea",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1824,
+        80
+      ],
+      "id": "dff0b1aa-17cb-4ef0-a996-90df37b556fc",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  let raw = item.json.output || \"\";\n  let cleaned = raw;\n\n  cleaned = cleaned.replace(/```json/gi, \"\");\n  cleaned = cleaned.replace(/```/g, \"\");\n  cleaned = cleaned.trim();\n\n  let respostaIA = {};\n\n  try {\n    respostaIA = JSON.parse(cleaned);\n  } catch (e) {\n    respostaIA = {\n      template: \"erro\",\n      var_1: item.json.name || \"\",\n      telefone: item.json.telefone || \"\"\n    };\n  }\n\n  const templates = {\n    mia_followup_1:\n      \"Oii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊\",\n\n    mia_followup_2:\n      \"Tudo bem, {{1}}? Tem um minutinho? 😄\",\n\n    mia_followup_3:\n      \"Opa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?\",\n\n    mia_followup_4:\n      \"Oi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?\",\n\n    mia_followup_5:\n      \"Olá {{1}}, estou organizando a agenda do nosso time para os próximos dias e queria reservar um horário exclusivo pra você antes de fechar. São só 30 minutos, as empresas que passaram por essa conversa saíram com um plano claro de como usar IA dentro delas. Ainda faz sentido pra você?\",\n\n    mia_followup_6:\n      \"Fala {{1}}, me desculpa insistir, mas não quero que você perca essa janela! Muitas empresas já estão usando IA pra sair na frente. Posso te mostrar como em 30 minutos. Topa?\",\n\n    mia_followup_7:\n      \"Tudo certo, {{1}}? Conseguimos um tempinho para trocar uma ideia rápida sobre IA em sua empresa? É coisa rápida. 😊\",\n\n    mia_despedida_encerramento:\n      \"Oi {{1}}! Por aqui é a Mia, da M[IA]. Como não tive seu retorno, vou encerrar nossa conversa por agora. Se quiser explorar como IA pode transformar sua empresa no futuro, é só me chamar. 😊\"\n  };\n\n  const templateName = respostaIA.template;\n  const textoTemplate = templates[templateName] || \"Template não encontrado.\";\n\n  const mensagemFinal = textoTemplate\n    .replace(\"{{1}}\", respostaIA.var_1 || \"\");\n\n  return {\n    json: {\n      ...respostaIA,\n      mensagem_template: mensagemFinal\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        32
+      ],
+      "id": "7da8f556-2f73-485a-adc4-f79670ef94cc",
+      "name": "Estruturação do JSON de saída"
+    },
+    {
+      "parameters": {
+        "jsCode": "const entrada = $items(\"Estruturação do JSON de saída\")[0].json;\n\nif (!entrada.template || entrada.template === \"pausar\" || entrada.template === \"erro\") {\n  return [{ json: { erro: `Template inválido ou pausado: ${entrada.template}` } }];\n}\n\nif (!entrada.telefone) {\n  return [{ json: { erro: \"Telefone não informado\" } }];\n}\n\nconst templateVarsCount = {\n  mia_followup_1: 1,\n  mia_followup_2: 1,\n  mia_followup_3: 1,\n  mia_followup_4: 1,\n  mia_followup_5: 1,\n  mia_followup_6: 1,\n  mia_followup_7: 1,\n  mia_despedida_encerramento: 1\n};\n\nconst qtd = templateVarsCount[entrada.template] || 0;\nconst parametros = [];\n\nif (qtd >= 1 && entrada.var_1) {\n  parametros.push({ type: \"text\", text: String(entrada.var_1) });\n}\n\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: String(entrada.telefone),\n  type: \"template\",\n  template: {\n    name: entrada.template,\n    language: { code: \"pt_BR\" },\n    components: parametros.length > 0\n      ? [{ type: \"body\", parameters: parametros }]\n      : []\n  }\n};\n\nreturn [{ json: { resultado: body } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        32
+      ],
+      "id": "f521b31e-3e08-4741-8058-8c18da42bb86",
+      "name": "Monta o body de requisição pra META"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/1099685786551688/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.resultado }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2688,
+        32
+      ],
+      "id": "8ed5b68f-d8e5-41e4-8451-30941e0e87ae",
+      "name": "Enviar mensagem no WhatsApp",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "VEIaezW6GjDeSS3w",
+          "name": "Meta Business Manager"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "de3f2786-345e-401b-a958-6adb5d1ccf09",
+              "leftValue": "={{ $('Estruturação do JSON de saída').first().json.template }}",
+              "rightValue": "mia_despedida_encerramento",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3248,
+        0
+      ],
+      "id": "3d5ea4b0-bc0b-4281-8e2d-709f6f2a9a1b",
+      "name": "Verifica se foi mensagem de despedida"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=5538998634756",
+        "messageText": "=Erro ao realizar Follow up da Mia com *{{ $('Estruturação do JSON de saída').first().json.var_1 }}* da empresa *{{ $('Preparar campos do lead').first().json.empresa }}*\n\n",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        3168,
+        336
+      ],
+      "id": "0543263c-9cb8-414c-91c4-5d85d4897fee",
+      "name": "Aviso de erro ao disparar mensagem1",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $input.first().json;\n\nlet telefone = lead.whatsapp || lead.phone || \"\";\n\n// Remove tudo que não é número\ntelefone = telefone.replace(/\\D/g, \"\");\n\n// Se começar com 0, remove\nif (telefone.startsWith(\"0\")) {\n  telefone = telefone.slice(1);\n}\n\n// Se tiver 10 dígitos (sem o 9), adiciona o 9 após o DDD\nif (telefone.length === 10) {\n  telefone = telefone.slice(0, 2) + \"9\" + telefone.slice(2);\n}\n\n// Adiciona DDI 55 se não tiver\nif (telefone.length === 11) {\n  telefone = \"55\" + telefone;\n}\n\nreturn [{\n  json: {\n    ...lead,\n    telefone_normalizado: telefone\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        -16
+      ],
+      "id": "5f3002aa-b486-4b35-8942-41c35ae8a7d8",
+      "name": "Normaliza telefone"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=5538998634756",
+        "messageText": "=Follow up da Mia realizado com *{{ $('Estruturação do JSON de saída').first().json.var_1 }}* da empresa *{{ $('Preparar campos do lead').first().json.empresa }}*\n",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        4016,
+        16
+      ],
+      "id": "4d0c89f5-69b5-4397-a296-62d18da8ac17",
+      "name": "Confirmação Follow-up",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "tableId": "mia-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_usuario",
+              "fieldValue": "="
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Estruturação do JSON de saída').first().json.mensagem_template }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Preparar campos do lead').first().json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Preparar campos do lead').first().json.name }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-MIA"
+            },
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Preparar campos do lead').first().json.telefone }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4240,
+        384
+      ],
+      "id": "27df1052-a862-4729-b0a4-9d540e325b70",
+      "name": "Cria Mensagem no histórico da MIA",
+      "credentials": {
+        "supabaseApi": {
+          "id": "FsQeUlxQ7Q6O8mbE",
+          "name": "MIA - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -336,
+        -16
+      ],
+      "id": "99ee1cdb-2629-430d-925a-847b5bef061f",
+      "name": "Disparo todo dia às 9h"
+    },
+    {
+      "parameters": {
+        "jsCode": "const template = `{\n  \"template\": \"mia_despedida_encerramento\",\n  \"var_1\": \"${$json.name}\",\n  \"telefone\": \"${$json.telefone}\"\n}`;\n\nreturn [\n  {\n    json: {\n      output: template\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1888,
+        -176
+      ],
+      "id": "b891bfd8-efe5-4e43-a8d5-9bb4a28b1c79",
+      "name": "Pegar template de despedida após 7 dias sem resposta"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=### Dia Atual: {{ $now.weekdayLong }}, {{ $now.format('dd/MM/yyyy') }}, {{ $now.hour.toString().padStart(2, '0') }}:{{ $now.minute.toString().padStart(2, '0') }}\n\nVocê é a **Mia**, SDR especialista em soluções de IA para empresas da M[IA].\nSeu trabalho é **analisar o histórico de conversa do lead e selecionar QUAL template oficial do WhatsApp deve ser usado**, conforme as regras abaixo.\n\nVocê NÃO escreve mensagens livres. Você apenas escolhe o próximo template da sequência.\n\n---\n\n# 📌 DADOS RECEBIDOS\n\n* Nome do lead: **{{ $json.name }}**\n* Histórico completo:\n{{ JSON.stringify($json.historico_conversa, null, 2) }}\n\nRetorne apenas um JSON indicando qual template usar e confirmando a variável 1 (nome).\n\n---\n\n# 📋 FLUXO DE FOLLOW-UP — 8 TEMPLATES SEQUENCIAIS\n\n> ⚠️ Sempre envie o próximo template da lista que ainda não foi usado. Não pule etapas.\n\n---\n\n// ======================================================\n// CONTATO 1 — Retomada leve\n// ======================================================\n**mia_followup_1**\nOii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊\n\n---\n\n// ======================================================\n// CONTATO 2 — Ping curto\n// ======================================================\n**mia_followup_2**\nTudo bem, {{1}}? Tem um minutinho? 😄\n\n---\n\n// ======================================================\n// CONTATO 3 — Valor e curiosidade\n// ======================================================\n**mia_followup_3**\nOpa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?\n\n---\n\n// ======================================================\n// CONTATO 4 — Prova social\n// ======================================================\n**mia_followup_4**\nOi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?\n\n---\n\n// ======================================================\n// CONTATO 5 — Escassez / agenda\n// ======================================================\n**mia_followup_5**\nOlá {{1}}, estou organizando a agenda do nosso time para os próximos dias e queria reservar um horário exclusivo pra você antes de fechar. São só 30 minutos, as empresas que passaram por essa conversa saíram com um plano claro de como usar IA dentro delas. Ainda faz sentido pra você?\n\n---\n\n// ======================================================\n// CONTATO 6 — Urgência suave\n// ======================================================\n**mia_followup_6**\nFala {{1}}, me desculpa insistir, mas não quero que você perca essa janela! Muitas empresas já estão usando IA pra sair na frente. Posso te mostrar como em 30 minutos. Topa?\n\n---\n\n// ======================================================\n// CONTATO 7 — Último contato\n// ======================================================\n**mia_followup_7**\nTudo certo, {{1}}? Conseguimos um tempinho para trocar uma ideia rápida sobre IA em sua empresa? É coisa rápida. 😊\n\n---\n\n// ======================================================\n// ENCERRAMENTO\n// ======================================================\n**mia_despedida_encerramento**\nOi {{1}}! Por aqui é a Mia, da M[IA]. Como não tive seu retorno, vou encerrar nossa conversa por agora. Se quiser explorar como IA pode transformar sua empresa no futuro, é só me chamar. 😊\n\n> Use somente após todos os anteriores terem sido enviados.\n\n---\n\n# 🧠 REGRAS DE DECISÃO\n\n### Sequência obrigatória:\n1. `mia_followup_1`\n2. `mia_followup_2`\n3. `mia_followup_3`\n4. `mia_followup_4`\n5. `mia_followup_5`\n6. `mia_followup_6`\n7. `mia_followup_7`\n8. `mia_despedida_encerramento` ← somente após todos os anteriores\n\n### Regras:\n- Verifique no histórico quais templates já foram enviados pelo Agente.\n- Envie sempre o **próximo da sequência** que ainda não foi utilizado.\n- **Nunca repita** um template já enviado.\n- Se o lead respondeu positivamente em qualquer etapa (demonstrou interesse real, pediu link, perguntou sobre valores), **pause o fluxo automático** e aguarde instrução ou intervenção humana.\n\n---\n\n# 📤 FORMATO DE RESPOSTA OBRIGATÓRIO (JSON)\n\n{\n  \"template\": \"<nome_do_template_escolhido>\",\n  \"var_1\": \"{{ $json.name }}\",\n  \"telefone\": \"{{ $json.telefone }}\"\n}\n\nNenhum texto fora do JSON.\nNenhuma explicação.\nNenhuma mensagem criada.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1824,
+        288
+      ],
+      "id": "eecab3b5-d935-43e5-aa90-906710ac9a97",
+      "name": "AI Agent - Mia"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b5296455-2292-4b5d-8e75-0b156471af30",
+              "leftValue": "={{ $json.messages[0].message_status }}",
+              "rightValue": "accepted",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2960,
+        16
+      ],
+      "id": "02798cac-8a45-4a66-8430-c4779e832a74",
+      "name": "Verificar status do envio1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "clients",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Pegar os leads que estão em Follow-up').first().json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "current_stage",
+              "fieldValue": "Fechado - Perdeu"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3616,
+        -144
+      ],
+      "id": "5933cdcd-df01-4d0f-b72b-429cbf176939",
+      "name": "Atualiza etapa do lead para Fechado - Perdeu",
+      "credentials": {
+        "supabaseApi": {
+          "id": "HnWiWrODTCTToBRD",
+          "name": "Flow - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "clients",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "current_stage",
+              "condition": "eq",
+              "keyValue": "Follow-up"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -96,
+        -16
+      ],
+      "id": "daf65d82-a420-48fd-9517-63a5d396b847",
+      "name": "Pegar os leads que estão em Follow-up",
+      "credentials": {
+        "supabaseApi": {
+          "id": "HnWiWrODTCTToBRD",
+          "name": "Flow - Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Pega histórico de mensagens": {
+      "main": [
+        [
+          {
+            "node": "Formata histórico de mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formata histórico de mensagens": {
+      "main": [
+        [
+          {
+            "node": "Combinar dados do lead + histórico",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Preparar campos do lead": {
+      "main": [
+        [
+          {
+            "node": "Pega histórico de mensagens",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Combinar dados do lead + histórico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combinar dados do lead + histórico": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Iterar sobre cada lead": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar campos do lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Pegar template de despedida após 7 dias sem resposta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent - Mia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent - Mia",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estruturação do JSON de saída": {
+      "main": [
+        [
+          {
+            "node": "Monta o body de requisição pra META",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta o body de requisição pra META": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagem no WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagem no WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Verificar status do envio1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso de erro ao disparar mensagem1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se foi mensagem de despedida": {
+      "main": [
+        [
+          {
+            "node": "Atualiza etapa do lead para Fechado - Perdeu",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Confirmação Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliza telefone": {
+      "main": [
+        [
+          {
+            "node": "Iterar sobre cada lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmação Follow-up": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no histórico da MIA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cria Mensagem no histórico da MIA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aviso de erro ao disparar mensagem1": {
+      "main": [
+        [
+          {
+            "node": "Iterar sobre cada lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Iterar sobre cada lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no histórico da MIA": {
+      "main": [
+        [
+          {
+            "node": "Iterar sobre cada lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Disparo todo dia às 9h": {
+      "main": [
+        [
+          {
+            "node": "Pegar os leads que estão em Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pegar template de despedida após 7 dias sem resposta": {
+      "main": [
+        [
+          {
+            "node": "Estruturação do JSON de saída",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Mia": {
+      "main": [
+        [
+          {
+            "node": "Estruturação do JSON de saída",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza etapa do lead para Fechado - Perdeu": {
+      "main": [
+        [
+          {
+            "node": "Confirmação Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pegar os leads que estão em Follow-up": {
+      "main": [
+        [
+          {
+            "node": "Normaliza telefone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar status do envio1": {
+      "main": [
+        [
+          {
+            "node": "Verifica se foi mensagem de despedida",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso de erro ao disparar mensagem1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Disparo a cada dia às 9h": {
+      "recurrenceRules": []
+    },
+    "node:Disparo a cada dois dias às 9h": {
+      "recurrenceRules": []
+    },
+    "node:Disparo todo dia às 9h": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "89135a95-440c-4e91-9dd6-415b863623f3",
+  "activeVersionId": "89135a95-440c-4e91-9dd6-415b863623f3",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-03-12T14:44:26.158Z",
+      "createdAt": "2026-03-12T14:44:26.158Z",
+      "role": "workflow:owner",
+      "workflowId": "ahyDtcL2UiMCmHRo",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-03-19T11:19:30.165Z",
+    "createdAt": "2026-03-19T11:19:30.165Z",
+    "versionId": "89135a95-440c-4e91-9dd6-415b863623f3",
+    "workflowId": "ahyDtcL2UiMCmHRo",
+    "nodes": [
+      {
+        "parameters": {
+          "batchSize": "=1",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          384,
+          -16
+        ],
+        "id": "91ce5d34-653d-4a51-889e-9bfb2d4eda12",
+        "name": "Iterar sobre cada lead"
+      },
+      {
+        "parameters": {
+          "operation": "getAll",
+          "tableId": "mia-historico_mensagens",
+          "returnAll": true,
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "telefone",
+                "condition": "eq",
+                "keyValue": "={{ $json.telefone }}"
+              },
+              {
+                "keyName": "nome_app",
+                "condition": "eq",
+                "keyValue": "SDR-MIA"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          848,
+          192
+        ],
+        "id": "182f1e7f-3cd2-4708-be42-f29e65921559",
+        "name": "Pega histórico de mensagens",
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "FsQeUlxQ7Q6O8mbE",
+            "name": "MIA - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Ordena as mensagens pela data\nitems.sort((a, b) =>\n  new Date(a.json.created_at).getTime() - new Date(b.json.created_at).getTime()\n);\n\nfunction formatarData(isoDate) {\n  const d = new Date(isoDate);\n  const dia = String(d.getDate()).padStart(2, \"0\");\n  const mes = String(d.getMonth() + 1).padStart(2, \"0\");\n  const ano = d.getFullYear();\n  return `${dia}/${mes}/${ano}`;\n}\n\nconst historico = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const data = formatarData(row.created_at);\n\n  if (row.mensagem_usuario?.trim()) {\n    historico.push({\n      autor: \"Usuário\",\n      mensagem: row.mensagem_usuario.trim(),\n      data\n    });\n  }\n\n  if (row.mensagem_agente?.trim()) {\n    historico.push({\n      autor: \"Agente\",\n      mensagem: row.mensagem_agente.trim(),\n      data\n    });\n  }\n}\n\n// =====================================================\n// NOVO TRECHO → Conta mensagens seguidas do agente\n// =====================================================\nlet qtd_mensagens_sem_resposta = 0;\n\nfor (let i = historico.length - 1; i >= 0; i--) {\n  if (historico[i].autor === \"Agente\") {\n    qtd_mensagens_sem_resposta++;\n  } else {\n    break; // usuário falou → reset\n  }\n}\n// =====================================================\n\nreturn [\n  {\n    json: {\n      historico_conversa: historico,\n      qtd_mensagens_sem_resposta\n    }\n  }\n];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1072,
+          192
+        ],
+        "id": "6d935554-56fe-4246-be25-8d2e7b0687b7",
+        "name": "Formata histórico de mensagens"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "5b6ca92b-2cff-4c1f-ade0-9a600c0fc251",
+                "name": "name",
+                "value": "={{ $json.contact_name }}",
+                "type": "string"
+              },
+              {
+                "id": "32ac25b1-b347-4117-8a37-c680328b151b",
+                "name": "empresa",
+                "value": "={{ $json.name }}",
+                "type": "string"
+              },
+              {
+                "id": "cfcf4634-e2fa-48a3-8824-e01715f5648e",
+                "name": "etapa",
+                "value": "={{ $json.current_stage }}",
+                "type": "string"
+              },
+              {
+                "id": "901826dc-2d94-4924-b751-d89417652c38",
+                "name": "telefone",
+                "value": "={{ $json.telefone_normalizado }}",
+                "type": "string"
+              },
+              {
+                "id": "9cfacdf3-f4b4-4fe4-b03b-a73ec3e9f07c",
+                "name": "var_1",
+                "value": "={{ $json.contact_name }}",
+                "type": "string"
+              },
+              {
+                "id": "30d1a21e-7ea8-4748-a4d4-f50384f2ddc0",
+                "name": "email",
+                "value": "={{ $json.email }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          640,
+          0
+        ],
+        "id": "6bd61276-f213-4064-85d7-01ad700119b2",
+        "name": "Preparar campos do lead"
+      },
+      {
+        "parameters": {
+          "mode": "combine",
+          "combineBy": "combineByPosition",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          1312,
+          16
+        ],
+        "id": "ec079b50-2e47-485d-9ce6-e166dc1caa24",
+        "name": "Combinar dados do lead + histórico"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "d7a9ce51-a1d8-43e5-b217-5b510b72b907",
+                "leftValue": "={{ $json.qtd_mensagens_sem_resposta }}",
+                "rightValue": 7,
+                "operator": {
+                  "type": "number",
+                  "operation": "gte"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1520,
+          16
+        ],
+        "id": "17d2f3cc-dfae-4496-afcc-6257f58f30ea",
+        "name": "If"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          1824,
+          80
+        ],
+        "id": "dff0b1aa-17cb-4ef0-a996-90df37b556fc",
+        "name": "OpenRouter Chat Model",
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "return items.map(item => {\n  let raw = item.json.output || \"\";\n  let cleaned = raw;\n\n  cleaned = cleaned.replace(/```json/gi, \"\");\n  cleaned = cleaned.replace(/```/g, \"\");\n  cleaned = cleaned.trim();\n\n  let respostaIA = {};\n\n  try {\n    respostaIA = JSON.parse(cleaned);\n  } catch (e) {\n    respostaIA = {\n      template: \"erro\",\n      var_1: item.json.name || \"\",\n      telefone: item.json.telefone || \"\"\n    };\n  }\n\n  const templates = {\n    mia_followup_1:\n      \"Oii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊\",\n\n    mia_followup_2:\n      \"Tudo bem, {{1}}? Tem um minutinho? 😄\",\n\n    mia_followup_3:\n      \"Opa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?\",\n\n    mia_followup_4:\n      \"Oi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?\",\n\n    mia_followup_5:\n      \"Olá {{1}}, estou organizando a agenda do nosso time para os próximos dias e queria reservar um horário exclusivo pra você antes de fechar. São só 30 minutos, as empresas que passaram por essa conversa saíram com um plano claro de como usar IA dentro delas. Ainda faz sentido pra você?\",\n\n    mia_followup_6:\n      \"Fala {{1}}, me desculpa insistir, mas não quero que você perca essa janela! Muitas empresas já estão usando IA pra sair na frente. Posso te mostrar como em 30 minutos. Topa?\",\n\n    mia_followup_7:\n      \"Tudo certo, {{1}}? Conseguimos um tempinho para trocar uma ideia rápida sobre IA em sua empresa? É coisa rápida. 😊\",\n\n    mia_despedida_encerramento:\n      \"Oi {{1}}! Por aqui é a Mia, da M[IA]. Como não tive seu retorno, vou encerrar nossa conversa por agora. Se quiser explorar como IA pode transformar sua empresa no futuro, é só me chamar. 😊\"\n  };\n\n  const templateName = respostaIA.template;\n  const textoTemplate = templates[templateName] || \"Template não encontrado.\";\n\n  const mensagemFinal = textoTemplate\n    .replace(\"{{1}}\", respostaIA.var_1 || \"\");\n\n  return {\n    json: {\n      ...respostaIA,\n      mensagem_template: mensagemFinal\n    }\n  };\n});"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2224,
+          32
+        ],
+        "id": "7da8f556-2f73-485a-adc4-f79670ef94cc",
+        "name": "Estruturação do JSON de saída"
+      },
+      {
+        "parameters": {
+          "jsCode": "const entrada = $items(\"Estruturação do JSON de saída\")[0].json;\n\nif (!entrada.template || entrada.template === \"pausar\" || entrada.template === \"erro\") {\n  return [{ json: { erro: `Template inválido ou pausado: ${entrada.template}` } }];\n}\n\nif (!entrada.telefone) {\n  return [{ json: { erro: \"Telefone não informado\" } }];\n}\n\nconst templateVarsCount = {\n  mia_followup_1: 1,\n  mia_followup_2: 1,\n  mia_followup_3: 1,\n  mia_followup_4: 1,\n  mia_followup_5: 1,\n  mia_followup_6: 1,\n  mia_followup_7: 1,\n  mia_despedida_encerramento: 1\n};\n\nconst qtd = templateVarsCount[entrada.template] || 0;\nconst parametros = [];\n\nif (qtd >= 1 && entrada.var_1) {\n  parametros.push({ type: \"text\", text: String(entrada.var_1) });\n}\n\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: String(entrada.telefone),\n  type: \"template\",\n  template: {\n    name: entrada.template,\n    language: { code: \"pt_BR\" },\n    components: parametros.length > 0\n      ? [{ type: \"body\", parameters: parametros }]\n      : []\n  }\n};\n\nreturn [{ json: { resultado: body } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2448,
+          32
+        ],
+        "id": "f521b31e-3e08-4741-8058-8c18da42bb86",
+        "name": "Monta o body de requisição pra META"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://graph.facebook.com/v22.0/1099685786551688/messages",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ $json.resultado }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2688,
+          32
+        ],
+        "id": "8ed5b68f-d8e5-41e4-8451-30941e0e87ae",
+        "name": "Enviar mensagem no WhatsApp",
+        "retryOnFail": true,
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "VEIaezW6GjDeSS3w",
+            "name": "Meta Business Manager"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "de3f2786-345e-401b-a958-6adb5d1ccf09",
+                "leftValue": "={{ $('Estruturação do JSON de saída').first().json.template }}",
+                "rightValue": "mia_despedida_encerramento",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          3248,
+          0
+        ],
+        "id": "3d5ea4b0-bc0b-4281-8e2d-709f6f2a9a1b",
+        "name": "Verifica se foi mensagem de despedida"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "MIA-LOGS",
+          "remoteJid": "=5538998634756",
+          "messageText": "=Erro ao realizar Follow up da Mia com *{{ $('Estruturação do JSON de saída').first().json.var_1 }}* da empresa *{{ $('Preparar campos do lead').first().json.empresa }}*\n\n",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          3168,
+          336
+        ],
+        "id": "0543263c-9cb8-414c-91c4-5d85d4897fee",
+        "name": "Aviso de erro ao disparar mensagem1",
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const lead = $input.first().json;\n\nlet telefone = lead.whatsapp || lead.phone || \"\";\n\n// Remove tudo que não é número\ntelefone = telefone.replace(/\\D/g, \"\");\n\n// Se começar com 0, remove\nif (telefone.startsWith(\"0\")) {\n  telefone = telefone.slice(1);\n}\n\n// Se tiver 10 dígitos (sem o 9), adiciona o 9 após o DDD\nif (telefone.length === 10) {\n  telefone = telefone.slice(0, 2) + \"9\" + telefone.slice(2);\n}\n\n// Adiciona DDI 55 se não tiver\nif (telefone.length === 11) {\n  telefone = \"55\" + telefone;\n}\n\nreturn [{\n  json: {\n    ...lead,\n    telefone_normalizado: telefone\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          128,
+          -16
+        ],
+        "id": "5f3002aa-b486-4b35-8942-41c35ae8a7d8",
+        "name": "Normaliza telefone"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "MIA-LOGS",
+          "remoteJid": "=5538998634756",
+          "messageText": "=Follow up da Mia realizado com *{{ $('Estruturação do JSON de saída').first().json.var_1 }}* da empresa *{{ $('Preparar campos do lead').first().json.empresa }}*\n",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          4016,
+          16
+        ],
+        "id": "4d0c89f5-69b5-4397-a296-62d18da8ac17",
+        "name": "Confirmação Follow-up",
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "tableId": "mia-historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "mensagem_usuario",
+                "fieldValue": "="
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "={{ $('Estruturação do JSON de saída').first().json.mensagem_template }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Preparar campos do lead').first().json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $('Preparar campos do lead').first().json.name }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "text"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "SDR-MIA"
+              },
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $('Preparar campos do lead').first().json.telefone }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          4240,
+          384
+        ],
+        "id": "27df1052-a862-4729-b0a4-9d540e325b70",
+        "name": "Cria Mensagem no histórico da MIA",
+        "credentials": {
+          "supabaseApi": {
+            "id": "FsQeUlxQ7Q6O8mbE",
+            "name": "MIA - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 9
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -336,
+          -16
+        ],
+        "id": "99ee1cdb-2629-430d-925a-847b5bef061f",
+        "name": "Disparo todo dia às 9h"
+      },
+      {
+        "parameters": {
+          "jsCode": "const template = `{\n  \"template\": \"mia_despedida_encerramento\",\n  \"var_1\": \"${$json.name}\",\n  \"telefone\": \"${$json.telefone}\"\n}`;\n\nreturn [\n  {\n    json: {\n      output: template\n    }\n  }\n];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1888,
+          -176
+        ],
+        "id": "b891bfd8-efe5-4e43-a8d5-9bb4a28b1c79",
+        "name": "Pegar template de despedida após 7 dias sem resposta"
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=### Dia Atual: {{ $now.weekdayLong }}, {{ $now.format('dd/MM/yyyy') }}, {{ $now.hour.toString().padStart(2, '0') }}:{{ $now.minute.toString().padStart(2, '0') }}\n\nVocê é a **Mia**, SDR especialista em soluções de IA para empresas da M[IA].\nSeu trabalho é **analisar o histórico de conversa do lead e selecionar QUAL template oficial do WhatsApp deve ser usado**, conforme as regras abaixo.\n\nVocê NÃO escreve mensagens livres. Você apenas escolhe o próximo template da sequência.\n\n---\n\n# 📌 DADOS RECEBIDOS\n\n* Nome do lead: **{{ $json.name }}**\n* Histórico completo:\n{{ JSON.stringify($json.historico_conversa, null, 2) }}\n\nRetorne apenas um JSON indicando qual template usar e confirmando a variável 1 (nome).\n\n---\n\n# 📋 FLUXO DE FOLLOW-UP — 8 TEMPLATES SEQUENCIAIS\n\n> ⚠️ Sempre envie o próximo template da lista que ainda não foi usado. Não pule etapas.\n\n---\n\n// ======================================================\n// CONTATO 1 — Retomada leve\n// ======================================================\n**mia_followup_1**\nOii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊\n\n---\n\n// ======================================================\n// CONTATO 2 — Ping curto\n// ======================================================\n**mia_followup_2**\nTudo bem, {{1}}? Tem um minutinho? 😄\n\n---\n\n// ======================================================\n// CONTATO 3 — Valor e curiosidade\n// ======================================================\n**mia_followup_3**\nOpa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?\n\n---\n\n// ======================================================\n// CONTATO 4 — Prova social\n// ======================================================\n**mia_followup_4**\nOi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?\n\n---\n\n// ======================================================\n// CONTATO 5 — Escassez / agenda\n// ======================================================\n**mia_followup_5**\nOlá {{1}}, estou organizando a agenda do nosso time para os próximos dias e queria reservar um horário exclusivo pra você antes de fechar. São só 30 minutos, as empresas que passaram por essa conversa saíram com um plano claro de como usar IA dentro delas. Ainda faz sentido pra você?\n\n---\n\n// ======================================================\n// CONTATO 6 — Urgência suave\n// ======================================================\n**mia_followup_6**\nFala {{1}}, me desculpa insistir, mas não quero que você perca essa janela! Muitas empresas já estão usando IA pra sair na frente. Posso te mostrar como em 30 minutos. Topa?\n\n---\n\n// ======================================================\n// CONTATO 7 — Último contato\n// ======================================================\n**mia_followup_7**\nTudo certo, {{1}}? Conseguimos um tempinho para trocar uma ideia rápida sobre IA em sua empresa? É coisa rápida. 😊\n\n---\n\n// ======================================================\n// ENCERRAMENTO\n// ======================================================\n**mia_despedida_encerramento**\nOi {{1}}! Por aqui é a Mia, da M[IA]. Como não tive seu retorno, vou encerrar nossa conversa por agora. Se quiser explorar como IA pode transformar sua empresa no futuro, é só me chamar. 😊\n\n> Use somente após todos os anteriores terem sido enviados.\n\n---\n\n# 🧠 REGRAS DE DECISÃO\n\n### Sequência obrigatória:\n1. `mia_followup_1`\n2. `mia_followup_2`\n3. `mia_followup_3`\n4. `mia_followup_4`\n5. `mia_followup_5`\n6. `mia_followup_6`\n7. `mia_followup_7`\n8. `mia_despedida_encerramento` ← somente após todos os anteriores\n\n### Regras:\n- Verifique no histórico quais templates já foram enviados pelo Agente.\n- Envie sempre o **próximo da sequência** que ainda não foi utilizado.\n- **Nunca repita** um template já enviado.\n- Se o lead respondeu positivamente em qualquer etapa (demonstrou interesse real, pediu link, perguntou sobre valores), **pause o fluxo automático** e aguarde instrução ou intervenção humana.\n\n---\n\n# 📤 FORMATO DE RESPOSTA OBRIGATÓRIO (JSON)\n\n{\n  \"template\": \"<nome_do_template_escolhido>\",\n  \"var_1\": \"{{ $json.name }}\",\n  \"telefone\": \"{{ $json.telefone }}\"\n}\n\nNenhum texto fora do JSON.\nNenhuma explicação.\nNenhuma mensagem criada.",
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 3,
+        "position": [
+          1824,
+          288
+        ],
+        "id": "eecab3b5-d935-43e5-aa90-906710ac9a97",
+        "name": "AI Agent - Mia"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "b5296455-2292-4b5d-8e75-0b156471af30",
+                "leftValue": "={{ $json.messages[0].message_status }}",
+                "rightValue": "accepted",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2960,
+          16
+        ],
+        "id": "02798cac-8a45-4a66-8430-c4779e832a74",
+        "name": "Verificar status do envio1"
+      },
+      {
+        "parameters": {
+          "operation": "update",
+          "tableId": "clients",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $('Pegar os leads que estão em Follow-up').first().json.id }}"
+              }
+            ]
+          },
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "current_stage",
+                "fieldValue": "Fechado - Perdeu"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          3616,
+          -144
+        ],
+        "id": "5933cdcd-df01-4d0f-b72b-429cbf176939",
+        "name": "Atualiza etapa do lead para Fechado - Perdeu",
+        "credentials": {
+          "supabaseApi": {
+            "id": "HnWiWrODTCTToBRD",
+            "name": "Flow - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "getAll",
+          "tableId": "clients",
+          "returnAll": true,
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "current_stage",
+                "condition": "eq",
+                "keyValue": "Follow-up"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          -96,
+          -16
+        ],
+        "id": "daf65d82-a420-48fd-9517-63a5d396b847",
+        "name": "Pegar os leads que estão em Follow-up",
+        "credentials": {
+          "supabaseApi": {
+            "id": "HnWiWrODTCTToBRD",
+            "name": "Flow - Supabase"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Pega histórico de mensagens": {
+        "main": [
+          [
+            {
+              "node": "Formata histórico de mensagens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Formata histórico de mensagens": {
+        "main": [
+          [
+            {
+              "node": "Combinar dados do lead + histórico",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Preparar campos do lead": {
+        "main": [
+          [
+            {
+              "node": "Pega histórico de mensagens",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Combinar dados do lead + histórico",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Combinar dados do lead + histórico": {
+        "main": [
+          [
+            {
+              "node": "If",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Iterar sobre cada lead": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Preparar campos do lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "If": {
+        "main": [
+          [
+            {
+              "node": "Pegar template de despedida após 7 dias sem resposta",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "AI Agent - Mia",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenRouter Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "AI Agent - Mia",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Estruturação do JSON de saída": {
+        "main": [
+          [
+            {
+              "node": "Monta o body de requisição pra META",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta o body de requisição pra META": {
+        "main": [
+          [
+            {
+              "node": "Enviar mensagem no WhatsApp",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar mensagem no WhatsApp": {
+        "main": [
+          [
+            {
+              "node": "Verificar status do envio1",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Aviso de erro ao disparar mensagem1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se foi mensagem de despedida": {
+        "main": [
+          [
+            {
+              "node": "Atualiza etapa do lead para Fechado - Perdeu",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Confirmação Follow-up",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normaliza telefone": {
+        "main": [
+          [
+            {
+              "node": "Iterar sobre cada lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Confirmação Follow-up": {
+        "main": [
+          [
+            {
+              "node": "Cria Mensagem no histórico da MIA",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Cria Mensagem no histórico da MIA",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Aviso de erro ao disparar mensagem1": {
+        "main": [
+          [
+            {
+              "node": "Iterar sobre cada lead",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Iterar sobre cada lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cria Mensagem no histórico da MIA": {
+        "main": [
+          [
+            {
+              "node": "Iterar sobre cada lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Disparo todo dia às 9h": {
+        "main": [
+          [
+            {
+              "node": "Pegar os leads que estão em Follow-up",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pegar template de despedida após 7 dias sem resposta": {
+        "main": [
+          [
+            {
+              "node": "Estruturação do JSON de saída",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Mia": {
+        "main": [
+          [
+            {
+              "node": "Estruturação do JSON de saída",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Atualiza etapa do lead para Fechado - Perdeu": {
+        "main": [
+          [
+            {
+              "node": "Confirmação Follow-up",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pegar os leads que estão em Follow-up": {
+        "main": [
+          [
+            {
+              "node": "Normaliza telefone",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verificar status do envio1": {
+        "main": [
+          [
+            {
+              "node": "Verifica se foi mensagem de despedida",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Aviso de erro ao disparar mensagem1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Lucas Andrade",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
