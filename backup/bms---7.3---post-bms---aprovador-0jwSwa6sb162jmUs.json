@@ -1,0 +1,524 @@
+{
+  "updatedAt": "2026-01-11T23:21:44.909Z",
+  "createdAt": "2025-12-15T12:33:19.036Z",
+  "id": "0jwSwa6sb162jmUs",
+  "name": "BMS - 7.3 - Post BMS - Aprovador",
+  "active": false,
+  "isArchived": true,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# Fluxo de Aprovação dos Posts\n",
+        "height": 704,
+        "width": 672,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1424,
+        -256
+      ],
+      "typeVersion": 1,
+      "id": "15e81e30-3024-4cb2-b3a4-a49e60f62453",
+      "name": "Sticky Note13"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        192
+      ],
+      "id": "cf71338b-cbb1-48eb-8cff-00bd54443145",
+      "name": "gpt-4.1-mini"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 20
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1360,
+        16
+      ],
+      "id": "96c422a0-43a2-4f1a-8a78-28a761c5bdeb",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "content": "## Realiza a avaliação dos posts",
+        "height": 704,
+        "width": 1488
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -736,
+        -256
+      ],
+      "id": "5f6df087-7746-43b9-8930-b57a15be9d5a",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Se não tem posts, retorna vazio\nif (!items.length) {\n  return [{\n    json: {\n      tem_posts: false,\n      mensagem: 'Nenhum post aguardando aprovação'\n    }\n  }];\n}\n\n// Pega apenas o PRIMEIRO post aguardando aprovação\n// Como o JSON vem como array, precisa pegar items[0].json (que é o array), depois [0] (primeiro item do array)\nconst post = items[0].json?.[0] || items[0].json || items[0];\n\n// Valida se o post tem os dados necessários\nif (!post.id_post || !post.blog) {\n  return [{\n    json: {\n      tem_posts: false,\n      mensagem: 'Post inválido: faltam dados essenciais',\n      debug: post // <-- adiciona isso para ver o que está vindo\n    }\n  }];\n}\n\n// Prepara as URLs das imagens (filtra vazias)\nconst imagens = [\n  post.imagem1_url\n].filter(url => url && url.trim() !== '');\n\n// Verifica se tem pelo menos 1 imagem\nif (!imagens.length) {\n  return [{\n    json: {\n      tem_posts: false,\n      mensagem: 'Post sem imagens válidas'\n    }\n  }];\n}\n\n// Retorna o post completo + metadados extras\nreturn [{\n  json: {\n    ...post, // <-- inclui todos os campos originais do JSON\n    tem_posts: true,\n    quantidade_imagens: imagens.length,\n    imagem_principal: imagens[0], // primeira imagem (capa)\n    imagens: imagens, // lista com todas as imagens válidas\n    data_processamento: new Date().toISOString(),\n    mensagem: `Post ${post.id_post} preparado para análise do AI Agent`\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        32
+      ],
+      "id": "661e2a6c-9b09-4dd5-84d1-bc74eab5f1e8",
+      "name": "Prepara Post para Análise"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "text": "=Contexto\nAnalise a imagem fornecida e descreva se está adequada para post no X (Twitter) sobre Gestão Tributária, Planejamento Fiscal e Contabilidade Empresarial.\n\nIMAGEM: {{ $('Prepara Post para Análise').item.json.imagem1_url }}\n\nCritérios de Avaliação\nAvalie se a imagem:\n\nEstá clara, nítida, completa e relevante para o tema tributário/fiscal/contábil?\nOu está cortada, vazia, sem sentido ou TOTALMENTE PRETA?\n\n\nIMPORTANTE\nSobre a Análise da Imagem de Fundo\n\nA imagem vem com texto/legenda sobreposto, porém a imagem de fundo é que deve ser avaliada\nFundo totalmente escuro/preto deve ser rejeitado (só rejeite se for TOTALMENTE escuro)\nPor padrão, imagens podem vir um pouco escuras por conta do HTML aplicado. Isso é NORMAL e NÃO deve ser motivo de rejeição\n\nCritérios de Rejeição\nApenas rejeite se:\n\nTotalmente preta\nCortada de forma que não faça sentido\nBorrada/sem nitidez\nCompletamente sem relação com temas corporativos/profissionais\n\n\nFormato de Resposta\nRetorne APENAS este JSON (sem markdown, sem ```json):\njson{\n  \"decisao_geral\": \"APROVADO ou REJEITADO\",\n  \"status_imagem\": \"Aprovada ou Rejeitada\",\n  \"motivo\": \"Descreva brevemente o motivo da decisão\",\n  \"analise_detalhada\": \"Faça uma descrição técnica e detalhada da composição da imagem\",\n  \"recomendacao_final\": \"PUBLICAR ou REGERAR_IMAGEM\"\n}\n\nExemplo de Resposta\nVocê deve analisar a imagem real fornecida e retornar sua própria avaliação seguindo este formato:\njson{\n  \"decisao_geral\": \"APROVADO\",\n  \"status_imagem\": \"Aprovada\",\n  \"motivo\": \"Imagem profissional com documentos fiscais, nítida e relevante para o tema tributário\",\n  \"analise_detalhada\": \"A imagem apresenta um plano médio de uma mesa de escritório com foco em papéis de balanço e uma caneta. O fundo está desfocado mas sugere um ambiente corporativo, as cores estão sóbrias e a iluminação está adequada para o contexto profissional.\",\n  \"recomendacao_final\": \"PUBLICAR\"\n}",
+        "imageUrls": "={{ $json.imagens.join(',') }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -448,
+        32
+      ],
+      "id": "5376b499-cbc0-4418-a543-7efc556b8269",
+      "name": "IA Vision - Analisa Imagens"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=ANALISTA DE APROVAÇÃO FINAL - POSTS X (TWITTER) E WHATSAPP\nVocê é um analista de conteúdo digital especializado em Gestão Tributária, Planejamento Fiscal e Contabilidade Empresarial.\nSua função: aprovar ou reprovar posts para X (Twitter) e WhatsApp baseado em qualidade visual, legendas e relevância, atribuindo nota final.\n\nDADOS DE ENTRADA\nPOST:\n\nID: {{ $('Prepara Post para Análise').item.json.id_post }}\nTítulo: {{ $('Prepara Post para Análise').item.json.titulo }}\nLegenda WhatsApp: {{ $('Prepara Post para Análise').item.json.legenda_whatsapp }}\nLegenda X: {{ $('Prepara Post para Análise').item.json.legenda_x }}\nQtd Imagens: {{ $('Prepara Post para Análise').item.json.quantidade_imagens }}\n\nANÁLISE VISUAL (IA Vision):\n\nDecisão: {{ $json.decisao_geral }}\nRecomendação: {{ $json.recomendacao_final }}\nDetalhes: {{ JSON.stringify($json.analise_detalhada, null, 2) }}\n\n\nCRITÉRIOS DE AVALIAÇÃO\n1. VISUAL (Peso: 40%) - CRÍTICO\nAPROVAR (8-10 pontos):\n\nAnálise visual = \"APROVADO\"\nMáximo 1 imagem rejeitada\nLegibilidade BOA/EXCELENTE\nImagem relevante para tema tributário/fiscal/contábil\n\nCONDICIONAL (5-7 pontos):\n\nAnálise visual com ressalvas\nImagem relacionada mas não ideal\nLegibilidade aceitável\n\nREPROVAR (0-4 pontos):\n\nAnálise visual = \"REJEITADO\"\nImagem totalmente preta ou cortada\nProblemas críticos de legibilidade\nSem relação com tema tributário\n\n\n2. LEGENDA X (TWITTER) (Peso: 35%) - CRÍTICO\nAPROVAR (8-10 pontos):\n\n400-600 caracteres (sem contar fontes e hashtags)\nHook inicial direto e impactante\nTexto conversacional e engajador\n2 fontes citadas com links\n4 hashtags relevantes ao tema tributário\nCTA ou insight final presente\nTom adequado ao X (ágil mas profissional)\nQuebras de linha adequadas\nFoco em tributação, planejamento fiscal ou contabilidade\n\nCONDICIONAL (5-7 pontos):\n\n300-400 caracteres (OK mas curto)\nHook presente mas fraco\n1 fonte citada\n2-3 hashtags\nCTA genérico\n\nREPROVAR (0-4 pontos):\n\nMenos de 300 caracteres\nSem hook impactante\nSem fontes citadas\nSem hashtags ou menos de 2\nSem CTA ou insight final\nErros graves ou texto inadequado\n\n\n3. LEGENDA WHATSAPP (Peso: 15%) - MODERADO\nAPROVAR (8-10 pontos):\n\n200-400 caracteres\nMensagem direta e objetiva\nTom conversacional e acessível\nCTA claro (pergunta, convite para ação)\nUso de emojis relevantes (1-3)\nAdequado para envio em grupos/listas de transmissão\nValor prático para empresários/gestores\n\nCONDICIONAL (5-7 pontos):\n\n150-200 caracteres (curto mas aceitável)\nCTA presente mas fraco\nPoucos ou muitos emojis\nTom muito formal para WhatsApp\n\nREPROVAR (0-4 pontos):\n\nMenos de 150 caracteres\nSem CTA\nTom inadequado para WhatsApp\nErros graves ou texto genérico\n\n\n4. RELEVÂNCIA (Peso: 10%) - MODERADO\nAPROVAR (8-10 pontos):\n\nTema: Gestão Tributária, Planejamento Fiscal ou Contabilidade Empresarial\nValor prático (dicas, insights, dados, alertas fiscais)\nPúblico: gestores, empresários, contadores, profissionais financeiros\nAtualizado para 2025/2026\nInformações precisas sobre legislação\n\nCONDICIONAL (5-7 pontos):\n\nTema relacionado (finanças empresariais gerais)\nValor presente mas superficial\n\nREPROVAR (0-4 pontos):\n\nFora do nicho tributário/fiscal/contábil\nSem valor prático\nInformação incorreta ou desatualizada\n\n\nSISTEMA DE PONTUAÇÃO\nCÁLCULO DA NOTA FINAL (0-10):\n\nAtribua nota individual (0-10) para cada categoria\nAplique os pesos:\n\nVisual: 40% (multiplique nota por 0.40)\nLegenda X: 35% (multiplique nota por 0.35)\nLegenda WhatsApp: 15% (multiplique nota por 0.15)\nRelevância: 10% (multiplique nota por 0.10)\n\n\nSome os valores ponderados = NOTA FINAL\n\nEXEMPLO:\n\nVisual: 9 pontos × 0.40 = 3.60\nLegenda X: 8 pontos × 0.35 = 2.80\nLegenda WhatsApp: 8 pontos × 0.15 = 1.20\nRelevância: 10 pontos × 0.10 = 1.00\nNOTA FINAL: 8.60\n\nCLASSIFICAÇÃO:\n\n9.0 - 10.0: Excelente (Publicar Imediatamente)\n7.5 - 8.9: Bom (Publicar com Ressalvas)\n6.0 - 7.4: Aceitável (Publicar com Ajustes Menores)\n4.0 - 5.9: Fraco (Retrabalho Necessário)\n0.0 - 3.9: Inadequado (Recriar Completo)\n\n\nLÓGICA DE DECISÃO\nAPROVAR SE:\n\nNota Final ≥ 6.0\nVisual: APROVADO\nLegenda X: APROVADO ou CONDICIONAL\nLegenda WhatsApp: APROVADO ou CONDICIONAL\nRelevância: APROVADO ou CONDICIONAL\n\nREPROVAR SE:\n\nNota Final < 6.0\nOU Visual: REJEITADO (reprova sozinho)\nOU Legenda X: REPROVADO (crítico)\nOU Legenda WhatsApp: REPROVADO\nOU Relevância: REPROVADO\nOU 2+ categorias CONDICIONAL fracas\n\n\nFORMATO DE SAÍDA\nRetorne APENAS este JSON como array (sem markdown, sem texto extra):\njson[\n  {\n    \"id_post\": \"{{ $('Prepara Post para Análise').item.json.id_post }}\",\n    \"status\": \"Aprovado ou Reprovado\",\n    \"nota_final\": 0.0,\n    \"notas_detalhadas\": {\n      \"visual\": 0.0,\n      \"legenda_x\": 0.0,\n      \"legenda_whatsapp\": 0.0,\n      \"relevancia\": 0.0\n    },\n    \"categoria_visual\": \"APROVADO ou REPROVADO\",\n    \"categoria_legenda_x\": \"APROVADO ou APROVACAO_CONDICIONAL ou REPROVADO\",\n    \"categoria_legenda_whatsapp\": \"APROVADO ou APROVACAO_CONDICIONAL ou REPROVADO\",\n    \"categoria_relevancia\": \"APROVADO ou APROVACAO_CONDICIONAL ou REPROVADO\",\n    \"justificativa\": \"Breve explicação (máx 150 chars)\",\n    \"pontos_fortes\": [\"ponto1\", \"ponto2\", \"ponto3\"],\n    \"pontos_fracos\": [\"ponto1\", \"ponto2\"] ou [],\n    \"recomendacao\": \"PUBLICAR_IMEDIATAMENTE ou PUBLICAR_COM_RESSALVAS ou REGERAR_IMAGEM ou REESCREVER_LEGENDA_X ou REESCREVER_LEGENDA_WHATSAPP ou REESCREVER_TODAS_LEGENDAS ou RECRIAR_POST_COMPLETO\"\n  }\n]\n\nREGRAS IMPORTANTES\n\nNUNCA altere o id_post\nUse apenas valores especificados\nCalcule corretamente as notas ponderadas\nnota_final deve ter 1 casa decimal (ex: 8.5)\nnotas_detalhadas devem ter 1 casa decimal\nJustificativa: máximo 150 caracteres\nPontos fortes: 2-4 itens\nPontos fracos: 0-3 itens\nStatus e recomendação devem estar alinhados com a nota\nRetorne APENAS o array JSON (começa com [ termina com ])\nCRÍTICO: Legenda X sem 2 fontes citadas = REPROVAÇÃO AUTOMÁTICA\nCRÍTICO: Imagem totalmente preta ou sem relação com tema tributário = REPROVAÇÃO AUTOMÁTICA\n\n\nEXEMPLOS\nAprovado - Excelente (9.3):\njson[{\n  \"id_post\": \"POST_123\",\n  \"status\": \"Aprovado\",\n  \"nota_final\": 9.3,\n  \"notas_detalhadas\": {\n    \"visual\": 9.5,\n    \"legenda_x\": 9.5,\n    \"legenda_whatsapp\": 9.0,\n    \"relevancia\": 9.0\n  },\n  \"categoria_visual\": \"APROVADO\",\n  \"categoria_legenda_x\": \"APROVADO\",\n  \"categoria_legenda_whatsapp\": \"APROVADO\",\n  \"categoria_relevancia\": \"APROVADO\",\n  \"justificativa\": \"Post excelente: imagem profissional tributária, X com 500 chars e 2 fontes, WhatsApp objetivo com CTA claro.\",\n  \"pontos_fortes\": [\"Imagem nítida de documentos fiscais\", \"X com hook forte e 2 fontes\", \"WhatsApp direto com emoji\", \"Tema atual sobre IRPJ\"],\n  \"pontos_fracos\": [],\n  \"recomendacao\": \"PUBLICAR_IMEDIATAMENTE\"\n}]\nReprovado - Inadequado (4.2):\njson[{\n  \"id_post\": \"POST_456\",\n  \"status\": \"Reprovado\",\n  \"nota_final\": 4.2,\n  \"notas_detalhadas\": {\n    \"visual\": 8.0,\n    \"legenda_x\": 2.0,\n    \"legenda_whatsapp\": 4.0,\n    \"relevancia\": 8.0\n  },\n  \"categoria_visual\": \"APROVADO\",\n  \"categoria_legenda_x\": \"REPROVADO\",\n  \"categoria_legenda_whatsapp\": \"REPROVADO\",\n  \"categoria_relevancia\": \"APROVADO\",\n  \"justificativa\": \"Legendas inadequadas: X sem fontes citadas e apenas 250 chars. WhatsApp sem CTA e muito curto.\",\n  \"pontos_fortes\": [\"Imagem de qualidade\", \"Tema relevante sobre planejamento fiscal\"],\n  \"pontos_fracos\": [\"X sem 2 fontes\", \"X muito curto\", \"WhatsApp sem CTA\", \"WhatsApp apenas 120 chars\"],\n  \"recomendacao\": \"REESCREVER_TODAS_LEGENDAS\"\n}]\nAprovado - Bom (8.4):\njson[{\n  \"id_post\": \"POST_789\",\n  \"status\": \"Aprovado\",\n  \"nota_final\": 8.4,\n  \"notas_detalhadas\": {\n    \"visual\": 8.5,\n    \"legenda_x\": 9.0,\n    \"legenda_whatsapp\": 7.5,\n    \"relevancia\": 9.0\n  },\n  \"categoria_visual\": \"APROVADO\",\n  \"categoria_legenda_x\": \"APROVADO\",\n  \"categoria_legenda_whatsapp\": \"APROVACAO_CONDICIONAL\",\n  \"categoria_relevancia\": \"APROVADO\",\n  \"justificativa\": \"Bom post. X excelente com 2 fontes. WhatsApp pode ter CTA mais direto. Imagem adequada ao tema contábil.\",\n  \"pontos_fortes\": [\"Imagem de balanço contábil nítida\", \"X 480 chars com 2 fontes\", \"Hashtags relevantes\", \"Tema útil sobre obrigações acessórias\"],\n  \"pontos_fracos\": [\"WhatsApp com CTA genérico\"],\n  \"recomendacao\": \"PUBLICAR_COM_RESSALVAS\"\n}]\nReprovado - Fraco (5.1):\njson[{\n  \"id_post\": \"POST_321\",\n  \"status\": \"Reprovado\",\n  \"nota_final\": 5.1,\n  \"notas_detalhadas\": {\n    \"visual\": 3.0,\n    \"legenda_x\": 7.0,\n    \"legenda_whatsapp\": 6.5,\n    \"relevancia\": 8.0\n  },\n  \"categoria_visual\": \"REPROVADO\",\n  \"categoria_legenda_x\": \"APROVACAO_CONDICIONAL\",\n  \"categoria_legenda_whatsapp\": \"APROVACAO_CONDICIONAL\",\n  \"categoria_relevancia\": \"APROVADO\",\n  \"justificativa\": \"Imagem rejeitada: totalmente preta. Legendas OK mas X com apenas 1 fonte. Visual crítico reprova o post.\",\n  \"pontos_fortes\": [\"Tema relevante sobre reforma tributária\", \"WhatsApp com boa linguagem\"],\n  \"pontos_fracos\": [\"Imagem totalmente preta\", \"X com apenas 1 fonte\", \"Visual inutilizável\"],\n  \"recomendacao\": \"REGERAR_IMAGEM\"\n}]\n\nANALISE O POST, CALCULE AS NOTAS E RETORNE APENAS O ARRAY JSON.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        -16,
+        32
+      ],
+      "id": "0147b9ae-7c7e-4e3f-9df8-b1cfbd9dca57",
+      "name": "IA - Decide Aprovação do Post",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Pega o item atual (modo Run Once for Each Item)\nconst item = $input.item.json;\n\ntry {\n  // Pega o conteúdo da resposta da IA\n  let aiResponse = item.data || item.response || item.message || item.output || item;\n  \n  // Se vier como string, tenta limpar e parsear\n  if (typeof aiResponse === 'string') {\n    // Remove markdown se existir (```json ... ```)\n    aiResponse = aiResponse.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n    \n    // Remove \"json\" no início se existir\n    aiResponse = aiResponse.replace(/^json/, '').trim();\n    \n    // Tenta fazer parse do JSON\n    aiResponse = JSON.parse(aiResponse);\n  }\n  \n  // Se a resposta for um array, pega o primeiro elemento\n  if (Array.isArray(aiResponse)) {\n    aiResponse = aiResponse[0];\n  }\n  \n  // Valida se tem os campos obrigatórios\n  if (!aiResponse.id_post) {\n    throw new Error('Campo id_post não encontrado na resposta da IA');\n  }\n  \n  // Retorna a estrutura completa do objeto\n  return {\n    id_post: aiResponse.id_post,\n    status: aiResponse.status,\n    nota_final: aiResponse.nota_final,\n    notas_detalhadas: {\n      visual: aiResponse.notas_detalhadas.visual,\n      legenda: aiResponse.notas_detalhadas.legenda,\n      relevancia: aiResponse.notas_detalhadas.relevancia\n    },\n    categoria_visual: aiResponse.categoria_visual,\n    categoria_legenda: aiResponse.categoria_legenda,\n    categoria_relevancia: aiResponse.categoria_relevancia,\n    justificativa: aiResponse.justificativa,\n    pontos_fortes: aiResponse.pontos_fortes,\n    pontos_fracos: aiResponse.pontos_fracos,\n    recomendacao: aiResponse.recomendacao\n  };\n  \n} catch (error) {\n  // Em caso de erro, retorna o erro estruturado\n  return {\n    erro: true,\n    mensagem: error.message,\n    item_original: item\n  };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        32
+      ],
+      "id": "f43eaadf-ba6a-4890-8df6-d3f74f168ea9",
+      "name": "Parseia Decisão da IA (JSON)"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA",
+          "mode": "list",
+          "cachedResultName": "BMS - Controle Journal",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1833394607,
+          "mode": "list",
+          "cachedResultName": "social-media-bms",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA/edit#gid=1833394607"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_post": "={{ $json.id_post }}",
+            "status_x": "={{ $json.status }}",
+            "nota": "={{ $json.nota_final }}",
+            "status_whatsapp": "={{ $json.status }}"
+          },
+          "matchingColumns": [
+            "id_post"
+          ],
+          "schema": [
+            {
+              "id": "id_post",
+              "displayName": "id_post",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "data_criacao",
+              "displayName": "data_criacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "titulo",
+              "displayName": "titulo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "briefing",
+              "displayName": "briefing",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "blog",
+              "displayName": "blog",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "legenda_x",
+              "displayName": "legenda_x",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "legenda_whatsapp",
+              "displayName": "legenda_whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_x",
+              "displayName": "status_x",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_whatsapp",
+              "displayName": "status_whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "nota",
+              "displayName": "nota",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "imagem1_url",
+              "displayName": "imagem1_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        560,
+        128
+      ],
+      "id": "75a98a4b-2ff6-4d48-8c76-2db26e13111e",
+      "name": "Atualiza Status no Sheets (Aprovado/Reprovado)"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -928,
+        16
+      ],
+      "id": "3cf559e9-dad7-428a-b30b-d1a7c5c94c92",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  // Obtém e limpa a resposta da IA Vision\n  let raw = $input.item.json.content;\n  \n  raw = raw\n    .replace(/\\n/g, '')\n    .replace(/\\r/g, '')\n    .replace(/json|```/g, '')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  // Extrai o objeto JSON\n  const start = raw.indexOf('{');\n  const end = raw.lastIndexOf('}') + 1;\n\n  if (start === -1 || end === 0) {\n    throw new Error('JSON não encontrado na resposta');\n  }\n\n  const data = JSON.parse(raw.substring(start, end));\n  const post = $('Prepara Post para Análise').item.json;\n\n  return {\n    json: {\n      id_post: post.id_post,\n      // 🔹 Apenas o que foi solicitado:\n      decisao_geral: data.decisao_geral,\n      recomendacao_final: data.recomendacao_final,\n      analise_detalhada: data.analise_detalhada,\n      // Metadados de controle\n      data_processamento: new Date().toISOString(),\n      erro: false\n    }\n  };\n} catch (error) {\n  const post = $('Prepara Post para Análise').item.json;\n  return {\n    json: {\n      id_post: post.id_post,\n      erro: true,\n      erro_mensagem: error.message,\n      decisao_geral: \"ERRO\",\n      recomendacao_final: \"REVISAR_MANUALMENTE\",\n      analise_detalhada: \"Erro ao processar análise visual.\"\n    }\n  };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        32
+      ],
+      "id": "b60b45af-dd1b-4117-8a89-5aea5241c4a1",
+      "name": "Resultado da análise"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA",
+          "mode": "list",
+          "cachedResultName": "BMS - Controle Journal",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1833394607,
+          "mode": "list",
+          "cachedResultName": "social-media-bms",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hqVrO3gl7qnmgBRDNh20zB_VJm7aGigjuJS4rN3S2yA/edit#gid=1833394607"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status_x",
+              "lookupValue": "Aguardando Aprovação"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        -1152,
+        16
+      ],
+      "id": "f616b18b-324b-42c5-a0e2-4c415fd537cc",
+      "name": "post aguardando aprovação",
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "gpt-4.1-mini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "IA - Decide Aprovação do Post",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "post aguardando aprovação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara Post para Análise": {
+      "main": [
+        [
+          {
+            "node": "IA Vision - Analisa Imagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA Vision - Analisa Imagens": {
+      "main": [
+        [
+          {
+            "node": "Resultado da análise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA - Decide Aprovação do Post": {
+      "main": [
+        [
+          {
+            "node": "Parseia Decisão da IA (JSON)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parseia Decisão da IA (JSON)": {
+      "main": [
+        [
+          {
+            "node": "Atualiza Status no Sheets (Aprovado/Reprovado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza Status no Sheets (Aprovado/Reprovado)": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Prepara Post para Análise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resultado da análise": {
+      "main": [
+        [
+          {
+            "node": "IA - Decide Aprovação do Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "post aguardando aprovação": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {
+    "Schedule Trigger1": [
+      {
+        "json": {
+          "timestamp": "2025-11-27T16:30:27.004-03:00",
+          "Readable date": "November 27th 2025, 4:30:27 pm",
+          "Readable time": "4:30:27 pm",
+          "Day of week": "Thursday",
+          "Year": "2025",
+          "Month": "November",
+          "Day of month": "27",
+          "Hour": "16",
+          "Minute": "30",
+          "Second": "27",
+          "Timezone": "America/Sao_Paulo (UTC-03:00)"
+        }
+      }
+    ]
+  },
+  "versionId": "e7aff8d4-2027-4d77-9858-ac8288506010",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2025-12-15T12:33:19.036Z",
+      "createdAt": "2025-12-15T12:33:19.036Z",
+      "role": "workflow:owner",
+      "workflowId": "0jwSwa6sb162jmUs",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
