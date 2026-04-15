@@ -1,0 +1,1432 @@
+{
+  "updatedAt": "2026-04-10T13:09:59.692Z",
+  "createdAt": "2026-01-05T18:08:52.590Z",
+  "id": "OhmBDAFOv4oAECel",
+  "name": "DAGAZ - 1.04 - Follow Up",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "PENDENTE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "0479c1f1-610d-4342-92c2-fc7af9e9c26d"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "pendente"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "9033141f-29aa-4e5c-a380-2b450f49fb4b",
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "IRREGULAR",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "irregular"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        720,
+        1296
+      ],
+      "id": "7dddde17-18c7-453f-beee-55c82c6d1008",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1152,
+        1616
+      ],
+      "id": "4d73d7c9-82de-48bc-82eb-2e7b9536c652",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "dagaz_historico_mensagens",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $('Loop Over Items').item.json.phone }}"
+            },
+            {
+              "keyName": "id_usuario",
+              "condition": "eq",
+              "keyValue": "={{ $json.participant_id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        1808
+      ],
+      "id": "15a07c66-f244-4acc-b028-a22a6b4c1bfe",
+      "name": "Buscar Histórico de Mensagens",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "5G36ZI0q9SPv9U25",
+          "name": "Dagaz - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2016,
+        1632
+      ],
+      "id": "7c76c0d7-1abf-4f90-a124-b16487e27689",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        2208,
+        1808
+      ],
+      "id": "441c77e9-4b98-4973-b532-525bfdc066a7",
+      "name": "OpenRouter Chat Model1",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const entrada = items[0].json;\n\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: String(entrada.telefone),\n  type: \"template\",\n  template: {\n    name: entrada.template,\n    language: { code: \"pt_BR\" },\n    components: [\n      {\n        type: \"body\",\n        parameters: [\n          { type: \"text\", text: entrada.var_1 },\n          { type: \"text\", text: entrada.var_2 }\n        ]\n      }\n    ]\n  }\n};\n\nreturn [{\n  json: {\n    resultado: body\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2736,
+        1632
+      ],
+      "id": "d467310e-65cf-498e-be89-a7a7d1976999",
+      "name": "Montar Body da Requisição WhatsApp"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  let raw = item.json.output || \"\";\n  let cleaned = raw;\n\n  // Remove blocos de código\n  cleaned = cleaned.replace(/```json/gi, \"\");\n  cleaned = cleaned.replace(/```/g, \"\");\n  cleaned = cleaned.trim();\n\n  let respostaIA = {};\n\n  try {\n    respostaIA = JSON.parse(cleaned);\n  } catch (e) {\n    respostaIA = {\n      template: \"cobranca_campos_1\",\n      var_1: item.json.name || \"\",\n      var_2: item.json.lista_campos_formatada || \"\",\n      telefone: item.json.phone || \"\"\n    };\n  }\n\n  // APENAS 3 TEMPLATES - VERSÃO FINAL\n  const templates = {\n    cobranca_campos_1: \"Olá {{1}}, tudo bem?\\n\\nEstamos entrando em contato para informar que ainda faltam alguns dados para completarmos sua inscrição no evento: {{2}}.\\n\\nPrecisamos receber essas informações para conseguir avançar com a confirmação da sua participação.\",\n    \n    cobranca_campos_2: \"Oi {{1}},\\n\\nVerificamos que sua inscrição está quase finalizada, porém ainda precisamos dos seguintes dados: {{2}}.\\n\\nAssim que essas informações forem preenchidas, conseguiremos confirmar sua participação no evento.\",\n    \n    cobranca_campos_3: \"Oii {{1}},\\n\\nPassando para lembrar que existem campos pendentes em sua inscrição: {{2}}.\\n\\nAguardamos o envio dessas informações para finalizar seu cadastro e assegurar sua vaga no evento.\"\n  };\n\n  const templateName = respostaIA.template;\n  const textoTemplate = templates[templateName] || templates.cobranca_campos_1;\n\n  // Substitui variáveis\n  const mensagemFinal = textoTemplate\n    .replace(\"{{1}}\", respostaIA.var_1)\n    .replace(\"{{2}}\", respostaIA.var_2);\n\n  return {\n    json: {\n      ...respostaIA,\n      mensagem_template: mensagemFinal\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2528,
+        1632
+      ],
+      "id": "66232212-d776-49e5-b710-1648c55e190c",
+      "name": "Estruturação do JSON de Saída"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v22.0/{{ $('Monta a mensagem').item.json.whatsapp_number_id }}/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.resultado }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2944,
+        1632
+      ],
+      "id": "b34242c0-8d2a-474a-be05-17c8ee936b72",
+      "name": "Enviar mensagem no WhatsApp1",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=5538998634756",
+        "messageText": "=Erro ao realizar Follow up Dagaz com {{ $('Estruturação do JSON de Saída').item.json.var_1 }} com status \"{{ $('Loop Over Items').item.json.status }}\"\n",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        3472,
+        1824
+      ],
+      "id": "50061771-9c56-4a3e-880a-b59def3ae5d0",
+      "name": "Aviso de erro ao disparar mensagem",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=5538998634756",
+        "messageText": "=Follow up Dagaz realizado com {{ $('Estruturação do JSON de Saída').item.json.var_1 }} com status \"{{ $('Loop Over Items').item.json.status }}\"\n",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        3488,
+        1616
+      ],
+      "id": "5d798a83-9f1f-4330-a5cd-81a6ec01b944",
+      "name": "Confirmação FLU Contato",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b5296455-2292-4b5d-8e75-0b156471af30",
+              "leftValue": "={{ $json.messages[0].message_status }}",
+              "rightValue": "accepted",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3152,
+        1632
+      ],
+      "id": "0b960c33-7bc8-4874-a150-74a0347135e8",
+      "name": "Verificar status do envio1"
+    },
+    {
+      "parameters": {
+        "tableId": "dagaz_historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Estruturação do JSON de Saída').item.json.mensagem_template }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Merge').item.json.phone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Merge').item.json.name }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "={{ $('Merge').item.json.chatwoot_inbox_name }}"
+            },
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Merge').item.json.participant_id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3744,
+        1904
+      ],
+      "id": "141ed7f9-b6e2-4cc7-ae8a-2f80a883ae8b",
+      "name": "Cria Mensagem no Supabase2",
+      "credentials": {
+        "supabaseApi": {
+          "id": "5G36ZI0q9SPv9U25",
+          "name": "Dagaz - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 400,
+        "width": 928
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -32,
+        1152
+      ],
+      "typeVersion": 1,
+      "id": "7df86f8d-40c6-47f1-b95c-1b1670c8850b",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "### Disparo para participantes que já confirmaram mas ainda tem campos pendentes",
+        "height": 768,
+        "width": 2896,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1040,
+        1376
+      ],
+      "typeVersion": 1,
+      "id": "4d519607-fe4a-453a-a61f-4b074c71fe4e",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ordena as mensagens pela data\nitems.sort((a, b) =>\n  new Date(a.json.created_at).getTime() - new Date(b.json.created_at).getTime()\n);\n\nfunction formatarData(isoDate) {\n  const d = new Date(isoDate);\n  const dia = String(d.getDate()).padStart(2, \"0\");\n  const mes = String(d.getMonth() + 1).padStart(2, \"0\");\n  const ano = d.getFullYear();\n  return `${dia}/${mes}/${ano}`;\n}\n\nconst historico = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const data = formatarData(row.created_at);\n\n  if (row.mensagem_usuario?.trim()) {\n    historico.push({\n      autor: \"Usuário\",\n      mensagem: row.mensagem_usuario.trim(),\n      data\n    });\n  }\n\n  if (row.mensagem_agente?.trim()) {\n    historico.push({\n      autor: \"Agente\",\n      mensagem: row.mensagem_agente.trim(),\n      data\n    });\n  }\n}\n\nreturn [{\n  json: {\n    historico_conversa: historico\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        1808
+      ],
+      "id": "900779e0-53cc-4a42-b18a-0bbda85606c5",
+      "name": "Formata histórico de mensagens"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=### Dia Atual: {{ $now.weekdayLong }}, {{ $now.format('dd/MM/yyyy') }}, {{ $now.hour.toString().padStart(2, '0') }}:{{ $now.minute.toString().padStart(2, '0')}}\n\n## QUEM VOCÊ É\n\nVocê é a **Assistente Virtual da Dagaz Turismo**, uma agência especializada em turismo de negócios e eventos corporativos. A Dagaz atua no planejamento e execução de viagens corporativas, convenções, feiras, congressos e incentivos, oferecendo soluções completas e personalizadas para empresas e organizações.\n\nSeu papel é auxiliar participantes de eventos organizados pela Dagaz, garantindo que todas as informações necessárias sejam coletadas de forma eficiente e cordial para proporcionar a melhor experiência aos participantes.\n\n---\n\n## DADOS DO PARTICIPANTE\n\n- Nome: {{ $json.name }}\n- Telefone: {{ $json.phone }}\n- Quantidade de campos pendentes total: {{ $json.qtd_total_pendentes }}\n- Quantidade de campos pendntes obrigatorios: {{ $json.qtd_obrigatorios }}\n- Campos pendentes obrigatorios: {{ $json.txt_obrigatorios }}\n\n---\n\n## HISTÓRICO DE CONVERSA\n\n{{ JSON.stringify($json.historico_conversa, null, 2) }}\n\n---\n\n## TEMPLATES DISPONÍVEIS (APENAS 3)\n\n**cobranca_campos_1:**\n\"Olá {{ $json.name }}, tudo bem?\n\nEstamos entrando em contato para informar que ainda faltam alguns dados para completarmos sua inscrição no evento: {{ $json.mensagem_final }}.\n\nPrecisamos receber essas informações para conseguir avançar com a confirmação da sua participação.\"\n\n**cobranca_campos_2:**\n\"Oi {{ $json.name }},\n\nVerificamos que sua inscrição está quase finalizada, porém ainda precisamos dos seguintes dados: {{ $json.mensagem_final }}.\n\nAssim que essas informações forem preenchidas, conseguiremos confirmar sua participação no evento.\"\n\n**cobranca_campos_3:**\n\"Oii {{ $json.name }},\n\nPassando para lembrar que existem campos pendentes em sua inscrição: {{ $json.mensagem_final }}.\n\nAguardamos o envio dessas informações para finalizar seu cadastro e assegurar sua vaga no evento.\"\n\n---\n\n## SUA TAREFA\n\n1. **ANALISAR O HISTÓRICO DE MENSAGENS** fornecido acima\n2. **IDENTIFICAR qual foi a ÚLTIMA MENSAGEM enviada pelo Agente** (se houver)\n3. **VERIFICAR qual template foi usado** na última mensagem (cobranca_campos_1, cobranca_campos_2 ou cobranca_campos_3)\n4. **ESCOLHER o PRÓXIMO TEMPLATE seguindo a rotação circular** explicada abaixo\n\n---\n\n## REGRAS OBRIGATÓRIAS\n\n### ⚠️ LÓGICA DE ROTAÇÃO CIRCULAR (CRÍTICA)\n\nA escolha do template deve seguir uma **rotação circular obrigatória**:\n\n- Se a última mensagem foi **cobranca_campos_1** → escolha **cobranca_campos_2**\n- Se a última mensagem foi **cobranca_campos_2** → escolha **cobranca_campos_3**\n- Se a última mensagem foi **cobranca_campos_3** → escolha **cobranca_campos_1**\n- Se **NÃO houver histórico** (primeira cobrança) → escolha **cobranca_campos_1**\n\n**IMPORTANTE:** Você DEVE seguir essa ordem de forma estrita. Não há flexibilidade nesta regra.\n\n---\n\n### 🔍 COMO IDENTIFICAR O TEMPLATE USADO\n\nAnalise o texto da última mensagem do Agente no histórico e identifique qual template foi usado:\n\n- Se contém **\"Estamos entrando em contato para informar\"** → foi **cobranca_campos_1**\n- Se contém **\"Verificamos que sua inscrição está quase finalizada\"** → foi **cobranca_campos_2**\n- Se contém **\"Passando para lembrar que existem campos pendentes\"** → foi **cobranca_campos_3**\n\n---\n\n### 📋 EXEMPLOS PRÁTICOS\n\n**Exemplo 1 - Primeira cobrança (histórico vazio):**\n- Histórico: []\n- Template escolhido: **cobranca_campos_1**\n\n**Exemplo 2 - Segunda cobrança:**\n- Última mensagem do Agente: \"Estamos entrando em contato para informar...\"\n- Template identificado: cobranca_campos_1\n- Próximo template: **cobranca_campos_2**\n\n**Exemplo 3 - Terceira cobrança:**\n- Última mensagem do Agente: \"Verificamos que sua inscrição está quase finalizada...\"\n- Template identificado: cobranca_campos_2\n- Próximo template: **cobranca_campos_3**\n\n**Exemplo 4 - Quarta cobrança:**\n- Última mensagem do Agente: \"Passando para lembrar que existem campos pendentes...\"\n- Template identificado: cobranca_campos_3\n- Próximo template: **cobranca_campos_1** (volta ao início do ciclo)\n\n---\n\n## FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)\n\nRetorne APENAS este JSON, sem nenhum texto adicional:\n\n{\n  \"template\": \"<nome_do_template_escolhido>\",\n  \"var_1\": \"{{ $json.name }}\",\n  \"var_2\": \"{{ $json.mensagem_final }}\",\n  \"telefone\": \"{{ $json.phone }}\"\n}\n\n**REGRAS DO JSON:**\n- Nenhum texto fora do JSON\n- Nenhuma explicação ou comentário\n- Apenas o JSON puro e válido\n- O campo \"template\" deve conter exatamente um destes valores: \"cobranca_campos_1\", \"cobranca_campos_2\" ou \"cobranca_campos_3\"\n- Siga estritamente a lógica de rotação circular explicada acima",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        2208,
+        1632
+      ],
+      "id": "fb6190fc-2c67-4310-809f-0bbe20cb1e7b",
+      "name": "Dagaz - Agente SDR"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1104,
+        768
+      ],
+      "id": "51e8ac1c-eff8-451f-af78-0f9c37eb5968",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "dagaz_historico_mensagens",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $json.phone }}"
+            },
+            {
+              "keyName": "id_usuario",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        1008
+      ],
+      "id": "ceaaeb96-c0bd-41ee-85fc-dfbbb1aaf793",
+      "name": "Buscar Histórico de Mensagens1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "5G36ZI0q9SPv9U25",
+          "name": "Dagaz - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2016,
+        800
+      ],
+      "id": "1feed5dd-32c2-4f14-b77d-fc98f9087d85",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        2176,
+        992
+      ],
+      "id": "ab7db2e9-b06f-4f62-aec0-485816ab062f",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const entrada = items[0].json;\n\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: String(entrada.telefone),\n  type: \"template\",\n  template: {\n    name: entrada.template,\n    language: { code: \"pt_BR\" },\n    components: [\n      {\n        type: \"body\",\n        parameters: [\n          { type: \"text\", text: entrada.var_1 }\n        ]\n      }\n    ]\n  }\n};\n\nreturn [{\n  json: {\n    resultado: body\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2736,
+        800
+      ],
+      "id": "502f6297-f529-4a63-9f34-3300cb568112",
+      "name": "Montar Body da Requisição WhatsApp1"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  let raw = item.json.output || \"\";\n  let cleaned = raw;\n\n  // Remove blocos de código\n  cleaned = cleaned.replace(/```json/gi, \"\");\n  cleaned = cleaned.replace(/```/g, \"\");\n  cleaned = cleaned.trim();\n\n  let respostaIA = {};\n\n  try {\n    respostaIA = JSON.parse(cleaned);\n  } catch (e) {\n    respostaIA = {\n      template: \"confirmacao_presenca_1\",\n      var_1: item.json.name || \"\",\n      telefone: item.json.phone || \"\"\n    };\n  }\n\n  // APENAS 3 TEMPLATES - CONFIRMAÇÃO DE PRESENÇA\n  const templates = {\n    confirmacao_presenca_1: \"Olá {{1}}, tudo bem?\\n\\nEstamos entrando em contato para confirmar sua participação no evento. Gostaríamos de saber se você poderá comparecer.\\n\\nPor favor, confirme sua presença para que possamos finalizar os preparativos.\",\n    \n    confirmacao_presenca_2: \"Oi {{1}},\\n\\nAinda precisamos da sua confirmação de presença para o evento.\\n\\nVocê poderá comparecer? Aguardamos seu retorno para garantir sua vaga.\",\n    \n    confirmacao_presenca_3: \"Oii {{1}},\\n\\nPassando para lembrar que precisamos da confirmação da sua participação no evento.\\n\\nConte conosco! Basta confirmar se você estará presente para finalizarmos sua inscrição.\"\n  };\n\n  const templateName = respostaIA.template;\n  const textoTemplate = templates[templateName] || templates.confirmacao_presenca_1;\n\n  // Substitui variável\n  const mensagemFinal = textoTemplate.replace(\"{{1}}\", respostaIA.var_1);\n\n  return {\n    json: {\n      ...respostaIA,\n      mensagem_template: mensagemFinal\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2528,
+        800
+      ],
+      "id": "271b5be5-f74b-4fe6-b5ca-fef49d3a27e6",
+      "name": "Estruturação do JSON de Saída1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v22.0/{{ $('Buscar Dados do Participante + phone_number_id1').item.json.whatsapp_number_id }}/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.resultado }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2944,
+        800
+      ],
+      "id": "7e4cb696-fbed-4aba-97c6-e6a007f19ed6",
+      "name": "Enviar mensagem no WhatsApp",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=5538998634756",
+        "messageText": "=Erro ao realizar Follow up Dagaz com {{ $('Estruturação do JSON de Saída1').item.json.var_1 }} com status \"{{ $('Loop Over Items1').item.json.status }}\"\n",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        3472,
+        1008
+      ],
+      "id": "617046e3-6d95-490f-936a-dd52ca8847b7",
+      "name": "Aviso de erro ao disparar mensagem1",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=5538998634756",
+        "messageText": "=Follow up Dagaz realizado com {{ $('Estruturação do JSON de Saída1').item.json.var_1 }} com status \"{{ $('Loop Over Items1').item.json.status }}\"\n",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        3488,
+        784
+      ],
+      "id": "8d4d577e-1d57-427b-9f74-202c75ed7c02",
+      "name": "Confirmação FLU Contato1",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b5296455-2292-4b5d-8e75-0b156471af30",
+              "leftValue": "={{ $json.messages[0].message_status }}",
+              "rightValue": "accepted",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3152,
+        800
+      ],
+      "id": "bee5dda6-3abd-49de-8c4e-418a090b6cde",
+      "name": "Verificar status do envio"
+    },
+    {
+      "parameters": {
+        "tableId": "dagaz_historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Estruturação do JSON de Saída1').item.json.mensagem_template }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Merge1').item.json.phone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Merge1').item.json.name }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "={{ $('Buscar Dados do Participante + phone_number_id1').item.json.chatwoot_inbox_name }}"
+            },
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Merge1').item.json.id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3744,
+        1088
+      ],
+      "id": "f9fce9f5-54ff-40ef-931c-018d2a1cc24d",
+      "name": "Cria Mensagem no Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "5G36ZI0q9SPv9U25",
+          "name": "Dagaz - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+    },
+    {
+      "parameters": {
+        "content": "### Disparo para participantes que ainda não confirmaram ou declinaram sua participação no evento",
+        "height": 672,
+        "width": 2896,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1040,
+        656
+      ],
+      "typeVersion": 1,
+      "id": "994f0e96-b5fb-4f6d-ab4b-d4fa947c70d7",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ordena as mensagens pela data\nitems.sort((a, b) =>\n  new Date(a.json.created_at).getTime() - new Date(b.json.created_at).getTime()\n);\n\nfunction formatarData(isoDate) {\n  const d = new Date(isoDate);\n  const dia = String(d.getDate()).padStart(2, \"0\");\n  const mes = String(d.getMonth() + 1).padStart(2, \"0\");\n  const ano = d.getFullYear();\n  return `${dia}/${mes}/${ano}`;\n}\n\nconst historico = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const data = formatarData(row.created_at);\n\n  if (row.mensagem_usuario?.trim()) {\n    historico.push({\n      autor: \"Usuário\",\n      mensagem: row.mensagem_usuario.trim(),\n      data\n    });\n  }\n\n  if (row.mensagem_agente?.trim()) {\n    historico.push({\n      autor: \"Agente\",\n      mensagem: row.mensagem_agente.trim(),\n      data\n    });\n  }\n}\n\nreturn [{\n  json: {\n    historico_conversa: historico\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        1008
+      ],
+      "id": "d6bc8b3f-c26a-46e0-9027-676cfd75f8d4",
+      "name": "Formata histórico de mensagens1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=### Dia Atual: {{ $now.weekdayLong }}, {{ $now.format('dd/MM/yyyy') }}, {{ $now.hour.toString().padStart(2, '0') }}:{{ $now.minute.toString().padStart(2, '0')}}\n\n## QUEM VOCÊ É\n\nVocê é a **Assistente Virtual da Dagaz Turismo**, uma agência especializada em turismo de negócios e eventos corporativos. A Dagaz atua no planejamento e execução de viagens corporativas, convenções, feiras, congressos e incentivos, oferecendo soluções completas e personalizadas para empresas e organizações.\n\nSeu papel é auxiliar na cobrança de confirmação de participação dos inscritos nos eventos organizados pela Dagaz, garantindo que os participantes confirmem sua presença de forma eficiente e cordial.\n\n---\n\n## DADOS DO PARTICIPANTE\n\n- Nome: {{ $json.name }}\n- Telefone: {{ $json.phone }}\n\n---\n\n## HISTÓRICO DE CONVERSA\n\n{{ JSON.stringify($json.historico_conversa, null, 2) }}\n\n---\n\n## TEMPLATES DISPONÍVEIS (APENAS 3)\n\n**confirmacao_presenca_1:**\n\"Olá {{ $json.name }}, tudo bem?\n\nEstamos entrando em contato para confirmar sua participação no evento. Gostaríamos de saber se você poderá comparecer.\n\nPor favor, confirme sua presença para que possamos finalizar os preparativos.\"\n\n**confirmacao_presenca_2:**\n\"Oi {{ $json.name }},\n\nAinda precisamos da sua confirmação de presença para o evento.\n\nVocê poderá comparecer? Aguardamos seu retorno para garantir sua vaga.\"\n\n**confirmacao_presenca_3:**\n\"Oii {{ $json.name }},\n\nPassando para lembrar que precisamos da confirmação da sua participação no evento.\n\nConte conosco! Basta confirmar se você estará presente para finalizarmos sua inscrição.\"\n\n---\n\n## SUA TAREFA\n\n1. **ANALISAR O HISTÓRICO DE MENSAGENS** fornecido acima\n2. **IDENTIFICAR qual foi a ÚLTIMA MENSAGEM enviada pelo Agente** (se houver)\n3. **VERIFICAR qual template foi usado** na última mensagem (confirmacao_presenca_1, confirmacao_presenca_2 ou confirmacao_presenca_3)\n4. **ESCOLHER o PRÓXIMO TEMPLATE seguindo a rotação circular** explicada abaixo\n\n---\n\n## REGRAS OBRIGATÓRIAS\n\n### ⚠️ LÓGICA DE ROTAÇÃO CIRCULAR (CRÍTICA)\n\nA escolha do template deve seguir uma **rotação circular obrigatória**:\n\n- Se a última mensagem foi **confirmacao_presenca_1** → escolha **confirmacao_presenca_2**\n- Se a última mensagem foi **confirmacao_presenca_2** → escolha **confirmacao_presenca_3**\n- Se a última mensagem foi **confirmacao_presenca_3** → escolha **confirmacao_presenca_1**\n- Se **NÃO houver histórico** (primeira cobrança) → escolha **confirmacao_presenca_1**\n\n**IMPORTANTE:** Você DEVE seguir essa ordem de forma estrita. Não há flexibilidade nesta regra.\n\n---\n\n### 🔍 COMO IDENTIFICAR O TEMPLATE USADO\n\nAnalise o texto da última mensagem do Agente no histórico e identifique qual template foi usado:\n\n- Se contém **\"Estamos entrando em contato para confirmar sua participação\"** → foi **confirmacao_presenca_1**\n- Se contém **\"Ainda precisamos da sua confirmação de presença\"** → foi **confirmacao_presenca_2**\n- Se contém **\"Passando para lembrar que precisamos da confirmação\"** → foi **confirmacao_presenca_3**\n\n---\n\n### 📋 EXEMPLOS PRÁTICOS\n\n**Exemplo 1 - Primeira cobrança (histórico vazio):**\n- Histórico: []\n- Template escolhido: **confirmacao_presenca_1**\n\n**Exemplo 2 - Segunda cobrança:**\n- Última mensagem do Agente: \"Estamos entrando em contato para confirmar sua participação...\"\n- Template identificado: confirmacao_presenca_1\n- Próximo template: **confirmacao_presenca_2**\n\n**Exemplo 3 - Terceira cobrança:**\n- Última mensagem do Agente: \"Ainda precisamos da sua confirmação de presença...\"\n- Template identificado: confirmacao_presenca_2\n- Próximo template: **confirmacao_presenca_3**\n\n**Exemplo 4 - Quarta cobrança:**\n- Última mensagem do Agente: \"Passando para lembrar que precisamos da confirmação...\"\n- Template identificado: confirmacao_presenca_3\n- Próximo template: **confirmacao_presenca_1** (volta ao início do ciclo)\n\n---\n\n## FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)\n\nRetorne APENAS este JSON, sem nenhum texto adicional:\n\n{\n  \"template\": \"<nome_do_template_escolhido>\",\n  \"var_1\": \"{{ $json.name }}\",\n  \"telefone\": \"{{ $json.phone }}\"\n}\n\n**REGRAS DO JSON:**\n- Nenhum texto fora do JSON\n- Nenhuma explicação ou comentário\n- Apenas o JSON puro e válido\n- O campo \"template\" deve conter exatamente um destes valores: \"confirmacao_presenca_1\", \"confirmacao_presenca_2\" ou \"confirmacao_presenca_3\"\n- Siga estritamente a lógica de rotação circular explicada acima",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        2208,
+        800
+      ],
+      "id": "89dddc98-b267-4107-a037-5be4b13cf92d",
+      "name": "Dagaz - Agente SDR1"
+    },
+    {
+      "parameters": {
+        "content": "# Obs para diferentes numeros:\n### Tem que cadastrar os mesmos templates na meta para cada novo número adicionado\nCom o mesmo nome, idioma e conteúdo",
+        "width": 640,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        256,
+        912
+      ],
+      "id": "b9cf992a-11ac-4d4f-a0f6-53def85b21cc",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "event_participants",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "PENDENTE"
+            },
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "IRREGULAR"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        240,
+        1376
+      ],
+      "id": "4e9675ec-1a27-4752-9a34-bce0630ce2d5",
+      "name": "participantes com status \"PENDENTE\" e \"IRREGULAR",
+      "credentials": {
+        "supabaseApi": {
+          "id": "5G36ZI0q9SPv9U25",
+          "name": "Dagaz - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        16,
+        1296
+      ],
+      "id": "21b87111-3a3f-4c53-81e4-edb84b5f4377",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  ep.id,\n  ep.event_id,\n  ep.name,\n  ep.phone,\n  ep.email,\n  ep.status,\n  wn.phone_number_id AS whatsapp_number_id,\n  wn.chatwoot_inbox_name\nFROM event_participants ep\nLEFT JOIN whatsapp_numbers wn\n  ON wn.current_event_id = ep.event_id\nWHERE ep.id = '{{ $json.id }}'\n  AND ep.event_id = '{{ $json.event_id }}'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1600,
+        784
+      ],
+      "id": "f2e3bfc4-7188-49e8-a096-c3b4cde16bae",
+      "name": "Buscar Dados do Participante + phone_number_id1",
+      "credentials": {
+        "postgres": {
+          "id": "RbteCsnBdomXyIZi",
+          "name": "DAGAZ-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4bffb4e3-d73a-4796-9fbb-2629f9dd0c85",
+              "leftValue": "={{ $json.qtd_obrigatorios }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1776,
+        1632
+      ],
+      "id": "5d954d62-fa04-4208-880f-edef4224e8bd",
+      "name": "Garante que não passe quem já enviou tudo"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH \n\n-- Valores já preenchidos pelo participante\nfilled_values AS (\n    SELECT \n        epfv.field_id,\n        epfv.value\n    FROM event_participant_field_values epfv\n    WHERE epfv.participant_id = '{{$json.id}}'::uuid\n      AND epfv.value IS NOT NULL \n      AND epfv.value != ''\n),\n\n-- Campos condicionais que devem ser exibidos\n-- Um campo é ativo apenas quando TODAS as suas condições são satisfeitas (E)\n-- Cada condição é satisfeita quando o valor do trigger está em trigger_values (OU)\nactive_conditional_fields AS (\n    SELECT fc.target_field_id\n    FROM field_conditions fc\n    LEFT JOIN filled_values fv \n        ON fv.field_id = fc.trigger_field_id\n        AND fv.value = ANY(fc.trigger_values)  -- Lógica OU: qualquer valor do array\n    WHERE fc.event_id = '{{$json.event_id}}'::uuid\n    GROUP BY fc.target_field_id\n    -- Lógica E: total de condições = condições satisfeitas\n    HAVING COUNT(*) = COUNT(fv.field_id)\n),\n\nmissing_fields AS (\n    -- 1. Verifica Email (Sempre Obrigatório)\n    SELECT \n        ep.id as participant_id,\n        'Email' as field_name,\n        TRUE as is_required,\n        0 as order_index\n    FROM event_participants ep\n    WHERE ep.id = '{{$json.id}}'::uuid \n      AND (ep.email IS NULL OR ep.email = '')\n\n    UNION ALL\n\n    -- 2. Verifica Telefone (Sempre Obrigatório)\n    SELECT \n        ep.id,\n        'Telefone',\n        TRUE,\n        1\n    FROM event_participants ep\n    WHERE ep.id = '{{$json.id}}'::uuid \n      AND (ep.phone IS NULL OR ep.phone = '')\n\n    UNION ALL\n\n    -- 3. Campos Personalizados NÃO condicionais (sempre verificar)\n    SELECT \n        '{{$json.id}}'::uuid,\n        epf.field_name,\n        epf.is_required,\n        epf.order_index + 2\n    FROM event_participant_fields epf\n    LEFT JOIN event_participant_field_values epfv \n        ON epf.id = epfv.field_id \n        AND epfv.participant_id = '{{$json.id}}'::uuid\n    WHERE epf.event_id = '{{$json.event_id}}'::uuid\n      AND epf.is_enabled = true\n      AND (epf.is_conditional = false OR epf.is_conditional IS NULL)\n      AND (epfv.value IS NULL OR epfv.value = '')\n\n    UNION ALL\n\n    -- 4. Campos CONDICIONAIS (só se TODAS as condições foram atendidas)\n    SELECT \n        '{{$json.id}}'::uuid,\n        epf.field_name,\n        epf.is_required,\n        epf.order_index + 2\n    FROM event_participant_fields epf\n    INNER JOIN active_conditional_fields acf ON acf.target_field_id = epf.id\n    LEFT JOIN event_participant_field_values epfv \n        ON epf.id = epfv.field_id \n        AND epfv.participant_id = '{{$json.id}}'::uuid\n    WHERE epf.event_id = '{{$json.event_id}}'::uuid\n      AND epf.is_enabled = true\n      AND epf.is_conditional = true\n      AND (epfv.value IS NULL OR epfv.value = '')\n)\n\nSELECT \n    ep.id as participant_id,\n    ep.event_id,\n    \n    -- 🚨 LISTA DE OBRIGATÓRIOS\n    COALESCE(\n        STRING_AGG(mf.field_name, ', ' ORDER BY mf.order_index) \n        FILTER (WHERE mf.is_required IS TRUE), \n        NULL\n    ) as txt_obrigatorios,\n    COUNT(mf.field_name) FILTER (WHERE mf.is_required IS TRUE)::int as qtd_obrigatorios,\n    \n    -- ℹ️ LISTA DE OPCIONAIS\n    COALESCE(\n        STRING_AGG(mf.field_name, ', ' ORDER BY mf.order_index) \n        FILTER (WHERE mf.is_required IS FALSE), \n        NULL\n    ) as txt_opcionais,\n    COUNT(mf.field_name) FILTER (WHERE mf.is_required IS FALSE)::int as qtd_opcionais,\n    \n    -- Total Geral e Dados\n    COUNT(mf.field_name)::int as qtd_total_pendentes,\n    ep.id, \n    ep.name,\n    ep.phone,\n    ep.email,\n    ep.status,\n    wn.phone_number_id as whatsapp_number_id,\n    wn.chatwoot_inbox_name\n\nFROM event_participants ep\nLEFT JOIN whatsapp_numbers wn ON wn.current_event_id = ep.event_id\nLEFT JOIN missing_fields mf ON mf.participant_id = ep.id\nWHERE ep.id = '{{$json.id}}'::uuid\nGROUP BY ep.id, ep.event_id, ep.name, ep.phone, ep.email, ep.status, \n         wn.phone_number_id, wn.chatwoot_inbox_name;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1360,
+        1632
+      ],
+      "id": "c01135a4-ae2f-43c1-8b65-56146c0cd033",
+      "name": "Filtra campos com status \"PENDENTE\" e dados do participante",
+      "credentials": {
+        "postgres": {
+          "id": "RbteCsnBdomXyIZi",
+          "name": "DAGAZ-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Percorre todos os itens para evitar erro de \"item is not defined\"\nfor (const item of items) {\n\n  const qtdObrigatorios = item.json.qtd_obrigatorios;\n  const txtObrigatorios = item.json.txt_obrigatorios || \"\"; // Garante que não é null\n  const qtdOpcionais = item.json.qtd_opcionais;\n  const txtOpcionais = item.json.txt_opcionais || \"\"; // Garante que não é null\n\n  let msg_template = \"\";\n\n  // 1. Processa OBRIGATÓRIOS\n  if (qtdObrigatorios > 0) {\n    // O comando .replace(/\\n/g, \", \") troca todas as quebras de linha por vírgula\n    let listaLimpa = txtObrigatorios.replace(/\\n/g, \", \");\n    msg_template += \"🚨 Obrigatórios: \" + listaLimpa + \". \";\n  }\n\n  // 2. Processa OPCIONAIS\n  if (qtdOpcionais > 0) {\n    // Adiciona um espaço antes se já tiver texto dos obrigatórios\n    if (msg_template.length > 0) msg_template += \" \"; \n    \n    let listaLimpa = txtOpcionais.replace(/\\n/g, \", \");\n    msg_template += \"Opcionais: \" + listaLimpa + \".\";\n  }\n\n  // Salva na variável 'mensagem_final'\n  item.json.mensagem_final = msg_template;\n}\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        1632
+      ],
+      "id": "36f9798b-50f1-47df-9d5d-c9f826d58a3b",
+      "name": "Monta a mensagem"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "events",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "upcoming"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        240,
+        1184
+      ],
+      "id": "f30edb5e-a61d-4ada-9847-af5852a8fbb1",
+      "name": "Evento em andamento",
+      "credentials": {
+        "supabaseApi": {
+          "id": "5G36ZI0q9SPv9U25",
+          "name": "Dagaz - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "id",
+              "field2": "event_id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        528,
+        1296
+      ],
+      "id": "e676a166-ac04-45c8-baa4-507a3ca6de38",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH missing_fields AS (\n    -- 1. Verifica Email (Sempre Obrigatório)\n    SELECT \n        ep.id as participant_id,\n        'Email' as field_name,\n        TRUE as is_required,\n        0 as order_index\n    FROM event_participants ep\n    WHERE ep.id = '{{$json.id}}'::uuid AND (ep.email IS NULL OR ep.email = '')\n\n    UNION ALL\n\n    -- 2. Verifica Telefone (Sempre Obrigatório)\n    SELECT \n        ep.id,\n        'Telefone',\n        TRUE,\n        1\n    FROM event_participants ep\n    WHERE ep.id = '{{$json.id}}'::uuid AND (ep.phone IS NULL OR ep.phone = '')\n\n    UNION ALL\n\n    -- 3. Verifica Campos Personalizados\n    SELECT \n        '{{$json.id}}'::uuid,\n        epf.field_name,\n        epf.is_required,\n        epf.order_index + 2\n    FROM event_participant_fields epf\n    LEFT JOIN event_participant_field_values epfv \n        ON epf.id = epfv.field_id \n        AND epfv.participant_id = '{{$json.id}}'::uuid\n    WHERE epf.event_id = '{{$json.event_id}}'::uuid\n      AND (epfv.value IS NULL OR epfv.value = '') \n)\n\nSELECT \n    ep.id as participant_id,\n    ep.event_id,\n    \n    -- ==========================================\n    -- 🚨 LISTA DE OBRIGATÓRIOS (Separado por vírgula)\n    -- ==========================================\n    COALESCE(\n        -- Aqui está a mudança: Apenas o nome do campo e o separador ', '\n        STRING_AGG(mf.field_name, ', ' ORDER BY mf.order_index) \n        FILTER (WHERE mf.is_required IS TRUE), \n        NULL\n    ) as txt_obrigatorios,\n    \n    COUNT(mf.field_name) FILTER (WHERE mf.is_required IS TRUE)::int as qtd_obrigatorios,\n\n    -- ==========================================\n    -- ℹ️ LISTA DE OPCIONAIS (Separado por vírgula)\n    -- ==========================================\n    COALESCE(\n        STRING_AGG(mf.field_name, ', ' ORDER BY mf.order_index) \n        FILTER (WHERE mf.is_required IS FALSE), \n        NULL\n    ) as txt_opcionais,\n\n    COUNT(mf.field_name) FILTER (WHERE mf.is_required IS FALSE)::int as qtd_opcionais,\n\n    -- Total Geral e Dados\n    COUNT(mf.field_name)::int as qtd_total_pendentes,\n    ep.id, \n    ep.name,\n    ep.phone,\n    ep.email,\n    ep.status,\n    wn.phone_number_id as whatsapp_number_id,\n    wn.chatwoot_inbox_name\n\nFROM event_participants ep\nLEFT JOIN whatsapp_numbers wn ON wn.current_event_id = ep.event_id\nLEFT JOIN missing_fields mf ON mf.participant_id = ep.id\nWHERE ep.id = '{{$json.id}}'::uuid\nGROUP BY ep.id, ep.event_id, ep.name, ep.phone, ep.email, ep.status, wn.phone_number_id, wn.chatwoot_inbox_name;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -16,
+        1632
+      ],
+      "id": "46bd0ff8-5a11-4e69-ba37-210fcccc27ce",
+      "name": "Filtra campos com status \"PENDENTE\" e dados do participante1",
+      "credentials": {
+        "postgres": {
+          "id": "RbteCsnBdomXyIZi",
+          "name": "DAGAZ-Postgres"
+        }
+      },
+      "disabled": true
+    }
+  ],
+  "connections": {
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Filtra campos com status \"PENDENTE\" e dados do participante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Histórico de Mensagens": {
+      "main": [
+        [
+          {
+            "node": "Formata histórico de mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Dagaz - Agente SDR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Dagaz - Agente SDR",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estruturação do JSON de Saída": {
+      "main": [
+        [
+          {
+            "node": "Montar Body da Requisição WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Body da Requisição WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagem no WhatsApp1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmação FLU Contato": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cria Mensagem no Supabase2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar status do envio1": {
+      "main": [
+        [
+          {
+            "node": "Confirmação FLU Contato",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso de erro ao disparar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagem no WhatsApp1": {
+      "main": [
+        [
+          {
+            "node": "Verificar status do envio1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aviso de erro ao disparar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase2": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formata histórico de mensagens": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Dagaz - Agente SDR": {
+      "main": [
+        [
+          {
+            "node": "Estruturação do JSON de Saída",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Buscar Dados do Participante + phone_number_id1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Buscar Histórico de Mensagens1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Histórico de Mensagens1": {
+      "main": [
+        [
+          {
+            "node": "Formata histórico de mensagens1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Dagaz - Agente SDR1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Dagaz - Agente SDR1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Body da Requisição WhatsApp1": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagem no WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estruturação do JSON de Saída1": {
+      "main": [
+        [
+          {
+            "node": "Montar Body da Requisição WhatsApp1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagem no WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Verificar status do envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aviso de erro ao disparar mensagem1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmação FLU Contato1": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar status do envio": {
+      "main": [
+        [
+          {
+            "node": "Confirmação FLU Contato1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso de erro ao disparar mensagem1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formata histórico de mensagens1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Dagaz - Agente SDR1": {
+      "main": [
+        [
+          {
+            "node": "Estruturação do JSON de Saída1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "participantes com status \"PENDENTE\" e \"IRREGULAR": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Evento em andamento",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "participantes com status \"PENDENTE\" e \"IRREGULAR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Dados do Participante + phone_number_id1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Garante que não passe quem já enviou tudo": "***REMOVIDO***",
+    "Filtra campos com status \"PENDENTE\" e dados do participante": {
+      "main": [
+        [
+          {
+            "node": "Buscar Histórico de Mensagens",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Monta a mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta a mensagem": {
+      "main": [
+        [
+          {
+            "node": "Garante que não passe quem já enviou tudo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evento em andamento": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "af626c94-71d6-41b5-b177-d47d2595e430",
+  "activeVersionId": null,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-01-05T18:08:52.590Z",
+      "createdAt": "2026-01-05T18:08:52.590Z",
+      "role": "workflow:owner",
+      "workflowId": "OhmBDAFOv4oAECel",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
