@@ -1,0 +1,591 @@
+{
+  "updatedAt": "2025-12-05T13:29:18.431Z",
+  "createdAt": "2025-12-05T11:58:58.587Z",
+  "id": "uEMsx9xlIQN4sEC6",
+  "name": "EMI - 3.13 - SDR Luana IA - Teste 2 reminders",
+  "active": false,
+  "isArchived": true,
+  "nodes": [
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "databaseId": {
+          "__rl": true,
+          "value": "287c103b-58ba-8057-bd3f-e2b83606d543",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://www.notion.so/287c103b58ba8057bd3fe2b83606d543"
+        },
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Etapa|status",
+              "condition": "equals",
+              "statusValue": "Reunião"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        -2032,
+        16
+      ],
+      "id": "39c3957e-600b-4176-9750-d9aba3f55b42",
+      "name": "Pega os leads do Notion",
+      "credentials": {
+        "notionApi": {
+          "id": "jmIIz8ORpI5khHQI",
+          "name": "EMI - Notion"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function ajustarTelefone(raw) {\n  if (!raw) return null;\n\n  let t = raw.toString();\n\n  // Remove tudo que não é número\n  t = t.replace(/\\D/g, \"\");\n\n  // Se vier com 11 dígitos (celular padrão)\n  if (t.length === 11) {\n    t = \"55\" + t;\n  }\n\n  // Se vier com 10 dígitos (fixo)\n  if (t.length === 10) {\n    t = \"55\" + t;\n  }\n\n  // Se já vier com 55 no início, deixa assim\n  if (t.startsWith(\"55\")) {\n    return t;\n  }\n\n  // Se vier com +55, remove o +\n  if (t.startsWith(\"+\")) {\n    t = t.replace(\"+\", \"\");\n    return t;\n  }\n\n  return t;\n}\n\n// Usa UTC diretamente\nconst agora = Date.now();\n\n// Define janelas de lembrete (em minutos)\nconst janelas = [\n  { tipo: \"10min\", inicio: 7, fim: 12 },\n  { tipo: \"2min\", inicio: 1, fim: 3 },\n];\n\nconst filtrados = [];\n\nfor (const item of items) {\n  const lead = item.json;\n  const telefone = lead.property_contato ?? null;\n  const reuniao = lead.property_data_de_reuni_o?.start;\n  if (!reuniao) continue;\n\n  // Notion envia ISO com timezone → JS converte automaticamente pra UTC\n  const timestampReuniao = new Date(reuniao).getTime();\n\n  // Verifica se a reunião está dentro de alguma das janelas definidas\n  for (const janela of janelas) {\n    const minInicio = agora + janela.inicio * 60 * 1000;\n    const minFim = agora + janela.fim * 60 * 1000;\n\n    if (timestampReuniao >= minInicio && timestampReuniao <= minFim) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          timestampReuniao,\n          agoraUTC: agora,\n          tipoLembrete: janela.tipo, // Identifica se é 10min ou 2min\n        },\n      });\n    }\n  }\n}\n\nreturn filtrados;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1792,
+        16
+      ],
+      "id": "0161067e-f48c-4f4d-9610-13089c757f46",
+      "name": "Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min"
+    },
+    {
+      "parameters": {
+        "tableId": "finamob-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_usuario",
+              "fieldValue": "="
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Montar o body da requisição').item.json.mensagem_final }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Preparar variáveis do lead').item.json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Preparar variáveis do lead').item.json.name }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-LUANA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        160,
+        256
+      ],
+      "id": "ebf44d31-dc95-4980-91d9-aaad68e2fee8",
+      "name": "Cria Mensagem no Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=120363421884092746@g.us",
+        "messageText": "=Erro ao disparar mensagem de reminder para {{ $('Preparar variáveis do lead').item.json.name }}\n\n{{ $('Preparar variáveis do lead').item.json.url }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        -192,
+        208
+      ],
+      "id": "0597beab-a5a3-40b6-b9e7-fe1b8c67881d",
+      "name": "Aviso de erro ao disparar mensagem1",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b5296455-2292-4b5d-8e75-0b156471af30",
+              "leftValue": "={{ $json.messages[0].message_status }}",
+              "rightValue": "accepted",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -384,
+        16
+      ],
+      "id": "f3e8235b-38b0-42df-b287-9004af4149aa",
+      "name": "Verifica se a msg foi enviada"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "=120363421884092746@g.us",
+        "messageText": "=Reminder disparado para {{ $('Preparar variáveis do lead').item.json.name }}\n\n{{ $('Preparar variáveis do lead').item.json.url }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        -128,
+        0
+      ],
+      "id": "e6fcffd7-bc10-4c4e-baab-2202d51a3efb",
+      "name": "Confirmação Reminder",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "calendar": {
+          "__rl": true,
+          "value": "contato@monteferrario.com.br",
+          "mode": "id"
+        },
+        "eventId": "={{ $json.id_calendar }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        -1104,
+        32
+      ],
+      "id": "b7cc6cd9-d5be-459a-9bdf-1399889639d5",
+      "name": "Pega o link do meet",
+      "alwaysOutputData": false,
+      "credentials": {
+        "googleCalendarOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ==========================\n// DEFINIÇÃO DOS TEMPLATES\n// ==========================\n\n// templates para 10 minutos\nconst templates10 = {\n  reminder_reuniao_sem_link: {\n    name: \"reminder_reuniao_sem_link\",\n    vars: 1,\n    text: \"Oi, {{1}}!\\nNossa reunião começa em aproximadamente *10 minutos*.\\nAté já!\"\n  },\n  reminder_reuniao: {\n    name: \"reminder_reuniao\",\n    vars: 2,\n    text: \"Oi, {{1}}!\\nSua reunião começa em aproximadamente *10 minutos*.\\n\\nAqui está o link: {{2}}\\n\\nAté já!\"\n  }\n};\n\n// templates para 2 minutos\nconst templates2 = {\n  reminder_reuniao_sem_link: {\n    name: \"reminder_reuniao_sem_link_2min\",\n    vars: 1,\n    text: \"Oi, {{1}}!\\nSua reunião começa em *2 minutos*.\\nAté já!\"\n  },\n  reminder_reuniao: {\n    name: \"reminder_reuniao_2min\",\n    vars: 2,\n    text: \"Oi, {{1}}!\\nSua reunião começa em *2 minutos*.\\n\\nAqui está o link: {{2}}\\n\\nBora lá!\"\n  }\n};\n\n// ==========================\n// PROCESSADOR PRINCIPAL\n// ==========================\nconst entrada = items[0].json;\n\n// Extrai link (Meet / Zoom)\nconst linkReuniao =\n  entrada?.conferenceData?.entryPoints?.[0]?.uri || null;\n\n// Tipo de lembrete vindo do nó anterior\nconst tipoLembrete = $('Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min').first().json.tipoLembrete || \"10min\";\n\n// Escolhe o conjunto de templates conforme o tipo\nconst templates = tipoLembrete === \"2min\" ? templates2 : templates10;\n\n// Escolha do template conforme presença do link\nconst templateEscolhido = linkReuniao\n  ? templates.reminder_reuniao\n  : templates.reminder_reuniao_sem_link;\n\n// ==========================\n// MONTAGEM DO BODY DO WHATSAPP\n// ==========================\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: String($('Preparar variáveis do lead').first().json.telefone || \"\"),\n  type: \"template\",\n  template: {\n    name: templateEscolhido.name,\n    language: { code: \"pt_BR\" },\n    components: []\n  }\n};\n\n// ==========================\n// VARIÁVEIS DO TEMPLATE\n// ==========================\nconst parameters = [];\n\n// Nome\nif (templateEscolhido.vars >= 1) {\n  parameters.push({ type: \"text\", text: $('Preparar variáveis do lead').first().json.name || \"\" });\n}\n\n// Link (se existir)\nif (templateEscolhido.vars >= 2) {\n  parameters.push({ type: \"text\", text: linkReuniao || \"\" });\n}\n\nbody.template.components.push({\n  type: \"body\",\n  parameters\n});\n\n// ==========================\n// TEXTO FINAL PARA HISTÓRICO\n// ==========================\nconst textoFinal = templateEscolhido.text\n  .replace(\"{{1}}\", $('Preparar variáveis do lead').first().json.name || \"\")\n  .replace(\"{{2}}\", linkReuniao || \"\");\n\n// ==========================\n// RETORNO — FORMATO PERFEITO\n// ==========================\nreturn {\n  json: {\n    resultado: body,\n    mensagem_final: textoFinal,\n    template_usado: templateEscolhido.name,\n    tipoLembrete\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        32
+      ],
+      "id": "c38a61b4-b9b3-4628-9207-5e198339eb80",
+      "name": "Montar o body da requisição"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "21,51 6-20 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2272,
+        16
+      ],
+      "id": "2c66555b-cc49-421a-912b-01b56a9c4c0c",
+      "name": "Gatilho de verificação periódica"
+    },
+    {
+      "parameters": {
+        "batchSize": "=1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1552,
+        16
+      ],
+      "id": "3bf5c242-725b-4842-a030-7546a0c03c63",
+      "name": "Rodar lembrete por lead"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "940b2951-9c80-4163-ad9f-fd5296a59997",
+              "name": "database_page",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "5b6ca92b-2cff-4c1f-ade0-9a600c0fc251",
+              "name": "name",
+              "value": "={{ $json.name.split(' ')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "cfcf4634-e2fa-48a3-8824-e01715f5648e",
+              "name": "etapa",
+              "value": "={{ $json.property_etapa }}",
+              "type": "string"
+            },
+            {
+              "id": "901826dc-2d94-4924-b751-d89417652c38",
+              "name": "telefone",
+              "value": "={{ $json.property_contato }}",
+              "type": "string"
+            },
+            {
+              "id": "9cfacdf3-f4b4-4fe4-b03b-a73ec3e9f07c",
+              "name": "var_1",
+              "value": "={{ $json.name.split(' ')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "1cc3014b-f284-429a-aa2e-9ecb0c55daec",
+              "name": "url",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "fcac981c-23b1-43ad-8608-af0f8bc7283a",
+              "name": "id_calendar",
+              "value": "={{ $json.property_id_calendar }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1328,
+        32
+      ],
+      "id": "67ccd360-75bb-4295-8fc2-38c56aef3c10",
+      "name": "Preparar variáveis do lead"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/869722152886578/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.resultado }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -688,
+        32
+      ],
+      "id": "baa285c9-3175-4133-93dc-845a557244a2",
+      "name": "Enviar mensagem via WhatsApp",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "height": 608,
+        "width": 2640,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2336,
+        -128
+      ],
+      "typeVersion": 1,
+      "id": "22b594c4-26e1-45d4-9f12-49a042d3cc81",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "27,57 6-20 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2272,
+        208
+      ],
+      "id": "ed970b7d-56f2-4308-9a43-f847d818ab5e",
+      "name": "Gatilho de verificação periódica1"
+    }
+  ],
+  "connections": {
+    "Pega os leads do Notion": {
+      "main": [
+        [
+          {
+            "node": "Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara e seleciona os dados dos leads que tem reunião nos proximos 10min": {
+      "main": [
+        [
+          {
+            "node": "Rodar lembrete por lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase": {
+      "main": [
+        [
+          {
+            "node": "Rodar lembrete por lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aviso de erro ao disparar mensagem1": {
+      "main": [
+        [
+          {
+            "node": "Rodar lembrete por lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rodar lembrete por lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se a msg foi enviada": {
+      "main": [
+        [
+          {
+            "node": "Confirmação Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso de erro ao disparar mensagem1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmação Reminder": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pega o link do meet": {
+      "main": [
+        [
+          {
+            "node": "Montar o body da requisição",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar o body da requisição": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagem via WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gatilho de verificação periódica": {
+      "main": [
+        [
+          {
+            "node": "Pega os leads do Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rodar lembrete por lead": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar variáveis do lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar variáveis do lead": {
+      "main": [
+        [
+          {
+            "node": "Pega o link do meet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagem via WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Verifica se a msg foi enviada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso de erro ao disparar mensagem1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gatilho de verificação periódica1": {
+      "main": [
+        [
+          {
+            "node": "Pega os leads do Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "f0ff8f59-497a-472f-a74d-1e063d42e2b8",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2025-12-05T11:58:58.587Z",
+      "createdAt": "2025-12-05T11:58:58.587Z",
+      "role": "workflow:owner",
+      "workflowId": "uEMsx9xlIQN4sEC6",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
