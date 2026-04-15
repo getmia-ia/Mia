@@ -1,0 +1,1439 @@
+{
+  "updatedAt": "2026-04-08T04:37:27.785Z",
+  "createdAt": "2026-03-10T18:56:13.634Z",
+  "id": "W0SzHNpYp6yDpKWa",
+  "name": "AgroNegociar - 1.1 - Renovação de Anúncios",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = false\nWHERE id = {{ $node[\"Loop Expirados\"].json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1904,
+        6160
+      ],
+      "id": "0794193a-8635-46e2-8905-2201d63bac71",
+      "name": "Update Sem WA Expirado",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = false\nWHERE id = {{ $node[\"Loop 8 Dias\"].json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1856,
+        6640
+      ],
+      "id": "c3060ea6-41a8-4881-b507-0c498218ab7a",
+      "name": "Update Sem WA 8 Dias",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $runIndex }}",
+              "value2": 14
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        5952
+      ],
+      "id": "22b898e5-7595-4360-b585-fc686e8c5c4d",
+      "name": "Já enviou 15? (Expirado)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $runIndex }}",
+              "value2": 14
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        6416
+      ],
+      "id": "f021268e-792b-453a-abf5-0e318a5bf592",
+      "name": "Já enviou 15? (8 Dias)"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- 1. INSERÇÃO NA TABELA DE ANALYTICS (A NOSSA FILA DE MENSAGENS)\nINSERT INTO \"Agronegociar_Analytics\".bids_message_queue \n    (user_id, bid_id, nome_produto, email, telefone, tipo, sent, expire, created_at, ultimo_anuncio)\n\n-- 2. SELEÇÃO E FILTRAGEM DOS DADOS BRUTOS\nSELECT DISTINCT ON (b.creator_id) \n    b.creator_id,\n    b.id,\n    p.name,\n    u.email,\n    f.telefone_limpo,\n    CASE \n        WHEN b.expire IS NOT NULL THEN 'expirado' \n        WHEN b.expire IS NULL AND b.created <= now() - interval '8 days' THEN '8dias' \n        ELSE 'ativo' \n    END as tipo,\n    false as sent, \n    b.expire,\n    b.created,\n    b.created as ultimo_anuncio\nFROM cbc.bids b\nLEFT JOIN types.products p ON p.id = b.product_id\nLEFT JOIN cbc.users u ON u.id = b.creator_id\nLEFT JOIN cbc.user_profiles up ON up.user_id = u.id\nLEFT JOIN cbc.profile_phones pp ON pp.profile_id = up.id\nLEFT JOIN cbc.phones phones ON phones.id = pp.phone_id\n\n-- 3. A \"MÁQUINA DE LAVAR\" TELEFONES\nCROSS JOIN LATERAL (\n    SELECT \n        CASE \n            WHEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') LIKE '55%' \n                THEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n            ELSE '55' || ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n        END as telefone_limpo\n) f\n\n-- 4. REGRAS DE NEGÓCIO\nWHERE b.deleted = false \n  AND b.created >= '2022-01-01' \n  AND phones.number IS NOT NULL \n  AND length(f.telefone_limpo) >= 10 \nORDER BY b.creator_id, b.created DESC \n\n-- 5. UPSERT\nON CONFLICT (user_id) \nDO UPDATE SET\n    bid_id          = EXCLUDED.bid_id,\n    nome_produto    = EXCLUDED.nome_produto,\n    telefone        = EXCLUDED.telefone,\n    tipo            = EXCLUDED.tipo,\n    expire          = EXCLUDED.expire,\n    created_at      = EXCLUDED.created_at,\n    ultimo_anuncio  = EXCLUDED.created_at,\n    sent = CASE \n                WHEN \"Agronegociar_Analytics\".bids_message_queue.created_at != EXCLUDED.created_at \n                  OR EXCLUDED.tipo = 'ativo'\n                THEN false \n                ELSE \"Agronegociar_Analytics\".bids_message_queue.sent \n           END,\n    sent_at = CASE \n                WHEN \"Agronegociar_Analytics\".bids_message_queue.created_at != EXCLUDED.created_at\n                  OR EXCLUDED.tipo = 'ativo'\n                THEN NULL \n                ELSE \"Agronegociar_Analytics\".bids_message_queue.sent_at \n              END;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -3200,
+        6352
+      ],
+      "id": "6b1a6e55-3d4b-49ab-8bcf-74683c70d1aa",
+      "name": "Atualiza Tabela Analytics1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 12,
+              "triggerAtMinute": 6
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -3520,
+        6352
+      ],
+      "id": "8a6b42d4-aa53-4b1b-83af-225536e7b910",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, user_id, bid_id, nome_produto, email, telefone\nFROM \"Agronegociar_Analytics\".bids_message_queue\nWHERE sent = false\n  AND tipo = 'expirado'\nORDER BY created_at DESC\nLIMIT 40;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2864,
+        6096
+      ],
+      "id": "b8501922-47ef-43b2-a8b7-3738105d9191",
+      "name": "Busca 30 Expirados1",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, user_id, bid_id, nome_produto, email, telefone\nFROM \"Agronegociar_Analytics\".bids_message_queue\nWHERE sent = false\n  AND tipo = '8dias'\nORDER BY created_at DESC\nLIMIT 40;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2832,
+        6560
+      ],
+      "id": "fa9dbdd8-153b-4f66-b799-7e7a2cb85ab3",
+      "name": "Busca 30 de 8 Dias1",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -2640,
+        6016
+      ],
+      "id": "b34f1e42-c078-45e8-b5af-842852af5a70",
+      "name": "Loop Expirados"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -2624,
+        6560
+      ],
+      "id": "d1b96165-1490-4b50-ad96-4d58eef71b83",
+      "name": "Loop 8 Dias"
+    },
+    {
+      "parameters": {
+        "resource": "chat-api",
+        "instanceName": "AgroNegociar - Comercial",
+        "numbers": "={{ $json.telefone }}"
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        -2384,
+        6096
+      ],
+      "id": "d9ea9c1a-524f-4db6-918a-717907c8ec46",
+      "name": "Check WA Expirado",
+      "credentials": {
+        "evolutionApi": {
+          "id": "LpFE8TuJugE26UUu",
+          "name": "AGRONEGOCIAR-COMERCIAL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "chat-api",
+        "instanceName": "AgroNegociar - Comercial",
+        "numbers": "={{ $json.telefone }}"
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        -2368,
+        6576
+      ],
+      "id": "88210214-d130-4ffd-9db2-05c8e8cd604d",
+      "name": "Check WA 8 Dias",
+      "alwaysOutputData": true,
+      "credentials": {
+        "evolutionApi": {
+          "id": "LpFE8TuJugE26UUu",
+          "name": "AGRONEGOCIAR-COMERCIAL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.data[0].exists }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -2176,
+        6048
+      ],
+      "id": "83db1286-8a0f-41c5-b510-c585e846b9a3",
+      "name": "Tem WhatsApp? (Expirado)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.data[0].exists }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -2112,
+        6512
+      ],
+      "id": "a0bcc3f5-10fc-4b14-8629-d7463ee820c5",
+      "name": "Tem WhatsApp? (8 Dias)"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "AgroNegociar - Comercial",
+        "remoteJid": "={{ $node[\"Loop Expirados\"].json.telefone }}",
+        "messageText": "=Olá! Tudo bem? 😊 Sou a Luana, da AgroNegociar.\n\nNotei aqui que o seu anúncio de *{{ $node[\"Loop Expirados\"].json.nome_produto }} (ID:{{ $('Loop Expirados').item.json.bid_id }})* expirou e saiu do ar. Passando para saber se você quer renovar o anúncio?\n\nSe quiser colocar ele no topo das buscas de novo, é só me responder SIM por aqui mesmo! 🌱\n\nSe preferir ver todos os seus itens, o link é este:\n🔗 app.agronegociar.com.br\n\nBoas negociações! 🤝",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        -1904,
+        5968
+      ],
+      "id": "42aef050-3e78-4d99-a316-3b8fb35159d3",
+      "name": "WA Expirado1",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "evolutionApi": {
+          "id": "LpFE8TuJugE26UUu",
+          "name": "AGRONEGOCIAR-COMERCIAL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "AgroNegociar - Comercial",
+        "remoteJid": "={{ $node[\"Loop 8 Dias\"].json.telefone }}",
+        "messageText": "=Olá! Tudo bem? 😊 Sou a Luana da AgroNegociar!\n\nNotamos que seu anúncio de *{{ $node[\"Loop 8 Dias\"].json.nome_produto }} (ID:{{ $('Loop 8 Dias').item.json.bid_id }})* está há algum tempo na plataforma e gostaríamos de saber se deseja mantê-lo ativo.\n\nPara renovar automaticamente, é só responder *SIM* por aqui mesmo — sem precisar acessar a plataforma! 🌱\n\nCaso prefira, você também pode entrar no seu painel e editar ou atualizar as informações manualmente:\n🔗 app.agronegociar.com.br\n\nEstamos aqui pra ajudar! 🤝",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        -1856,
+        6432
+      ],
+      "id": "31f3e65f-f743-4e65-8d88-3a50a385c1c5",
+      "name": "WA 8 Dias1",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "evolutionApi": {
+          "id": "LpFE8TuJugE26UUu",
+          "name": "AGRONEGOCIAR-COMERCIAL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = true\nWHERE id = {{ $node[\"Loop Expirados\"].json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1632,
+        5952
+      ],
+      "id": "c2fbd36e-8543-4646-81ba-67cf307711d4",
+      "name": "Update Expirado1",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = true\nWHERE id = {{ $node[\"Loop 8 Dias\"].json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1632,
+        6416
+      ],
+      "id": "afbfa2bb-45ee-4576-b7d1-97f8c19c9571",
+      "name": "Registra 8 Dias1",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * (120 - 45 + 1)) + 45 }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1088,
+        6016
+      ],
+      "id": "7557486d-ac82-48ac-93a8-5d67e7e2019c",
+      "name": "Wait (Expirado)",
+      "webhookId": "wait-expirado-001"
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * (120 - 45 + 1)) + 45 }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1184,
+        6528
+      ],
+      "id": "d47fdc39-3786-497c-aea1-d9fcf11d238b",
+      "name": "Wait (8 Dias)",
+      "webhookId": "wait-8dias-001"
+    },
+    {
+      "parameters": {
+        "content": "### 2. FLUXO: ANÚNCIOS EXPIRADOS\nMensagens para anúncios com valor na coluna expirado",
+        "height": 546,
+        "width": 2040,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2944,
+        5840
+      ],
+      "id": "9e47a755-9792-4188-8f4b-b61b257b23c9",
+      "name": "Sticky Note",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "content": "### 3. FLUXO: ANÚNCIOS  >8 DIAS\nMensagens para anúncios a mais de 8 dias mas sem valor na coluna expirado",
+        "height": 450,
+        "width": 2040,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2944,
+        6416
+      ],
+      "id": "2e145700-109e-4ade-a8cf-b2d88028a8b7",
+      "name": "Sticky Note6",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "content": "### 1. TRATAMENTO DE DADOS E FILA\nAqui o banco decide quem entra na fila e limpa os telefones.",
+        "height": 280,
+        "width": 560,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -3584,
+        6272
+      ],
+      "id": "adfd099f-a1ee-4b7e-8ea3-f1f71577b1dd",
+      "name": "Sticky Note7",
+      "disabled": true
+    }
+  ],
+  "connections": {
+    "Update Sem WA Expirado": {
+      "main": [
+        [
+          {
+            "node": "Wait (Expirado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sem WA 8 Dias": {
+      "main": [
+        [
+          {
+            "node": "Wait (8 Dias)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Já enviou 15? (Expirado)": {
+      "main": [
+        [
+          {
+            "node": "Wait (Expirado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Já enviou 15? (8 Dias)": {
+      "main": [
+        [
+          {
+            "node": "Wait (8 Dias)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza Tabela Analytics1": {
+      "main": [
+        [
+          {
+            "node": "Busca 30 Expirados1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Busca 30 de 8 Dias1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Atualiza Tabela Analytics1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca 30 Expirados1": {
+      "main": [
+        [
+          {
+            "node": "Loop Expirados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca 30 de 8 Dias1": {
+      "main": [
+        [
+          {
+            "node": "Loop 8 Dias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Expirados": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Check WA Expirado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop 8 Dias": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Check WA 8 Dias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check WA Expirado": {
+      "main": [
+        [
+          {
+            "node": "Tem WhatsApp? (Expirado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check WA 8 Dias": {
+      "main": [
+        [
+          {
+            "node": "Tem WhatsApp? (8 Dias)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem WhatsApp? (Expirado)": {
+      "main": [
+        [
+          {
+            "node": "WA Expirado1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sem WA Expirado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem WhatsApp? (8 Dias)": {
+      "main": [
+        [
+          {
+            "node": "WA 8 Dias1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sem WA 8 Dias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WA Expirado1": {
+      "main": [
+        [
+          {
+            "node": "Update Expirado1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WA 8 Dias1": {
+      "main": [
+        [
+          {
+            "node": "Registra 8 Dias1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Expirado1": {
+      "main": [
+        [
+          {
+            "node": "Já enviou 15? (Expirado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registra 8 Dias1": {
+      "main": [
+        [
+          {
+            "node": "Já enviou 15? (8 Dias)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait (Expirado)": {
+      "main": [
+        [
+          {
+            "node": "Loop Expirados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait (8 Dias)": {
+      "main": [
+        [
+          {
+            "node": "Loop 8 Dias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    },
+    "node:Schedule Trigger1": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "b2afa0ec-5707-4745-8ee6-11e304d77b95",
+  "activeVersionId": "b2afa0ec-5707-4745-8ee6-11e304d77b95",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-03-10T18:56:13.634Z",
+      "createdAt": "2026-03-10T18:56:13.634Z",
+      "role": "workflow:owner",
+      "workflowId": "W0SzHNpYp6yDpKWa",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-04-08T04:37:27.787Z",
+    "createdAt": "2026-04-08T04:37:27.787Z",
+    "versionId": "b2afa0ec-5707-4745-8ee6-11e304d77b95",
+    "workflowId": "W0SzHNpYp6yDpKWa",
+    "nodes": [
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = false\nWHERE id = {{ $node[\"Loop Expirados\"].json.id }};",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -1904,
+          6160
+        ],
+        "id": "0794193a-8635-46e2-8905-2201d63bac71",
+        "name": "Update Sem WA Expirado",
+        "credentials": {
+          "postgres": {
+            "id": "htyT6TWxXxRh5mZQ",
+            "name": "Postgres N8N workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = false\nWHERE id = {{ $node[\"Loop 8 Dias\"].json.id }};",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -1856,
+          6640
+        ],
+        "id": "c3060ea6-41a8-4881-b507-0c498218ab7a",
+        "name": "Update Sem WA 8 Dias",
+        "credentials": {
+          "postgres": {
+            "id": "htyT6TWxXxRh5mZQ",
+            "name": "Postgres N8N workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "number": [
+              {
+                "value1": "={{ $runIndex }}",
+                "value2": 14
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 1,
+        "position": [
+          -1440,
+          5952
+        ],
+        "id": "22b898e5-7595-4360-b585-fc686e8c5c4d",
+        "name": "Já enviou 15? (Expirado)"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "number": [
+              {
+                "value1": "={{ $runIndex }}",
+                "value2": 14
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 1,
+        "position": [
+          -1440,
+          6416
+        ],
+        "id": "f021268e-792b-453a-abf5-0e318a5bf592",
+        "name": "Já enviou 15? (8 Dias)"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- 1. INSERÇÃO NA TABELA DE ANALYTICS (A NOSSA FILA DE MENSAGENS)\nINSERT INTO \"Agronegociar_Analytics\".bids_message_queue \n    (user_id, bid_id, nome_produto, email, telefone, tipo, sent, expire, created_at, ultimo_anuncio)\n\n-- 2. SELEÇÃO E FILTRAGEM DOS DADOS BRUTOS\nSELECT DISTINCT ON (b.creator_id) \n    b.creator_id,\n    b.id,\n    p.name,\n    u.email,\n    f.telefone_limpo,\n    CASE \n        WHEN b.expire IS NOT NULL THEN 'expirado' \n        WHEN b.expire IS NULL AND b.created <= now() - interval '8 days' THEN '8dias' \n        ELSE 'ativo' \n    END as tipo,\n    false as sent, \n    b.expire,\n    b.created,\n    b.created as ultimo_anuncio\nFROM cbc.bids b\nLEFT JOIN types.products p ON p.id = b.product_id\nLEFT JOIN cbc.users u ON u.id = b.creator_id\nLEFT JOIN cbc.user_profiles up ON up.user_id = u.id\nLEFT JOIN cbc.profile_phones pp ON pp.profile_id = up.id\nLEFT JOIN cbc.phones phones ON phones.id = pp.phone_id\n\n-- 3. A \"MÁQUINA DE LAVAR\" TELEFONES\nCROSS JOIN LATERAL (\n    SELECT \n        CASE \n            WHEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') LIKE '55%' \n                THEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n            ELSE '55' || ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n        END as telefone_limpo\n) f\n\n-- 4. REGRAS DE NEGÓCIO\nWHERE b.deleted = false \n  AND b.created >= '2022-01-01' \n  AND phones.number IS NOT NULL \n  AND length(f.telefone_limpo) >= 10 \nORDER BY b.creator_id, b.created DESC \n\n-- 5. UPSERT\nON CONFLICT (user_id) \nDO UPDATE SET\n    bid_id          = EXCLUDED.bid_id,\n    nome_produto    = EXCLUDED.nome_produto,\n    telefone        = EXCLUDED.telefone,\n    tipo            = EXCLUDED.tipo,\n    expire          = EXCLUDED.expire,\n    created_at      = EXCLUDED.created_at,\n    ultimo_anuncio  = EXCLUDED.created_at,\n    sent = CASE \n                WHEN \"Agronegociar_Analytics\".bids_message_queue.created_at != EXCLUDED.created_at \n                  OR EXCLUDED.tipo = 'ativo'\n                THEN false \n                ELSE \"Agronegociar_Analytics\".bids_message_queue.sent \n           END,\n    sent_at = CASE \n                WHEN \"Agronegociar_Analytics\".bids_message_queue.created_at != EXCLUDED.created_at\n                  OR EXCLUDED.tipo = 'ativo'\n                THEN NULL \n                ELSE \"Agronegociar_Analytics\".bids_message_queue.sent_at \n              END;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -3200,
+          6352
+        ],
+        "id": "6b1a6e55-3d4b-49ab-8bcf-74683c70d1aa",
+        "name": "Atualiza Tabela Analytics1",
+        "alwaysOutputData": true,
+        "credentials": {
+          "postgres": {
+            "id": "htyT6TWxXxRh5mZQ",
+            "name": "Postgres N8N workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 12,
+                "triggerAtMinute": 6
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          -3520,
+          6352
+        ],
+        "id": "8a6b42d4-aa53-4b1b-83af-225536e7b910",
+        "name": "Schedule Trigger"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT id, user_id, bid_id, nome_produto, email, telefone\nFROM \"Agronegociar_Analytics\".bids_message_queue\nWHERE sent = false\n  AND tipo = 'expirado'\nORDER BY created_at DESC\nLIMIT 40;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -2864,
+          6096
+        ],
+        "id": "b8501922-47ef-43b2-a8b7-3738105d9191",
+        "name": "Busca 30 Expirados1",
+        "credentials": {
+          "postgres": {
+            "id": "htyT6TWxXxRh5mZQ",
+            "name": "Postgres N8N workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT id, user_id, bid_id, nome_produto, email, telefone\nFROM \"Agronegociar_Analytics\".bids_message_queue\nWHERE sent = false\n  AND tipo = '8dias'\nORDER BY created_at DESC\nLIMIT 40;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -2832,
+          6560
+        ],
+        "id": "fa9dbdd8-153b-4f66-b799-7e7a2cb85ab3",
+        "name": "Busca 30 de 8 Dias1",
+        "credentials": {
+          "postgres": {
+            "id": "htyT6TWxXxRh5mZQ",
+            "name": "Postgres N8N workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          -2640,
+          6016
+        ],
+        "id": "b34f1e42-c078-45e8-b5af-842852af5a70",
+        "name": "Loop Expirados"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          -2624,
+          6560
+        ],
+        "id": "d1b96165-1490-4b50-ad96-4d58eef71b83",
+        "name": "Loop 8 Dias"
+      },
+      {
+        "parameters": {
+          "resource": "chat-api",
+          "instanceName": "AgroNegociar - Comercial",
+          "numbers": "={{ $json.telefone }}"
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          -2384,
+          6096
+        ],
+        "id": "d9ea9c1a-524f-4db6-918a-717907c8ec46",
+        "name": "Check WA Expirado",
+        "credentials": {
+          "evolutionApi": {
+            "id": "LpFE8TuJugE26UUu",
+            "name": "AGRONEGOCIAR-COMERCIAL"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "resource": "chat-api",
+          "instanceName": "AgroNegociar - Comercial",
+          "numbers": "={{ $json.telefone }}"
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          -2368,
+          6576
+        ],
+        "id": "88210214-d130-4ffd-9db2-05c8e8cd604d",
+        "name": "Check WA 8 Dias",
+        "alwaysOutputData": true,
+        "credentials": {
+          "evolutionApi": {
+            "id": "LpFE8TuJugE26UUu",
+            "name": "AGRONEGOCIAR-COMERCIAL"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "boolean": [
+              {
+                "value1": "={{ $json.data[0].exists }}",
+                "value2": true
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 1,
+        "position": [
+          -2176,
+          6048
+        ],
+        "id": "83db1286-8a0f-41c5-b510-c585e846b9a3",
+        "name": "Tem WhatsApp? (Expirado)"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "boolean": [
+              {
+                "value1": "={{ $json.data[0].exists }}",
+                "value2": true
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 1,
+        "position": [
+          -2112,
+          6512
+        ],
+        "id": "a0bcc3f5-10fc-4b14-8629-d7463ee820c5",
+        "name": "Tem WhatsApp? (8 Dias)"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "AgroNegociar - Comercial",
+          "remoteJid": "={{ $node[\"Loop Expirados\"].json.telefone }}",
+          "messageText": "=Olá! Tudo bem? 😊 Sou a Luana, da AgroNegociar.\n\nNotei aqui que o seu anúncio de *{{ $node[\"Loop Expirados\"].json.nome_produto }} (ID:{{ $('Loop Expirados').item.json.bid_id }})* expirou e saiu do ar. Passando para saber se você quer renovar o anúncio?\n\nSe quiser colocar ele no topo das buscas de novo, é só me responder SIM por aqui mesmo! 🌱\n\nSe preferir ver todos os seus itens, o link é este:\n🔗 app.agronegociar.com.br\n\nBoas negociações! 🤝",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          -1904,
+          5968
+        ],
+        "id": "42aef050-3e78-4d99-a316-3b8fb35159d3",
+        "name": "WA Expirado1",
+        "retryOnFail": true,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "evolutionApi": {
+            "id": "LpFE8TuJugE26UUu",
+            "name": "AGRONEGOCIAR-COMERCIAL"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "AgroNegociar - Comercial",
+          "remoteJid": "={{ $node[\"Loop 8 Dias\"].json.telefone }}",
+          "messageText": "=Olá! Tudo bem? 😊 Sou a Luana da AgroNegociar!\n\nNotamos que seu anúncio de *{{ $node[\"Loop 8 Dias\"].json.nome_produto }} (ID:{{ $('Loop 8 Dias').item.json.bid_id }})* está há algum tempo na plataforma e gostaríamos de saber se deseja mantê-lo ativo.\n\nPara renovar automaticamente, é só responder *SIM* por aqui mesmo — sem precisar acessar a plataforma! 🌱\n\nCaso prefira, você também pode entrar no seu painel e editar ou atualizar as informações manualmente:\n🔗 app.agronegociar.com.br\n\nEstamos aqui pra ajudar! 🤝",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          -1856,
+          6432
+        ],
+        "id": "31f3e65f-f743-4e65-8d88-3a50a385c1c5",
+        "name": "WA 8 Dias1",
+        "retryOnFail": true,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "evolutionApi": {
+            "id": "LpFE8TuJugE26UUu",
+            "name": "AGRONEGOCIAR-COMERCIAL"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = true\nWHERE id = {{ $node[\"Loop Expirados\"].json.id }};",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -1632,
+          5952
+        ],
+        "id": "c2fbd36e-8543-4646-81ba-67cf307711d4",
+        "name": "Update Expirado1",
+        "credentials": {
+          "postgres": {
+            "id": "htyT6TWxXxRh5mZQ",
+            "name": "Postgres N8N workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = true\nWHERE id = {{ $node[\"Loop 8 Dias\"].json.id }};",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -1632,
+          6416
+        ],
+        "id": "afbfa2bb-45ee-4576-b7d1-97f8c19c9571",
+        "name": "Registra 8 Dias1",
+        "credentials": {
+          "postgres": {
+            "id": "htyT6TWxXxRh5mZQ",
+            "name": "Postgres N8N workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "amount": "={{ Math.floor(Math.random() * (120 - 45 + 1)) + 45 }}"
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          -1088,
+          6016
+        ],
+        "id": "7557486d-ac82-48ac-93a8-5d67e7e2019c",
+        "name": "Wait (Expirado)",
+        "webhookId": "wait-expirado-001"
+      },
+      {
+        "parameters": {
+          "amount": "={{ Math.floor(Math.random() * (120 - 45 + 1)) + 45 }}"
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          -1184,
+          6528
+        ],
+        "id": "d47fdc39-3786-497c-aea1-d9fcf11d238b",
+        "name": "Wait (8 Dias)",
+        "webhookId": "wait-8dias-001"
+      },
+      {
+        "parameters": {
+          "content": "### 2. FLUXO: ANÚNCIOS EXPIRADOS\nMensagens para anúncios com valor na coluna expirado",
+          "height": 546,
+          "width": 2040,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -2944,
+          5840
+        ],
+        "id": "9e47a755-9792-4188-8f4b-b61b257b23c9",
+        "name": "Sticky Note",
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "content": "### 3. FLUXO: ANÚNCIOS  >8 DIAS\nMensagens para anúncios a mais de 8 dias mas sem valor na coluna expirado",
+          "height": 450,
+          "width": 2040,
+          "color": 7
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -2944,
+          6416
+        ],
+        "id": "2e145700-109e-4ade-a8cf-b2d88028a8b7",
+        "name": "Sticky Note6",
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "content": "### 1. TRATAMENTO DE DADOS E FILA\nAqui o banco decide quem entra na fila e limpa os telefones.",
+          "height": 280,
+          "width": 560,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -3584,
+          6272
+        ],
+        "id": "adfd099f-a1ee-4b7e-8ea3-f1f71577b1dd",
+        "name": "Sticky Note7",
+        "disabled": true
+      }
+    ],
+    "connections": {
+      "Update Sem WA Expirado": {
+        "main": [
+          [
+            {
+              "node": "Wait (Expirado)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Update Sem WA 8 Dias": {
+        "main": [
+          [
+            {
+              "node": "Wait (8 Dias)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Já enviou 15? (Expirado)": {
+        "main": [
+          [
+            {
+              "node": "Wait (Expirado)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Já enviou 15? (8 Dias)": {
+        "main": [
+          [
+            {
+              "node": "Wait (8 Dias)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Atualiza Tabela Analytics1": {
+        "main": [
+          [
+            {
+              "node": "Busca 30 Expirados1",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Busca 30 de 8 Dias1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "Atualiza Tabela Analytics1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca 30 Expirados1": {
+        "main": [
+          [
+            {
+              "node": "Loop Expirados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca 30 de 8 Dias1": {
+        "main": [
+          [
+            {
+              "node": "Loop 8 Dias",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Expirados": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Check WA Expirado",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop 8 Dias": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Check WA 8 Dias",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check WA Expirado": {
+        "main": [
+          [
+            {
+              "node": "Tem WhatsApp? (Expirado)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check WA 8 Dias": {
+        "main": [
+          [
+            {
+              "node": "Tem WhatsApp? (8 Dias)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tem WhatsApp? (Expirado)": {
+        "main": [
+          [
+            {
+              "node": "WA Expirado1",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Update Sem WA Expirado",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tem WhatsApp? (8 Dias)": {
+        "main": [
+          [
+            {
+              "node": "WA 8 Dias1",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Update Sem WA 8 Dias",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "WA Expirado1": {
+        "main": [
+          [
+            {
+              "node": "Update Expirado1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "WA 8 Dias1": {
+        "main": [
+          [
+            {
+              "node": "Registra 8 Dias1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Update Expirado1": {
+        "main": [
+          [
+            {
+              "node": "Já enviou 15? (Expirado)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Registra 8 Dias1": {
+        "main": [
+          [
+            {
+              "node": "Já enviou 15? (8 Dias)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait (Expirado)": {
+        "main": [
+          [
+            {
+              "node": "Loop Expirados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait (8 Dias)": {
+        "main": [
+          [
+            {
+              "node": "Loop 8 Dias",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
