@@ -1,0 +1,432 @@
+{
+  "updatedAt": "2026-03-02T11:09:26.081Z",
+  "createdAt": "2025-12-23T14:12:18.065Z",
+  "id": "kJAAOYjW3ELySLBt",
+  "name": "Tools - 02 - Buscar imagem no HTML",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "05295fc0-aca6-433a-a239-c5d8ed4fc011",
+              "leftValue": "={{ $json.total_imagens }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -544,
+        784
+      ],
+      "id": "41b17323-1fef-4c0a-b073-377d41817506",
+      "name": "Imagem encontrada?1",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "content": "# Busca 6 imagens no HTML da notícia",
+        "height": 464,
+        "width": 2144,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1296,
+        528
+      ],
+      "typeVersion": 1,
+      "id": "45a1ac77-6417-4639-8e3b-621d119dbd6a",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        176,
+        784
+      ],
+      "id": "2099acac-b481-4e20-bdf4-2c4c86fc388e",
+      "name": "Unificar imagem final"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.link }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1008,
+        784
+      ],
+      "id": "8e24011a-7859-4ae6-8d3d-ba5c2e3f122e",
+      "name": "Buscar HTML da notícia1",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "inputSource": "jsonExample",
+        "jsonExample": "{\n  \"link\": \"https://www.infomoney.com.br/business/global/energia-limpa-e-ilimitada-existe-a-china-esta-investindo-pesado-para-aproveita-la/\"\n}"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1232,
+        784
+      ],
+      "id": "d2d45975-c84b-43c4-ac3f-5b7ac6a6f23a",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "/* =========================\n   GERAR ID TEMPORÁRIO DA NOTÍCIA\n========================= */\nconst dataAgora = new Date();\nconst yyyy = dataAgora.getFullYear();\nconst mm = String(dataAgora.getMonth() + 1).padStart(2, '0');\nconst dd = String(dataAgora.getDate()).padStart(2, '0');\nconst hh = String(dataAgora.getHours()).padStart(2, '0');\nconst min = String(dataAgora.getMinutes()).padStart(2, '0');\nconst ss = String(dataAgora.getSeconds()).padStart(2, '0');\nconst rand = Math.floor(Math.random() * 1000).toString().padStart(3, '0');\n\nconst id_post = `noticia_${yyyy}${mm}${dd}_${hh}${min}${ss}_${rand}`;\n\n/* =========================\n   EXTRAÇÃO DE IMAGENS\n========================= */\nconst html = $json.data || $json.body || '';\nlet imagens = [];\n\n/* 1️⃣ OG IMAGE */\nconst ogRegex = /<meta[^>]+property=[\"']og:image[\"'][^>]+content=[\"']([^\"']+)[\"']/i;\nconst ogMatch = html.match(ogRegex);\nif (ogMatch?.[1]) imagens.push(ogMatch[1]);\n\n/* 2️⃣ TWITTER IMAGE */\nconst twitterRegex = /<meta[^>]+name=[\"']twitter:image[\"'][^>]+content=[\"']([^\"']+)[\"']/i;\nconst twitterMatch = html.match(twitterRegex);\nif (twitterMatch?.[1]) imagens.push(twitterMatch[1]);\n\n/* 3️⃣ JSON-LD */\nconst jsonLdRegex = /<script type=\"application\\/ld\\+json\">([\\s\\S]*?)<\\/script>/gi;\nlet jsonMatch;\n\nwhile ((jsonMatch = jsonLdRegex.exec(html)) !== null) {\n  try {\n    const json = JSON.parse(jsonMatch[1]);\n    const graph = json['@graph'] || [json];\n\n    graph.forEach(item => {\n      if (item?.image?.url) imagens.push(item.image.url);\n      if (item?.thumbnailUrl) imagens.push(item.thumbnailUrl);\n      if (Array.isArray(item?.image)) {\n        item.image.forEach(img => {\n          if (typeof img === 'string') imagens.push(img);\n          if (img?.url) imagens.push(img.url);\n        });\n      }\n    });\n  } catch (e) {}\n}\n\n/* 4️⃣ IMG TAGS */\nconst imgRegex = /<img[^>]+(?:src|data-src|data-original)=[\"']([^\"']+)[\"']/gi;\nlet imgMatch;\n\nwhile ((imgMatch = imgRegex.exec(html)) !== null) {\n  let url = imgMatch[1];\n  if (url.startsWith('//')) url = 'https:' + url;\n  if (url.startsWith('http')) imagens.push(url);\n}\n\n/* LIMPEZA */\nimagens = [...new Set(imagens)]\n  .filter(u => !u.includes('logo') && !u.includes('icon'));\n\n/* LIMITAR A 6 */\nconst imagensLimitadas = imagens.slice(0, 6);\n\n/* =========================\n   LINK DA NOTÍCIA (ITEM ATUAL)\n========================= */\nconst linkNoticia = $('When Executed by Another Workflow').item.json.link || '';\n\n/* =========================\n   OUTPUT FINAL\n========================= */\nconst output = {\n  id_post,\n  link_noticia: linkNoticia,\n};\n\nfor (let i = 1; i <= 6; i++) {\n  output[`imagem${i}`] = imagensLimitadas[i - 1] || '';\n}\n\noutput.total_imagens = imagens.length;\noutput.imagem_consolidado = imagensLimitadas.join(', ');\n\nreturn output;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -784,
+        784
+      ],
+      "id": "a8ea5b6c-bd3f-4275-9aca-a83b8c62c55d",
+      "name": "Busca imagens no HTML + Gera id da noticia"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c669bc4b-92c6-45d1-8a97-4e6df78b0794",
+              "name": "id_post",
+              "value": "={{ $json.id_post }}",
+              "type": "string"
+            },
+            {
+              "id": "7d76561e-1ee5-4966-810e-8de1b6f5acc9",
+              "name": "link_noticia",
+              "value": "={{ $json.link_noticia }}",
+              "type": "string"
+            },
+            {
+              "id": "7aa643bb-005c-48ee-8b81-ae4f74955120",
+              "name": "imagem1",
+              "value": "={{ $json.imagem1 }}",
+              "type": "string"
+            },
+            {
+              "id": "05989d55-5616-4118-ad54-36a2bbfb1a93",
+              "name": "stat_imagem1",
+              "value": "={{ $json.stat_imagem1 }}",
+              "type": "string"
+            },
+            {
+              "id": "b63c3f49-fa9d-47b1-a6f4-e532d0066eed",
+              "name": "imagem2",
+              "value": "={{ $json.imagem2 }}",
+              "type": "string"
+            },
+            {
+              "id": "31128502-7fbe-4a82-99e4-fe98a1281316",
+              "name": "stat_imagem2",
+              "value": "={{ $json.stat_imagem2 }}",
+              "type": "string"
+            },
+            {
+              "id": "55b5e78f-7581-4a21-b965-95cf36936bf9",
+              "name": "imagem3",
+              "value": "={{ $json.imagem3 }}",
+              "type": "string"
+            },
+            {
+              "id": "304d786e-e94f-4ee8-8a79-67305da56ae0",
+              "name": "stat_imagem3",
+              "value": "={{ $json.stat_imagem3 }}",
+              "type": "string"
+            },
+            {
+              "id": "f2b5b680-208d-48bc-8d49-1151d02af8ee",
+              "name": "imagem4",
+              "value": "={{ $json.imagem4 }}",
+              "type": "string"
+            },
+            {
+              "id": "01d38c1a-d4b0-4c73-b944-9c3b203a10d3",
+              "name": "stat_imagem4",
+              "value": "={{ $json.stat_imagem4 }}",
+              "type": "string"
+            },
+            {
+              "id": "506914dd-a117-40dc-b850-d95af8b2ca92",
+              "name": "imagem5",
+              "value": "={{ $json.imagem5 }}",
+              "type": "string"
+            },
+            {
+              "id": "ca9e1090-7bd3-4b16-bc0f-a543a239a441",
+              "name": "stat_imagem5",
+              "value": "={{ $json.stat_imagem5 }}",
+              "type": "string"
+            },
+            {
+              "id": "2dc986b8-d4d0-49da-8f6c-921624042bfe",
+              "name": "imagem6",
+              "value": "={{ $json.imagem6 }}",
+              "type": "string"
+            },
+            {
+              "id": "615f851d-e841-4dd8-a7f3-4d30faebb529",
+              "name": "stat_imagem6",
+              "value": "={{ $json.stat_imagem6 }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        640,
+        784
+      ],
+      "id": "40ab95b2-b2ff-471c-b162-318f4fe94dc6",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "/* =========================\n   INPUT = ITEM FINAL DA NOTÍCIA\n========================= */\nconst item = $json;\n\n/* =========================\n   COLETAR IMAGENS EM ARRAY\n========================= */\nlet imagens = [];\n\nfor (let i = 1; i <= 6; i++) {\n  imagens.push({\n    imagem: item[`imagem${i}`] || '',\n    avaliacao: item[`aval_imagem${i}`] || '',\n    comentario: item[`com_imagem${i}`] || '',\n    status: item[`stat_imagem${i}`] || 'rejeitada',\n  });\n}\n\n/* =========================\n   ORDENAR: APROVADAS PRIMEIRO\n========================= */\nconst aprovadas = imagens.filter(i => i.status === 'aprovada' && i.imagem);\nconst rejeitadas = imagens.filter(i => i.status !== 'aprovada' || !i.imagem);\n\nconst ordenado = [...aprovadas, ...rejeitadas].slice(0, 6);\n\n/* =========================\n   RECONSTRUIR OUTPUT\n========================= */\nconst output = {\n  id_post: item.id_post,\n  link_noticia: item.link_noticia,\n};\n\n/* Slots fixos */\nfor (let i = 1; i <= 6; i++) {\n  const img = ordenado[i - 1] || {};\n\n  output[`imagem${i}`] = img.imagem || '';\n  output[`aval_imagem${i}`] = img.avaliacao || '';\n  output[`com_imagem${i}`] = img.comentario || '';\n  output[`stat_imagem${i}`] = img.imagem ? (img.status || 'rejeitada') : 'rejeitada';\n}\n\n/* =========================\n   METADADOS\n========================= */\noutput.total_imagens = item.total_imagens || 0;\n\n/* Recalcular consolidado só com URLs válidas */\noutput.imagem_consolidado = ordenado\n  .map(i => i.imagem)\n  .filter(Boolean)\n  .join(', ');\n\nreturn output;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        784
+      ],
+      "id": "106c6eec-805a-41db-91e1-325393dcb5f3",
+      "name": "Ordenar imagens baseado na aprovação"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "/* =========================\n   CONTEXTO DA NOTÍCIA (ITEM CORRETO)\n========================= */\nconst contexto = $('Imagem encontrada?1').item.json;\n\nconst id_post = contexto.id_post;\nconst link_noticia = contexto.link_noticia;\n\n/* =========================\n   LIMPAR E PARSEAR JSON DO ANALYZE IMAGE\n========================= */\nconst raw = $json.content || '';\n\nconst clean = raw\n  .replace(/```json/gi, '')\n  .replace(/```/g, '')\n  .trim();\n\nlet parsed = { imagens: [] };\n\ntry {\n  parsed = JSON.parse(clean);\n} catch (e) {\n  // se der erro, segue com array vazio\n}\n\n/* =========================\n   OUTPUT BASE\n========================= */\nconst output = {\n  id_post,\n  link_noticia\n};\n\n/* =========================\n   CAMPOS FIXOS (1 a 6)\n========================= */\nfor (let i = 1; i <= 6; i++) {\n  // imagem\n  output[`imagem${i}`] = contexto[`imagem${i}`] || '';\n\n  // avaliação\n  output[`aval_imagem${i}`] = '';\n  output[`com_imagem${i}`] = '';\n\n  // default = rejeitada\n  output[`stat_imagem${i}`] = 'rejeitada';\n}\n\n/* =========================\n   APLICAR AVALIAÇÕES RECEBIDAS\n========================= */\n(parsed.imagens || []).forEach(img => {\n  const idx = img.idx;\n\n  if (idx >= 1 && idx <= 6) {\n    output[`aval_imagem${idx}`] = img.avaliacao || '';\n    output[`com_imagem${idx}`] = img.comentario || '';\n\n    if (img.status) {\n      output[`stat_imagem${idx}`] = img.status;\n    }\n  }\n});\n\n/* =========================\n   METADADOS\n========================= */\noutput.total_imagens = contexto.total_imagens || 0;\noutput.imagem_consolidado = contexto.imagem_consolidado || '';\n\nreturn output;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        576
+      ],
+      "id": "39077088-70d0-4e4b-9cc9-e14d814e2eca",
+      "name": "Organizar tabela com as imagens e seus status"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "/* =========================\n   CONTEXTO DA NOTÍCIA (ITEM CORRETO)\n========================= */\nconst contexto = $('Imagem encontrada?1').item.json;\n\nconst id_post = contexto.id_post || '';\nconst link_noticia = contexto.link_noticia || '';\n\n/* =========================\n   OUTPUT BASE (SEM IMAGENS)\n========================= */\nconst output = {\n  id_post,\n  link_noticia\n};\n\n/* =========================\n   CAMPOS FIXOS (1 a 6) - TUDO VAZIO / REJEITADA\n========================= */\nfor (let i = 1; i <= 6; i++) {\n  output[`imagem${i}`] = '';\n  output[`aval_imagem${i}`] = '';\n  output[`com_imagem${i}`] = '';\n  output[`stat_imagem${i}`] = 'rejeitada';\n}\n\n/* =========================\n   METADADOS\n========================= */\noutput.total_imagens = 0;\noutput.imagem_consolidado = '';\n\nreturn output;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        800
+      ],
+      "id": "c585c912-f016-4fa3-ac13-c469129f606f",
+      "name": "Organizar tabela com as imagens e seus status 2"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "text": "=Você receberá UMA LISTA DE IMAGENS, na ordem exata em que foram enviadas.\n \nLISTA DE IMAGENS: {{ $json.imagem_consolidado }}\n\nSua tarefa é analisar CADA imagem INDIVIDUALMENTE, respeitando rigorosamente a ordem recebida.\n\nIMPORTANTE:\n- (para imagens repetidas): Caso você analise imagens repetidas, marque o status da ultima como \"rejeitada\" e deixe apenas uma \"aprovada\".\n- Para imagens corrompidas ou totalmente escuras, marque como \"rejeitada\".\n\nPara cada imagem:\n- Avalie se ela é adequada para uso em redes sociais\n- Dê uma nota mental de 0 a 10\n- Se a nota for MAIOR que 6 → \"bom\"\n- Se a nota for MENOR ou IGUAL a 6 → \"ruim\"\n- Se a imagem for totalmente preta → \"ruim\"\n\nRetorne APENAS um JSON válido, SEM texto adicional, no seguinte formato EXATO:\n\n{\n  \"imagens\": [\n    {\n      \"idx\": 1,\n      \"avaliacao\": \"bom|ruim\",\n      \"comentario\": \"justificativa curta\",\n      \"status\": \"aprovada|rejeitada\"\n    },\n    {\n      \"idx\": 2,\n      \"avaliacao\": \"bom|ruim\",\n      \"comentario\": \"justificativa curta\",\n      \"status\": \"aprovada|rejeitada\"\n    }\n  ]\n}\n\nRegras obrigatórias!:\n- O array deve ter exatamente o mesmo número de itens que imagens recebidas\n- O idx deve começar em 1 e seguir a ordem\n- Não invente imagens\n- Não pule índices\n- Não escreva absolutamente nada fora do JSON\n- Analise qualquer tipo de imagem\n- Aprove APENAS uma imagem caso ela venha repetida.\n- Não aprove imagens corrompidas totalmente escuras.\n- Imagens com dimensões pequenas ou baixa resolução devem ser marcadas como \"rejeitada\". \n- Apenas aprove imagens com boas dimensões (mínimo 800px de largura) e boa resolução visual.\n- Imagens borradas, pixeladas ou visivelmente comprimidas devem ser rejeitadas.",
+        "imageUrls": "={{ $json.imagem_consolidado }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -320,
+        576
+      ],
+      "id": "79e6bd9f-26b5-4d74-89ec-59df81068400",
+      "name": "Analyze image1",
+      "retryOnFail": true,
+      "credentials": {
+        "openAiApi": {
+          "id": "GNYM1RjawrdA7XKF",
+          "name": "OpenAi account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Imagem encontrada?1": {
+      "main": [
+        [
+          {
+            "node": "Analyze image1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Organizar tabela com as imagens e seus status 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unificar imagem final": {
+      "main": [
+        [
+          {
+            "node": "Ordenar imagens baseado na aprovação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar HTML da notícia1": {
+      "main": [
+        [
+          {
+            "node": "Busca imagens no HTML + Gera id da noticia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Buscar HTML da notícia1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca imagens no HTML + Gera id da noticia": {
+      "main": [
+        [
+          {
+            "node": "Imagem encontrada?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ordenar imagens baseado na aprovação": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Organizar tabela com as imagens e seus status": {
+      "main": [
+        [
+          {
+            "node": "Unificar imagem final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Organizar tabela com as imagens e seus status 2": {
+      "main": [
+        [
+          {
+            "node": "Unificar imagem final",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Analyze image1": {
+      "main": [
+        [
+          {
+            "node": "Organizar tabela com as imagens e seus status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "timeSavedMode": "fixed"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "142f08d2-5629-4075-9009-ba722411b610",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2025-12-23T14:12:18.065Z",
+      "createdAt": "2025-12-23T14:12:18.065Z",
+      "role": "workflow:owner",
+      "workflowId": "kJAAOYjW3ELySLBt",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
