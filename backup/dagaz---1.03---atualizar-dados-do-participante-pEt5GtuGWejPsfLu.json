@@ -1,0 +1,804 @@
+{
+  "updatedAt": "2026-04-14T19:09:19.856Z",
+  "createdAt": "2026-01-05T13:57:36.805Z",
+  "id": "pEt5GtuGWejPsfLu",
+  "name": "DAGAZ - 1.03 - Atualizar Dados do Participante",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2464,
+        128
+      ],
+      "id": "68597329-1f68-4f34-9567-d57fea07a599",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1248,
+        336
+      ],
+      "id": "8cde4e73-efa2-41b0-bf0a-8dfcd1ecf5b6",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0e50b3db-a64d-49ea-8948-08abbd6835a6",
+              "name": "Fields",
+              "value": "[\"Tipo de Transporte\"]",
+              "type": "array"
+            },
+            {
+              "id": "8df33992-50f0-4e23-81ee-bcc1175b3b82",
+              "name": "Values",
+              "value": "[\"van\"]",
+              "type": "array"
+            },
+            {
+              "id": "c37c4dc8-1ea9-48c6-887d-037adc33a861",
+              "name": "participant_id",
+              "value": "9e7b8947-f37c-4236-94fd-cb977f572b35",
+              "type": "string"
+            },
+            {
+              "id": "18a7ff6c-ecf3-4e48-81b4-4e69e70a0a60",
+              "name": "event_id",
+              "value": "a18fc0d3-4140-45b1-a6ce-65833e0b4e35",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2288,
+        128
+      ],
+      "id": "28f30eb9-dfa8-4aa0-9f79-9e1a81cab870",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "Fields",
+              "type": "array"
+            },
+            {
+              "name": "Values",
+              "type": "array"
+            },
+            {
+              "name": "participant_id"
+            },
+            {
+              "name": "event_id"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2480,
+        336
+      ],
+      "id": "045657c1-8482-4e36-a6ff-7b3e9c389457",
+      "name": "Trigger"
+    },
+    {
+      "parameters": {
+        "content": "## Atualiza os dados do participante",
+        "height": 960,
+        "width": 2256
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2528,
+        48
+      ],
+      "id": "e480e1da-2ccb-4bf3-9293-c4ddc6d59b69",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ======================================================\n// 1. FONTE A — DICIONÁRIO DO BANCO (INPUT DO NODE)\n// ======================================================\nconst referenceData = $input.all().map(i => i.json);\n\n// ======================================================\n// 2. FONTE B — DADOS DO USUÁRIO (TRIGGER / WEBHOOK)\n// ======================================================\nlet userData = null;\n\nconst possibleTriggerNodes = [\n  'When Executed by Another Workflow',\n  'Edit Fields',\n  'Trigger',\n  'Webhook',\n  'Start'\n];\n\nfor (const nodeName of possibleTriggerNodes) {\n  try {\n    const item = $(nodeName).first();\n    if (item?.json?.Fields && item?.json?.Values) {\n      userData = item.json;\n      break;\n    }\n  } catch {}\n}\n\nif (!userData) {\n  throw new Error(\"Não foi possível localizar Fields/Values no Trigger.\");\n}\n\n// ======================================================\n// 3. FUNÇÕES UTILITÁRIAS\n// ======================================================\nfunction normalize(str = \"\") {\n  return str\n    .toLowerCase()\n    .normalize(\"NFD\").replace(/[\\u0300-\\u036f]/g, \"\")\n    .replace(/[^a-z0-9]/g, \"\");\n}\n\n// A função classifyField agora é apenas um auxiliar, não define o fluxo principal\nfunction classifyField(fieldName) {\n  const n = normalize(fieldName);\n  if (n.includes(\"endereco\")) return \"ADDRESS_FULL\";\n  if (n.includes(\"aeroporto\")) return \"AIRPORT\";\n  return \"OTHER\";\n}\n\nfunction buildResult(ref, originalInput, value, participantId, eventId) {\n  return {\n    participant_id: participantId,\n    event_id: eventId,\n    field_name: ref.field_name,\n    field_id: ref.field_id,\n    field_type: ref.field_type,\n    description: ref.description || null,\n    format_example: ref.format_example || null,\n    options: ref.options || [],\n    value,\n    _original_input: originalInput\n  };\n}\n\n\n// ======================================================\n// 4. PROCESSAMENTO\n// ======================================================\nconst fieldsList = userData.Fields;\nconst valuesList = userData.Values;\nconst participantId = userData.participant_id;\nconst eventId = userData.event_id;\n\nconst matchedFields = [];\n\nfor (let i = 0; i < fieldsList.length; i++) {\n  const inputFieldName = fieldsList[i];\n  const inputValue = valuesList[i] ?? null;\n  const normalizedInput = normalize(inputFieldName);\n\n  let matchFound = false;\n\n  // ---------------------------\n  // 1. TENTATIVA DE MATCH DIRETO (PRIORIDADE ABSOLUTA)\n  // ---------------------------\n  \n  // A. Tenta Exato\n  let match = referenceData.find(ref => {\n    if (!ref.field_name) return false;\n    return normalize(ref.field_name) === normalizedInput;\n  });\n\n  // B. Tenta \"Banco contém Input\"\n  if (!match) {\n    match = referenceData.find(ref => {\n      if (!ref.field_name) return false;\n      const refNorm = normalize(ref.field_name);\n      return refNorm.includes(normalizedInput);\n    });\n  }\n\n  // C. Match semântico leve (remove \"de\", \"do\", \"da\")\n  if (!match) {\n      match = referenceData.find(ref => {\n        if (!ref.field_name) return false;\n    \n        const refNorm = normalize(ref.field_name)\n          .replace(/(de|do|da|das|dos)/g, \"\");\n    \n        const inputNorm = normalizedInput\n          .replace(/(de|do|da|das|dos)/g, \"\");\n    \n        return refNorm === inputNorm;\n      });\n  }\n\n\n  // Se achou match direto, salva e PULA para o próximo campo (continue)\n  if (match) {\n    matchedFields.push(\n      buildResult(match, inputFieldName, inputValue, participantId, eventId)\n    );\n    matchFound = true;\n    continue; // <--- ISSO EVITA A DUPLICAÇÃO\n  }\n\n  // ---------------------------\n  // 2. HEURÍSTICAS (SÓ RODA SE NÃO DEU MATCH DIRETO)\n  // ---------------------------\n  if (!matchFound) {\n    const fieldType = classifyField(inputFieldName);\n\n    // --- ENDEREÇO COMPLETO ---\n    // (Só entra aqui se o input for algo genérico como \"Endereço Completo\"\n    // e não tiver batido com nenhum campo específico antes)\n    if (fieldType === \"ADDRESS_FULL\") {\n      const addressFields = [\n        \"enderecoruaenumero\",\n        \"complemento\",\n        \"bairro\",\n        \"cidade\",\n        \"estado\",\n        \"cep\"\n      ];\n\n      referenceData.forEach(ref => {\n        if (addressFields.includes(normalize(ref.field_name))) {\n          matchedFields.push(\n            buildResult(ref, inputFieldName, inputValue, participantId, eventId)\n          );\n        }\n      });\n    }\n\n    // --- AEROPORTOS ---\n    if (fieldType === \"AIRPORT\") {\n      referenceData.forEach(ref => {\n        const n = normalize(ref.field_name);\n        if (n === \"aeroportoida\" || n === \"aeroportovolta\") {\n          matchedFields.push(\n            buildResult(ref, inputFieldName, inputValue, participantId, eventId)\n          );\n        }\n      });\n    }\n  }\n}\n\n// ======================================================\n// 5. GERAR PROMPT PARA O AI AGENT\n// ======================================================\nconst userMessage = `Formate os valores dos campos abaixo seguindo EXATAMENTE o padrão definido em format_example.\n\n## CAMPOS PARA FORMATAR\n\n${JSON.stringify(matchedFields, null, 2)}\n\n## INSTRUÇÕES\n- Analise cada campo e seu format_example\n- Formate o value para seguir o mesmo padrão do format_example\n- Retorne um JSON com formatted_fields contendo:\n  - field_id\n  - original_value\n  - formatted_value\n  - changed (boolean)`;\n\n// ======================================================\n// 6. RETORNO FINAL\n// ======================================================\nreturn {\n  json: {\n    participant_id: participantId,\n    event_id: eventId,\n    fields: matchedFields,\n    user_message: userMessage\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2048,
+        336
+      ],
+      "id": "e4bc20da-fdb7-4096-b7e3-a3304fbaebdd",
+      "name": "Prepara os dados"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Campos Base (Email)\nSELECT \n  'email'            AS field_name,\n  'base'             AS category,\n  NULL               AS description,\n  NULL               AS format_example,\n  'email'            AS field_type,\n  NULL::jsonb        AS options,\n  NULL::uuid         AS field_id,\n  0                  AS order_index\nFROM event_participants ep\nWHERE ep.id = $1 AND ep.event_id = $2\n\nUNION ALL\n\n-- Campos Base (Telefone)\nSELECT \n  'telefone'         AS field_name,\n  'base'             AS category,\n  NULL               AS description,\n  NULL               AS format_example,\n  'phone'            AS field_type,\n  NULL::jsonb        AS options,\n  NULL::uuid         AS field_id,\n  1                  AS order_index\nFROM event_participants ep\nWHERE ep.id = $1 AND ep.event_id = $2\n\nUNION ALL\n\n-- Campos Personalizados\nSELECT \n  epf.field_name      AS field_name,\n  'custom'            AS category,\n  epf.description     AS description,\n  epf.format_example  AS format_example,\n  epf.field_type      AS field_type,\n  epf.options         AS options,\n  epf.id              AS field_id,\n  epf.order_index + 2 AS order_index\nFROM event_participant_fields epf\nWHERE epf.event_id = $2\n\nORDER BY order_index;\n",
+        "options": {
+          "queryReplacement": "={{ $json.participant_id }},{{ $json.event_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2256,
+        336
+      ],
+      "id": "54eee033-5147-4047-8f5d-ca2ff283eb44",
+      "name": "Busca Dicionario de Campos",
+      "credentials": {
+        "postgres": {
+          "id": "RbteCsnBdomXyIZi",
+          "name": "DAGAZ-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json._field_name }}",
+                    "rightValue": "email",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "dc1db58b-1b17-4505-8c80-d425af91e4fd"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "email"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "5cd45027-8ad6-4dc6-b39f-663e6295ef03",
+                    "leftValue": "={{ $json._field_name }}",
+                    "rightValue": "telefone",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "telefone"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -1024,
+        496
+      ],
+      "id": "e3bff413-c6db-495b-be90-359a640b720b",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "event_participants",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "event_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Prepara os dados').first().json.event_id }}"
+            },
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.participant_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "email",
+              "fieldValue": "={{ $json.value }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        368
+      ],
+      "id": "09a1df36-75a8-42da-b314-c49c1e079f32",
+      "name": "Atualiza email",
+      "credentials": {
+        "supabaseApi": {
+          "id": "5G36ZI0q9SPv9U25",
+          "name": "Dagaz - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "event_participants",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "event_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Prepara os dados').first().json.event_id }}"
+            },
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.participant_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "phone",
+              "fieldValue": "={{ $json.value }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        512
+      ],
+      "id": "56faf0ae-0cdd-402e-91bd-c84591426057",
+      "name": "Atualiza telefone",
+      "credentials": {
+        "supabaseApi": {
+          "id": "5G36ZI0q9SPv9U25",
+          "name": "Dagaz - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- CTE para pegar todos os valores preenchidos do participante\nWITH filled_values AS (\n  SELECT \n    epfv.field_id,\n    epfv.value,\n    epfv.filled_at\n  FROM event_participant_field_values epfv\n  WHERE epfv.participant_id = $1\n),\n\n-- CTE para identificar campos condicionais que devem ser mostrados\n-- Um campo é ativo apenas quando TODAS as suas condições são satisfeitas\n-- Cada condição é satisfeita quando o valor do trigger está em trigger_values (OU)\nactive_conditional_fields AS (\n  SELECT fc.target_field_id\n  FROM field_conditions fc\n  LEFT JOIN filled_values fv \n    ON fv.field_id = fc.trigger_field_id\n    AND fv.value IS NOT NULL \n    AND fv.value != ''\n    AND fv.value = ANY(fc.trigger_values)  -- Lógica OU: qualquer valor do array\n  WHERE fc.event_id = $2\n  GROUP BY fc.target_field_id\n  -- Lógica E: total de condições = condições satisfeitas\n  HAVING COUNT(*) = COUNT(fv.field_id)\n)\n\n-- Campos base: Email (sempre obrigatório)\nSELECT \n  'email' as field_name,\n  'email' as field_type,\n  TRUE as is_required,\n  'Endereço de e-mail pessoal e válido.' as description,\n  NULL::jsonb as options,\n  ep.email as value,\n  ep.created_at as filled_at,\n  CASE \n    WHEN ep.email IS NULL OR ep.email = '' THEN 'PENDENTE'\n    ELSE 'COLETADO'\n  END as status,\n  0 as order_index\nFROM event_participants ep\nWHERE ep.id = $1\n  AND ep.event_id = $2\n\nUNION ALL\n\n-- Campos base: Telefone (sempre obrigatório)\nSELECT \n  'telefone' as field_name,\n  'phone' as field_type,\n  TRUE as is_required,\n  'Número de contato principal (WhatsApp) com DDD.' as description,\n  NULL::jsonb as options,\n  ep.phone as value,\n  ep.created_at as filled_at,\n  CASE \n    WHEN ep.phone IS NULL OR ep.phone = '' THEN 'PENDENTE'\n    ELSE 'COLETADO'\n  END as status,\n  1 as order_index\nFROM event_participants ep\nWHERE ep.id = $1\n  AND ep.event_id = $2\n\nUNION ALL\n\n-- Campos personalizados NÃO condicionais (sempre aparecem)\nSELECT \n  epf.field_name,\n  epf.field_type,\n  epf.is_required,\n  epf.description,\n  epf.options,\n  fv.value,\n  fv.filled_at,\n  CASE \n    WHEN fv.value IS NULL OR fv.value = '' THEN 'PENDENTE'\n    ELSE 'COLETADO'\n  END as status,\n  epf.order_index + 2 as order_index\nFROM event_participant_fields epf\nLEFT JOIN filled_values fv ON fv.field_id = epf.id\nWHERE epf.event_id = $2\n  AND epf.is_enabled = TRUE\n  AND (epf.is_conditional IS NULL OR epf.is_conditional = FALSE)\n\nUNION ALL\n\n-- Campos personalizados CONDICIONAIS (só aparecem quando TODAS as regras são atendidas)\nSELECT \n  epf.field_name,\n  epf.field_type,\n  epf.is_required,\n  epf.description,\n  epf.options,\n  fv.value,\n  fv.filled_at,\n  CASE \n    WHEN fv.value IS NULL OR fv.value = '' THEN 'PENDENTE'\n    ELSE 'COLETADO'\n  END as status,\n  epf.order_index + 2 as order_index\nFROM event_participant_fields epf\nINNER JOIN active_conditional_fields acf ON acf.target_field_id = epf.id\nLEFT JOIN filled_values fv ON fv.field_id = epf.id\nWHERE epf.event_id = $2\n  AND epf.is_enabled = TRUE\n  AND epf.is_conditional = TRUE\n\nORDER BY order_index;",
+        "options": {
+          "queryReplacement": "={{ $('Trigger').first().json.participant_id }},{{ $('Trigger').first().json.event_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1008,
+        208
+      ],
+      "id": "1d686f90-e401-4ddf-a0df-49d36422e4f8",
+      "name": "Documentos que faltam",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "RbteCsnBdomXyIZi",
+          "name": "DAGAZ-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===============================\n// ENTRADA\n// ===============================\n\n// 1️⃣ Estado atual dos campos (vem do node Documentos que faltam)\nconst fields = items.map(i => i.json);\n\n// 2️⃣ Campos atualizados NESTA execução\nconst camposAtualizadosAgora = $items('Processar Resposta do AI Agent')\n  .map(i => i.json)\n  .filter(f => f._collected_now === true)\n  .map(f => f._field_name);\n\n// ===============================\n// HELPERS\n// ===============================\nconst getField = (name) =>\n  fields.find(f => f.field_name === name);\n\nconst isColetado = (name) =>\n  getField(name)?.status === 'COLETADO';\n\nconst listarCampos = (campos) =>\n  campos.map(c => `• ${c.field_name}`).join('\\n');\n\n// ===============================\n// PENDÊNCIAS\n// ===============================\nconst obrigatoriosPendentes = fields.filter(\n  f => f.is_required === true && f.status === 'PENDENTE'\n);\n\nconst opcionaisPendentes = fields.filter(\n  f => f.is_required === false && f.status === 'PENDENTE'\n);\n\n// ===============================\n// REGRA DE LOGÍSTICA\n// ===============================\n\n// 1. Verifica status do Transporte\nconst transporteField = getField('Tipo de Transporte');\nconst transporteColetado = isColetado('Tipo de Transporte');\nconst valorTransporte = transporteField?.value;\n\n// 2. Regra de Exclusão (NOVA LÓGICA) 🛑\n// Se for Carro ou Outro, NÃO precisa de sugestão logística\nconst transporteRequerLogistica = ![\n  'Carro próprio',\n  'Outro (carona, aplicativo, táxi, etc.)',\n  'Outro' // Segurança caso venha simplificado\n].includes(valorTransporte);\n\n// 3. Endereço completo\nconst enderecoCompletoColetado =\n  isColetado('Endereço (rua e número)') &&\n  isColetado('Bairro') &&\n  isColetado('Cidade') &&\n  isColetado('Estado') &&\n  isColetado('CEP');\n\n// 4. O que mudou AGORA\nconst atualizouTransporteAgora =\n  camposAtualizadosAgora.includes('Tipo de Transporte');\n\nconst atualizouEnderecoAgora =\n  camposAtualizadosAgora.some(c =>\n    [\n      'Endereço (rua e número)',\n      'Bairro',\n      'Cidade',\n      'Estado',\n      'CEP'\n    ].includes(c)\n  );\n\n// ===============================\n// CONDIÇÃO FINAL DE DISPARO\n// ===============================\nconst deveSugerirLogistica =\n  transporteColetado &&             // Tem transporte salvo?\n  transporteRequerLogistica &&      // É Avião, Onibus ou Transfer? (Se for carro, dá false aqui)\n  enderecoCompletoColetado &&       // Tem endereço salvo?\n  (atualizouTransporteAgora || atualizouEnderecoAgora); // Acabou de mudar?\n\n// ===============================\n// MENSAGEM PADRÃO\n// ===============================\nlet mensagem = '';\n\n// CENÁRIO 1 — Ainda faltam obrigatórios\nif (obrigatoriosPendentes.length > 0) {\n  mensagem =\n`✅ Dados cadastrados com sucesso!\n\nMas ainda faltam alguns dados *obrigatórios* para finalizar sua inscrição:\n\n${listarCampos(obrigatoriosPendentes)}\n\nAssim que puder, é só me enviar essas informações por aqui 😊`;\n}\n\n// CENÁRIO 2 — Só opcionais pendentes\nelse if (opcionaisPendentes.length > 0) {\n  mensagem =\n`✅ Dados cadastrados com sucesso!\n\nSeu status pode ser atualizado para *Confirmado* 🎉  \nMas ainda faltam alguns dados *opcionais* que ajudam a melhorar sua experiência no evento:\n\n${listarCampos(opcionaisPendentes)}\n\nSe quiser completar depois, é só me avisar 😉`;\n}\n\n// CENÁRIO 3 — Tudo coletado\nelse {\n  mensagem =\n`🎉 Dados cadastrados com sucesso!\n\nTodos os dados necessários já foram coletados.  \nObrigada! Qualquer coisa, é só chamar 😊`;\n}\n\n// ===============================\n// RETORNO FINAL\n// ===============================\nreturn [\n  {\n    json: {\n      mensagem,\n      resumo: {\n        obrigatorios_pendentes: obrigatoriosPendentes.length,\n        opcionais_pendentes: opcionaisPendentes.length,\n        total_campos: fields.length\n      },\n      logistica: {\n        acionar_sugestao: deveSugerirLogistica,\n        tipo_transporte: valorTransporte || null,\n        endereco_completo: enderecoCompletoColetado\n      }\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        208
+      ],
+      "id": "1bf478ff-065e-4cc1-942d-a1ad1d843b82",
+      "name": "Feedback para o agente",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -1840,
+        560
+      ],
+      "id": "1e61ed5f-0ab0-4dd6-be39-bbacb2f2081d",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.user_message }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=Você é um agente de formatação de dados. Sua ÚNICA tarefa é formatar valores seguindo EXATAMENTE o padrão mostrado no campo \"format_example\".\n\n## COMO FUNCIONA\n\nPara cada item recebido, analise o {{ $json.fields[0].format_example }} e aplique o MESMO padrão ao {{ $json.fields[0].value }}.\n\n## REGRAS\n\n1. **O format_example é a LEI**: Se o exemplo mostra \"12345678900\" (só números), remova pontuação. Se mostra \"123.456.789-00\" (com pontuação), mantenha/adicione pontuação.\n\n2. **Analise o PADRÃO do exemplo**:\n   - Tem pontuação? Mantenha/adicione pontuação\n   - Só números? Deixe só números\n   - Maiúsculas? Converta para maiúsculas\n   - Minúsculas? Converta para minúsculas\n   - Formato de data específico? Use esse formato\n\n3. **Campos do tipo \"select\"**:\noptions: {{ $json.fields[0].options }}\n   - O valor formatado DEVE ser EXATAMENTE um dos valores presentes em \"options\"\n   - \"options\" é a FONTE DA VERDADE ABSOLUTA para campos select.\n   - Lógica de Match (em ordem de prioridade):\n     1. **Match Exato**: O value é igual a uma option (ignorando case/acentos).\n     2. **Contém/Substring**: O value está CONTIDO dentro de uma option (ex: \"Rodoviário\" está dentro de \"Rodoviário (ônibus)\").\n     3. **Palavra-chave**: O value é a palavra principal da option.\n   - Se encontrar match por qualquer um desses critérios, substitua pelo texto COMPLETO da option.\n   - Se o value já for idêntico a uma option, mantenha.\n   - Se NÃO houver nenhuma opção compatível (nem parcial):\n     - NÃO invente\n     - Retorne o value original\n     - changed = false\n\nchanged = true  → somente se formatted_value for diferente de original_value\nchanged = false → se não houve alteração OU se não foi possível mapear para options\n\n4. **Se o valor já está no formato correto**: Não altere\n\n## INPUT\nVocê receberá um array de objetos com:\n- field_name ({{ $json.fields[0].field_name }}) : nome do campo \n- field_type ({{ $json.fields[0].field_type }}) : tipo do campo\n- format_example ({{ $json.fields[0].format_example }}) : O PADRÃO A SEGUIR\n- description ({{ $json.fields[0].description }}) : descrição adicional (pode ser null)\n- value ({{ $json.fields[0].value }}): valor a ser formatado\n\n## OUTPUT\nRetorne APENAS um JSON com esta estrutura:\n\n{\n  \"formatted_fields\": [\n    {\n      \"field_id\": \"uuid\",\n      \"field_name\": \"nome\",\n      \"original_value\": \"valor original\",\n      \"formatted_value\": \"valor formatado conforme format_example\",\n      \"changed\": true/false\n    }\n  ]\n}\n\n## EXEMPLOS\n\n### Exemplo 1: CPF sem pontuação\nformat_example: \"12345678900\"\nvalue: \"365.628.498-96\"\n→ formatted_value: \"36562849896\" (removeu pontuação pois exemplo não tem)\n\n### Exemplo 2: Data no formato brasileiro\nformat_example: \"DD/MM/AAAA\"\nvalue: \"25/04/1987\"\n→ formatted_value: \"25/04/1987\" (já está correto)\n\n### Exemplo 3: Estado como sigla\nformat_example: \"SP, RJ, MG...\"\nvalue: \"São Paulo\"\n→ formatted_value: \"SP\" (converteu para sigla conforme padrão)\n\n### Exemplo 4: CEP sem hífen\nformat_example: \"12345678\"\nvalue: \"11030-603\"\n→ formatted_value: \"11030603\" (removeu hífen pois exemplo não tem)\n\n### Exemplo 5: Aeroporto com código\nformat_example: \"GRU - São Paulo\"\nvalue: \"Congonhas\"\n→ formatted_value: \"CGH - São Paulo\" (seguiu padrão CÓDIGO - Cidade)\n\n### Exemplo 6: Texto livre\nformat_example: \"Gerente de Vendas\"\nvalue: \"Head de relacionamento\"\n→ formatted_value: \"Head de relacionamento\" (texto livre, mantém original com capitalização adequada)\n\n### Exemplo 7: Select com match parcial\noptions: [\"Plano Básico (Mensal)\", \"Plano Pro\", \"Enterprise\"]\nvalue: \"Básico\"\n→ formatted_value: \"Plano Básico (Mensal)\" (Encontrou \"Básico\" dentro da opção e retornou a opção completa)\n\nIMPORTANTE: NÃO invente formatações. Use APENAS o que o format_example indica. {{ $json.fields[0].format_example }} de cada item.\n\nO output é sempre nesse formato:\n\n{\n  \"formatted_fields\": [\n    {\n      \"field_id\": \"uuid\",\n      \"field_name\": \"nome\",\n      \"original_value\": \"valor original\",\n      \"formatted_value\": \"valor formatado conforme format_example\",\n      \"changed\": true/false\n    }\n  ]\n}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -1840,
+        336
+      ],
+      "id": "79a48f15-dac2-4174-9074-6e7a2f83ae07",
+      "name": "Formata os dados"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega a resposta do AI Agent\nconst aiOutput = $input.first().json;\n\n// Pega os dados originais (participant_id, event_id) do nó anterior ao AI Agent\n// Ajuste o nome do nó conforme seu fluxo\nlet originalData = null;\nconst possibleNodes = ['Code', 'Code1', 'Montar contexto', 'Prepara os dados'];\n\nfor (const nodeName of possibleNodes) {\n  try {\n    const item = $(nodeName).first();\n    if (item && item.json && item.json.participant_id) {\n      originalData = item.json;\n      break;\n    }\n  } catch (e) {\n    // Nó não existe, continua\n  }\n}\n\n// Se não encontrou, tenta pegar do trigger\nif (!originalData) {\n  const triggerNodes = ['When Executed by Another Workflow', 'Webhook', 'Trigger'];\n  for (const nodeName of triggerNodes) {\n    try {\n      const item = $(nodeName).first();\n      if (item && item.json && item.json.participant_id) {\n        originalData = item.json;\n        break;\n      }\n    } catch (e) {\n      // Continua\n    }\n  }\n}\n\n// Parse da resposta do AI (vem como string JSON)\nlet formattedFields = [];\ntry {\n  const parsed = typeof aiOutput.output === 'string' \n    ? JSON.parse(aiOutput.output) \n    : aiOutput.output;\n  \n  formattedFields = parsed.formatted_fields || [];\n} catch (e) {\n  // Tenta extrair JSON do texto se veio com texto extra\n  const match = aiOutput.output.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    const parsed = JSON.parse(match[0]);\n    formattedFields = parsed.formatted_fields || [];\n  }\n}\n\n// Monta os itens para o Loop\nconst items = formattedFields.map(field => ({\n  json: {\n    // IDs para o upsert\n    participant_id: originalData?.participant_id || null,\n    field_id: field.field_id,\n    \n    // Valor formatado para salvar\n    value: field.formatted_value,\n    \n    // Timestamp de preenchimento\n    filled_at: new Date().toISOString(),\n    \n    // Metadados (opcional, para debug/log)\n    _field_name: field.field_name,\n    _original_value: field.original_value,\n    _was_changed: field.changed,\n    _collected_now: true                  // coleta\n  }\n}));\n\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1488,
+        336
+      ],
+      "id": "9ef341a4-48fb-456b-9575-022cc5be026d",
+      "name": "Processar Resposta do AI Agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepara os dados finais para o Supabase (SEM normalização)\nconst results = [];\n\n// Dados vindos do loop principal\nconst loopData = $('Loop Over Items').first().json;\n\nfor (const item of $input.all()) {\n  const data = item.json;\n\n  const participantId = loopData.participant_id;\n  const fieldId = data.field_id;      // UUID do campo (null para base)\n  const value = data.value ?? null;   // Valor já tratado anteriormente\n\n  // Apenas campos customizados vão para a tabela de respostas\n  if (participantId && fieldId) {\n    results.push({\n      json: {\n        participant_id: participantId,\n        field_id: fieldId,\n        value: value,\n        filled_at: new Date().toISOString(),\n        updated_at: new Date().toISOString()\n      }\n    });\n  }\n}\n\nreturn results;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -704,
+        720
+      ],
+      "id": "f5af8a2f-a854-4045-8b64-1a1731c3fc59",
+      "name": "Prepara os dados para o supabase"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"formatted_fields\": [\n    {\n      \"field_id\": \"uuid\",\n      \"field_name\": \"nome\",\n      \"original_value\": \"valor original\",\n      \"formatted_value\": \"valor formatado conforme format_example\",\n      \"changed\": true\n    }\n  ]\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -1696,
+        560
+      ],
+      "id": "26941774-07f4-4d50-99a8-a75b65813a9c",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -1696,
+        704
+      ],
+      "id": "5ced6733-5ec5-4855-a8cc-91314843604b",
+      "name": "OpenRouter Chat Model1",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "event_participant_field_values",
+          "mode": "list",
+          "cachedResultName": "event_participant_field_values"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "field_id",
+            "participant_id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "participant_id",
+              "displayName": "participant_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "field_id",
+              "displayName": "field_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "value",
+              "displayName": "value",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "filled_at",
+              "displayName": "filled_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -512,
+        720
+      ],
+      "id": "a0b6ddb4-07f7-47b0-8e9e-34f90940d214",
+      "name": "Insere ou atualiza os dados do participante",
+      "credentials": {
+        "postgres": {
+          "id": "RbteCsnBdomXyIZi",
+          "name": "DAGAZ-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## MUDAR DIRETO AQUI",
+        "height": 80,
+        "width": 272,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -816,
+        96
+      ],
+      "typeVersion": 1,
+      "id": "3a88c47f-6938-4729-816f-b82b698519e8",
+      "name": "Sticky Note1"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Documentos que faltam",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Busca Dicionario de Campos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Busca Dicionario de Campos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara os dados": {
+      "main": [
+        [
+          {
+            "node": "Formata os dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca Dicionario de Campos": {
+      "main": [
+        [
+          {
+            "node": "Prepara os dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Atualiza email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Atualiza telefone",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepara os dados para o supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza email": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza telefone": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Documentos que faltam": {
+      "main": [
+        [
+          {
+            "node": "Feedback para o agente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Formata os dados",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formata os dados": {
+      "main": [
+        [
+          {
+            "node": "Processar Resposta do AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processar Resposta do AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara os dados para o supabase": {
+      "main": [
+        [
+          {
+            "node": "Insere ou atualiza os dados do participante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Formata os dados",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structured Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insere ou atualiza os dados do participante": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "8ee6c09f-fb8f-4b82-a5b7-03a7d8a2a52a",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-01-05T13:57:36.805Z",
+      "createdAt": "2026-01-05T13:57:36.805Z",
+      "role": "workflow:owner",
+      "workflowId": "pEt5GtuGWejPsfLu",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
