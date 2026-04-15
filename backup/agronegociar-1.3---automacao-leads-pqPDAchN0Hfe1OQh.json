@@ -1,0 +1,348 @@
+{
+  "updatedAt": "2026-03-26T19:05:37.205Z",
+  "createdAt": "2026-03-25T19:28:36.877Z",
+  "id": "pqPDAchN0Hfe1OQh",
+  "name": "Agronegociar 1.3 - Automação Leads",
+  "active": false,
+  "isArchived": true,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 17,
+              "triggerAtMinute": 19
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "id": "620e172b-06ce-4f09-844e-0e5bb479bef3",
+      "name": "1. Schedule (14:30)",
+      "position": [
+        1216,
+        2992
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "tableId": "interessados",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "release_id",
+              "condition": "gt",
+              "keyValue": "0"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "id": "7dfe48c1-3f55-4c63-92cb-2bf968417d85",
+      "name": "Limpar Leads",
+      "position": [
+        1440,
+        2992
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "qF5T2ej3TiWXL4jk",
+          "name": "Agronegociar - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webhook.miabuilder.com/webhook/dashboard-leads",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "fromStart",
+              "value": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "id": "f0b374bf-fdfe-419d-a070-23e012f44958",
+      "name": "Disparar Webhook",
+      "position": [
+        1664,
+        2992
+      ],
+      "typeVersion": 4.3
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dashboard-leads",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "id": "44120c88-73bf-462f-b3a1-303b02928df1",
+      "name": "Webhook Loop",
+      "webhookId": "sync-leads-loop",
+      "position": [
+        1216,
+        3200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Acessa a memória global deste workflow específico\nconst staticData = $getWorkflowStaticData('global');\n\n// Tenta ler 'fromStart' do Webhook ou do HTTP Request anterior\n// O ?. garante que se não houver dados, ele não quebra (retorna undefined)\nconst inputData = $input.first()?.json;\nconst isInitial = inputData?.fromStart === true || inputData?.trigger === 'start';\n\n// Se for o comando de início, reseta. Se não, mantém o que está na memória.\nif (isInitial) {\n  staticData.offset = 0;\n}\n\n// Retorna o valor para o nó do Postgres usar\nreturn [{ \n  json: { \n    offset: staticData.offset || 0 \n  } \n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "id": "38b7771a-853a-4475-8095-7900263de3c0",
+      "name": "Ler Offset",
+      "position": [
+        1440,
+        3200
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM \"Agronegociar_Analytics\".vw_ofertas_interessados \nLIMIT 500 \nOFFSET {{ $json.offset }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "id": "318d1e31-a26d-48bb-bf03-1411f8f9ce01",
+      "name": "Postgres Leads",
+      "position": [
+        1664,
+        3200
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "interessados",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "id": "a6e452b9-da07-4f3c-9f49-9d5d5af89f28",
+      "name": "Supabase Leads",
+      "position": [
+        1888,
+        3104
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "qF5T2ej3TiWXL4jk",
+          "name": "Agronegociar - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "id": "fcfca238-025c-4e0f-83ad-396e95f5ff08",
+      "name": "Avançar Estado",
+      "position": [
+        1888,
+        3296
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isDone }}",
+              "value2": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "id": "b94e25c6-7149-4e12-9a3d-e92e03443f6f",
+      "name": "Acabou Tudo?",
+      "position": [
+        2096,
+        3296
+      ],
+      "typeVersion": 2.3
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webhook.miabuilder.com/webhook/dashboard-leads",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "trigger",
+              "value": "next"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "id": "97539f92-f466-4d64-8fca-3e73827556b0",
+      "name": "Próxima Página",
+      "position": [
+        2320,
+        3312
+      ],
+      "typeVersion": 4.3
+    }
+  ],
+  "connections": {
+    "1. Schedule (14:30)": {
+      "main": [
+        [
+          {
+            "node": "Limpar Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpar Leads": {
+      "main": [
+        [
+          {
+            "node": "Disparar Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Loop": {
+      "main": [
+        [
+          {
+            "node": "Ler Offset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Offset": {
+      "main": [
+        [
+          {
+            "node": "Postgres Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Leads": {
+      "main": [
+        [
+          {
+            "node": "Supabase Leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Avançar Estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avançar Estado": {
+      "main": [
+        [
+          {
+            "node": "Acabou Tudo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acabou Tudo?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Próxima Página",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "4amIEbV343sOAUFq",
+    "timeSavedPerExecution": 0,
+    "executionTimeout": 600,
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    },
+    "node:Schedule Trigger2": {
+      "recurrenceRules": []
+    },
+    "node:1. Schedule (11:25)": {
+      "recurrenceRules": []
+    },
+    "node:1. Schedule (11:25)1": {
+      "recurrenceRules": []
+    },
+    "global": {
+      "offset": 500,
+      "isDone": true,
+      "phase": "anuncios"
+    },
+    "node:1. Schedule (14:30)": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "8124404e-129e-4bc6-9f71-1fc1e9d75809",
+  "activeVersionId": null,
+  "triggerCount": 2,
+  "shared": [
+    {
+      "updatedAt": "2026-03-25T19:28:36.877Z",
+      "createdAt": "2026-03-25T19:28:36.877Z",
+      "role": "workflow:owner",
+      "workflowId": "pqPDAchN0Hfe1OQh",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
