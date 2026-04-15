@@ -1,0 +1,1021 @@
+{
+  "updatedAt": "2026-02-27T17:04:50.725Z",
+  "createdAt": "2026-02-27T17:02:24.039Z",
+  "id": "fiWC8XjT7uaQ3bup",
+  "name": "API - 2 - SADM - v1.4 DEV Não use",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 01 - GATEWAY DE ENTRADA & SEGURANÇA\n-> Webhook: Entrada protegida via JWT Auth. Recebe url_image.\n-> Identificação de Extensão: O nó 'Dados da IMG' valida se a URL é válida e identifica o formato do arquivo (PNG, JPG, WEBP).\n-> Verifica input: Filtro de segurança que impede o processamento se campos obrigatórios estiverem ausentes.",
+        "height": 736,
+        "width": 1040,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1248,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "1c973686-6392-402c-94ed-aa1ca56d3f14",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## 03 - COLETA DE DADOS CRM\n-> API do CFM: Consulta o Conselho Federal de Medicina para validar se o CRM extraído é autêntico e se o médico está ativo.\n-> output CRM: Realiza o cruzamento do nome do médico com o registro oficial para confirmar a identidade.",
+        "height": 736
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        352,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "31c7e2ec-d77e-4f5b-b2fa-c6876f0a837e",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "## 04 - COLETA DE DADOS CID\n-> API da OMS: Acessa a base de dados da Organização Mundial da Saúde para obter a descrição oficial do CID extraído.\n-> Referência Técnica: Documentação oficial disponível em https://id.who.int/swagger/index.html.",
+        "height": 736
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        608,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "19f58aa4-20c8-4698-a123-82320167bfcc",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "## 08 - MOTOR DE RISCO E SCHEMA\n-> Compilação (Open Router): Consolida todos os sinais técnicos obtidos nas etapas anteriores.\n-> Florense Agent: Aplica o modelo de scoring para definir o risco final e preenche o schema estruturado do cliente",
+        "height": 736,
+        "width": 592,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1840,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "a4e98dfd-faa4-4dc1-8105-2d4cdf033193",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "## 02 - ANÁLISE FORENSE DA IMAGEM\n-> Análise de Imagem (Open Router): Examina a imagem em busca de sinais de falsificação, como recortes, montagens ou fontes inconsistentes.\n-> Detecção de Fraude: Identifica traços de adulteração digital ou física aplicados ao conteúdo do documento.",
+        "height": 736,
+        "width": 512
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -176,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "9f8909ca-bdc3-4003-bd18-3418f6d369bc",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "content": "## 09 - OUTPUT JSON (AVALIAÇÃO FINAL)\n-> Resultado Consolidado: Nó final que entrega o JSON estruturado com o score de risco, tags e fundamentação (rationale).\n-> Respond to Webhook: Envia a resposta de sucesso para o orquestrador ou reporta erros 400/500.",
+        "height": 736,
+        "width": 448,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2448,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "1d273006-48e7-4c8e-bfba-3b6ba4f50e64",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * MIA-SADM — Extreme Minimal Decoder\n * Version: v1.4.0 (Prompt v4 aligned + Bug fixes)\n * Mode: Run Once for All Items\n *\n * CHANGELOG from v1.3.3:\n * - FIX: stamp_valid and signature_valid now evaluated INDEPENDENTLY\n *        (global blur/lowRes no longer invalidates both; each checks its own faNotes flag)\n * - FIX: manipulation promotion maps physical→white_patch, digital→obfuscation (was always obfuscation)\n * - FIX: periodo_indefinido logic corrected for \"indefinite\" leave type (was inverted)\n * - FIX: attendance type \"u\" now maps to \"undefined\" (was empty string)\n * - ADD: CID regex validation safety net\n * - ADD: leave derivation fields marked as decoder-derived in output\n * - PRESERVED: All v1.3.3 coherence patch logic, rb patch, fail-safe promotion\n */\n\n// ---------------- Helpers ----------------\nfunction splitSafe(value, sep, size) {\n  const arr = (value || \"\").split(sep);\n  while (arr.length < size) arr.push(\"\");\n  return arr;\n}\nconst f = v => isNaN(parseFloat(v)) ? 0.0 : parseFloat(v);\nconst i = v => {\n  const n = parseInt(v, 10);\n  if (isNaN(n)) return 0;\n  return n < 0 ? 0 : n;\n};\nconst b = v => v === \"1\";\n\n// ---------------- Deterministic Normalizers ----------------\nfunction normLangPacked(lang) {\n  const s = (lang || \"\").trim().toLowerCase();\n  if (s === \"pt\" || s === \"en\" || s === \"es\" || s === \"xx\") return s;\n  if (s === \"pt-br\" || s === \"pt_br\" || s === \"por\") return \"pt\";\n  if (s === \"eng\") return \"en\";\n  if (s === \"spa\") return \"es\";\n  return \"xx\";\n}\n\nfunction normCrmUF(uf) {\n  const s = (uf || \"\").trim();\n  if (s.toLowerCase() === \"undefined\") return \"\";\n  return /^[A-Z]{2}$/.test(s) ? s : \"\";\n}\n\nfunction normDocType(t) {\n  const s = (t || \"\").trim();\n  return s.toLowerCase() === \"undefined\" ? \"\" : s;\n}\n\nfunction clampFa(v) {\n  const s = (v || \"\").toLowerCase();\n  return [\"none\", \"weak\", \"moderate\", \"strong\"].includes(s) ? s : \"none\";\n}\n\n// ---------------- CID Validation ----------------\nfunction validateCid(parent, child) {\n  const p = (parent || \"\").trim();\n  const c = (child || \"\").trim();\n  const validParent = /^[A-Z]\\d{2}$/.test(p);\n  const validChild = c === \"\" || /^\\d$/.test(c);\n  return {\n    parent: validParent ? p : \"\",\n    child: validParent && validChild ? c : \"\"\n  };\n}\n\n// ---------------- Date Helpers ----------------\nfunction parseDMY(dmy) {\n  const m = String(dmy || \"\").match(/^(\\d{2})\\/(\\d{2})\\/(\\d{4})$/);\n  if (!m) return null;\n  const d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));\n  return isNaN(d.getTime()) ? null : d;\n}\n\nfunction formatDMY(d) {\n  const dd = String(d.getUTCDate()).padStart(2, \"0\");\n  const mm = String(d.getUTCMonth() + 1).padStart(2, \"0\");\n  const yy = d.getUTCFullYear();\n  return `${dd}/${mm}/${yy}`;\n}\n\nfunction daysBetween(dateStr) {\n  if (!dateStr) return null;\n  const d = parseDMY(dateStr);\n  if (!d) return null;\n  const now = new Date();\n  const nowUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));\n  return Math.floor((nowUtc - d) / (1000 * 60 * 60 * 24));\n}\n\nfunction attendanceDateStatus(attDate) {\n  const diff = daysBetween(attDate);\n  if (diff === null) return \"unknown\";\n  if (diff <= 30) return \"within_deadline\";\n  if (diff <= 60) return \"out_of_deadline\";\n  if (diff <= 90) return \"deadline_exceeded\";\n  return \"old_document\";\n}\n\nfunction leaveDaysRisk(days) {\n  if (days < 0) return \"none\";\n  if (days <= 5) return \"very_low\";\n  if (days <= 10) return \"low\";\n  if (days <= 12) return \"moderate\";\n  if (days <= 15) return \"high\";\n  return \"very_high\";\n}\n\nfunction isTimeHHMM(t) {\n  return /^([01]\\d|2[0-3]):[0-5]\\d$/.test((t || \"\").trim());\n}\n\nfunction timeToMinutes(t) {\n  if (!isTimeHHMM(t)) return null;\n  const [h, m] = t.split(\":\").map(Number);\n  return h * 60 + m;\n}\n\nfunction minutesToHoursCeil(mins) {\n  return mins > 0 ? Math.ceil(mins / 60) : 0;\n}\n\n// ---------------- Input ----------------\nconst input = $input.first().json;\n\n// ---------------- Find EXTREME JSON ----------------\nfunction findJsonString(obj) {\n  if (!obj) return null;\n  if (typeof obj === \"string\") {\n    const s = obj.trim();\n    const start = s.indexOf(\"{\");\n    const end = s.lastIndexOf(\"}\");\n    if (start === -1 || end === -1 || end <= start) return null;\n    return s.slice(start, end + 1);\n  }\n  if (Array.isArray(obj)) {\n    for (const v of obj) {\n      const found = findJsonString(v);\n      if (found) return found;\n    }\n  }\n  if (typeof obj === \"object\") {\n    for (const k of Object.keys(obj)) {\n      const found = findJsonString(obj[k]);\n      if (found) return found;\n    }\n  }\n  return null;\n}\n\nconst raw = findJsonString(input);\nif (!raw) throw new Error(\"No EXTREME JSON found\");\n\nlet src;\ntry {\n  src = JSON.parse(raw);\n} catch (e) {\n  throw new Error(\"Invalid EXTREME JSON: \" + (e && e.message ? e.message : \"parse_error\"));\n}\n\n// ---------------- Maps ----------------\nconst docTypeMap = { mc: \"medical_certificate\", ot: \"other\" };\nconst attTypeMap = { c: \"consultation\", e: \"exam\", p: \"companion\", h: \"hospitalization\", u: \"undefined\" };\nconst manipulationMap = { B: \"blur\", W: \"white_patch\", O: \"obfuscation\", T: \"texture_inconsistency\" };\n\n// ---------------- Decode primitives ----------------\nconst [patientName, patientDocValue, patientDocTypeRaw] = splitSafe(src.p, \"|\", 3);\nconst patientDocType = normDocType(patientDocTypeRaw);\n\nlet [doctorName, crmNumber, crmState, rqeNumber] = splitSafe(src.d, \"|\", 4);\ncrmState = normCrmUF(crmState);\n\nconst [issuerName, issuerCity, issuerState, issuerCnpj] = splitSafe(src.i, \"|\", 4);\n\nconst [\n  attType, attDate, attTime, leaveTypeRaw, leaveDays,\n  leaveHoursStart, leaveHoursEnd, leaveStartDate, leaveEndDate\n] = splitSafe(src.a, \"|\", 9);\n\nconst leaveType = (leaveTypeRaw || \"\").trim().toLowerCase();\n\nconst [cidVerRaw, cidParentRaw, cidChildRaw] = splitSafe(src.cid, \"|\", 3);\nconst cidValidated = validateCid(cidParentRaw, cidChildRaw);\n\nconst [capType, capDevice, capNotes] = splitSafe(src.cap, \"|\", 3);\n\nlet [ocrLangRaw, ocrConf, ocrMatch, ocrMismatch] = splitSafe(src.ocr, \"|\", 4);\nconst ocrLang = normLangPacked(ocrLangRaw);\n\nconst ocrText = src.ocr_text || \"\";\n\nconst deArr = splitSafe(src.de, \"|\", 12).map(b);\n\nlet [faStatus, faDigital, faPhysical, faAI, lowRes, blur, noise, occlusion, faNotes] =\n  splitSafe(src.fa, \"|\", 9);\n\nfaDigital = clampFa(faDigital);\nfaPhysical = clampFa(faPhysical);\n\nconst rbCount = i(src.rb);\n\nconst [qrPresent, qrReadableVisual, qrNotes] = splitSafe(src.qr, \"|\", 3);\n\n// ---------------- Leave / Time Derived ----------------\nconst leaveDaysInt = i(leaveDays);\nconst hoursStartOk = isTimeHHMM(leaveHoursStart) ? leaveHoursStart.trim() : \"\";\nconst hoursEndOk = isTimeHHMM(leaveHoursEnd) ? leaveHoursEnd.trim() : \"\";\n\nconst attendanceDateStatusValue = attendanceDateStatus(attDate);\n\n// FIX: periodo_indefinido — \"indefinite\" means leave IS indefinite → \"S\"\n// \"N\" means leave period is DEFINED (has days or hours)\nconst periodoIndefinidoValor =\n  (leaveType === \"indefinite\")\n    ? \"S\"\n    : (leaveType === \"days\" && leaveDaysInt > 0) ||\n      (leaveType === \"hours\" && (hoursStartOk || hoursEndOk))\n      ? \"N\"\n      : \"S\";\n\n// ---------------- Leave Temporal Intelligence (Decoder-Derived) ----------------\nconst attDateObj = parseDMY(attDate);\n\nlet finalStartDate = leaveStartDate || \"\";\nlet finalEndDate = leaveEndDate || \"\";\nlet finalLeaveDays = leaveDaysInt;\nlet finalLeaveHours = 0;\nlet finalAttendanceTime = attTime || \"\";\n\n// Track what the decoder derived vs what the LLM extracted\nlet startDateDerived = false;\nlet endDateDerived = false;\n\n// RULE 1: HOURS → start_date and end_date = attendance date if missing\nif (leaveType === \"hours\" && attDateObj) {\n  if (!finalStartDate) { finalStartDate = formatDMY(attDateObj); startDateDerived = true; }\n  if (!finalEndDate) { finalEndDate = formatDMY(attDateObj); endDateDerived = true; }\n}\n\n// RULE 2: DAYS → derive dates if missing\nif (leaveType === \"days\" && attDateObj) {\n  if (finalLeaveDays > 0 && !finalStartDate) {\n    finalStartDate = formatDMY(attDateObj);\n    startDateDerived = true;\n  }\n  if (finalLeaveDays > 0 && !finalEndDate && finalStartDate) {\n    const startObj = parseDMY(finalStartDate);\n    if (startObj) {\n      const end = new Date(startObj);\n      end.setUTCDate(end.getUTCDate() + finalLeaveDays);\n      finalEndDate = formatDMY(end);\n      endDateDerived = true;\n    }\n  }\n\n  // If dates present but days missing → calculate days\n  if (finalLeaveDays === 0 && finalStartDate && finalEndDate) {\n    const s = parseDMY(finalStartDate);\n    const e = parseDMY(finalEndDate);\n    if (s && e && e >= s) {\n      finalLeaveDays = Math.ceil((e - s) / (1000 * 60 * 60 * 24));\n    }\n  }\n}\n\n// RULE 3: HOURS → calculate quantity if missing\nif (leaveType === \"hours\" && finalLeaveHours === 0 && hoursStartOk && hoursEndOk) {\n  const startMin = timeToMinutes(hoursStartOk);\n  const endMin = timeToMinutes(hoursEndOk);\n  if (startMin !== null && endMin !== null && endMin > startMin) {\n    finalLeaveHours = minutesToHoursCeil(endMin - startMin);\n  }\n}\n\n// RULE 4: HOURS → fill attendance_time if empty\nif (leaveType === \"hours\" && !finalAttendanceTime && hoursStartOk) {\n  finalAttendanceTime = hoursStartOk;\n}\n\nconst leaveDaysRiskValue = leaveDaysRisk(finalLeaveDays);\n\n// ---------------- Manipulation FAIL-SAFE (COHERENCE PATCH) ----------------\nconst mParts = splitSafe(src.m, \"|\", 4);\nconst mDetectedRaw = mParts[0] === \"1\";\n\nlet mappedTypes = (mParts[1] || \"\")\n  .split(\"+\")\n  .map(t => manipulationMap[t])\n  .filter(Boolean);\n\nlet impactedFields = (mParts[2] || \"\").split(\"+\").filter(Boolean);\n\nlet manipulationDetected = mDetectedRaw && mappedTypes.length > 0;\nlet manipulationConfidence = manipulationDetected ? f(mParts[3]) : 0.0;\n\n// Promote manipulation when forensic indicates strong but m is empty\nconst forensicStrong = (faDigital === \"strong\" || faPhysical === \"strong\");\n\nif (!manipulationDetected && forensicStrong) {\n  manipulationDetected = true;\n  // FIX: map to appropriate type based on which forensic flag is strong\n  if (faPhysical === \"strong\" && faDigital !== \"strong\") {\n    mappedTypes = [\"white_patch\"];\n  } else if (faDigital === \"strong\" && faPhysical !== \"strong\") {\n    mappedTypes = [\"obfuscation\"];\n  } else {\n    // both strong\n    mappedTypes = [\"obfuscation\", \"white_patch\"];\n  }\n  impactedFields = [];\n  manipulationConfidence = 0.80;\n}\n\n// ---------------- Stamp & Signature Validity (FIX: independent evaluation) ----------------\nconst hasStamp = deArr[3];\nconst hasSignature = deArr[4];\nconst faNotesStr = String(faNotes || \"\").toLowerCase();\n\n// Stamp validity: independent check\nconst stampDegraded =\n  manipulationDetected ||\n  faNotesStr.includes(\"stamp_illegible\");\n\nconst stampValid = hasStamp && !stampDegraded;\n\n// Signature validity: independent check\nconst signatureDegraded =\n  manipulationDetected ||\n  faNotesStr.includes(\"signature_illegible\");\n\nconst signatureValid = hasSignature && !signatureDegraded;\n\n// ---------------- Build Canonical Output ----------------\nconst sParts = splitSafe(src.s, \"|\", 3);\n\nconst output = {\n  document_metadata: {\n    document_type: docTypeMap[src.t] || \"other\",\n    is_medical_certificate: src.t === \"mc\",\n    analysis_timestamp: new Date().toISOString()\n  },\n\n  capture: {\n    capture_type: capType || \"\",\n    device_info: capDevice || \"\",\n    capture_quality_notes: capNotes || \"\"\n  },\n\n  ocr: {\n    status: \"\",\n    engine: \"\",\n    language_detected: ocrLang || \"xx\",\n    confidence_avg: f(ocrConf),\n    match_score: f(ocrMatch),\n    mismatch_fields: (ocrMismatch || \"\").split(\"+\").filter(Boolean),\n    full_text: ocrText\n  },\n\n  patient_identification: {\n    patient_name: patientName || \"\",\n    patient_document_type: patientDocType || \"\",\n    patient_document_value: patientDocValue || \"\"\n  },\n\n  medical_professional: {\n    doctor_name: doctorName || \"\",\n    crm_number: crmNumber || \"\",\n    crm_state: crmState || \"\",\n    specialty_registration: rqeNumber || \"\"\n  },\n\n  issuer_information: {\n    issuer_name: issuerName || \"\",\n    city: issuerCity || \"\",\n    state: issuerState || \"\",\n    cnpj: issuerCnpj || \"\"\n  },\n\n  attendance_information: {\n    attendance_type: attTypeMap[attType] || \"\",\n    attendance_date: attDate || \"\",\n    attendance_time: finalAttendanceTime,\n    attendance_date_status: attendanceDateStatusValue,\n    periodo_indefinido: periodoIndefinidoValor,\n    leave: {\n      type: leaveType || \"\",\n      days: finalLeaveDays,\n      hours: finalLeaveHours,\n      hours_start: hoursStartOk,\n      hours_end: hoursEndOk,\n      start_date: finalStartDate,\n      end_date: finalEndDate,\n      start_date_derived: startDateDerived,\n      end_date_derived: endDateDerived,\n      leave_days_risk: leaveDaysRiskValue\n    }\n  },\n\n  medical_classification: {\n    cid_version:\n      cidVerRaw === \"CID10\" ? \"CID-10\" :\n      cidVerRaw === \"CID11\" ? \"CID-11\" : \"\",\n    cid_parent: cidValidated.parent,\n    cid_child: cidValidated.child\n  },\n\n  document_elements: {\n    has_logo: deArr[0],\n    has_letterhead: deArr[1],\n    has_mandatory_fields: deArr[2],\n    has_stamp: hasStamp,\n    has_signature: hasSignature,\n    stamp_valid: stampValid,\n    signature_valid: signatureValid,\n    has_disclaimer: deArr[5],\n    has_issuer_data: deArr[6],\n    has_doctor_data: deArr[7],\n    has_patient_data: deArr[8],\n    has_attendance_data: deArr[9],\n    has_disease_data: deArr[10],\n    has_locality_data: deArr[11]\n  },\n\n  forensic_analysis: {\n    status: faStatus || \"complete\",\n    digital_manipulation_indicators: faDigital,\n    physical_manipulation_indicators: faPhysical,\n    ai_generation_or_reconstruction_indicators: faAI || \"none\",\n    scribbles_count: rbCount,\n    visual_quality_issues: {\n      low_resolution: b(lowRes),\n      blur: b(blur),\n      noise: b(noise),\n      occlusion: b(occlusion)\n    },\n    forensic_notes: faNotes || \"\"\n  },\n\n  qr_validation: {\n    qr_present_ia_detected: b(qrPresent),\n    qr_readable_visual_opinion: b(qrReadableVisual),\n    qr_notes: qrNotes || \"\"\n  },\n\n  manipulation_analysis: {\n    detected: manipulationDetected,\n    manipulation_types: mappedTypes,\n    impacted_fields: impactedFields,\n    confidence: manipulationConfidence\n  },\n\n  image_scores: {\n    consistency: f(sParts[0]),\n    completeness: f(sParts[1]),\n    image_quality: f(sParts[2])\n  }\n};\n\n// ---------------- Recommendation (COHERENCE PATCH) ----------------\nlet [risk, action, reason] = splitSafe(src.r, \"|\", 3);\n\nif (manipulationDetected) {\n  risk = \"high\";\n  action = forensicStrong ? \"reject\" : \"manual_review\";\n  reason = \"manipulation_suspected\";\n}\n\noutput.preliminary_recommendation = {\n  visual_risk: risk || \"\",\n  recommended_action: action || \"\",\n  reason_code: reason || \"\"\n};\n\n// ---------------- Return ----------------\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        32,
+        432
+      ],
+      "id": "9e78f04e-bafd-4285-ab3f-0d4a658f92dd",
+      "name": "Output Analise Imagem",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://portal.cfm.org.br/api_rest_php/api/v2/medicos/buscar_medicos",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Referer",
+              "value": "https://portal.cfm.org.br/busca-medicos"
+            },
+            {
+              "name": "Origin",
+              "value": "https://portal.cfm.org.br"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "=[{\"medico\":{\"nome\":\"\",\"ufMedico\":\"\",\"crmMedico\":\"{{ $json.medical_professional.crm_number }}\",\"municipioMedico\":\"\",\"tipoInscricaoMedico\":\"\",\"situacaoMedico\":\"\",\"detalheSituacaoMedico\":\"\",\"especialidadeMedico\":\"\",\"areaAtuacaoMedico\":\"\"},\"page\":1,\"pageNumber\":1,\"pageSize\":100}]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        416,
+        160
+      ],
+      "id": "d635bd53-ae87-4562-8b9e-92516a45ce6a",
+      "name": "Dados CRM",
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://id.who.int/icd/release/{{ $('Output Analise Imagem').item.json.medical_classification.cid_version.replace(/[^0-9]*/,'') == '' ? 10 : $('Output Analise Imagem').item.json.medical_classification.cid_version.replace(/[^0-9]*/,'') ?? 10  }}/{{ $('Output Analise Imagem').item.json.medical_classification.cid_parent  }}{{ $('Output Analise Imagem').item.json.medical_classification.cid_child === '' ? '' : '.' + $('Output Analise Imagem').item.json.medical_classification.cid_child }} ",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en"
+            },
+            {
+              "name": "API-Version",
+              "value": "v2"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        688,
+        160
+      ],
+      "id": "03f5ad98-f71a-403f-95b1-f45e7b9d982c",
+      "name": "Versao CID",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## 05 - COLETA DE DADOS CNPJ\n-> Banco de Dados CNPJ: Acessa base Postgres para validar os dados da empresa emissora (Hospital/Clínica) através do CNPJ.\n-> Verificação de Status: Confirma a situação cadastral e localização da entidade issuer.",
+        "height": 736
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        864,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "c056ed23-8053-4248-b066-764cb5b4cb4d",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "content": "## 06 - VALIDAÇÃO QR CODE\n-> Leitor de QR Code: Executa script Python via linha de comando para detectar e decodificar URLs de autenticação eletrônica.\n-> Dados QRCode: Valida o status da URL do QR Code (ativo/erro) para reforçar a autenticidade do documento.",
+        "height": 736,
+        "width": 448
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1120,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "97011845-a044-4a43-acaf-ef3b31434204",
+      "name": "Sticky Note8"
+    },
+    {
+      "parameters": {
+        "content": "obter dados de \nespecialidade médica?",
+        "height": 80,
+        "width": 150
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        640,
+        -272
+      ],
+      "typeVersion": 1,
+      "id": "7f84d02b-b6dc-404b-a372-b7e25db306b1",
+      "name": "Sticky Note9"
+    },
+    {
+      "parameters": {
+        "method": "HEAD",
+        "url": "={{ $json.stdout.parseJson().qr_text }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1392,
+        144
+      ],
+      "id": "233f92ad-352c-491c-94cb-ab7d3bbf7195",
+      "name": "Dados QRCode",
+      "alwaysOutputData": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH base AS MATERIALIZED (\n    SELECT\n        cnpj_basico,\n        cnpj_ordem,\n        cnpj_dv,\n        nome_fantasia,\n        cnae_fiscal,\n        motivo_situacao_cadastral,\n        municipio,\n        uf,\n        cep,\n        ddd1,\n        telefone1,\n        ddd2,\n        telefone2,\n        data_inicio_atividades,\n        tipo_logradouro,\n        logradouro,\n        numero,\n        complemento,\n        bairro\n    FROM cnpj.estabelecimento\n    WHERE  cnpj = '{{ $('Output Analise Imagem').item.json.issuer_information.cnpj.replace(/[\\D]*/gmi,'') }}'\n)\nSELECT\n    b.cnpj_basico || b.cnpj_ordem || b.cnpj_dv AS cnpj,\n\n    CASE\n    WHEN m.codigo = '00' THEN 'Ativo'\n    ELSE m.descricao\n\tend Status,\n    \n    te.razao_social,\n    b.nome_fantasia,\n\n    tnat.descricao AS natureza_juridica,\n\n    -- Endereço\n    CONCAT_WS(\n        '',\n        CONCAT_WS(' ', b.tipo_logradouro, b.logradouro),\n        CASE WHEN b.numero IS NOT NULL THEN ', ' || b.numero END,\n        CASE WHEN b.complemento IS NOT NULL AND b.complemento <> '' THEN ' ' || b.complemento END,\n        CASE WHEN b.bairro IS NOT NULL AND b.bairro <> '' THEN ' - ' || b.bairro END\n    ) AS endereco,\n\n    tmun.descricao AS cidade,\n    b.uf,\n    b.cep\n\n\nFROM base b\nJOIN cnpj.empresas te\n  ON te.cnpj_basico = b.cnpj_basico\n\nLEFT JOIN cnpj.natureza_juridica tnat\n  ON tnat.codigo = te.natureza_juridica\n\nLEFT JOIN cnpj.municipio tmun\n  ON tmun.codigo = b.municipio\n\nLEFT JOIN cnpj.cnae tc\n  ON tc.codigo = b.cnae_fiscal\n\nLEFT JOIN cnpj.simples sp\n  ON sp.cnpj_basico = b.cnpj_basico\n  \nleft join cnpj.motivo m \n  on b.motivo_situacao_cadastral = m.codigo \n\n\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        928,
+        160
+      ],
+      "id": "c137172e-a723-40cd-93b0-f13fdb9ec36b",
+      "name": "Dados CNPJ",
+      "alwaysOutputData": false,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * n8n Code Node (JavaScript)\n * CRM Matching with Fuzzy Name Scoring\n */\n\n// ---------------------- Helpers ----------------------\n\nfunction normalizeName(name) {\n  return (name || \"\")\n    .toUpperCase()\n    .replace(/\\b(DR|DRA|DR\\.)\\b/g, \"\")\n    .normalize(\"NFD\").replace(/[\\u0300-\\u036f]/g, \"\")\n    .replace(/[^A-Z\\s]/g, \"\")\n    .replace(/\\s+/g, \" \")\n    .trim();\n}\n\nfunction tokenize(name) {\n  return normalizeName(name).split(\" \").filter(Boolean);\n}\n\n// [MIN-CHANGE] small Levenshtein for surname-only penalty\nfunction levenshtein(a, b) {\n  a = a || \"\"; b = b || \"\";\n  const n = a.length, m = b.length;\n  if (n === 0) return m;\n  if (m === 0) return n;\n\n  const dp = new Array(m + 1);\n  for (let j = 0; j <= m; j++) dp[j] = j;\n\n  for (let i = 1; i <= n; i++) {\n    let prev = dp[0];\n    dp[0] = i;\n    for (let j = 1; j <= m; j++) {\n      const tmp = dp[j];\n      const cost = a[i - 1] === b[j - 1] ? 0 : 1;\n      dp[j] = Math.min(\n        dp[j] + 1,        // deletion\n        dp[j - 1] + 1,    // insertion\n        prev + cost       // substitution\n      );\n      prev = tmp;\n    }\n  }\n  return dp[m];\n}\n\n/**\n * Name similarity score ∈ [0,1]\n * Improvements:\n * - rewards whole-word overlap more strongly\n * - keeps strong surname match weight\n * - penalizes \"almost surname\" typos (e.g., MOLER vs MOLTER)\n */\nfunction nameSimilarity(a, b) {\n  const ta = tokenize(a);\n  const tb = tokenize(b);\n\n  if (!ta.length || !tb.length) return 0;\n\n  const setA = new Set(ta);\n  const setB = new Set(tb);\n\n  const intersectionCount = [...setA].filter(t => setB.has(t)).length;\n\n  // token F1 (whole-word overlap)\n  const prec = intersectionCount / setA.size;\n  const rec  = intersectionCount / setB.size;\n  const f1 = (prec + rec) > 0 ? (2 * prec * rec) / (prec + rec) : 0; // 0..1\n\n  const surnameA = ta[ta.length - 1];\n  const surnameB = tb[tb.length - 1];\n  const surnameExact = surnameA === surnameB;\n\n  // Base score: whole-word overlap dominates\n  // (makes BARBARA FREIRE vs BARBARA FREIRE DOS SANTOS go > 0.5)\n  let score = 0.75 * f1;\n\n  // Surname bonus (strong)\n  if (surnameExact) {\n    score += 0.25; // total can reach 1.0\n  } else {\n    // If surname is \"almost\" the same, we penalize (to avoid MOLER ~ MOLTER being too high)\n    // normalized surname similarity ∈ [0,1]\n    const dist = levenshtein(surnameA, surnameB);\n    const maxLen = Math.max(surnameA.length, surnameB.length, 1);\n    const surnameSim = 1 - (dist / maxLen);\n\n    // If surname similarity is moderate-high but not exact, force it down\n    // This pushes cases like MOLER vs MOLTER closer to ~0.25 rather than ~0.5+\n    if (surnameSim >= 0.7) {\n      score *= 0.55; // strong downscale for near-miss surname\n    } else if (surnameSim >= 0.5) {\n      score *= 0.75; // moderate downscale\n    }\n  }\n\n  return Math.max(0, Math.min(score, 1));\n}\n\n// ---------------------- Input ----------------------\n\nconst input = $input.first().json;\n\nconst registros = input.dados || [];\nconst target = {\n  doctor_name: $('Output Analise Imagem').first().json.medical_professional.doctor_name,\n  crm_state: ( $('Output Analise Imagem').first().json.medical_professional.crm_state || \"\").toUpperCase()\n};\n\n// ---------------------- Matching Logic ----------------------\n\nconst THRESHOLD = 0.25;\nlet bestMatch = null;\nlet bestScore = 0;\n\nfor (const r of registros) {\n  // Strong UF filter (if provided)\n  if (target.crm_state && r.SG_UF !== target.crm_state) {\n    continue;\n  }\n\n  const score = nameSimilarity(r.NM_MEDICO, target.doctor_name);\n\n  if (score >= THRESHOLD && score > bestScore) {\n    bestScore = score;\n    bestMatch = r;\n  }\n}\n\n// ---------------------- Output ----------------------\n\nif (!bestMatch) {\n  return [{\n    json: {\n      cfm_data: {},\n      match_status: \"not_found\"\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    cfm_data: {\n      doctor_name: bestMatch.NM_MEDICO,\n      crm_state: bestMatch.SG_UF,\n      situation: bestMatch.COD_SITUACAO === \"A\" ? \"Active\" : \"Inactive\",\n      specialty_registration: bestMatch.ESPECIALIDADE,\n      match_status: \"matched\",\n      match_score: Number(bestScore.toFixed(3))\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        432
+      ],
+      "id": "f1184c45-4207-4ec4-ac3d-e4e140a9343d",
+      "name": "output CRM"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code / Function Node\n// Input: WHO ICD API JSON (single item)\n\nconst input = $input.first().json;\n\n// Safely access title.@value\nconst cidDescription =\n  input &&\n  input.title &&\n  typeof input.title === 'object' &&\n  typeof input.title['@value'] === 'string'\n    ? input.title['@value'].trim()\n    : \"\";\n\n// Build normalized output\nreturn [\n  {\n    json: {\n      cid_found: cidDescription !== \"\",\n      cid_description: cidDescription\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        432
+      ],
+      "id": "c07ab382-342e-45d2-a92b-1204bb8f44f1",
+      "name": "Output CID"
+    },
+    {
+      "parameters": {
+        "jsCode": " if (!$(\"Dados CNPJ\").first().json.success) {\n   return $(\"Dados CNPJ\").first()\n  } else {return JSON.parse('{}')}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        432
+      ],
+      "id": "8710de19-c5b4-42bb-bdf7-c355fc59d6fa",
+      "name": "Output CNPJ"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * MIA-SADM — QR + HTTP Normalizer (STRICT)\n * INPUT 1 -> httpInput.statusCode\n * INPUT 2 -> qrInput (string JSON or object)\n */\n\n// ================= INPUTS =================\nconst httpInput = $input.first().json; // HTTP Request\nconst qrInput   = $('Leitor de QR Code').first().json.stdout; // QR Reader\n// ==========================================\n\n\n// ---------------- Helpers ----------------\nfunction parseJSONSafe(value) {\n  if (typeof value === \"object\") return value;\n  if (typeof value === \"string\") {\n    try { return JSON.parse(value); } catch { return null; }\n  }\n  return null;\n}\n\n// ---------------- Output ----------------\nconst result = {\n  qr_exists: false,\n  qr_decodable: false,\n  qr_target_url: \"\",\n  qr_domain: \"\",\n  qr_bbox: {\n    x: 0,\n    y: 0,\n    width: 0,\n    height: 0\n  },\n  qr_url_status: \"error\"\n};\n\n// ---------------- HTTP (STRICT) ----------------\nif (httpInput && httpInput.statusCode === 200) {\n  result.qr_url_status = \"active\";\n}\n\n// ---------------- QR (STRICT) ----------------\nconst qr = parseJSONSafe(qrInput);\n\nif (qr) {\n  result.qr_exists = qr.qr_exists === true;\n  result.qr_decodable = qr.qr_decodable === true;\n  result.qr_target_url = qr.qr_text || \"\";\n  result.qr_domain = qr.qr_domain || \"\";\n\n  if (qr.qr_bbox) {\n    result.qr_bbox = {\n      x: qr.qr_bbox.x ?? 0,\n      y: qr.qr_bbox.y ?? 0,\n      width: qr.qr_bbox.width ?? 0,\n      height: qr.qr_bbox.height ?? 0\n    };\n  }\n}\n\n// ---------------- Final rule ----------------\nif (!(result.qr_exists && result.qr_decodable && httpInput?.statusCode === 200)) {\n  result.qr_url_status = \"error\";\n}\n\n// ---------------- Return ----------------\nreturn [{ json: result }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        432
+      ],
+      "id": "0b872f34-17b9-447c-91c7-d216e0c8f1e3",
+      "name": "Output QRCode"
+    },
+    {
+      "parameters": {
+        "command": "=# ============================================\n# INPUTS\n# ============================================\n\nIMG_URL=\"{{ $('Verifica input da API').first().json.url_final }}\"\nFILE_PREFIX=\"{{ $('Verifica input da API').first().json.FILE_PREFIX }}\"\nQR_DETECTED=\"{{ $('Output Analise Imagem').item.json.qr_validation.qr_present_ia_detected }}\"\n\n# ============================================\n# QR presence gate (minimal)\n# true or null → continue\n# false → exit silently\n# ============================================\n\nif [ \"$QR_DETECTED\" = \"false\" ]; then\n  exit 0\nfi\n\n# ============================================\n# Dynamic temp paths\n# ============================================\n\nOUT=\"/tmp/${FILE_PREFIX}_qr_input.webp\"\nPY=\"/tmp/${FILE_PREFIX}_qr_reader_fast_v2.py\"\n\n# ============================================\n# Download image\n# ============================================\n\nwget -q -O \"$OUT\" \"$IMG_URL\" || exit 1\n\n# ============================================\n# Python script (embedded)\n# ============================================\n\ncat > \"$PY\" << 'EOF'\n#!/usr/bin/env python3\nimport sys, json\nfrom urllib.parse import urlparse\nfrom PIL import Image, ImageOps\nfrom pyzbar.pyzbar import decode\n\ndef decode_safe(img):\n    try:\n        return decode(img)\n    except Exception:\n        return []\n\ndef txt(qr):\n    try:\n        return qr.data.decode(\"utf-8\", errors=\"ignore\").strip()\n    except Exception:\n        return \"\"\n\ndef domain(v):\n    if not v: return \"\"\n    p = urlparse(v)\n    return p.netloc if p.scheme and p.netloc else \"\"\n\ndef bbox(rect, ox=0, oy=0, s=1):\n    if not rect: return None\n    return {\n        \"x\": int(rect.left / s + ox),\n        \"y\": int(rect.top / s + oy),\n        \"width\": int(rect.width / s),\n        \"height\": int(rect.height / s),\n    }\n\ndef emit(qr, rect, meta):\n    t = txt(qr)\n    print(json.dumps({\n        \"qr_exists\": True,\n        \"qr_decodable\": bool(t),\n        \"qr_text\": t,\n        \"qr_domain\": domain(t),\n        \"qr_bbox\": bbox(rect, meta.get(\"ox\",0), meta.get(\"oy\",0), meta.get(\"scale\",1)),\n        \"strategy\": meta\n    }))\n    sys.exit(0)\n\ndef try_set(base, ox=0, oy=0, region=\"full\", img=None, scales=(3,)):\n    for s in scales:\n        test = img.resize((img.size[0]*s, img.size[1]*s), Image.NEAREST)\n        qrs = decode_safe(test)\n        if qrs:\n            qr = next((q for q in qrs if txt(q)), qrs[0])\n            emit(qr, getattr(qr, \"rect\", None), {\n                \"region\": region,\n                \"scale\": s,\n                \"ox\": ox,\n                \"oy\": oy\n            })\n\ndef main():\n    base = Image.open(sys.argv[1]).convert(\"RGB\")\n    W, H = base.size\n\n    # ---------- NÍVEL A: FAST ----------\n    try_set(base, img=base, scales=(3,))\n\n    # ---------- NÍVEL B: FULL GRAYSCALE ----------\n    gray = ImageOps.autocontrast(ImageOps.grayscale(base))\n    try_set(base, img=gray, scales=(3,5))\n\n    # ---------- NÍVEL C: FOCUSED CROPS ----------\n    crops = [\n        (\"top_right\", int(W*0.65), 0, (int(W*0.65), 0, W, int(H*0.35))),\n        (\"bottom_center\", int(W*0.275), int(H*0.6), (int(W*0.275), int(H*0.6), int(W*0.725), H)),\n    ]\n\n    for name, ox, oy, box in crops:\n        crop = base.crop(box)\n        gray = ImageOps.autocontrast(ImageOps.grayscale(crop))\n        try_set(base, ox, oy, name, gray, scales=(5,))\n\n    print(json.dumps({\"qr_exists\": False, \"qr_text\": \"\", \"qr_decodable\": False}))\n\nif __name__ == \"__main__\":\n    main()\nEOF\n\n# ============================================\n# Execute QR reader\n# ============================================\n\npython3 \"$PY\" \"$OUT\" 2>/dev/null\n\n# ============================================\n# Cleanup temp files\n# ============================================\n\nrm -f \"$OUT\"\nrm -f \"$PY\"\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1184,
+        160
+      ],
+      "id": "12adb8ef-5f53-4abf-af54-e88542a9d8a4",
+      "name": "Leitor de QR Code",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "var data = $('Output Analise Imagem').first().json;\n\ndata.medical_professional.cfm_data = $('output CRM').first().json;\n\ndata.issuer_information.cnpj_data = $('Output CNPJ').first().json;\n\ndata.medical_classification.cid_oms_data = \n$('Output CID').first().json;\n\ndata.qr_validation.qr_code_data = $('Output QRCode').first().json;\n\n// Só cria/atribui employe_data se \"Output Analise Paciente\" tiver conteúdo (não vazio)\nconst outPaciente = $(\"Output Analise Paciente\").first()?.json;\n\n// considera vazio se: null/undefined ou objeto sem chaves\nconst outPacienteVazio =\n  !outPaciente ||\n  (typeof outPaciente === \"object\" && !Array.isArray(outPaciente) && Object.keys(outPaciente).length === 0);\n\nif (!outPacienteVazio) {\n  // garante o caminho\n  data.patient_identification = data.patient_identification || {};\n  data.patient_identification.employe_data = outPaciente;\n} else {\n  // se por algum motivo já existir, remove\n  if (data?.patient_identification && \"employe_data\" in data.patient_identification) {\n    delete data.patient_identification.employe_data;\n  }\n}\n\nreturn data;\n\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        160
+      ],
+      "id": "eba30375-09c5-4d1c-bb86-d12830adbcda",
+      "name": "Compila resultados",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Tratamento de erro",
+        "height": 192,
+        "width": 4144,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1248,
+        592
+      ],
+      "id": "2b9d5a4c-df25-400a-bae1-8ca55a93eee8",
+      "name": "Sticky Note19"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// Recupera dados\n// ============================================\n\n// Resposta do HTTP Request (GET + Range bytes=0-0)\nconst response = $input.first().json;\n\n// URL original enviada no payload\nconst urlImage = $('Edit Fields').first().json.url_image;\n\n// ============================================\n// Valida URL recebida\n// ============================================\n\nif (!urlImage) {\n  return [\n    {\n      json: {\n        isValid: false,\n        status: 400,\n        error: \"URL da imagem não fornecida\",\n      },\n    },\n  ];\n}\n\n// ============================================\n// Valida Status HTTP\n// ============================================\n\n// Sucesso pode ser 200 (OK) ou 206 (Partial Content)\nconst validStatusCodes = [200, 206];\n\nif (!validStatusCodes.includes(response.statusCode)) {\n  return [\n    {\n      json: {\n        isValid: false,\n        status: 400,\n        url: urlImage,\n        statusCode: response.statusCode,\n        statusMessage: response.statusMessage,\n        error: \"URL não acessível (status inválido)\",\n      },\n    },\n  ];\n}\n\n// ============================================\n// Valida Content-Type\n// ============================================\n\nconst contentType =\n  response.headers?.[\"content-type\"] ||\n  response.headers?.[\"Content-Type\"] ||\n  null;\n\n// Extensões permitidas\nconst allowedExtensions = [\"webp\", \"jpg\", \"jpeg\", \"png\", \"gif\", \"bmp\"];\n\n// Extrai extensão da URL sem querystring\nconst urlExtension = (() => {\n  try {\n    const cleanUrl = urlImage.split(\"?\")[0];\n    return cleanUrl.split(\".\").pop().toLowerCase();\n  } catch {\n    return \"\";\n  }\n})();\n\n// Regras:\n// - Content-Type deve começar com image/\n// OU extensão deve ser conhecida\nconst isImageByContentType =\n  contentType && contentType.startsWith(\"image/\");\n\nconst isImageByExtension =\n  allowedExtensions.includes(urlExtension);\n\n// ⚠️ Aqui seu exemplo falharia porque veio application/pdf\nif (!isImageByContentType && !isImageByExtension) {\n  return [\n    {\n      json: {\n        isValid: false,\n        status: 400,\n        url: urlImage,\n        statusCode: response.statusCode,\n        contentType,\n        extension: urlExtension || null,\n        error:\n          \"Arquivo acessível, mas não é uma imagem válida (Content-Type incorreto)\",\n      },\n    },\n  ];\n}\n\n// ============================================\n// Gera FILE_PREFIX único\n// ============================================\n\nconst now = new Date();\nconst pad = (n, size) => String(n).padStart(size, \"0\");\n\nconst timestamp =\n  now.getFullYear() +\n  pad(now.getMonth() + 1, 2) +\n  pad(now.getDate(), 2) +\n  pad(now.getHours(), 2) +\n  pad(now.getMinutes(), 2) +\n  pad(now.getSeconds(), 2) +\n  pad(now.getMilliseconds(), 3);\n\nconst FILE_PREFIX = timestamp;\n\n// ============================================\n// Resultado FINAL (válido)\n// ============================================\n\nreturn [\n  {\n    json: {\n      isValid: true,\n      status: 200,\n      url_final: urlImage,\n      statusCode: response.statusCode, // 200 ou 206\n      contentType,\n      extension: urlExtension,\n      FILE_PREFIX,\n      message: \"URL válida e acessível como imagem\",\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        176
+      ],
+      "id": "c52f9a08-e932-4d95-bdcb-2a23a4b20438",
+      "name": "identifica a extensao e validade da url"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "55283f25-1c24-482c-8666-61bd7eb74248",
+              "name": "url_image",
+              "value": "={{ $json.body.url_image }}",
+              "type": "string"
+            },
+            {
+              "id": "b69d0d16-5638-43a7-a55a-1da047e667b7",
+              "name": "employee_name",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "c9f4e4ff-654a-40ec-a96c-01549bd0128c",
+              "name": "employee_identity_document",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "d8cf1cd3-bf67-4859-9ff3-fa5f45b46377",
+              "name": "employee_national_document",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "e6bc7a85-92c1-4b1c-9162-d0547ce634e4",
+              "name": " use_validator",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -992,
+        176
+      ],
+      "id": "38af5a61-c472-4ef4-8f32-d592dd1ddb13",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url_image }}",
+        "sendHeaders": "***REMOVIDO***",
+        "specifyHeaders": "***REMOVIDO***",
+        "jsonHeaders": "***REMOVIDO***",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -800,
+        176
+      ],
+      "id": "4cb428d0-1760-4948-b20c-db0a820854ee",
+      "name": "Dados da IMG",
+      "alwaysOutputData": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "07c0c77a-0857-4982-83e9-c36ef7551521",
+              "leftValue": "={{ $json.isValid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -400,
+        176
+      ],
+      "id": "d328930b-f16f-4b89-a959-e710676fcda2",
+      "name": "Verifica input da API"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2640,
+        208
+      ],
+      "id": "efb7089b-53fb-4407-b4ae-0e5dca44195c",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"error\": \"Bad Request\",\n  \"message\": \"{{ $json.error }}\",\n  \"status\": 400\n} ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -560,
+        624
+      ],
+      "id": "d9886a42-4c37-4e14-ae66-3823f0026fd6",
+      "name": "Respond to Webhook (400)"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"error\": \"erro\",\n  \"message\": \"Erro interno no processamento do documento.\",\n  \"status\": 500\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -80,
+        624
+      ],
+      "id": "41c80098-d663-4a39-8a64-bc555f9849ae",
+      "name": "Respond to Webhook (500)",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "errorMessage": "Erro na API SADM"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        -384,
+        624
+      ],
+      "id": "33914ed7-df5e-4a97-9a3b-e57e6f7742bc",
+      "name": "Stop and Error"
+    },
+    {
+      "parameters": {
+        "errorMessage": "Erro na API SADM"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        368,
+        624
+      ],
+      "id": "8cd8e87d-5255-4c56-9169-9a7b829a1566",
+      "name": "Stop and Error1"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * MIA-SADM — Deterministic Decision & Scoring Engine v2.1.2\n * N8N-ready (drop-in replacement) — EVOLUTION of PROD v2.0.4\n *\n * Compatibility guarantee:\n * - When ENABLE_RULE_ENGINE_DEBUG = false, the output JSON structure remains identical to v2.0.4.\n * - Debug payload (_rule_engine_debug) may change freely.\n *\n * v2.1.1 changes (MINIMAL):\n * - Optional patient_identification.employe_data support:\n *    - If employe_data absent: NO CHANGE in behavior.\n *    - If employe_data present:\n *        - Patient vs Employee name match is CRITICAL acceptance (score >= 0.5).\n *        - all_documents_match === false => VERY HIGH penalty.\n *\n * v2.1.2 changes (MINIMAL):\n * - Optional forensic_analysis.scribbles_count:\n *    - Configurable min/max (defaults 3 and 6).\n *    - scribbles_count < min: no penalty (keeps eligible for auto).\n *    - min <= scribbles_count <= max: moderate penalty (scaled).\n *    - scribbles_count > max: critical (hard gate + high penalty).\n */\n\n// =========================================================\n// CONFIG\n// =========================================================\nconst ENABLE_RULE_ENGINE_DEBUG = false; // base debug (run log)\nconst ENABLE_RULE_ENGINE_DEBUG_COVERAGE_MAP = false; // full catalog/config map\nconst ENABLE_RULE_ENGINE_DEBUG_RATIONALE_MAP = false; // full rationale dictionary + unmapped report\n\nconst ENGINE_VERSION = \"v2.1.2\";\nconst MAX_RATIONALE_ITENS = 5;\n\n// =========================================================\n// [MIN-CHANGE] NAME MATCHING SENSITIVITY (CFM match_score threshold)\n// =========================================================\nconst NAME_MATCH_MIN_SCORE = 0.4; // <-- ajuste aqui\nconst NAME_MATCH_SCORE_NULL_IS_OK = true; // if match_score missing but match_status=matched, still accept\n\n// =========================================================\n// BUSINESS CONFIG (employee cross-check)\n// =========================================================\nconst EMPLOYEE_NAME_MATCH_MIN_SCORE = 0.5; // critical threshold when employe_data exists\n\n// =========================================================\n// BUSINESS CONFIG (scribbles / rasuras)\n// =========================================================\nconst SCRIBBLES_MIN = 2; // default\nconst SCRIBBLES_MAX = 6; // default\n\n// =========================================================\n// BUSINESS CONFIG (time rules)\n// =========================================================\nconst MAX_DOCUMENT_AGE_DAYS_FOR_AUTO = 35; // <- ajuste aqui quando necessário\n\n// =========================================================\n// BUSINESS CONFIG (leave temporal consistency)\n// =========================================================\nconst MAX_LEAVE_START_OFFSET_DAYS = 1;        // leave_start can be attendance_date or attendance_date + 1\nconst PTS_LEAVE_TEMPORAL_INCONSISTENCY = 60;  // high risk points (preserved)\n\n// =========================================================\n// BUSINESS CONFIG (score shaping)\n// =========================================================\nconst BASE_RISK_SCORE = 8;      // makes 0 / 100 rare\nconst BONUS_CAP = -40;          // preserved\n\n// =========================================================\n// INPUT\n// =========================================================\nconst inputRaw = $input.first().json;\nconst input = Array.isArray(inputRaw) ? (inputRaw[0] ?? {}) : (inputRaw ?? {});\n\n// =========================================================\n// HELPERS\n// =========================================================\nconst isEmpty = (v) => v === \"\" || v === undefined || v === null;\nconst norm = (v) => (isEmpty(v) ? null : v);\n\nfunction get(obj, path, fallback = null) {\n  try {\n    const parts = path.split(\".\");\n    let cur = obj;\n    for (const p of parts) {\n      if (cur == null) return fallback;\n      cur = cur[p];\n    }\n    return cur === undefined ? fallback : cur;\n  } catch {\n    return fallback;\n  }\n}\n\nfunction toISODateFromBR(dateStr) {\n  if (!dateStr || typeof dateStr !== \"string\") return null;\n  const m = dateStr.trim().match(/^(\\d{2})\\/(\\d{2})\\/(\\d{2}|\\d{4})$/);\n  if (!m) return null;\n\n  const dd = parseInt(m[1], 10);\n  const mm = parseInt(m[2], 10);\n  let yy = m[3];\n  if (yy.length === 2) yy = \"20\" + yy;\n  const yyyy = parseInt(yy, 10);\n\n  if (!(yyyy >= 2000 && yyyy <= 2099)) return null;\n  if (!(mm >= 1 && mm <= 12)) return null;\n  if (!(dd >= 1 && dd <= 31)) return null;\n\n  const d = new Date(Date.UTC(yyyy, mm - 1, dd));\n  if (isNaN(d.getTime())) return null;\n  if (d.getUTCFullYear() !== yyyy || d.getUTCMonth() !== (mm - 1) || d.getUTCDate() !== dd) return null;\n\n  return `${String(yyyy).padStart(4, \"0\")}-${String(mm).padStart(2, \"0\")}-${String(dd).padStart(2, \"0\")}`;\n}\n\nfunction isoDateOnlyUTC(d) {\n  if (!d || isNaN(d.getTime())) return null;\n  const y = d.getUTCFullYear();\n  const m = String(d.getUTCMonth() + 1).padStart(2, \"0\");\n  const da = String(d.getUTCDate()).padStart(2, \"0\");\n  return `${y}-${m}-${da}`;\n}\n\nfunction todayISODateUTC() {\n  const now = new Date();\n  return isoDateOnlyUTC(now);\n}\n\nfunction evalISODateUTC() {\n  const ts = norm(get(input, \"document_metadata.analysis_timestamp\", null))\n    ?? norm(get(input, \"document_metadata.analysisTimestamp\", null));\n\n  if (ts && typeof ts === \"string\") {\n    const d = new Date(ts);\n    const iso = isoDateOnlyUTC(d);\n    if (iso) return iso;\n  }\n  return todayISODateUTC();\n}\n\nfunction parseISODateToUTC(isoDate) {\n  if (!isoDate || typeof isoDate !== \"string\") return null;\n  const m = isoDate.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);\n  if (!m) return null;\n  const y = parseInt(m[1], 10);\n  const mo = parseInt(m[2], 10);\n  const da = parseInt(m[3], 10);\n  const d = new Date(Date.UTC(y, mo - 1, da));\n  if (isNaN(d.getTime())) return null;\n  if (d.getUTCFullYear() !== y || d.getUTCMonth() !== (mo - 1) || d.getUTCDate() !== da) return null;\n  return d;\n}\n\nfunction daysBetweenUTC(a, b) {\n  const ms = b.getTime() - a.getTime();\n  return Math.floor(ms / 86400000);\n}\n\nfunction clampScore(n) {\n  const x = Number.isFinite(n) ? n : 0;\n  return Math.max(0, Math.min(100, x));\n}\n\nfunction anyTrue(obj) {\n  if (!obj || typeof obj !== \"object\") return false;\n  return Object.values(obj).some((v) => v === true);\n}\n\nfunction hasQuestionMarks(name) {\n  if (!name || typeof name !== \"string\") return false;\n  return name.includes(\"?\") || name.includes(\"�\");\n}\n\nfunction inSet(v, arr) {\n  return arr.includes(v);\n}\n\nfunction piecewiseDocAgePenalty(ageDays) {\n  if (!Number.isFinite(ageDays)) return 0;\n  if (ageDays <= MAX_DOCUMENT_AGE_DAYS_FOR_AUTO) return 0;\n  if (ageDays <= 60) return 6;\n  if (ageDays <= 120) return 12;\n  if (ageDays <= 365) return 22;\n  return 30;\n}\n\nfunction piecewiseCompletenessPenalty(v) {\n  if (!Number.isFinite(v)) return 0;\n  if (v < 0.60) return 28;\n  if (v < 0.75) return 18;\n  if (v < 0.85) return 12;\n  if (v < 0.90) return 6;\n  return 0;\n}\n\nfunction piecewiseQualityPenalty(v) {\n  if (!Number.isFinite(v)) return 0;\n  if (v < 0.60) return 15;\n  if (v < 0.85) return 6;\n  return 0;\n}\n\nfunction piecewiseConsistencyPenalty(v) {\n  if (!Number.isFinite(v)) return 0;\n  if (v < 0.75) return 10;\n  if (v < 0.90) return 4;\n  return 0;\n}\n\nfunction addPenalty(arr, code, points, evidence, meta = {}) {\n  if (!Number.isFinite(points) || points <= 0) return;\n  arr.push({ code, points, evidence: evidence || \"\", ...meta });\n}\n\nfunction addBonus(arr, code, points, evidence, meta = {}) {\n  if (!Number.isFinite(points) || points >= 0) return;\n  arr.push({ code, points, evidence: evidence || \"\", ...meta });\n}\n\n// =========================================================\n// NORMALIZE / EXTRACT (authoritative structured fields)\n// =========================================================\nconst documentType = norm(get(input, \"document_metadata.document_type\", null));\nconst isMedicalCertificate = get(input, \"document_metadata.is_medical_certificate\", false) === true;\n\nconst captureType = norm(get(input, \"capture.capture_type\", null));\n\nconst ocrConfidence = (() => {\n  const v = get(input, \"ocr.confidence_avg\", null);\n  if (v === null || v === undefined || v === \"\") return null;\n  const num = Number(v);\n  return Number.isFinite(num) ? num : null;\n})();\n\nconst patientName = norm(get(input, \"patient_identification.patient_name\", null));\nconst patientDocValue = norm(get(input, \"patient_identification.patient_document_value\", null));\n\n// --- employe_data (optional) ---\nconst employeDataRaw = get(input, \"patient_identification.employe_data\", null);\nconst employeDataPresent = !!(employeDataRaw && typeof employeDataRaw === \"object\");\n\nconst emp_patient_data_present = employeDataPresent ? (get(employeDataRaw, \"patient_data_present\", null) === true) : null;\nconst emp_employee_data_present = employeDataPresent ? (get(employeDataRaw, \"employee_data_present\", null) === true) : null;\n\nconst emp_name_score = (() => {\n  if (!employeDataPresent) return null;\n  const v = get(employeDataRaw, \"patient_employee_name_score\", null);\n  const num = Number(v);\n  return Number.isFinite(num) ? num : null;\n})();\n\nconst emp_name_match = employeDataPresent ? (get(employeDataRaw, \"patient_employee_name_match\", null) === true) : null;\n\nconst emp_all_documents_match = employeDataPresent ? get(employeDataRaw, \"all_documents_match\", null) : null; // true|false|null\n\nconst emp_patient_document_present = employeDataPresent ? (get(employeDataRaw, \"patient_document_present\", null) === true) : null;\nconst emp_patient_employee_national_document_match = employeDataPresent ? get(employeDataRaw, \"patient_employee_national_document_match\", null) : null;\nconst emp_patient_employee_identity_document_match = employeDataPresent ? get(employeDataRaw, \"patient_employee_identity_document_match\", null) : null;\n\n// Derived acceptance (critical when employe_data exists)\nconst employeeCrossCheckRequired = employeDataPresent === true; // exists => required\nconst employeeNameOk = (() => {\n  if (!employeeCrossCheckRequired) return true; // no change if absent\n  if (!Number.isFinite(emp_name_score)) return false;\n  return emp_name_score >= EMPLOYEE_NAME_MATCH_MIN_SCORE;\n})();\nconst employeeDocsOk = (() => {\n  if (!employeeCrossCheckRequired) return true;\n  if (emp_all_documents_match === null) return true; // null => no-op (insufficient data)\n  return emp_all_documents_match === true;\n})();\n\nconst issuerName = norm(get(input, \"issuer_information.issuer_name\", null));\n\n// Prefer CFM doctor_name and crm_state when present\nconst cfmDoctorName = norm(get(input, \"medical_professional.cfm_data.cfm_data.doctor_name\", null));\nconst cfmCrmState   = norm(get(input, \"medical_professional.cfm_data.cfm_data.crm_state\", null));\n\nconst doctorNameRaw = norm(get(input, \"medical_professional.doctor_name\", null));\nconst doctorName = cfmDoctorName || doctorNameRaw;\n\nconst crmNumber = norm(get(input, \"medical_professional.crm_number\", null));\nconst crmStateFromOCR = norm(get(input, \"medical_professional.crm_state\", null));\nconst crmUF = cfmCrmState || crmStateFromOCR;\n\nconst attendanceType = norm(get(input, \"attendance_information.attendance_type\", null));\nconst attendanceDateBR = norm(get(input, \"attendance_information.attendance_date\", null));\nconst attendanceDateISO = toISODateFromBR(attendanceDateBR);\n\nconst periodoIndefinido = norm(get(input, \"attendance_information.periodo_indefinido\", null)); // e.g. \"S\"\n\nconst leave = get(input, \"attendance_information.leave\", {}) || {};\nconst leaveType = norm(get(leave, \"type\", null));\nconst leaveDays = (() => {\n  const v = get(leave, \"days\", null);\n  if (v === null || v === undefined || v === \"\") return null;\n  const num = Number(v);\n  return Number.isFinite(num) ? num : null;\n})();\nconst leaveHours = (() => {\n  const v = get(leave, \"hours\", null);\n  if (v === null || v === undefined || v === \"\") return null;\n  const num = Number(v);\n  return Number.isFinite(num) ? num : null;\n})();\nconst leaveDaysRisk = norm(get(leave, \"leave_days_risk\", null));\nconst leaveStartISO = toISODateFromBR(norm(get(leave, \"start_date\", null)));\nconst leaveEndISO = toISODateFromBR(norm(get(leave, \"end_date\", null)));\nconst leaveStartHour = norm(get(leave, \"hours_start\", null));\nconst leaveEndHour   = norm(get(leave, \"hours_end\", null));\n\nconst cidParent = norm(get(input, \"medical_classification.cid_parent\", null));\nconst cidType = norm(get(input, \"medical_classification.cid_version\", null));\nconst cidFound = get(input, \"medical_classification.cid_oms_data.cid_found\", null);\nconst cidValid = (() => {\n  if (cidParent === null) return null;\n  if (cidFound === true) return true;\n  if (cidFound === false) return false;\n  return null;\n})();\n\nconst elements = get(input, \"document_elements\", {}) || {};\nconst hasMandatoryFields = get(elements, \"has_mandatory_fields\", false) === true;\nconst hasStamp = get(elements, \"has_stamp\", false) === true;\nconst hasSignature = get(elements, \"has_signature\", false) === true;\nconst stampValid = get(elements, \"stamp_valid\", false) === true;\nconst signatureValid = get(elements, \"signature_valid\", false) === true;\n\nconst hasDoctorData = get(elements, \"has_doctor_data\", false) === true;\nconst hasPatientData = get(elements, \"has_patient_data\", false) === true;\nconst hasDiseaseData = get(elements, \"has_disease_data\", false) === true;\n\nconst hasIssuerData = get(elements, \"has_issuer_data\", null);\nconst hasAttendanceData = get(elements, \"has_attendance_data\", null);\nconst hasLocalityData = get(elements, \"has_locality_data\", null);\nconst hasDisclaimer = get(elements, \"has_disclaimer\", null);\n\nconst qrExists = get(input, \"qr_validation.qr_code_data.qr_exists\", false) === true;\nconst qrDecodable = get(input, \"qr_validation.qr_code_data.qr_decodable\", false) === true;\nconst qrUrlStatus = norm(get(input, \"qr_validation.qr_code_data.qr_url_status\", null));\n\nconst forensic = get(input, \"forensic_analysis\", {}) || {};\nconst digitalManip = norm(get(forensic, \"digital_manipulation_indicators\", null));\nconst physicalManip = norm(get(forensic, \"physical_manipulation_indicators\", null));\nconst aiIndicators = norm(get(forensic, \"ai_generation_or_reconstruction_indicators\", null));\n\n// NEW: scribbles_count (optional; NO CHANGE if absent)\nconst scribblesCount = (() => {\n  const v = get(forensic, \"scribbles_count\", null);\n  if (v === null || v === undefined || v === \"\") return null;\n  const num = Number(v);\n  return Number.isFinite(num) ? num : null;\n})();\n\nconst forensicNotes = norm(get(forensic, \"forensic_notes\", null));\nconst visualIssues = get(forensic, \"visual_quality_issues\", {}) || {};\nconst anyVisualIssues = anyTrue(visualIssues);\n\nconst manipulation = get(input, \"manipulation_analysis\", {}) || {};\nconst manipulationDetected = get(manipulation, \"detected\", false) === true;\n\nconst imageScoresRaw = get(input, \"image_scores\", {}) || {};\nconst imageScores = {\n  consistency: Number(get(imageScoresRaw, \"consistency\", 1)),\n  completeness: Number(get(imageScoresRaw, \"completeness\", 1)),\n  image_quality: Number(get(imageScoresRaw, \"image_quality\", 1)),\n};\n\nconst preliminary = get(input, \"preliminary_recommendation\", {}) || {};\nconst visualRisk = norm(get(preliminary, \"visual_risk\", null)); // low|medium|high\nconst recommendedAction = norm(get(preliminary, \"recommended_action\", null)); // accept|reject (or others)\nconst visualReasonCode = norm(get(preliminary, \"reason_code\", null));\n\n// CFM (authoritative when present)\nconst cfmSituation = norm(get(input, \"medical_professional.cfm_data.cfm_data.situation\", null));\nconst cfmMatchStatus = norm(get(input, \"medical_professional.cfm_data.cfm_data.match_status\", null))\n  ?? norm(get(input, \"medical_professional.cfm_data.match_status\", null));\nconst cfmMatchScore = (() => {\n  const v = get(input, \"medical_professional.cfm_data.cfm_data.match_score\", null);\n  if (v === null || v === undefined || v === \"\") return null;\n  const num = Number(v);\n  return Number.isFinite(num) ? num : null;\n})();\n\nconst crmPresent = crmNumber !== null;\nconst crmStatusNorm = (() => {\n  if (cfmSituation === null) return \"not_verified\";\n  return String(cfmSituation).toLowerCase() === \"active\" ? \"active\" : \"inactive\";\n})();\n\nconst crmStateFromCFM = norm(get(input, \"medical_professional.cfm_data.cfm_data.crm_state\", null));\nconst crmStateResolved = crmStateFromCFM || crmStateFromOCR;\n\nconst crmVerifiedAndValid = (() => {\n  const hasName = doctorName !== null;\n  const hasCRM = crmNumber !== null;\n\n  const ufOk = crmStateResolved !== null && String(crmStateResolved).trim().length === 2;\n  const situationOk = crmStatusNorm === \"active\";\n  const matchOk = String(cfmMatchStatus || \"\").toLowerCase() === \"matched\";\n\n  const scoreOk = (cfmMatchScore === null)\n    ? (NAME_MATCH_SCORE_NULL_IS_OK === true)\n    : (cfmMatchScore >= NAME_MATCH_MIN_SCORE);\n\n  return hasName && hasCRM && ufOk && situationOk && matchOk && scoreOk;\n})();\n\n// =========================================================\n// DATE RULES\n// =========================================================\nconst evalISO = evalISODateUTC();\nconst dAtt = attendanceDateISO ? parseISODateToUTC(attendanceDateISO) : null;\nconst dEval = parseISODateToUTC(evalISO);\n\nconst attendanceAgeDays = (() => {\n  if (!dAtt || !dEval) return null;\n  return daysBetweenUTC(dAtt, dEval); // eval - attendance\n})();\n\nconst isFutureAttendance = (() => {\n  if (!dAtt || !dEval) return false;\n  return dAtt.getTime() > dEval.getTime();\n})();\n\nconst withinMaxAutoDays = (() => {\n  if (attendanceAgeDays === null) return false;\n  return attendanceAgeDays >= 0 && attendanceAgeDays <= MAX_DOCUMENT_AGE_DAYS_FOR_AUTO;\n})();\n\n// =========================================================\n// LEAVE vs ATTENDANCE TEMPORAL CONSISTENCY (HIGH RISK)\n// =========================================================\nconst dLeaveStart = leaveStartISO ? parseISODateToUTC(leaveStartISO) : null;\n\nconst leavePresent = (() => {\n  const d = leaveDays ?? 0;\n  const h = leaveHours ?? 0;\n  const hasStart = !!leaveStartISO;\n  const hasEnd = !!leaveEndISO;\n  const hasWindow = (!!leaveStartHour || !!leaveEndHour);\n  const indef = String(periodoIndefinido || \"\").toUpperCase() === \"S\";\n\n  return (\n    !!leaveType ||\n    (Number.isFinite(d) && d > 0) ||\n    (Number.isFinite(h) && h > 0) ||\n    hasStart ||\n    hasEnd ||\n    hasWindow ||\n    indef\n  );\n})();\n\nconst leaveTemporalDiffDays = (() => {\n  if (!dAtt || !dLeaveStart) return null;\n  return daysBetweenUTC(dAtt, dLeaveStart);\n})();\n\nconst leaveTemporalHighRisk = (() => {\n  if (!leavePresent) return false;\n  if (!dAtt || !dLeaveStart) return false;\n  const diffDays = leaveTemporalDiffDays;\n  if (!Number.isFinite(diffDays)) return false;\n  return diffDays < 0 || diffDays > MAX_LEAVE_START_OFFSET_DAYS;\n})();\n\nconst leaveDatesConsistent = (() => {\n  if (!leavePresent) return true;\n\n  const indef = String(periodoIndefinido || \"\").toUpperCase() === \"S\";\n  const hasStart = !!leaveStartISO;\n  const hasEnd = !!leaveEndISO;\n\n  if (!hasStart) return false;\n  if (!hasEnd && indef) return true;\n  if (hasStart !== hasEnd) return false;\n\n  const s = parseISODateToUTC(leaveStartISO);\n  const e = parseISODateToUTC(leaveEndISO);\n  if (!s || !e) return false;\n  return e.getTime() >= s.getTime();\n})();\n\nconst leaveRiskOkForAuto = inSet(leaveDaysRisk, [\"very_low\", \"low\"]);\n\n// =========================================================\n// AUTHENTICATION MINIMUMS\n// =========================================================\nconst hasStrongStampSignatureAuth = (hasStamp && hasSignature && stampValid && signatureValid);\nconst hasValidQrAuth = (qrExists === true && qrDecodable === true && qrUrlStatus === \"active\");\nconst hasMinAuth = hasStrongStampSignatureAuth || hasValidQrAuth;\n\nconst digitalNativeWithStampHighRisk = (captureType === \"digital_native\" && stampValid === true);\n\n// QR rule: when present must be valid\nconst qrPresentButInvalid = (qrExists === true && (qrDecodable === false || qrUrlStatus !== \"active\"));\n\n// =========================================================\n// DERIVED ACCEPTANCE SIGNALS\n// =========================================================\nconst ocrOkForAuto = (ocrConfidence !== null && ocrConfidence >= 0.90);\nconst captureOkForAuto = inSet(captureType, [\"photo\", \"scan\", \"digital_native\"]);\nconst attendanceTypeOk = (attendanceType !== null && String(attendanceType).toLowerCase() !== \"undefined\");\nconst patientNameOk = (patientName !== null && patientName !== \"\" && !hasQuestionMarks(patientName));\n\nconst elementsOkForAuto = (\n  hasMandatoryFields === true &&\n  (hasStamp === true || hasValidQrAuth === true) &&\n  hasDoctorData === true &&\n  hasPatientData === true &&\n  hasDiseaseData === true\n);\n\nconst hasMinimumStructuralIntegrity = (\n  hasDoctorData === true &&\n  hasPatientData === true &&\n  hasDiseaseData === true &&\n  hasMandatoryFields === true\n);\n\nconst noManipulationOkForAuto = (\n  manipulationDetected === false &&\n  (digitalManip === null || digitalManip === \"none\") &&\n  (aiIndicators === null || aiIndicators === \"none\") &&\n  anyVisualIssues === false\n);\n\nconst cidOkForAuto = (cidParent !== null && cidFound === true);\nconst doctorFieldsOkForAuto = (doctorName !== null && crmNumber !== null);\nconst issuerOkForAuto = (issuerName !== null);\n\nconst attendanceDataOkForAuto = (\n  attendanceDateISO !== null &&\n  attendanceTypeOk === true &&\n  withinMaxAutoDays === true &&\n  isFutureAttendance === false\n);\n\nconst leaveOkForAuto = (\n  leavePresent === false ||\n  (leaveDatesConsistent === true && leaveRiskOkForAuto === true && leaveTemporalHighRisk === false)\n);\n\nconst imageScoresOkForAuto = (() => {\n  const c = imageScores.consistency;\n  const comp = imageScores.completeness;\n  const q = imageScores.image_quality;\n  return (\n    Number.isFinite(c) && Number.isFinite(comp) && Number.isFinite(q) &&\n    c >= 0.9 && comp >= 0.9 && q >= 0.9\n  );\n})();\n\nconst prelimOkForAuto = (visualRisk === \"low\" && recommendedAction === \"accept\");\n\n// scribbles flags (NO CHANGE if scribblesCount is null)\nconst scribblesPresent = Number.isFinite(scribblesCount);\nconst scribblesIsCritical = (scribblesPresent && scribblesCount > SCRIBBLES_MAX);\n\n// =========================================================\n// RULES — CANONICAL OBJECT\n// =========================================================\nconst RULES = {\n  version: ENGINE_VERSION,\n\n  gates: [\n    // NEW: scribbles critical gate (only if scribbles_count provided and > max)\n    {\n      code: \"G_SCRIBBLES_TOO_MANY\",\n      name: \"Excessive scribbles/erasures detected\",\n      severity: \"hard\",\n      fail_if: () => (scribblesIsCritical === true),\n      base_score: 80,\n      decision: \"manual_verification_required\",\n      penalty: { code: \"P_GATE_SCRIBBLES_TOO_MANY\", points: 10 },\n      rationale: () => [\"Excessive scribbles/erasures detected (high risk)\"]\n    },\n\n    // employee mismatch gate (only when employe_data exists)\n    {\n      code: \"G_EMPLOYEE_NAME_MISMATCH\",\n      name: \"Employee cross-check name mismatch\",\n      severity: \"hard\",\n      fail_if: () => (employeeCrossCheckRequired === true && employeeNameOk !== true),\n      base_score: 85,\n      decision: \"manual_verification_required\",\n      penalty: { code: \"P_GATE_EMPLOYEE_NAME_MISMATCH\", points: 10 },\n      rationale: () => [\"Patient name does not match employee record (critical cross-check)\"]\n    },\n\n    {\n      code: \"G0\",\n      name: \"Visual non-authentic declarative\",\n      severity: \"hard\",\n      fail_if: () => (recommendedAction === \"reject\" || visualRisk === \"high\"),\n      base_score: 95,\n      decision: \"rejected_high_risk\",\n      penalty: { code: \"P_GATE_G0\", points: 10 },\n      rationale: () => [\n        \"Visual analysis explicitly indicates non-authentic document\",\n        \"Declared rejection by visual subsystem\",\n        visualReasonCode ? `Visual reason code: ${visualReasonCode}` : null\n      ].filter(Boolean)\n    },\n    {\n      code: \"G_QR_INVALID_WHEN_PRESENT\",\n      name: \"QR present but invalid\",\n      severity: \"hard\",\n      fail_if: () => qrPresentButInvalid === true,\n      base_score: 85,\n      decision: \"manual_verification_required\",\n      penalty: { code: \"P_GATE_QR_INVALID\", points: 6 },\n      rationale: () => [\"QR code present but not decodable/valid\"]\n    },\n    {\n      code: \"G_FUTURE_ATTENDANCE\",\n      name: \"Future attendance date\",\n      severity: \"hard\",\n      fail_if: () => isFutureAttendance === true,\n      base_score: 85,\n      decision: \"manual_verification_required\",\n      penalty: { code: \"P_GATE_FUTURE_DATE\", points: 6 },\n      rationale: () => [\"Attendance date is in the future\"]\n    },\n    {\n      code: \"G_NO_MIN_AUTH\",\n      name: \"No minimum authentication (stamp/signature or valid QR)\",\n      severity: \"hard\",\n      fail_if: () => hasMinAuth === false,\n      base_score: 75,\n      decision: \"manual_verification_required\",\n      penalty: { code: \"P_GATE_NO_MIN_AUTH\", points: 8 },\n      rationale: () => [\"Missing minimum issuer authentication\"]\n    },\n    {\n      code: \"G_CFM_NOT_VALIDATED\",\n      name: \"CFM/CRM not validated\",\n      severity: \"soft\",\n      fail_if: () => (crmVerifiedAndValid !== true),\n      force: false,\n      penalty: { code: \"P_GATE_CFM_NOT_VALIDATED\", points: 4 },\n      rationale: () => [\"Doctor CFM validation missing or not confirmed\"]\n    }\n  ],\n\n  penalties: [\n    { code: \"P_NOT_MED_CERT\", points: 85, apply_if: () => isMedicalCertificate !== true, evidence: () => `is_medical_certificate=${isMedicalCertificate}` },\n\n    // NEW: scribbles penalty (only when scribbles_count exists)\n    {\n      code: \"P_SCRIBBLES_COUNT\",\n      points_fn: () => {\n        if (!scribblesPresent) return 0;\n\n        // < min => eligible / no penalty\n        if (scribblesCount < SCRIBBLES_MIN) return 0;\n\n        // between min..max => moderate penalty (scaled)\n        if (scribblesCount <= SCRIBBLES_MAX) {\n          // linear-ish scale: min => 6, max => 18\n          const span = Math.max(1, (SCRIBBLES_MAX - SCRIBBLES_MIN));\n          const k = (scribblesCount - SCRIBBLES_MIN) / span; // 0..1\n          return Math.round(6 + (12 * k));\n        }\n\n        // > max => high penalty (gate will also fire)\n        return 35;\n      },\n      apply_if: () => scribblesPresent === true,\n      evidence: () => `scribbles_count=${scribblesCount},min=${SCRIBBLES_MIN},max=${SCRIBBLES_MAX}`\n    },\n\n    // employee cross-check penalties (only when employe_data exists)\n    {\n      code: \"P_EMPLOYEE_NAME_SCORE_LOW\",\n      points_fn: () => {\n        if (!employeeCrossCheckRequired) return 0;\n        if (!Number.isFinite(emp_name_score)) return 25;\n        if (emp_name_score >= EMPLOYEE_NAME_MATCH_MIN_SCORE) return 0;\n        if (emp_name_score >= 0.40) return 35;\n        if (emp_name_score >= 0.25) return 45;\n        return 55;\n      },\n      apply_if: () => employeeCrossCheckRequired === true,\n      evidence: () => `employee_cross_check=true,name_score=${emp_name_score},min=${EMPLOYEE_NAME_MATCH_MIN_SCORE}`\n    },\n    {\n      code: \"P_EMPLOYEE_NAME_MATCH_FALSE\",\n      points: 55,\n      apply_if: () => (employeeCrossCheckRequired === true && emp_name_match === false),\n      evidence: () => `employee_cross_check=true,name_match=false,name_score=${emp_name_score}`\n    },\n    {\n      code: \"P_EMPLOYEE_ALL_DOCUMENTS_MISMATCH\",\n      points: 75,\n      apply_if: () => (employeeCrossCheckRequired === true && emp_all_documents_match === false),\n      evidence: () => `employee_cross_check=true,all_documents_match=false`\n    },\n    {\n      code: \"P_EMPLOYEE_PATIENT_DOC_MISSING\",\n      points: 6,\n      apply_if: () => (employeeCrossCheckRequired === true && emp_patient_document_present === false),\n      evidence: () => `employee_cross_check=true,patient_document_present=false`\n    },\n\n    // OCR confidence piecewise\n    {\n      code: \"P_OCR_CONF_LOW\",\n      points_fn: () => {\n        if (!Number.isFinite(ocrConfidence)) return 0;\n        if (ocrConfidence >= 0.95) return 0;\n        if (ocrConfidence >= 0.90) return 4;\n        if (ocrConfidence >= 0.80) return 10;\n        return 18;\n      },\n      apply_if: () => Number.isFinite(ocrConfidence),\n      evidence: () => `ocr_confidence_avg=${ocrConfidence}`\n    },\n\n    { code: \"P_PATIENT_NAME_MISSING_OR_SUSPECT\", points: 18, apply_if: () => patientNameOk !== true, evidence: () => `patient_name=${patientName || \"\"}` },\n    { code: \"P_ISSUER_NAME_MISSING\", points: 10, apply_if: () => issuerOkForAuto !== true, evidence: () => `issuer_name=${issuerName || \"\"}` },\n    { code: \"P_ATTENDANCE_TYPE_MISSING\", points: 6, apply_if: () => attendanceTypeOk !== true, evidence: () => `attendance_type=${attendanceType || \"\"}` },\n    { code: \"P_ATTENDANCE_DATE_MISSING\", points: 25, apply_if: () => attendanceDateISO === null, evidence: () => `attendance_date=${attendanceDateBR || \"\"}` },\n\n    {\n      code: \"P_DOCUMENT_AGE\",\n      points_fn: () => piecewiseDocAgePenalty(attendanceAgeDays),\n      apply_if: () => Number.isFinite(attendanceAgeDays) && attendanceAgeDays > MAX_DOCUMENT_AGE_DAYS_FOR_AUTO,\n      evidence: () => `attendance_age_days=${attendanceAgeDays},max_auto_days=${MAX_DOCUMENT_AGE_DAYS_FOR_AUTO},eval_date=${evalISO}`\n    },\n\n    {\n      code: \"P_LEAVE_TEMPORAL_INCONSISTENCY\",\n      points: PTS_LEAVE_TEMPORAL_INCONSISTENCY,\n      apply_if: () => leaveTemporalHighRisk === true,\n      evidence: () => `attendance_date=${attendanceDateISO},leave_start_date=${leaveStartISO},diff_days=${leaveTemporalDiffDays}`\n    },\n\n    { code: \"P_LEAVE_DATES_INCONSISTENT\", points: 22, apply_if: () => (leavePresent === true && leaveDatesConsistent === false), evidence: () => `leave_present=true,start=${leaveStartISO},end=${leaveEndISO},indef=${periodoIndefinido || \"\"}` },\n\n    {\n      code: \"P_LEAVE_RISK_NOT_LOW\",\n      points_fn: () => {\n        if (!leavePresent) return 0;\n        if (leaveDaysRisk === null) return 10;\n        const v = String(leaveDaysRisk).toLowerCase();\n        if (v === \"very_low\" || v === \"low\") return 0;\n        if (v === \"medium\") return 10;\n        if (v === \"high\" || v === \"very_high\") return 18;\n        return 10;\n      },\n      apply_if: () => leavePresent === true,\n      evidence: () => `leave_days_risk=${leaveDaysRisk || \"\"}`\n    },\n\n    // Image penalties (piecewise)\n    { code: \"P_IMG_COMPLETENESS\", points_fn: () => piecewiseCompletenessPenalty(imageScores.completeness), apply_if: () => Number.isFinite(imageScores.completeness), evidence: () => `P_IMG_COMPLETENESS_value=${imageScores.completeness}` },\n    { code: \"P_IMG_QUALITY\", points_fn: () => piecewiseQualityPenalty(imageScores.image_quality), apply_if: () => Number.isFinite(imageScores.image_quality), evidence: () => `P_IMG_QUALITY_value=${imageScores.image_quality}` },\n    { code: \"P_IMG_CONSISTENCY\", points_fn: () => piecewiseConsistencyPenalty(imageScores.consistency), apply_if: () => Number.isFinite(imageScores.consistency), evidence: () => `P_IMG_CONSISTENCY_value=${imageScores.consistency}` },\n\n    // Digital native with physical stamp (preserved)\n    { code: \"P_DIGITAL_NATIVE_WITH_PHYSICAL_STAMP\", points: 70, apply_if: () => digitalNativeWithStampHighRisk === true, evidence: () => `capture_type=${captureType},stamp_valid=${stampValid}` },\n\n    // Capture penalties (preserved)\n    { code: \"P_CAPTURE_DIGITAL_NATIVE\", points: 16, apply_if: () => captureType === \"digital_native\", evidence: () => `capture_type=${captureType}` },\n    { code: \"P_CAPTURE_SCAN\", points: 8, apply_if: () => captureType === \"scan\", evidence: () => `capture_type=${captureType}` },\n    { code: \"P_CAPTURE_OTHER\", points: 24, apply_if: () => captureType !== null && !inSet(captureType, [\"photo\", \"scan\", \"digital_native\"]), evidence: () => `capture_type=${captureType}` },\n\n    // Forensic/manipulation penalties (expanded)\n    { code: \"P_MANIPULATION_ANALYSIS_DETECTED\", points: 35, apply_if: () => manipulationDetected === true, evidence: () => \"manipulation_analysis.detected=true\" },\n    { code: \"P_DIGITAL_MANIPULATION_INDICATORS\", points: 25, apply_if: () => digitalManip !== null && digitalManip !== \"none\", evidence: () => `digital_manipulation_indicators=${digitalManip}` },\n    { code: \"P_PHYSICAL_MANIPULATION_INDICATORS\", points: 18, apply_if: () => physicalManip !== null && physicalManip !== \"none\", evidence: () => `physical_manipulation_indicators=${physicalManip}` },\n    { code: \"P_AI_GENERATION_INDICATORS\", points: 30, apply_if: () => aiIndicators !== null && aiIndicators !== \"none\", evidence: () => `ai_generation_or_reconstruction_indicators=${aiIndicators}` },\n    { code: \"P_VISUAL_QUALITY_ISSUES\", points: 12, apply_if: () => anyVisualIssues === true, evidence: () => `visual_quality_issues=${JSON.stringify(visualIssues)}` },\n    { code: \"P_SIGNATURE_ILLEGIBLE\", points: 8, apply_if: () => (typeof forensicNotes === \"string\" && forensicNotes.toLowerCase().includes(\"signature_illegible\")), evidence: () => `forensic_notes=${forensicNotes}` },\n\n    // Elements penalties (recalibrated)\n    { code: \"P_MISSING_MANDATORY_FIELDS\", points: 26, apply_if: () => hasMandatoryFields === false, evidence: () => \"has_mandatory_fields=false\" },\n    { code: \"P_MISSING_DOCTOR_DATA\", points: 10, apply_if: () => hasDoctorData === false, evidence: () => \"has_doctor_data=false\" },\n    { code: \"P_MISSING_PATIENT_DATA\", points: 14, apply_if: () => hasPatientData === false, evidence: () => \"has_patient_data=false\" },\n    { code: \"P_MISSING_DISEASE_DATA\", points: 10, apply_if: () => hasDiseaseData === false, evidence: () => \"has_disease_data=false\" },\n\n    // richer elements, if present as booleans\n    { code: \"P_MISSING_ISSUER_DATA\", points: 14, apply_if: () => hasIssuerData === false, evidence: () => \"has_issuer_data=false\" },\n    { code: \"P_MISSING_ATTENDANCE_DATA\", points: 10, apply_if: () => hasAttendanceData === false, evidence: () => \"has_attendance_data=false\" },\n    { code: \"P_MISSING_LOCALITY_DATA\", points: 6, apply_if: () => hasLocalityData === false, evidence: () => \"has_locality_data=false\" },\n    { code: \"P_MISSING_DISCLAIMER\", points: 2, apply_if: () => hasDisclaimer === false, evidence: () => \"has_disclaimer=false\" },\n\n    // Patient doc undefined\n    { code: \"P_PATIENT_DOC_UNDEFINED\", points: 4, apply_if: () => String(patientDocValue || \"\").toLowerCase() === \"undefined\", evidence: () => \"patient_document_value=undefined\" },\n\n    // CRM/CFM penalties\n    { code: \"P_CRM_MISSING\", points: 18, apply_if: () => crmPresent !== true, evidence: () => \"crm_number_missing\" },\n    { code: \"P_CRM_INACTIVE_OR_INVALID\", points: 26, apply_if: () => crmPresent === true && crmStatusNorm === \"inactive\", evidence: () => `crm_status=${crmStatusNorm}` },\n    { code: \"P_CRM_NOT_VERIFIED\", points: 18, apply_if: () => crmPresent === true && crmVerifiedAndValid !== true && crmStatusNorm !== \"inactive\", evidence: () => `cfm_match_status=${cfmMatchStatus || \"\"},match_score=${cfmMatchScore || \"\"}` },\n\n    // QR penalty (in addition to gate)\n    { code: \"P_QR_PRESENT_BUT_INVALID\", points: 12, apply_if: () => qrPresentButInvalid === true, evidence: () => `qr_exists=${qrExists},qr_decodable=${qrDecodable},qr_url_status=${qrUrlStatus || \"\"}` },\n\n    // CID penalty\n    { code: \"P_CID_INVALID\", points: 18, apply_if: () => cidValid === false, evidence: () => `cid_parent=${cidParent}` },\n    { code: \"P_CID_MISSING\", points: 8, apply_if: () => cidParent === null, evidence: () => \"cid_parent_missing\" },\n\n    // preliminary risk penalty (when not gate)\n    { code: \"P_PRELIM_MEDIUM_RISK\", points: 15, apply_if: () => visualRisk === \"medium\", evidence: () => `visual_risk=${visualRisk}` },\n\n    // min auth (if no gate forced score for any reason)\n    { code: \"P_MISSING_MIN_AUTH\", points: 25, apply_if: () => hasMinAuth === false, evidence: () => `has_strong_stamp_signature_auth=${hasStrongStampSignatureAuth},has_valid_qr_auth=${hasValidQrAuth}` },\n\n    // future attendance penalty (in addition to gate)\n    { code: \"P_FUTURE_ATTENDANCE_DATE\", points: 40, apply_if: () => isFutureAttendance === true, evidence: () => `attendance_date=${attendanceDateISO},eval_date=${evalISO}` }\n  ],\n\n  bonuses: [\n    // optional: employee strong match bonus\n    {\n      code: \"B_EMPLOYEE_NAME_STRONG_MATCH\",\n      points: -6,\n      apply_if: () => (employeeCrossCheckRequired === true && Number.isFinite(emp_name_score) && emp_name_score >= 0.85),\n      evidence: () => `employee_cross_check=true,name_score=${emp_name_score}`\n    },\n\n    { code: \"B_VALID_QR\", points: -25, apply_if: () => hasValidQrAuth === true, evidence: () => \"valid_qr_auth=true\" },\n    { code: \"B_CRM_VERIFIED_MATCHED\", points: -15, apply_if: () => crmVerifiedAndValid === true, evidence: () => `cfm_match_score=${cfmMatchScore}` },\n    { code: \"B_CID_VALID\", points: -8, apply_if: () => cidValid === true, evidence: () => `cid_parent=${cidParent}` },\n    { code: \"B_STAMP_SIGNATURE_VALID\", points: -8, apply_if: () => hasStrongStampSignatureAuth === true, evidence: () => \"stamp_valid=true & signature_valid=true\" }\n  ],\n\n  acceptance_penalties: [\n    { a: \"A1_is_medical_certificate\", code: \"P_A1_FAIL\", points: 10, apply_if: () => isMedicalCertificate !== true },\n    { a: \"A2_capture_type_recognized\", code: \"P_A2_FAIL\", points: 3, apply_if: () => captureOkForAuto !== true },\n    { a: \"A3_ocr_confidence_gte_0_95\", code: \"P_A3_FAIL\", points: 2, apply_if: () => ocrOkForAuto !== true },\n    { a: \"A4_patient_name_present_no_question_marks\", code: \"P_A4_FAIL\", points: 4, apply_if: () => patientNameOk !== true },\n    { a: \"A5_doctor_name_crm_present_and_cfm_valid\", code: \"P_A5_FAIL\", points: 4, apply_if: () => !(doctorFieldsOkForAuto === true && crmVerifiedAndValid === true) },\n    { a: \"A6_issuer_name_present\", code: \"P_A6_FAIL\", points: 2, apply_if: () => issuerOkForAuto !== true },\n    { a: \"A7_attendance_type_identified\", code: \"P_A7_FAIL\", points: 2, apply_if: () => attendanceTypeOk !== true },\n    { a: \"A8_attendance_date_present_within_max_days\", code: \"P_A8_FAIL\", points: 4, apply_if: () => attendanceDataOkForAuto !== true },\n    { a: \"A9_leave_absent_or_low_risk_and_consistent\", code: \"P_A9_FAIL\", points: 3, apply_if: () => leaveOkForAuto !== true },\n    { a: \"A10_cid_present_and_found_true\", code: \"P_A10_FAIL\", points: 3, apply_if: () => cidOkForAuto !== true },\n    { a: \"A11_elements_mandatory_stamp_or_qr_and_entities\", code: \"P_A11_FAIL\", points: 6, apply_if: () => elementsOkForAuto !== true },\n    { a: \"A12_no_manipulation_no_visual_quality_issues\", code: \"P_A12_FAIL\", points: 6, apply_if: () => noManipulationOkForAuto !== true },\n    { a: \"A13_qr_when_present_must_be_valid\", code: \"P_A13_FAIL\", points: 4, apply_if: () => (qrPresentButInvalid === true) },\n    { a: \"A14_image_scores_all_gte_0_9\", code: \"P_A14_FAIL\", points: 3, apply_if: () => imageScoresOkForAuto !== true },\n    { a: \"A15_preliminary_low_and_accept\", code: \"P_A15_FAIL\", points: 2, apply_if: () => prelimOkForAuto !== true },\n\n    // employee acceptance (only when employe_data exists)\n    { a: \"A16_employee_name_match_if_present\", code: \"P_A16_FAIL\", points: 8, apply_if: () => (employeeCrossCheckRequired === true && employeeNameOk !== true) }\n  ],\n\n  bonus_cap: BONUS_CAP\n};\n\n// =========================================================\n// ACCEPTANCE CHECKLIST (whitelist)\n// =========================================================\nconst acceptanceChecklist = [\n  { code: \"A1_is_medical_certificate\", ok: isMedicalCertificate === true },\n  { code: \"A2_capture_type_recognized\", ok: captureOkForAuto === true },\n  { code: \"A3_ocr_confidence_gte_0_90\", ok: ocrOkForAuto === true },\n  { code: \"A4_patient_name_present_no_question_marks\", ok: patientNameOk === true },\n  { code: \"A5_doctor_name_crm_present_and_cfm_valid\", ok: (doctorFieldsOkForAuto === true && crmVerifiedAndValid === true) },\n  { code: \"A6_issuer_name_present\", ok: issuerOkForAuto === true },\n  { code: \"A7_attendance_type_identified\", ok: attendanceTypeOk === true },\n  { code: \"A8_attendance_date_present_within_max_days\", ok: attendanceDataOkForAuto === true },\n  { code: \"A9_leave_absent_or_low_risk_and_consistent\", ok: leaveOkForAuto === true },\n  { code: \"A10_cid_present_and_found_true\", ok: cidOkForAuto === true },\n  { code: \"A11_elements_mandatory_stamp_or_qr_and_entities\", ok: elementsOkForAuto === true },\n  { code: \"A12_no_manipulation_no_visual_quality_issues\", ok: noManipulationOkForAuto === true },\n  { code: \"A13_qr_when_present_must_be_valid\", ok: (qrPresentButInvalid === false) },\n  { code: \"A14_image_scores_all_gte_0_9\", ok: imageScoresOkForAuto === true },\n  { code: \"A15_preliminary_low_and_accept\", ok: prelimOkForAuto === true },\n\n  // employee: only meaningful when employee data exists\n  { code: \"A16_employee_name_match_if_present\", ok: (employeeCrossCheckRequired ? (employeeNameOk === true) : true) }\n];\n\nconst isAutoApprovedEligible = acceptanceChecklist.every(x => x.ok === true);\n\n// =========================================================\n// RULE ENGINE EXECUTION\n// =========================================================\nconst gates_failed = [];\nconst penalties_applied = [];\nconst bonuses_applied = [];\n\nlet forcedDecision = null;\nlet forcedScore = null;\nlet forcedRationale = null;\n\n// ---- Gates first (authority) ----\nfor (const g of RULES.gates) {\n  let fail = false;\n  try { fail = !!g.fail_if(); } catch { fail = false; }\n\n  if (fail) {\n    gates_failed.push({ code: g.code, name: g.name, severity: g.severity || \"unknown\" });\n\n    // Gate penalty always recorded (and scored)\n    if (g.penalty && Number.isFinite(g.penalty.points) && g.penalty.points > 0) {\n      addPenalty(penalties_applied, g.penalty.code, g.penalty.points, `gate=${g.code}`, { source: \"gate\" });\n    }\n\n    // Some gates force decision/score; some only annotate.\n    const force = (g.force === false) ? false : true;\n    if (force && forcedDecision === null) {\n      forcedDecision = g.decision;\n      forcedScore = g.base_score;\n      forcedRationale = (typeof g.rationale === \"function\") ? g.rationale() : null;\n    }\n  }\n}\n\n// ---- Compute penalties (major signals) ----\nlet computedScore = BASE_RISK_SCORE;\n\nfor (const p of RULES.penalties) {\n  let apply = false;\n  try { apply = !!p.apply_if(); } catch { apply = false; }\n  if (!apply) continue;\n\n  const pts = (typeof p.points_fn === \"function\") ? p.points_fn() : p.points;\n  const points = Number(pts);\n  if (!Number.isFinite(points) || points <= 0) continue;\n\n  const ev = (typeof p.evidence === \"function\") ? p.evidence() : (p.evidence || \"\");\n  addPenalty(penalties_applied, p.code, points, ev, { source: \"signal\" });\n  computedScore += points;\n}\n\n// ---- Acceptance-failure penalties (small deltas) ----\nfor (const ap of RULES.acceptance_penalties) {\n  let apply = false;\n  try { apply = !!ap.apply_if(); } catch { apply = false; }\n  if (!apply) continue;\n\n  addPenalty(penalties_applied, ap.code, ap.points, `acceptance_fail=${ap.a}`, { source: \"acceptance\" });\n  computedScore += ap.points;\n}\n\n// ---- Bonuses (cap to -40 total) ----\nlet bonusTotal = 0;\nfor (const b of RULES.bonuses) {\n  let apply = false;\n  try { apply = !!b.apply_if(); } catch { apply = false; }\n\n  // 🚫 NEVER apply bonuses if minimum structural integrity is broken\n  if (apply && hasMinimumStructuralIntegrity === true) {\n    addBonus(bonuses_applied, b.code, b.points, (typeof b.evidence === \"function\") ? b.evidence() : (b.evidence || \"\"), { source: \"bonus\" });\n    bonusTotal += b.points;\n  }\n}\n\nif (bonusTotal < RULES.bonus_cap) {\n  // clamp bonus total to -40 by scaling\n  const scale = RULES.bonus_cap / bonusTotal; // both negative => positive <=1\n  let adjustedTotal = 0;\n  const adjusted = [];\n\n  for (const b of bonuses_applied) {\n    const newPoints = Math.trunc(b.points * scale);\n    adjusted.push({ ...b, points: newPoints, evidence: `${b.evidence}|scaled=${scale}` });\n    adjustedTotal += newPoints;\n  }\n\n  bonuses_applied.length = 0;\n  bonuses_applied.push(...adjusted);\n  bonusTotal = adjustedTotal;\n}\n\ncomputedScore += bonusTotal;\n\n// Convergence floors (preserved)\nif (visualRisk === \"medium\" && computedScore < 40) computedScore = 40;\nif (visualRisk === \"high\" && computedScore < 60) computedScore = 60;\n\ncomputedScore = clampScore(computedScore);\n\n// If gate forced a minimum score, keep it as a floor (not a replacement)\nlet score = (forcedScore !== null) ? Math.max(Number(forcedScore), computedScore) : computedScore;\nscore = clampScore(score);\n\n// =========================================================\n// RISK LEVEL + DECISION LOGIC (aligned to 0-25 / 26-50 / 51+)\n// =========================================================\nfunction riskLevelFromScore(s) {\n  if (s <= 25) return \"LOW\";\n  if (s <= 50) return \"MEDIUM\";\n  return \"HIGH\";\n}\n\nlet riskLevel = riskLevelFromScore(score);\n\n// Decision default by score\nlet decisionStatus =\n  riskLevel === \"LOW\" ? \"approved_low_risk\" :\n  riskLevel === \"MEDIUM\" ? \"approved_with_reservations\" :\n  \"manual_verification_required\";\n\nlet manualReviewRequired =\n  decisionStatus === \"manual_verification_required\" ||\n  decisionStatus === \"rejected_high_risk\" ||\n  riskLevel === \"HIGH\";\n\n// If forced decision (hard gate), override decision (score already floored)\nif (forcedDecision !== null) {\n  decisionStatus = forcedDecision;\n  riskLevel = \"HIGH\";\n  manualReviewRequired = true;\n}\n\n// =========================================================\n// NON-NEGOTIABLE ACCEPTANCE WHITELIST ENFORCEMENT (preserved)\n// =========================================================\nconst cfmNotValidated = !crmVerifiedAndValid;\n\nif (decisionStatus === \"approved_low_risk\") {\n  if (!isAutoApprovedEligible) {\n    decisionStatus = \"manual_verification_required\";\n    manualReviewRequired = true;\n    // ensure score at least MEDIUM when whitelist fails\n    if (score < 26) score = 26;\n    riskLevel = riskLevelFromScore(score);\n  }\n}\n\n// Even if score is low, if CFM not validated, force manual review\nif (cfmNotValidated) {\n  if (decisionStatus !== \"rejected_high_risk\") {\n    decisionStatus = \"manual_verification_required\";\n    manualReviewRequired = true;\n    if (score < 26) score = 26;\n    riskLevel = riskLevelFromScore(score);\n  }\n}\n\n// If not a recognized medical certificate -> reject\nif (isMedicalCertificate !== true) {\n  decisionStatus = \"rejected_high_risk\";\n  manualReviewRequired = true;\n  score = Math.max(score, 85);\n  riskLevel = \"HIGH\";\n}\n\n// If preliminary says reject/high but gate did not fire (shouldn't happen), enforce safety\nif ((recommendedAction === \"reject\" || visualRisk === \"high\") && decisionStatus !== \"rejected_high_risk\") {\n  decisionStatus = \"rejected_high_risk\";\n  manualReviewRequired = true;\n  score = Math.max(score, 95);\n  riskLevel = \"HIGH\";\n}\n\n// =========================================================\n// FORENSIC SUMMARY (strict, no guessing)\n// =========================================================\nconst forensic_summary = {\n  visual_manipulation_detected: (manipulationDetected === true) || (digitalManip !== null && digitalManip !== \"none\"),\n  ai_generation_suspected: (aiIndicators !== null && aiIndicators !== \"none\"),\n  visual_quality_resume: anyVisualIssues ? \"visual_issues_detected\" : \"no_visual_issues_detected\"\n};\n\n// =========================================================\n// ELEMENTS CHECKS (compat)\n// =========================================================\nconst elements_checks = {\n  has_valid_qr_auth: hasValidQrAuth,\n  has_strong_stamp_signature_auth: hasStrongStampSignatureAuth,\n  has_min_auth: hasMinAuth,\n  crm_status_normalized: crmStatusNorm,\n  attendance_date_parsed: attendanceDateISO,\n  is_future_date: isFutureAttendance\n};\n\n// =========================================================\n// RATIONALE (score-aware) + FULL MAP + TRAVA\n// =========================================================\nconst rationaleCandidates = [];\n\nif (forcedRationale && forcedRationale.length) {\n  for (const r of forcedRationale) rationaleCandidates.push({ impact: 999, text: r, kind: \"negative\" });\n} else {\n  for (const p of penalties_applied) rationaleCandidates.push({ impact: Math.abs(p.points), text: p.code, kind: \"negative\" });\n  for (const b of bonuses_applied) rationaleCandidates.push({ impact: Math.abs(b.points), text: b.code, kind: \"positive\" });\n\n  if (!isAutoApprovedEligible) rationaleCandidates.push({ impact: 500, text: \"Auto-approval prerequisites not fully satisfied\", kind: \"negative\" });\n  if (cfmNotValidated) rationaleCandidates.push({ impact: 450, text: \"Doctor CFM validation missing or not confirmed\", kind: \"negative\" });\n\n  if (employeeCrossCheckRequired) {\n    if (employeeNameOk) rationaleCandidates.push({ impact: 120, text: \"R_OK_EMPLOYEE_NAME_MATCH\", kind: \"positive\" });\n    if (emp_all_documents_match === true) rationaleCandidates.push({ impact: 110, text: \"R_OK_EMPLOYEE_DOCS_MATCH\", kind: \"positive\" });\n  }\n\n  // Score <= 25: include explicit \"approval drivers\" (positive-only)\n  if (score <= 25) {\n    rationaleCandidates.push({ impact: 140, text: \"R_OK_DOCUMENT_CONSISTENT\", kind: \"positive\" });\n    if (hasMinAuth) rationaleCandidates.push({ impact: 130, text: \"R_OK_AUTH_PRESENT\", kind: \"positive\" });\n    if (crmVerifiedAndValid) rationaleCandidates.push({ impact: 125, text: \"R_OK_DOCTOR_VERIFIED\", kind: \"positive\" });\n    if (cidOkForAuto) rationaleCandidates.push({ impact: 115, text: \"R_OK_CID_VALID\", kind: \"positive\" });\n    if (noManipulationOkForAuto) rationaleCandidates.push({ impact: 120, text: \"R_OK_NO_MANIPULATION\", kind: \"positive\" });\n    if (ocrOkForAuto) rationaleCandidates.push({ impact: 90, text: \"R_OK_OCR_HIGH_CONF\", kind: \"positive\" });\n    if (attendanceDataOkForAuto) rationaleCandidates.push({ impact: 85, text: \"R_OK_ATTENDANCE_WITHIN_WINDOW\", kind: \"positive\" });\n  }\n}\n\nrationaleCandidates.sort((a, b) => b.impact - a.impact);\n\n// ---- FULL RATIONALE DICTIONARY (single source of truth) ----\nfunction getRationaleDictionary() {\n  return {\n    \"Auto-approval prerequisites not fully satisfied\": \"Automatic approval prerequisites were not fully satisfied\",\n    \"Doctor CFM validation missing or not confirmed\": \"Doctor registration could not be validated (CFM/CRM check not confirmed)\",\n\n    // NEW: scribbles\n    \"P_GATE_SCRIBBLES_TOO_MANY\": \"Excessive scribbles/erasures were detected (high risk)\",\n    \"P_SCRIBBLES_COUNT\": \"Scribbles/erasures were detected and may indicate alterations\",\n\n    // employee\n    \"P_GATE_EMPLOYEE_NAME_MISMATCH\": \"Patient name does not match the employee record (critical cross-check)\",\n    \"P_EMPLOYEE_NAME_SCORE_LOW\": \"Patient name similarity with employee record is below the required threshold\",\n    \"P_EMPLOYEE_NAME_MATCH_FALSE\": \"Patient name does not match the employee record\",\n    \"P_EMPLOYEE_ALL_DOCUMENTS_MISMATCH\": \"Patient documents do not match the employee record (high risk)\",\n    \"P_EMPLOYEE_PATIENT_DOC_MISSING\": \"Patient document information is missing for employee cross-check (minor)\",\n    \"P_A16_FAIL\": \"Patient name does not match the employee record (required cross-check)\",\n\n    // Gate penalty codes\n    \"P_GATE_G0\": \"Visual analysis indicates high risk (rejection recommended)\",\n    \"P_GATE_QR_INVALID\": \"QR code is present but invalid or unreadable\",\n    \"P_GATE_FUTURE_DATE\": \"Attendance date appears to be in the future\",\n    \"P_GATE_NO_MIN_AUTH\": \"Missing minimum authentication (stamp/signature or valid QR)\",\n    \"P_GATE_CFM_NOT_VALIDATED\": \"Doctor registration could not be validated\",\n\n    // Main penalty codes\n    \"P_NOT_MED_CERT\": \"Document type is not consistent with a medical certificate\",\n    \"P_OCR_CONF_LOW\": \"OCR confidence is below the recommended threshold\",\n    \"P_PATIENT_NAME_MISSING_OR_SUSPECT\": \"Patient name is missing or uncertain\",\n    \"P_ISSUER_NAME_MISSING\": \"Issuer name is missing\",\n    \"P_ATTENDANCE_TYPE_MISSING\": \"Attendance type could not be determined\",\n    \"P_ATTENDANCE_DATE_MISSING\": \"Attendance date is missing or unreadable\",\n    \"P_DOCUMENT_AGE\": \"Document appears outside the expected submission window (old document)\",\n    \"P_LEAVE_TEMPORAL_INCONSISTENCY\": \"Leave start date is inconsistent with the attendance date\",\n    \"P_LEAVE_DATES_INCONSISTENT\": \"Leave period dates are inconsistent or incomplete\",\n    \"P_LEAVE_RISK_NOT_LOW\": \"Leave risk is not low or could not be confirmed\",\n    \"P_IMG_COMPLETENESS\": \"Image completeness is below the recommended threshold\",\n    \"P_IMG_QUALITY\": \"Image quality is below the recommended threshold\",\n    \"P_IMG_CONSISTENCY\": \"Image consistency is below the recommended threshold\",\n    \"P_DIGITAL_NATIVE_WITH_PHYSICAL_STAMP\": \"Digital-native document shows physical stamp characteristics (high risk pattern)\",\n    \"P_CAPTURE_DIGITAL_NATIVE\": \"Capture type is digital-native (higher risk context)\",\n    \"P_CAPTURE_SCAN\": \"Capture type is scan (moderate risk context)\",\n    \"P_CAPTURE_OTHER\": \"Capture type is unusual or unrecognized\",\n    \"P_MANIPULATION_ANALYSIS_DETECTED\": \"Manipulation analysis flagged potential tampering\",\n    \"P_DIGITAL_MANIPULATION_INDICATORS\": \"Digital manipulation indicators were detected\",\n    \"P_PHYSICAL_MANIPULATION_INDICATORS\": \"Physical manipulation indicators were detected\",\n    \"P_AI_GENERATION_INDICATORS\": \"AI generation or reconstruction indicators were detected\",\n    \"P_VISUAL_QUALITY_ISSUES\": \"Visual quality issues may impact validation\",\n    \"P_SIGNATURE_ILLEGIBLE\": \"Signature appears illegible or cannot be confirmed\",\n    \"P_MISSING_MANDATORY_FIELDS\": \"Mandatory fields are incomplete or missing\",\n    \"P_MISSING_DOCTOR_DATA\": \"Doctor information is incomplete or missing\",\n    \"P_MISSING_PATIENT_DATA\": \"Patient information is incomplete or missing\",\n    \"P_MISSING_DISEASE_DATA\": \"Disease/CID information is incomplete or missing\",\n    \"P_MISSING_ISSUER_DATA\": \"Issuer identification details are incomplete or missing\",\n    \"P_MISSING_ATTENDANCE_DATA\": \"Attendance details are incomplete or missing\",\n    \"P_MISSING_LOCALITY_DATA\": \"Locality (city/state) information is missing\",\n    \"P_MISSING_DISCLAIMER\": \"Disclaimer is missing (minor)\",\n    \"P_PATIENT_DOC_UNDEFINED\": \"Patient document identifier is missing or invalid (minor)\",\n    \"P_CRM_MISSING\": \"Doctor CRM number is missing\",\n    \"P_CRM_INACTIVE_OR_INVALID\": \"Doctor CRM status is inactive or invalid\",\n    \"P_CRM_NOT_VERIFIED\": \"Doctor CRM/CFM verification could not be confirmed\",\n    \"P_QR_PRESENT_BUT_INVALID\": \"QR code is present but invalid or unreadable\",\n    \"P_CID_INVALID\": \"CID code is invalid or not recognized\",\n    \"P_CID_MISSING\": \"CID code is missing\",\n    \"P_PRELIM_MEDIUM_RISK\": \"Preliminary visual assessment indicates medium risk\",\n    \"P_MISSING_MIN_AUTH\": \"Missing minimum authentication (stamp/signature or valid QR)\",\n    \"P_FUTURE_ATTENDANCE_DATE\": \"Attendance date appears to be in the future\",\n\n    // Acceptance penalty codes\n    \"P_A1_FAIL\": \"Document type does not match a medical certificate\",\n    \"P_A2_FAIL\": \"Capture type is not recognized or is unusual\",\n    \"P_A3_FAIL\": \"OCR confidence is below the auto-approval threshold\",\n    \"P_A4_FAIL\": \"Patient name is missing or uncertain\",\n    \"P_A5_FAIL\": \"Doctor identification/registration could not be fully validated\",\n    \"P_A6_FAIL\": \"Issuer information is missing\",\n    \"P_A7_FAIL\": \"Attendance type could not be determined\",\n    \"P_A8_FAIL\": \"Attendance date is missing or outside the expected window\",\n    \"P_A9_FAIL\": \"Leave information is inconsistent or higher risk\",\n    \"P_A10_FAIL\": \"CID code is missing or not confirmed\",\n    \"P_A11_FAIL\": \"Mandatory elements are incomplete\",\n    \"P_A12_FAIL\": \"Visual/forensic checks indicate quality or integrity issues\",\n    \"P_A13_FAIL\": \"QR is present but not valid\",\n    \"P_A14_FAIL\": \"Image score thresholds were not met\",\n    \"P_A15_FAIL\": \"Preliminary recommendation is not eligible for auto-approval\",\n\n    // Bonus codes\n    \"B_EMPLOYEE_NAME_STRONG_MATCH\": \"Patient name strongly matches employee record\",\n    \"B_VALID_QR\": \"Valid QR authentication was detected\",\n    \"B_CRM_VERIFIED_MATCHED\": \"Doctor registration was verified successfully\",\n    \"B_CID_VALID\": \"CID code is present and confirmed\",\n    \"B_STAMP_SIGNATURE_VALID\": \"Issuer authentication is present (stamp and signature valid)\",\n\n    // Pretty approval rationales (score <= 25)\n    \"R_OK_DOCUMENT_CONSISTENT\": \"Medical certificate appears consistent and complete\",\n    \"R_OK_AUTH_PRESENT\": \"Issuer authentication is present (stamp/signature or valid QR)\",\n    \"R_OK_DOCTOR_VERIFIED\": \"Doctor registration was verified successfully\",\n    \"R_OK_CID_VALID\": \"CID code is present and confirmed\",\n    \"R_OK_NO_MANIPULATION\": \"No manipulation indicators were detected\",\n    \"R_OK_OCR_HIGH_CONF\": \"OCR confidence is high\",\n    \"R_OK_ATTENDANCE_WITHIN_WINDOW\": \"Attendance date is within the expected submission window\",\n\n    // employee positives\n    \"R_OK_EMPLOYEE_NAME_MATCH\": \"Patient name matches the employee record\",\n    \"R_OK_EMPLOYEE_DOCS_MATCH\": \"Patient documents match the employee record\"\n  };\n}\n\n// ---- rationaleText with TRAVA: never expose raw codes ----\nfunction rationaleText(codeOrText) {\n  const m = getRationaleDictionary();\n  if (m[codeOrText]) return m[codeOrText];\n\n  const s = String(codeOrText || \"\").trim();\n\n  // Hard trap: never expose raw rule codes to clients\n  if (/^(P_|B_|G_|A_)/.test(s)) {\n    const pretty = s\n      .replace(/^(P_|B_|G_|A_)/, \"\")\n      .replace(/^A\\d+_/, \"\")\n      .replace(/_/g, \" \")\n      .toLowerCase();\n    return pretty.charAt(0).toUpperCase() + pretty.slice(1);\n  }\n\n  return s || \"Manual verification required\";\n}\n\n// score-aware selection rules\nlet allowKinds;\nif (score <= 25) {\n  allowKinds = new Set([\"positive\"]);\n} else if (score <= 50) {\n  allowKinds = new Set([\"negative\"]);\n} else {\n  allowKinds = new Set([\"negative\"]);\n}\n\nconst finalRationale = [];\nfor (const c of rationaleCandidates) {\n  if (c.kind && !allowKinds.has(c.kind)) continue;\n  if (score <= 25 && String(c.text || \"\").startsWith(\"P_\")) continue;\n\n  const t = rationaleText(c.text);\n  if (!t) continue;\n\n  if (!finalRationale.includes(t)) finalRationale.push(t);\n  if (finalRationale.length >= MAX_RATIONALE_ITENS) break;\n}\n\nif (finalRationale.length === 0) {\n  finalRationale.push(score <= 25 ? \"Approved (low risk)\" : \"Manual verification required\");\n}\n\n// =========================================================\n// OUTPUT (must match v2.0.4 when debug is OFF)\n// =========================================================\nconst out = {\n  document_id: null,\n  document_type: documentType,\n  document: { capture_type: captureType },\n  patient: { name: patientName },\n  doctor: {\n    name: doctorName,\n    crm_number: crmNumber,\n    crm_uf: crmUF,\n    crm_status: crmStatusNorm\n  },\n  issuer: {\n    name: issuerName,\n    city: norm(get(input, \"issuer_information.city\", null)),\n    state: norm(get(input, \"issuer_information.state\", null)),\n    cnpj: norm(get(input, \"issuer_information.cnpj\", null)),\n    cnpj_status: \"not_verified\"\n  },\n  attendance: {\n    type: attendanceType,\n    date: attendanceDateISO,\n    leave_type: leaveType,\n    leave_days: leaveDays,\n    leave_hours: leaveHours,\n    leave_days_risk: leaveDaysRisk,\n    leave_start_date: leaveStartISO,\n    leave_end_date: leaveEndISO,\n    leave_start_hour: leaveStartHour,\n    leave_end_hour: leaveEndHour\n  },\n  disease: {\n    cid_code: cidParent,\n    cid_type: cidType,\n    cid_valid: cidValid\n  },\n  forensic_summary,\n  elements_checks,\n  risk_assessment: {\n    risk_score: clampScore(score),\n    risk_level: riskLevel,\n    manual_review_required: manualReviewRequired\n  },\n  decision: {\n    status: decisionStatus,\n    rationale: finalRationale\n  },\n  inputRaw: inputRaw\n};\n\n// =========================================================\n// DEBUG (run log + optional maps)\n// =========================================================\nif (ENABLE_RULE_ENGINE_DEBUG) {\n  const debugObj = {\n    engine_version: ENGINE_VERSION,\n    rules_version: RULES.version,\n\n    evaluation_date_iso: evalISO,\n\n    acceptance_checklist: acceptanceChecklist,\n    is_auto_approved_eligible: isAutoApprovedEligible,\n\n    cfm_not_validated: cfmNotValidated,\n\n    gates_failed,\n    penalties_applied,\n    bonuses_applied,\n\n    key_signals: {\n      is_medical_certificate: isMedicalCertificate,\n      capture_type: captureType,\n      ocr_confidence_avg: ocrConfidence,\n\n      // NEW: scribbles signals\n      scribbles_count: scribblesCount,\n      scribbles_min: SCRIBBLES_MIN,\n      scribbles_max: SCRIBBLES_MAX,\n      scribbles_critical: scribblesIsCritical,\n\n      patient_name_ok: patientNameOk,\n      doctor_fields_ok: doctorFieldsOkForAuto,\n      crm_verified_and_valid: crmVerifiedAndValid,\n      issuer_ok: issuerOkForAuto,\n\n      // employee signals\n      employee_cross_check_required: employeeCrossCheckRequired,\n      employee_patient_data_present: emp_patient_data_present,\n      employee_employee_data_present: emp_employee_data_present,\n      patient_employee_name_score: emp_name_score,\n      patient_employee_name_match: emp_name_match,\n      all_documents_match: emp_all_documents_match,\n      patient_document_present: emp_patient_document_present,\n      patient_employee_national_document_match: emp_patient_employee_national_document_match,\n      patient_employee_identity_document_match: emp_patient_employee_identity_document_match,\n      employee_name_match_min_score: EMPLOYEE_NAME_MATCH_MIN_SCORE,\n\n      name_match_min_score: NAME_MATCH_MIN_SCORE,\n      name_match_score_null_is_ok: NAME_MATCH_SCORE_NULL_IS_OK,\n      doctor_name_resolved_from_cfm: cfmDoctorName,\n      crm_uf_resolved_from_cfm: cfmCrmState,\n\n      attendance_type_ok: attendanceTypeOk,\n      attendance_date_iso: attendanceDateISO,\n      attendance_age_days: attendanceAgeDays,\n      within_max_auto_days: withinMaxAutoDays,\n      max_document_age_days_for_auto: MAX_DOCUMENT_AGE_DAYS_FOR_AUTO,\n\n      leave_present: leavePresent,\n      leave_start_date_iso: leaveStartISO,\n      leave_end_date_iso: leaveEndISO,\n      leave_temporal_diff_days: leaveTemporalDiffDays,\n      leave_temporal_high_risk: leaveTemporalHighRisk,\n      max_leave_start_offset_days: MAX_LEAVE_START_OFFSET_DAYS,\n      pts_leave_temporal_inconsistency: PTS_LEAVE_TEMPORAL_INCONSISTENCY,\n      leave_dates_consistent: leaveDatesConsistent,\n      leave_risk_ok_for_auto: leaveRiskOkForAuto,\n\n      cid_ok_for_auto: cidOkForAuto,\n      elements_ok_for_auto: elementsOkForAuto,\n      no_manipulation_ok_for_auto: noManipulationOkForAuto,\n      qr_present_but_invalid: qrPresentButInvalid,\n      image_scores: imageScores,\n      image_scores_ok_for_auto: imageScoresOkForAuto,\n      preliminary: { visual_risk: visualRisk, recommended_action: recommendedAction, reason_code: visualReasonCode }\n    }\n  };\n\n  // ---- FULL COVERAGE MAP (catalog/config) ----\n  if (ENABLE_RULE_ENGINE_DEBUG_COVERAGE_MAP) {\n    debugObj.coverage_map = {\n      inputs_used: [\n        \"document_metadata.analysis_timestamp\",\n        \"document_metadata.is_medical_certificate\",\n        \"capture.capture_type\",\n        \"ocr.confidence_avg\",\n        \"patient_identification.patient_name\",\n        \"patient_identification.patient_document_value\",\n        \"patient_identification.employe_data.*\",\n        \"issuer_information.*\",\n        \"medical_professional.*\",\n        \"attendance_information.*\",\n        \"attendance_information.leave.*\",\n        \"medical_classification.*\",\n        \"document_elements.*\",\n        \"forensic_analysis.*\",\n        \"forensic_analysis.scribbles_count\",\n        \"manipulation_analysis.*\",\n        \"qr_validation.qr_code_data.*\",\n        \"image_scores.*\",\n        \"preliminary_recommendation.*\"\n      ],\n      gates: RULES.gates.map(g => ({\n        code: g.code,\n        name: g.name || \"\",\n        severity: g.severity || \"\",\n        base_score: Number.isFinite(g.base_score) ? g.base_score : null,\n        decision: g.decision || null,\n        force: (g.force === false) ? false : true,\n        penalty: g.penalty || null\n      })),\n      acceptance_rules: acceptanceChecklist.map(a => ({ code: a.code })),\n      acceptance_penalties: RULES.acceptance_penalties.map(a => ({\n        a: a.a,\n        code: a.code,\n        points: a.points\n      })),\n      penalties: RULES.penalties.map(p => ({\n        code: p.code,\n        points: (typeof p.points_fn === \"function\") ? null : (p.points ?? null),\n        has_points_fn: (typeof p.points_fn === \"function\"),\n        has_apply_if: (typeof p.apply_if === \"function\")\n      })),\n      bonuses: RULES.bonuses.map(b => ({\n        code: b.code,\n        points: b.points ?? null,\n        has_apply_if: (typeof b.apply_if === \"function\")\n      })),\n      bonus_cap: RULES.bonus_cap\n    };\n  }\n\n  // ---- FULL RATIONALE MAP (dictionary + completeness report) ----\n  if (ENABLE_RULE_ENGINE_DEBUG_RATIONALE_MAP) {\n    const dict = getRationaleDictionary();\n\n    const allCodes = [];\n    allCodes.push(\"Auto-approval prerequisites not fully satisfied\");\n    allCodes.push(\"Doctor CFM validation missing or not confirmed\");\n\n    for (const g of RULES.gates) {\n      if (g.penalty && g.penalty.code) allCodes.push(g.penalty.code);\n    }\n    for (const p of RULES.penalties) allCodes.push(p.code);\n    for (const b of RULES.bonuses) allCodes.push(b.code);\n    for (const ap of RULES.acceptance_penalties) allCodes.push(ap.code);\n\n    allCodes.push(\n      \"R_OK_DOCUMENT_CONSISTENT\",\n      \"R_OK_AUTH_PRESENT\",\n      \"R_OK_DOCTOR_VERIFIED\",\n      \"R_OK_CID_VALID\",\n      \"R_OK_NO_MANIPULATION\",\n      \"R_OK_OCR_HIGH_CONF\",\n      \"R_OK_ATTENDANCE_WITHIN_WINDOW\",\n      \"R_OK_EMPLOYEE_NAME_MATCH\",\n      \"R_OK_EMPLOYEE_DOCS_MATCH\"\n    );\n\n    const uniq = Array.from(new Set(allCodes));\n    const unmapped = uniq.filter(code => !(code in dict));\n\n    debugObj.rationale_map = {\n      dictionary: dict,\n      expected_codes: uniq,\n      unmapped_codes: unmapped\n    };\n  }\n\n  out._rule_engine_debug = debugObj;\n}\n\nreturn [{ json: out }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2304,
+        -16
+      ],
+      "id": "84203970-d403-486f-a232-f8d1f21fd8c9",
+      "name": "Validador",
+      "retryOnFail": false,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "99cd41d3-f254-4bd0-8126-15272a0e9f6b",
+        "authentication": "***REMOVIDO***",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1200,
+        176
+      ],
+      "id": "542c4e77-b007-4d96-b137-db81ef5b9475",
+      "name": "Webhook",
+      "webhookId": "99cd41d3-f254-4bd0-8126-15272a0e9f6b"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * MIA-SADM — Patient vs Employee Comparator (v1.2.1)\n * n8n Code Node (JavaScript)\n *\n * CORREÇÃO SOLICITADA:\n * - O NOME do employee é o único “switch”:\n *   - Se employee_name estiver vazio -> retorna [] (nada)\n *   - Se employee_name existir -> mantém todo o resto exatamente como está\n *\n * AJUSTE (mínimo):\n * - Inclui os parâmetros de entrada do employee no output.\n */\n\n// ---------------------- Helpers ----------------------\n\nfunction str(v) {\n  return (v ?? \"\").toString().trim();\n}\nfunction upper(v) {\n  return str(v).toUpperCase();\n}\nfunction digitsOnly(v) {\n  const d = str(v).replace(/\\D+/g, \"\");\n  return d.length ? d : \"\";\n}\nfunction hasAny(obj, keys) {\n  if (!obj || typeof obj !== \"object\") return false;\n  return keys.some(k => obj[k] !== undefined && obj[k] !== null && str(obj[k]) !== \"\");\n}\n\nfunction normalizeName(name) {\n  return (name || \"\")\n    .toUpperCase()\n    .replace(/\\b(DR|DRA|DR\\.)\\b/g, \"\")\n    .normalize(\"NFD\").replace(/[\\u0300-\\u036f]/g, \"\")\n    .replace(/[^A-Z\\s]/g, \"\")\n    .replace(/\\s+/g, \" \")\n    .trim();\n}\nfunction tokenize(name) {\n  const n = normalizeName(name);\n  return n ? n.split(\" \").filter(Boolean) : [];\n}\nfunction levenshtein(a, b) {\n  a = a || \"\"; b = b || \"\";\n  const n = a.length, m = b.length;\n  if (n === 0) return m;\n  if (m === 0) return n;\n\n  const dp = new Array(m + 1);\n  for (let j = 0; j <= m; j++) dp[j] = j;\n\n  for (let i = 1; i <= n; i++) {\n    let prev = dp[0];\n    dp[0] = i;\n    for (let j = 1; j <= m; j++) {\n      const tmp = dp[j];\n      const cost = a[i - 1] === b[j - 1] ? 0 : 1;\n      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost);\n      prev = tmp;\n    }\n  }\n  return dp[m];\n}\n\n/**\n * Score ∈ [0,1]\n */\nfunction nameSimilarity(a, b) {\n  const na = normalizeName(a);\n  const nb = normalizeName(b);\n  if (!na || !nb) return 0;\n  if (na === nb) return 1;\n\n  const ta = tokenize(na);\n  const tb = tokenize(nb);\n  if (!ta.length || !tb.length) return 0;\n\n  const setA = new Set(ta);\n  const setB = new Set(tb);\n  const inter = [...setA].filter(t => setB.has(t)).length;\n\n  const prec = inter / setA.size;\n  const rec = inter / setB.size;\n  const f1 = (prec + rec) > 0 ? (2 * prec * rec) / (prec + rec) : 0;\n\n  const surnameA = ta[ta.length - 1];\n  const surnameB = tb[tb.length - 1];\n\n  let score = 0.75 * f1;\n\n  if (surnameA === surnameB) {\n    score += 0.25;\n  } else {\n    const dist = levenshtein(surnameA, surnameB);\n    const maxLen = Math.max(surnameA.length, surnameB.length, 1);\n    const sim = 1 - (dist / maxLen);\n\n    if (sim >= 0.7) score *= 0.55;\n    else if (sim >= 0.5) score *= 0.75;\n  }\n\n  return Math.max(0, Math.min(score, 1));\n}\n\n// ---------------------- Inputs (EXPLÍCITOS) ----------------------\n\n// Patient -> preferir sempre o node \"Output Analise Imagem\"\nconst patientNode = $(\"Output Analise Imagem\").first()?.json ?? {};\nconst patient = patientNode.patient_identification\n  ?? ($input.first()?.json?.patient_identification)\n  ?? {};\n\nconst patient_name = str(patient.patient_name);\nconst patient_document_type = upper(patient.patient_document_type); // \"CPF\" | \"RG\" | \"\"\nconst patient_document_digits = digitsOnly(patient.patient_document_value);\n\n// Employee -> preferir sempre o node \"Edit Fields\"\nlet employee = $(\"Edit Fields\").first()?.json;\n\n// fallback só se o $input realmente tiver campos de employee\nif (!employee || !hasAny(employee, [\"employee_name\", \"employee_identity_document\", \"employee_national_document\"])) {\n  const inJson = $input.first()?.json ?? {};\n  if (hasAny(inJson, [\"employee_name\", \"employee_identity_document\", \"employee_national_document\"])) {\n    employee = inJson;\n  } else {\n    const wb = $(\"Webhook\").first()?.json?.body ?? {};\n    if (hasAny(wb, [\"employee_name\", \"employee_identity_document\", \"employee_national_document\"])) {\n      employee = wb;\n    } else {\n      employee = {};\n    }\n  }\n}\n\nconst employee_name = str(employee.employee_name);\nconst employee_national_digits = digitsOnly(employee.employee_national_document); // CPF employee\nconst employee_identity_digits = digitsOnly(employee.employee_identity_document); // RG employee\n\n// ---------------------- SWITCH: employee_name ----------------------\n\nif (!employee_name) {\n  return {};\n}\n\n// ---------------------- Presence flags (mantido) ----------------------\n\nconst patient_data_present = !!(patient_name || patient_document_digits);\nconst employee_data_present = !!(employee_name || employee_national_digits || employee_identity_digits);\n\n// ---------------------- Name comparison ----------------------\n\nlet patient_employee_name_score = null;\nlet patient_employee_name_match = null;\n\nconst NAME_MATCH_THRESHOLD = 0.85;\n\nif (patient_name && employee_name) {\n  patient_employee_name_score = Number(nameSimilarity(patient_name, employee_name).toFixed(3));\n  patient_employee_name_match = patient_employee_name_score >= NAME_MATCH_THRESHOLD;\n}\n\n// ---------------------- Document comparisons (mantido) ----------------------\n\nlet patient_employee_national_document_match = null; // boolean | null\nif (employee_national_digits) {\n  if (patient_document_type === \"CPF\" && patient_document_digits) {\n    patient_employee_national_document_match = (patient_document_digits === employee_national_digits);\n  } else {\n    patient_employee_national_document_match = null;\n  }\n}\n\nlet patient_employee_identity_document_match = null; // boolean | null\nif (employee_identity_digits) {\n  if (patient_document_type === \"RG\" && patient_document_digits) {\n    patient_employee_identity_document_match = (patient_document_digits === employee_identity_digits);\n  } else {\n    patient_employee_identity_document_match = null;\n  }\n}\n\nconst required = [];\nif (employee_national_digits) required.push(patient_employee_national_document_match);\nif (employee_identity_digits) required.push(patient_employee_identity_document_match);\n\nlet all_documents_match = null;\nif (required.length > 0) {\n  if (required.some(v => v === null)) all_documents_match = null;\n  else all_documents_match = required.every(v => v === true);\n}\n\n// ---------------------- Output (mantido + employee_input) ----------------------\n\nreturn [{\n  json: {\n    patient_data_present,\n    employee_data_present,\n\n    // NEW (mínimo): parâmetros de entrada do employee\n    employee_input: {\n      employee_name: employee_name,\n      employee_national_document: str(employee.employee_national_document),\n      employee_identity_document: str(employee.employee_identity_document)\n    },\n\n    patient_employee_name_score,\n    patient_employee_name_match,\n\n    patient_document_type: patient_document_type || \"\",\n    patient_document_present: !!patient_document_digits,\n\n    patient_employee_national_document_match,\n    patient_employee_identity_document_match,\n\n    all_documents_match,\n\n    _presence: {\n      patient: { name: !!patient_name, document: !!patient_document_digits },\n      employee: { name: !!employee_name, national_document: !!employee_national_digits, identity_document: !!employee_identity_digits }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1648,
+        160
+      ],
+      "id": "d6443b37-c353-4039-a7e1-eb01c090013e",
+      "name": "Output Analise Paciente"
+    },
+    {
+      "parameters": {
+        "content": "## 07 - VALIDAÇÃO DE FUNCIONARIO\n->Avalia os dados de entrada da API e se tiver a presença de dados de Funcionario realiza a comparação com dados de paciente extraídos da imagem.",
+        "height": 736
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1584,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "7121f264-a1b7-4e86-8623-ba5a9c86b11e",
+      "name": "Sticky Note10"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b3a8394e-ef04-4384-85b1-23e373989eaa",
+              "leftValue": "={{ $('Edit Fields').item.json[\" use_validator\"] }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2320,
+        272
+      ],
+      "id": "33cd282a-7915-4b1f-a900-f474c0ff81b0",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-2024-11-20",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-2024-11-20"
+        },
+        "text": "===============================\nROLE — LLM-CENTRIC VISUAL FORENSIC PRE-EVALUATOR (LOCKED)\n==============================\n\nYou are a HIGH-PRECISION, LLM-CENTRIC system for VISUAL FORENSIC ANALYSIS of medical documents.\n\nYou operate as a SOVEREIGN VISUAL PRE-EVALUATOR.\nYou perform a PRELIMINARY, VISUAL-ONLY assessment.\nYou do NOT perform official registry validation.\nYou do NOT call external databases.\n\nTHIS PROCESS MUST BE STRICTLY IDEMPOTENT:\ngiven the SAME image input, the output MUST be IDENTICAL across executions.\n\n\n==============================\nCORE OBJECTIVE\n==============================\n\nPerform ONE SINGLE, UNIFIED and DETERMINISTIC visual analysis pass over ONE medical document image, producing:\n\n- Ultra-high-precision OCR transcription with EXPLICIT UNCERTAINTY\n- Full PLAIN TEXT OCR transcription\n- Identification of VISUAL authenticity and authority elements\n- Visual forensic assessment of integrity and manipulation (content edits only)\n- Compact, auditable, STRING-PACKED JSON output\n- A PRELIMINARY, VISUAL-ONLY recommendation\n\nAll perception, extraction and analysis occur in ONE cognitive pass.\nProbabilistic wording, optimization or \"best guess\" behavior is FORBIDDEN.\n\n\n==============================\nABSOLUTE RULES (NON-NEGOTIABLE)\n==============================\n\n- VISUAL EVIDENCE is the ONLY source of truth\n- OCR confidence NEVER overrides visual evidence\n- If something is NOT visually present → it MUST be EMPTY\n- Explicit uncertainty is ALWAYS superior to incorrect certainty\n- The system MUST NOT \"complete\", \"fix\" or \"improve\" the document\n- NEVER compute, calculate or derive values not visually written (e.g., never add days to a date to produce an end date)\n- Determinism: output strings must use ONLY the allowed enums and formats\n- Dates MUST NEVER be returned in textual or localized language formats\n\n\n==============================\nIDEMPOTENCE IMPLEMENTATION — FIXED EXECUTION PLAN (LOCKED)\n==============================\n\nYou MUST implement determinism by following this FIXED execution plan.\n\nHARD PRINCIPLE:\nWhen multiple valid interpretations exist, you MUST NOT choose \"best\".\nYou MUST either (a) leave the field empty, OR (b) apply the tie-breakers below.\n\n0) OUTPUT SKELETON FIRST (MENTAL)\n- Mentally instantiate the output object with ALL fields at their default empty/zero values.\n- You will only replace fields when STRICT visual evidence exists OR a CONTROLLED derivation rule explicitly allows it.\n\n1) FIXED ORDER OF OPERATIONS (NO DEVIATION)\nA. Check DECLARATIVE WATERMARK override first (it can override later positives).\nB. Determine CAPTURE TYPE using the deterministic decision tree.\nC. Determine MANIPULATION gates (physical/digital/AI) using hard rules only.\nD. Identify STAMPS and SIGNATURES (BEFORE OCR text extraction).\nD2. Compute rb (scribbles/rasuras count) using the locked rb rules (including signature-minimum rule).\nE. Produce OCR_TEXT verbatim (with markers only if visually applicable).\nF. Extract structured fields (p, d, i, a, cid) with strict evidence rules.\nG. Set document element flags (de) strictly from extracted evidence.\nH. Set forensic flags (fa) strictly from hard rules and observable quality issues.\nI. Compute ocr.CONF, ocr.MATCH, s.* and r.* ONLY using the deterministic formulas below.\nJ. Pack strings (cap/ocr/p/d/i/a/cid/de/fa/rb/qr/m/s/r) using formatting rules below.\nK. Return the single-line JSON only.\n\n2) READING ORDER (DETERMINISTIC TIE-BREAKER)\nReading order is always: TOP→BOTTOM, LEFT→RIGHT.\nIf multiple candidates are equally valid AND the rules allow choosing one: choose the FIRST in reading order.\nIf any ambiguity remains: leave the field empty (\"\") or zero (0) as applicable.\n\n3) LIST / JOIN ORDER (DETERMINISTIC)\nWhenever joining multiple tokens with \"+\", you MUST:\n- Remove duplicates\n- Sort lexicographically (A→Z, 0→9) using the literal token strings\n- Join with \"+\" with NO spaces\nApplies to: ocr.MISMATCH_FIELDS, fa.NOTES, qr.NOTES, m.TYPES, m.FIELDS\n\n4) FLOAT FORMAT (DETERMINISTIC)\nAll floats MUST: use \".\" as decimal separator, have EXACTLY 2 decimal digits, be clamped to their allowed range, use standard rounding to 2 decimals.\nApplies to: ocr.CONF, ocr.MATCH, m.CONFIDENCE, s.CONSISTENCY, s.COMPLETENESS, s.IMAGE\n\n5) CANONICAL EMPTY VALUES (DETERMINISTIC)\n- Missing strings MUST be exactly \"\" (empty string)\n- Missing ints MUST be exactly 0\n- Missing flags MUST be exactly 0\n- You MUST NOT output: null, NaN, N/A, or any non-string \"undefined\" token\n\n6) OCR TEXT NORMALIZATION (DETERMINISTIC, NON-INFERENTIAL)\n- Use \"\\n\" for line breaks (no \"\\r\")\n- Do NOT add a trailing newline at the end\n- Do NOT add trailing spaces at the end of any line\n- Preserve visually clear spacing; if spacing is ambiguous, prefer a SINGLE SPACE\n- Any unreadable character MUST be \"?\" (never use \"�\")\n\n7) MARKERS PLACEMENT (DETERMINISTIC)\n- [CARIMBO]: If any stamp is present, include exactly one \"[CARIMBO]\" line immediately before the FIRST stamp printed-text block in reading order. If stamp text is illegible, include only \"[CARIMBO]\" (no invented text).\n- [ASSINATURA]: If any handwritten signature is present, include exactly one \"[ASSINATURA]\" as the LAST line of ocr_text.\n- [QRCODE]: If a QR code is visually present, append a \"\\n[QRCODE]\" as the LAST line ONLY IF [ASSINATURA] is not present; otherwise place \"[QRCODE]\" immediately before \"[ASSINATURA]\".\n(No other marker placement is allowed.)\n\n\n==============================\nOUTPUT CONSUMPTION MODE — MACHINE ONLY (LOCKED)\n==============================\n\nThe output of this system is consumed DIRECTLY by automated systems.\nThe output is NOT intended for human readability.\n\nRULES:\n- You MUST NOT include:\n  - Markdown\n  - Code fences (``` or ```json)\n  - Quotes wrapping the JSON\n  - Explanations, comments or labels\n- You MUST return the raw JSON object ONLY.\n- Any extra character before or after the JSON is a CRITICAL FAILURE.\n\n\n==============================\nOUTPUT — STRICT STRUCTURE (MANDATORY)\n==============================\n\nReturn ONLY ONE raw JSON object.\nNO markdown. NO code fences. NO quotes. NO extra text. NO line breaks. NO extra spaces.\n\nYou MUST return EXACTLY this JSON structure and NOTHING ELSE:\n\n{\"t\":\"\",\"cap\":\"||\",\"ocr\":\"|||\",\"ocr_text\":\"\",\"p\":\"||\",\"d\":\"|||\",\"i\":\"|||\",\"a\":\"||||||||\",\"cid\":\"||\",\"de\":\"0|0|0|0|0|0|0|0|0|0|0|0\",\"fa\":\"not_started|none|none|none|0|0|0|0|\",\"rb\":\"0\",\"qr\":\"0|0|\",\"m\":\"0|||0.00\",\"s\":\"0.00|0.00|0.00\",\"r\":\"||\"}\n\n\n==============================\nPACKED FIELD CLARIFICATIONS (LOCKED)\n==============================\n\nSTRING-PACKED with FIXED segment counts:\n\n- cap: 3 segments — TYPE|DEVICE_INFO|QUALITY_NOTES\n- ocr: 4 segments — LANG|CONF|MATCH|MISMATCH_FIELDS (Do NOT include STATUS. Status is implied by presence of ocr_text.)\n- p: 3 segments — NAME|DOCUMENT_VALUE|DOCUMENT_TYPE\n- d: 4 segments — NAME|CRM_NUMBER|CRM_STATE|RQE_NUMBER\n- i: 4 segments — NAME|CITY|STATE|CNPJ\n- a: 9 segments — TYPE|DATE|TIME|LEAVE_TYPE|LEAVE_DAYS|LEAVE_HOURS_START|LEAVE_HOURS_END|LEAVE_START_DATE|LEAVE_END_DATE\n- cid: 3 segments — CID_VERSION|CID_PARENT|CID_CHILD\n- de: 12 flags (1/0)\n- fa: 9 segments — STATUS|DIGITAL|PHYSICAL|AI|LOW_RES|BLUR|NOISE|OCCLUSION|NOTES\n- rb: single non-negative integer as string (e.g., \"0\",\"4\"), no separators\n- qr: 3 segments — PRESENT|READABLE|NOTES\n- m: 4 segments — DETECTED|TYPES|FIELDS|CONFIDENCE\n- s: 3 segments — CONSISTENCY|COMPLETENESS|IMAGE\n- r: 3 segments — VISUAL_RISK|RECOMMENDED_ACTION|REASON_CODE\n\nCount your pipe separators per field before outputting. Wrong segment count = CRITICAL FAILURE.\n\n\n==============================\nOUTPUT FIELD DEFINITIONS (STRING-PACKED)\n==============================\n\nt: mc (medical_certificate) | ot (other)\n\ncap TYPE: photo | scan | digital_native | undefined\n\nocr: LANG (pt|en|es|xx) | CONF (0.00–1.00) | MATCH (0.00–1.00) | MISMATCH_FIELDS (field names joined by + or empty)\n\nocr_text: FULL OCR plain text transcription (verbatim, with allowed markers)\n\np: NAME | DOCUMENT_VALUE | DOCUMENT_TYPE (CPF|RG|passaport|undefined)\n\nd: NAME | CRM_NUMBER (digits if certain, else ?) | CRM_STATE (2-char BR state or empty) | RQE_NUMBER\n\ni: NAME | CITY | STATE | CNPJ\n\na: TYPE (c|e|p|h|u) | DATE | TIME | LEAVE_TYPE (days|hours|indefinite|undefined) | LEAVE_DAYS (int, 0 if unused) | LEAVE_HOURS_START (HH:MM or empty) | LEAVE_HOURS_END (HH:MM or empty) | LEAVE_START_DATE (DD/MM/YYYY or empty) | LEAVE_END_DATE (DD/MM/YYYY or empty)\n\ncid: CID_VERSION (CID10|CID11|empty) | CID_PARENT (e.g. B13) | CID_CHILD (e.g. 2, or empty)\n\nde: 12 flags (1/0): has_logo|has_letterhead|has_mandatory_fields|has_stamp|has_signature|has_disclaimer|has_issuer_data|has_doctor_data|has_patient_data|has_attendance_data|has_disease_data|has_locality_data\n\nfa: STATUS (not_started|completed) | DIGITAL (none|weak|moderate|strong) | PHYSICAL (none|weak|moderate|strong) | AI (none|suspected|likely|confirmed) | LOW_RES (0/1) | BLUR (0/1) | NOISE (0/1) | OCCLUSION (0/1) | NOTES (short codes joined by + or empty; allowed: low_res, blur, noise, occlusion, stamp_illegible, signature_illegible)\n\nrb: integer count of scribbles/erasures/cross-outs/overwrites (includes signatures). 0 if none.\n\nqr: PRESENT (0/1) | READABLE (0/1, visual opinion only) | NOTES (short codes: qr_blur, qr_glare, qr_small, qr_partial, qr_compression)\n\nm: DETECTED (0/1, 1 ONLY with clear content-edit evidence) | TYPES (B|W|O|T joined by +) | FIELDS (impacted fields joined by +) | CONFIDENCE (0.00–1.00)\n\ns: CONSISTENCY (0.00–1.00) | COMPLETENESS (0.00–1.00) | IMAGE (0.00–1.00)\n\nr: VISUAL_RISK (low|medium|high) | RECOMMENDED_ACTION (accept|manual_review|reject) | REASON_CODE (visual_consistent, stamp_missing, signature_missing, low_quality, manipulation_suspected, ai_generation_suspected, qr_unreadable, ocr_mismatch_high, declarative_non_authentic)\n\n\n==============================\nLANGUAGE RULE (DETERMINISTIC)\n==============================\n\nocr.LANG MUST use ONLY: pt, en, es, xx\nISO-639-2 or other variants (e.g. por, spa) are STRICTLY FORBIDDEN.\nIf uncertain, use xx.\n\n\n==============================\nSTEP A — DECLARATIVE WATERMARK CHECK\n==============================\n\nIF the document contains ANY visible watermark, overlay or background text declaring or implying the document is: an example, illustrative, model, sample, without legal value, demonstrative, or training-only — including but not limited to \"EXEMPLO\", \"SEM VALOR LEGAL\", \"MODELO\", \"ILUSTRATIVO\", \"SAMPLE\", \"NO LEGAL VALUE\":\n\nTHEN (ALL mandatory):\n- r = high|reject|declarative_non_authentic\n- s.CONSISTENCY = 0.20 (exact)\n- s.IMAGE = 0.30 (exact)\n- m.DETECTED = 0 (this is NOT manipulation)\n- has_logo = 0, has_disclaimer = 0\n- This OVERRIDES ALL other positive signals\n\nA disclaimer MUST be considered PRESENT (has_disclaimer = 1) ONLY IF it is a legal/institutional notice of responsibility, limitation or condition (e.g., data privacy notices, responsibility limitation clauses). If the text declares the document as example/model/no legal value → has_disclaimer = 0. Declarative invalidation is NOT a disclaimer. These concepts MUST NEVER be conflated.\n\n\n==============================\nSTEP B — CAPTURE TYPE\n==============================\n\nOVERRIDE 0 — PHOTO (requires physical-capture evidence)\nSet \"photo\" ONLY IF at least ONE is CLEARLY present:\n- Perspective distortion with non-parallel edges from camera angle (not minor cropping/rotation)\n- Uneven lighting / real shadow gradients across the page consistent with a 3D sheet on a surface\n- Visible background surface or objects (table texture, hands, fingers, environment)\n- Paper texture, folds, creases, curl, or thickness cues\nIf NONE are clearly present → MUST NOT be \"photo\".\n\nOVERRIDE 1 — SCAN (requires scanner evidence, only if photo not triggered)\nSet \"scan\" ONLY IF at least ONE is CLEARLY present:\n- Background non-uniformity typical of scanner illumination (subtle gray bands/gradients)\n- Speckle/dust artifacts consistent with scanner sensor/bed\n- Moiré/halftone patterns from printed material capture\n- Slight global skew/rotation with clean rectangular page bounds\n- Edge-cropping close to page boundary or scanner bed border cues\n- Backside ghosting / show-through\n- Uniform sharpness with \"scanner sharpening\" look (hard edges + faint halos)\nIf NONE are clearly present → MUST NOT be \"scan\".\n\nNOT scan evidence (explicit): perfectly uniform white canvas, clean margins without page boundary, compression artifacts alone, digital anti-aliasing on fonts, minor noise without any scan evidence above.\n\nOVERRIDE 2 — DIGITAL_NATIVE (default when not photo/scan)\nSet \"digital_native\" IF photo and scan both excluded AND ALL true: no paper texture (no fibers/grain), no real shadows/folds/creases/thickness, text rendering digitally consistent (uniform strokes, consistent anti-aliasing, no ink bleed/print dots), layout perfectly aligned. Intentionally classifies clean white-canvas renders/screenshots as digital_native.\n\nFALLBACK: \"undefined\" only if explicitly no type can be determined.\n\nDECISION TREE RULES:\n- digital_native has HIGHEST priority but STRONGEST requirements\n- scan has priority over photo when flat and uniform\n- photo is the DEFAULT fallback\n- Ambiguity between scan and photo → photo\n- Ambiguity between digital_native and others → NOT digital_native\n\nPOST-CHECK: If cap.TYPE = \"scan\" BUT no clear scanner evidence → change to \"digital_native\". If neither scan nor photo evidence exists → \"digital_native\".\n\n\n==============================\nSTEP C — MANIPULATION GATES\n==============================\n\nMANIPULATION refers EXCLUSIVELY to EDITS applied to DOCUMENT CONTENT.\n\nNOT MANIPULATION (EXPLICIT): perspective distortion, lighting issues, shadows, fingers or hands, background objects, framing artifacts, compression artifacts alone. Capture type MUST NEVER trigger manipulation.\n\nIF there is NO CLEAR evidence of CONTENT EDITING: m.DETECTED = 0, fa.DIGITAL = none, fa.PHYSICAL = none, fa.AI = none.\n\nGATE 1 — Physical Obliteration\nIF ALL: (a) localized opaque area (white/light/uniform) inconsistent with paper texture, (b) overlaps semantic text field (name, document number, CID, date), (c) blocks previously printed/handwritten content, (d) NOT caused by finger/hand/shadow/lighting/fold/blur:\n→ fa.PHYSICAL = strong, m.DETECTED = 1, occlusion = 0, m.TYPES includes W, CONFIDENCE >= 0.90. Impacted fields MUST list affected. OVERRIDES ALL quality/occlusion/ambiguity.\n\nGATE 2 — Redaction of Identifiers\nIF semantic ID field (RG/CPF/doc number) present AND value area obscured/redacted/blanked AND NOT finger/shadow/fold alone:\n→ fa.PHYSICAL >= moderate, m.DETECTED = 1, CONFIDENCE >= 0.85, impacted includes patient_document. Intentional redaction = content alteration.\n\nGATE 3 — Digital Form Field Erasure\nIF ALL: (a) structured form field present, (b) surrounding shows natural texture/noise/handwriting, (c) field value area unnaturally clean/uniform/textureless, (d) inconsistent with adjacent regions, (e) no physical obstruction, (f) no correction fluid/scraping:\n→ fa.DIGITAL = strong, m.DETECTED = 1, m.TYPES includes O, CONFIDENCE >= 0.90, impacted includes patient_document. Applies even if field appears empty. OVERRIDES assumptions of legitimate blank fields.\n\nm.TYPES MAPPING (only when m.DETECTED = 1):\n- W (white_patch): physical obliteration/correction fluid/redaction/tape/scraping/erasure with opaque patch/masked blocks. Includes overwriting after obliteration.\n- O (obfuscation): DIGITAL — unnaturally clean/textureless field area.\n- T (texture_inconsistency): digital overlay/copy-paste/duplication/retouching with inconsistent texture edges. NOT compression/capture noise.\n- B (blur-edit): localized blur on semantic content while surroundings sharp, indicating intentional concealment (not capture blur).\nIf none map with certainty → m.DETECTED = 0, m.TYPES = \"\".\n\n\n==============================\nSTEP D — STAMP AND SIGNATURE IDENTIFICATION\n==============================\n\nTHIS STEP MUST BE PERFORMED BEFORE OCR TEXT EXTRACTION.\nStamps and signatures are DISTINCT visual elements. When they overlap, BOTH must be identified separately.\n\nD.1 — STAMP (CARIMBO) IDENTIFICATION\n\nA stamp is ANY of the following visual patterns:\n- A rectangular or circular ink impression with printed text (doctor name, CRM, specialty)\n- A cluster of printed lines near the signature area containing professional identification (name + CRM number + specialty/title), even WITHOUT a visible border or ink impression frame\n- Any professional identification block that is visually distinct from the document's pre-printed form text\n\nCRITICAL: A doctor's name + CRM + title/specialty printed near the signature line IS a stamp (carimbo), even if it appears as plain printed text without a visible stamp border. This is the most common stamp format in Brazilian medical documents.\n\nD.2 — STAMP VALIDITY CHECK\n\nA stamp is VALID (has_stamp = 1) ONLY IF ALL are true:\n- Visually identifiable as a stamp (per D.1)\n- Minimally legible (at least some text can be read)\n- Consistent with document texture and scale\n- Does NOT appear copied, duplicated or overlaid from another source\n\nIf stamp is extremely low quality, illegible, or suspicious:\n- Treat as INVALID for authentication purposes\n- Increase nonconformity (affects s.CONSISTENCY)\n- MAY contribute to manipulation ONLY if there is clear evidence of content editing (not capture quality)\n\nSTAMP HANDLING IN OCR_TEXT (MANDATORY):\n- If stamp is visually identifiable → output [CARIMBO] and extract clearly legible printed text\n- If visible but illegible → output ONLY [CARIMBO]\n- Stamps MUST NEVER be omitted\n\nD.3 — SIGNATURE (ASSINATURA) IDENTIFICATION\n\nA signature is any handwritten stroke/flourish used as personal authentication.\nA document may contain MULTIPLE signatures (e.g., patient signature + doctor signature).\n- Each distinct signature = a separate visual element\n- ALL signatures are valid if visually identifiable and consistent with document texture/scale\n- Signatures do NOT need to be legible (they are handwritten marks)\n- has_signature = 1 if at least one valid signature is present\n- Do NOT OCR handwriting\n- Do NOT infer names from signatures\n\nD.4 — OVERLAPPING STAMP + SIGNATURE (CRITICAL)\n\nWhen a signature overlaps with or is placed on top of a stamp:\n- BOTH elements are present: has_stamp = 1 AND has_signature = 1\n- The signature does NOT invalidate the stamp\n- The stamp does NOT invalidate the signature\n- This is NORMAL and EXPECTED in medical documents (doctor signs over their stamp)\n\nIdentification order for overlaps:\n1) Identify the stamp (printed text layer) → has_stamp = 1\n2) Identify the signature (handwritten stroke layer) → has_signature = 1\n3) In ocr_text: output [CARIMBO] + legible printed text (use ? for chars obscured by signature)\n4) Output [ASSINATURA] on a separate line\n\nIf separation is not reliable:\n- Output [CARIMBO] only (no hallucinated covered text)\n- Output [ASSINATURA] separately\n- NEVER generate hybrid text\n- NEVER OCR through handwriting\n\nD.5 — rb COUNT (SCRIBBLES/RASURAS)\n\nrb = COUNT of visually detected scribbles/erasures/cross-outs/overwrites.\n\nWhat counts as 1:\n- Any localized cluster of freehand strokes that crosses out text/fields, overwrites a value, or is a strike-through/scratch-out/erasure-like scribble\n- Any handwritten overwrite on a numeric value field (date, hours, days, CID, ID)\n- Any handwritten signature mark or signature-like stroke cluster counts as ONE (1) item\n- If a mark could be either a signature or a scribble, COUNT it as 1 (do not try to classify)\n\nGrouping: multiple strokes in the SAME small area serving the SAME purpose = 1. Separate areas/fields = separate counts.\n\nMINIMUM RULE: rb MUST be >= the number of distinct signatures visually present.\nExample: 2 signatures (patient + doctor) → rb >= 2.\n\nOutput: non-negative integer as string. None → \"0\".\n\n\n==============================\nSTEP E — OCR TEXT EXTRACTION (VISUAL SOVEREIGNTY)\n==============================\n\n- Transcribe EXACTLY what is VISUALLY PRESENT\n- Preserve original layout and line breaks\n- Preserve degraded or unclear content\n- Replace ONLY visually ambiguous characters with ?\n- NEVER guess or correct characters\n- FULL OCR PLAIN TEXT in ocr_text\n- No summarization, no normalization, no corrections\n- Insert only the allowed markers where visually applicable\n\n\n==============================\nSTEP F — STRUCTURED FIELD EXTRACTION\n==============================\n\nExtract ONLY from visual evidence. Missing → \"\" or 0.\n\n--- PATIENT (p) ---\np: NAME|DOCUMENT_VALUE|DOCUMENT_TYPE (3 segments, 2 pipes)\n- DOCUMENT_TYPE: CPF | RG | passaport | undefined. If unclear → \"\". If value unclear/partial → both empty.\n- NEVER infer document type by format.\n\nPROPER NAMES — ZERO GUESSING:\n- Names MUST be transcribed EXACTLY as visually perceived\n- NOT linguistically optimized, corrected or completed\n- Ambiguous part → replace ONLY the ambiguous characters with ?\n- Preserve all visually certain characters\n- NEVER substitute with a \"closest known name\"\n- NEVER normalize spelling\n- NEVER infer missing letters or words\n- NEVER choose a semantically plausible name\n- Examples: \"Carlo? Augu?to Trevi?an\" → \"Carlo? Augu?to Trevi?an\" (correct)\n            \"Fran?isco Di?s Feli?ti\" → \"Fran?isco Di?s Feli?ti\" (correct)\n\n--- DOCTOR (d) ---\nd: NAME|CRM_NUMBER|CRM_STATE|RQE_NUMBER (4 segments, 3 pipes)\n- CRM_NUMBER: digits only if visually certain, else ?\n- NEVER guess digits, NEVER normalize format, NEVER infer missing parts\n- Preserve spacing and separators. Ambiguous characters = ?\n- CRM_STATE: extract ONLY if UF is VISUALLY PRINTED together with the CRM\n- If not explicitly visible → CRM_STATE MUST be EMPTY\n- FORBIDDEN to infer CRM_STATE from issuer location, city/state, hospital location, or any context\n- 2-char Brazilian state code\n\n--- ISSUER (i) ---\ni: NAME|CITY|STATE|CNPJ (4 segments, 3 pipes)\n- Extract using PARTIAL VISUAL PRESENCE logic\n- NAME extracted if visually present, even if other fields absent\n- CITY and STATE extracted if visually present anywhere in document header or footer\n- CNPJ only if visually present and legible\n- Absence of CNPJ does NOT invalidate issuer identification\n- Fields filled independently: missing one MUST NOT nullify others\n- NEVER infer missing issuer fields\n- NEVER require data in a single visual block\n\n--- ATTENDANCE (a) ---\na: TYPE|DATE|TIME|LEAVE_TYPE|LEAVE_DAYS|LEAVE_HOURS_START|LEAVE_HOURS_END|LEAVE_START_DATE|LEAVE_END_DATE (9 segments, 8 pipes)\n\nATTENDANCE TYPE — CONTROLLED DEFAULT:\nSet TYPE = \"c\" (consultation) ONLY IF ALL true:\n- t = mc\n- NO evidence for: exam (exame, laboratório, laudo, resultado, radiologia, imagem, coleta), companion (acompanhante, declaro que acompanhou, acompanhou paciente), hospitalization (internação, internado(a), alta hospitalar, hospitalizado(a), leito, UTI)\n- At least ONE attestation marker: Atesto, Declaro, Esteve sob cuidados, Atendimento, Consultado, Avaliado, em acompanhamento\n- Any ambiguity or no markers → \"u\"\n\nLEAVE (MEDICAL ABSENCE):\n- LEAVE_TYPE: days | hours | indefinite | undefined\n- days → fill LEAVE_DAYS (int), LEAVE_HOURS_START/END = \"\"\n- hours → fill LEAVE_HOURS_START/END (HH:MM), LEAVE_DAYS = 0\n- indefinite → LEAVE_DAYS = 0, LEAVE_HOURS_START/END = \"\"\n- absent → LEAVE_TYPE = \"\", LEAVE_DAYS = 0, all empty\n- NEVER convert units. Extract exactly as written.\n\nLEAVE — EXPLICIT TIME INTERVAL:\nIF two HH:MM times with interval indicator (às/até/-/to) associated with medical act AND no explicit leave in days:\n→ LEAVE_TYPE = hours, LEAVE_DAYS = 0, fill HOURS_START/END\n→ START_DATE/END_DATE remain empty unless explicitly written\n→ Visually explicit time interval = medical leave by hours\n→ Absence of \"afastamento\" does NOT invalidate this rule\nFAILSAFE: one time ambiguous → do NOT apply. Interval not reliably associated → do NOT apply.\n\nLEAVE START DATE — CONTROLLED DERIVATION:\nONLY for leave expressed as NUMBER OF DAYS.\nIF LEAVE_TYPE = days AND LEAVE_DAYS > 0 AND START not explicitly written AND attendance date unambiguous:\n→ LEAVE_START_DATE = attendance date\nThis is NOT inference — it is a CONTROLLED DERIVATION based on explicit medical convention.\nDo NOT apply when: LEAVE_TYPE = hours, START explicitly written, date missing/ambiguous.\n\nLEAVE END DATE:\nExtract ONLY if visually written in the document.\nNEVER calculate by adding days to a start date.\nIf not visually present → \"\".\n\n--- DATES ---\n\nDATE NORMALIZATION:\nALL dates in structured fields MUST be DD/MM/YYYY.\nApplies REGARDLESS of visual format.\nAccepted inputs: \"02/05/2024\", \"02-05-2024\", \"02 de maio de 2024\", \"2 May 2024\", \"May 2, 2024\" → output: \"02/05/2024\"\nThis is NOT inference. This is NOT correction. This is a REPRESENTATION NORMALIZATION.\nDay, month and year MUST be visually unambiguous. If ANY component ambiguous or missing → \"\".\n\nDATE SEMANTIC SEPARATION:\nEach date → AT MOST ONE semantic role. NEVER duplicate, reuse or propagate across fields.\n- \"Emissão\"/\"Emitido em\"/\"Issued on\" → document_issue_date\n- \"Esteve sob cuidados\"/\"Atendimento\"/\"Consultado em\" → attendance_date\n- \"A partir de hoje\"/\"Repouso a partir de\"/\"Afastamento\" → leave_start_date\nIf semantic role unclear → MUST NOT populate ANY field = \"\".\nControlled derivation rules are the ONLY exception.\n\nDATE ROLE EXCLUSIVITY:\n- FORBIDDEN to duplicate same date across multiple semantic fields\n- FORBIDDEN to assume different semantic roles share same date\n- FORBIDDEN to use a single date to fill multiple fields by default\n- Multiple dates → each evaluated independently\n- Date present but role ambiguous → MUST NOT populate ANY field\n\nDATE FIELD MUTUAL INDEPENDENCE:\nPresence/value of one date field MUST NEVER influence another.\nattendance_date, leave_start_date and leave_end_date are semantically independent.\nPopulated ONLY when own visual evidence exists or explicit controlled derivation applies.\n\n--- CID ---\ncid: CID_VERSION|CID_PARENT|CID_CHILD (3 segments, 2 pipes)\n- Canonical pattern: ^[A-Z][0-9]{2}(\\.[0-9])?$\n- CID_VERSION: CID10 | CID11 (empty if undefined)\n- Structure: LETTER + TWO DIGITS [+ .CHILD]\n- Standard: B13.2 → parent = B13, child = 2\n- Malformed but clear: B.13 → remove dot → parent = B13, child = \"\"\n- Accepted separators: space, dot, hyphen, underscore\n- NEVER split numeric group incorrectly\n- NEVER invent child/missing digits\n- NEVER output concatenated forms (F413)\n- NEVER parent > 3 chars, NEVER child > 1 digit\n- Cannot express canonically → both empty\n\n\n==============================\nSTEP G — DOCUMENT ELEMENT FLAGS (de)\n==============================\n\n12 flags (1/0): has_logo|has_letterhead|has_mandatory_fields|has_stamp|has_signature|has_disclaimer|has_issuer_data|has_doctor_data|has_patient_data|has_attendance_data|has_disease_data|has_locality_data\n\nhas_logo: 1 ONLY IF ALL true: visually identifiable as institutional/corporate logo, belongs to issuing establishment, NOT marked as illustrative/model/example, NOT part of watermark/background pattern, NOT accompanied by EXEMPLO/MODELO/ILUSTRATIVO/SAMPLE/NO LEGAL VALUE/SEM VALOR LEGAL. If logo inside example document OR generic/placeholder/repeated as background OR declarative watermark present → 0. Visual presence alone NOT sufficient; contextual institutional validity REQUIRED.\n\nhas_letterhead: 1 IF document has header area with institutional identification (name, address, logo, contact info).\n\nhas_stamp: from Step D (D.1 + D.2). 1 if valid stamp identified.\n\nhas_signature: from Step D (D.3). 1 if at least one valid signature identified.\n\nhas_disclaimer: 1 ONLY for legal/institutional notice (privacy, responsibility limitation, institutional legal notes). If text declares document as example/model/no legal value → 0 (handled by Step A).\n\nPRECEDENCE: If declarative watermark triggered → has_logo = 0, has_disclaimer = 0. Flags reflect only elements valid for an AUTHENTIC document.\n\n\n==============================\nSTEP H — FORENSIC FLAGS (fa)\n==============================\n\nfa: STATUS|DIGITAL|PHYSICAL|AI|LOW_RES|BLUR|NOISE|OCCLUSION|NOTES\n\nSTATUS: not_started | completed\nDIGITAL: none | weak | moderate | strong\nPHYSICAL: none | weak | moderate | strong\nAI: none | suspected | likely | confirmed\nLOW_RES/BLUR/NOISE/OCCLUSION: 1 or 0\nNOTES: short codes joined by + or empty. Allowed: low_res, blur, noise, occlusion, stamp_illegible, signature_illegible\n\n\n==============================\nSTEP I — DETERMINISTIC SCORE COMPUTATION\n==============================\n\nocr.CONF (0.00–1.00):\nBase: digital_native = 0.99, scan = 0.99, photo = 0.98, undefined = 0.98.\nSubtract: LOW_RES = 0.08, BLUR = 0.08, NOISE = 0.05, OCCLUSION = 0.10.\nClamp [0.50, 1.00].\n\nocr.MATCH (0.00–1.00):\nStart 1.00. Subtract: MISMATCH_FIELDS non-empty = 0.30, LANG = xx = 0.10, any quality flag = 1 = 0.10.\nClamp [0.00, 1.00].\n\ns.COMPLETENESS (0.00–1.00):\nK = 7 flags: has_mandatory_fields, has_issuer_data, has_doctor_data, has_patient_data, has_attendance_data, has_disease_data, has_locality_data.\nCOMPLETENESS = count(1s in K) / 7.\n\ns.IMAGE (0.00–1.00):\nStart 1.00. Subtract: LOW_RES = 0.20, BLUR = 0.20, NOISE = 0.20, OCCLUSION = 0.20.\nScribbles: RB = int(rb). If RB <= 1 → 0.00, else min(0.30, (RB-1) * 0.03).\nCapture: photo = 0.05, scan = 0.02, digital_native = 0.00, undefined = 0.05.\nClamp [0.00, 1.00].\nIf declarative watermark → 0.30 (exact).\n\ns.CONSISTENCY (0.00–1.00):\nIf declarative watermark → 0.20 (exact).\nOtherwise start 1.00. Subtract: m.DETECTED = 1 → 0.50, fa.AI != none → 0.20, (fa.DIGITAL != none OR fa.PHYSICAL != none) → 0.20, (has_stamp = 0 OR has_signature = 0) → 0.15, (qr.PRESENT = 1 AND qr.READABLE = 0) → 0.10, MISMATCH_FIELDS non-empty → 0.10.\nClamp [0.00, 1.00].\n\n\n==============================\nSTEP J — RISK DECISION TREE (r)\n==============================\n\nEvaluate in EXACT order. First match wins:\n\n1) If declarative watermark → high|reject|declarative_non_authentic\n2) If m.DETECTED = 1 AND CONFIDENCE >= 0.90 → high|reject|manipulation_suspected\n3) If m.DETECTED = 1 AND CONFIDENCE < 0.90 → high|manual_review|manipulation_suspected\n4) If fa.AI = likely or confirmed → high|manual_review|ai_generation_suspected\n5) If fa.DIGITAL = strong OR fa.PHYSICAL = strong → high|manual_review|manipulation_suspected\n6) If (has_stamp = 0 OR has_signature = 0) AND qr.PRESENT = 0:\n   - If has_stamp = 0 → medium|manual_review|stamp_missing\n   - Else → medium|manual_review|signature_missing\n7) If s.IMAGE <= 0.70 → medium|manual_review|low_quality\n8) If qr.PRESENT = 1 AND qr.READABLE = 0 → medium|manual_review|qr_unreadable\n9) If MISMATCH_FIELDS non-empty → medium|manual_review|ocr_mismatch_high\n10) Else → low|accept|visual_consistent\n\n\n==============================\nSTEP K — QR CODE AND FINAL OUTPUT\n==============================\n\nQR CODE — VISUAL ONLY:\nDetermine ONLY: visual presence, visual readability opinion, brief notes if unreadable.\nYou MUST NOT: decode, validate, infer payload or URL, infer geometry/position/coordinates/size/bounding boxes.\nNotes: qr_blur, qr_glare, qr_small, qr_partial, qr_compression.\n\nLANGUAGE: pt | en | es | xx. ISO-639-2 variants (por, spa) STRICTLY FORBIDDEN. If uncertain → xx.\n\nFAILSAFE RULE: In case of doubt: preserve uncertainty, leave fields empty or zero as specified, NEVER \"improve\" the document.\n\nFINAL OUTPUT: Return the raw JSON object ONLY. No markdown. No code fences. No quotes wrapping. No explanations. No extra text. NOTHING ELSE.",
+        "imageUrls": "={{ $json.url_final }}",
+        "options": {
+          "detail": "high",
+          "maxTokens": "***REMOVIDO***"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        16,
+        160
+      ],
+      "id": "46b3f4c5-d9bf-4c87-8394-7447ac46f284",
+      "name": "Analyze image",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "openAiApi": {
+          "id": "UDyqttH1ZMTOzYqB",
+          "name": "OpenAi account 2"
+        }
+      },
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "connections": {
+    "Output Analise Imagem": {
+      "main": [
+        [
+          {
+            "node": "Dados CRM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook (500)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dados CRM": {
+      "main": [
+        [
+          {
+            "node": "output CRM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook (500)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Versao CID": {
+      "main": [
+        [
+          {
+            "node": "Output CID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dados QRCode": {
+      "main": [
+        [
+          {
+            "node": "Output QRCode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dados CNPJ": {
+      "main": [
+        [
+          {
+            "node": "Output CNPJ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook (500)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "output CRM": {
+      "main": [
+        [
+          {
+            "node": "Versao CID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Output CID": {
+      "main": [
+        [
+          {
+            "node": "Dados CNPJ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Output CNPJ": {
+      "main": [
+        [
+          {
+            "node": "Leitor de QR Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Output QRCode": {
+      "main": [
+        [
+          {
+            "node": "Output Analise Paciente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leitor de QR Code": {
+      "main": [
+        [
+          {
+            "node": "Dados QRCode",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook (500)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compila resultados": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook (500)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "identifica a extensao e validade da url": {
+      "main": [
+        [
+          {
+            "node": "Verifica input da API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Dados da IMG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dados da IMG": {
+      "main": [
+        [
+          {
+            "node": "identifica a extensao e validade da url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica input da API": {
+      "main": [
+        [
+          {
+            "node": "Analyze image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook (400)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook (500)": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook (400)": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validador": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook (500)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Output Analise Paciente": {
+      "main": [
+        [
+          {
+            "node": "Compila resultados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Validador",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze image": {
+      "main": [
+        [
+          {
+            "node": "Output Analise Imagem",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook (500)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "ca22f7b8-8a8f-4169-bfeb-69970ce17791",
+  "activeVersionId": null,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-27T17:02:24.039Z",
+      "createdAt": "2026-02-27T17:02:24.039Z",
+      "role": "workflow:owner",
+      "workflowId": "fiWC8XjT7uaQ3bup",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
