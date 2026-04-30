@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-28T22:50:40.144Z",
+  "updatedAt": "2026-04-30T01:00:11.843Z",
   "createdAt": "2026-04-24T16:53:22.853Z",
   "id": "hb7oOF29XUp2lS2v",
   "name": "BMS - 5.6 - Contestação NTAP",
@@ -41,25 +41,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $json.url }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        128,
-        192
-      ],
-      "id": "a00a2632-b3b2-4a25-84d0-e49cc3a54aca",
-      "name": "Baixar PDF",
-      "retryOnFail": false,
-      "maxTries": 5,
-      "waitBetweenTries": 5000,
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "const input = items[0].json.body;\n\nconst defensaId = input.defensaId;\nconst templateGoogleDocId = input.templateGoogleDocId;\nconst midias = input.midias || [];\n\nfunction getTipoMidia(nome, url) {\n  const lower = (nome || url || \"\").toLowerCase();\n\n  if (lower.endsWith(\".pdf\")) return \"pdf\";\n\n  if (\n    lower.endsWith(\".jpg\") ||\n    lower.endsWith(\".jpeg\") ||\n    lower.endsWith(\".png\") ||\n    lower.endsWith(\".gif\") ||\n    lower.endsWith(\".webp\")\n  ) return \"img\";\n\n  return \"outro\";\n}\n\n// 🚨 aqui muda tudo\nreturn midias.map(m => {\n  return {\n    json: {\n      defensaId,\n      templateGoogleDocId,\n      url: m.url,\n      nome: m.nome,\n      tipo: getTipoMidia(m.nome, m.url),\n      principal: m.principal || false\n    }\n  };\n});"
+        "jsCode": "const input = items[0].json.body;\n\nconst defensaId = input.defensaId;\nconst templateGoogleDocId = input.templateGoogleDocId;\nconst midias = input.midias || [];\n\nfunction getTipoMidia(nome, url) {\n  const lower = (nome || url || \"\").toLowerCase();\n\n  if (lower.endsWith(\".pdf\")) return \"pdf\";\n\n  if (\n    lower.endsWith(\".jpg\") ||\n    lower.endsWith(\".jpeg\") ||\n    lower.endsWith(\".png\") ||\n    lower.endsWith(\".gif\") ||\n    lower.endsWith(\".webp\")\n  ) return \"img\";\n\n  return \"outro\";\n}\n\n// 🚀 AGORA PREPARADO PRA ARQUITETURA CORRETA\nreturn midias.map((m, index) => {\n  const tipo = getTipoMidia(m.nome, m.url);\n\n  return {\n    json: {\n      defensaId,\n      templateGoogleDocId,\n\n      // 🔑 ESSENCIAL PRA NÃO PERDER CONTEXTO NO FLUXO\n      midiaIndex: index,\n\n      url: m.url,\n      nome: m.nome,\n      tipo,\n      principal: m.principal || false,\n\n      // 🔥 flags úteis pro fluxo (evita IF complexo depois)\n      isPdf: tipo === \"pdf\",\n      isImg: tipo === \"img\",\n\n      // 🔥 controle de fluxo\n      origem: \"upload\",\n\n      // 🔥 prepara campos que vão existir depois (padronização)\n      pageIndex: null,\n      totalPages: null\n    }\n  };\n});"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -78,8 +60,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        1216,
-        672
+        1312,
+        768
       ],
       "id": "a3efc3c6-b7d5-418b-8465-3546ebe6b322",
       "name": "OpenRouter Chat Model1",
@@ -122,7 +104,8 @@
         176
       ],
       "id": "ab1d7c80-f476-4b05-bb9d-3c6fd6a8eb4f",
-      "name": "Verifica se é pdf"
+      "name": "Verifica se é pdf",
+      "alwaysOutputData": false
     },
     {
       "parameters": {
@@ -160,48 +143,13 @@
     },
     {
       "parameters": {
-        "resource": "image",
-        "operation": "analyze",
-        "modelId": {
-          "__rl": true,
-          "value": "gpt-4o-2024-11-20",
-          "mode": "list",
-          "cachedResultName": "GPT-4O-2024-11-20"
-        },
-        "text": "=Transcreva TODO o conteúdo do documento exatamente como está.\n\nRegras:\n- Não resuma\n- Não omita nenhuma informação\n- Preserve a estrutura (quebras de linha, listas, blocos)\n- Corrija apenas erros óbvios de OCR (ex: caracteres quebrados)\n- Não invente informações\n\nRetorne apenas o texto bruto do documento.\n\ndê de output também a url do arquivo na qual foi aplicado o OCR: {{ $json.url }}",
-        "imageUrls": "={{ $json.url }}",
-        "options": {
-          "detail": "high",
-          "maxTokens": "***REMOVIDO***"
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.openAi",
-      "typeVersion": 2.1,
-      "position": [
-        400,
-        512
-      ],
-      "id": "c87e34eb-7b38-4d11-9ffe-9c870452bac8",
-      "name": "OCR",
-      "retryOnFail": true,
-      "maxTries": 2,
-      "credentials": {
-        "openAiApi": {
-          "id": "GNYM1RjawrdA7XKF",
-          "name": "OpenAi account"
-        }
-      },
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "const allItems = items;\n\nlet urlDataprev = null;\n\nfunction extrairTextoEUrl(item) {\n  let textos = [];\n\n  // 🔥 OCR (formato merge \"0\")\n  if (item.json[\"0\"]?.content?.[0]?.text) {\n    const raw = item.json[\"0\"].content[0].text;\n\n    // 🔥 extrai URL do OCR (se existir)\n    const urlMatch = raw.match(/https?:\\/\\/[^\\s]+/);\n    const url = urlMatch ? urlMatch[0] : null;\n\n    // 🔥 remove URL do texto\n    const textoLimpo = raw\n      .replace(/```/g, \"\")\n      .replace(/https?:\\/\\/[^\\s]+/g, \"\")\n      .replace(/\\*\\*URL do arquivo:\\*\\*/gi, \"\")\n      .trim();\n\n    // 🔥 DETECTA DATAPREV\n    const lower = textoLimpo.toLowerCase();\n\n    const isDataprev =\n      lower.includes(\"nb:\") &&\n      lower.includes(\"cpf:\") &&\n      lower.includes(\"espécie\") &&\n      lower.includes(\"dt. início\");\n\n    if (isDataprev && url) {\n      urlDataprev = url;\n    }\n\n    textos.push(textoLimpo);\n  }\n\n  // 🔥 OCR formato antigo\n  if (Array.isArray(item.json) && item.json[0]?.content?.[0]?.text) {\n    textos.push(item.json[0].content[0].text);\n  }\n\n  // 🔥 PDF extractor\n  if (Array.isArray(item.json.text)) {\n    textos.push(item.json.text.join(\"\\n\"));\n  }\n\n  // 🔥 fallback\n  if (item.json.textoExtraido) {\n    textos.push(item.json.textoExtraido);\n  }\n\n  return textos.join(\"\\n\\n\");\n}\n\n// ordena\nallItems.sort((a, b) => (a.json.pageIndex || 0) - (b.json.pageIndex || 0));\n\n// extrai textos\nconst textos = allItems\n  .map(item => extrairTextoEUrl(item))\n  .filter(t => t && t.trim().length > 0);\n\n// junta tudo\nconst textoCompleto = textos.join(\"\\n\\n\");\n\n// datas\nconst hoje = new Date();\n\nconst dataSubmissao = hoje.toLocaleDateString(\"pt-BR\");\n\nconst dataIdentificacao = hoje.toLocaleDateString(\"pt-BR\", {\n  month: \"long\",\n  year: \"numeric\"\n});\n\n// retorno final\nreturn [\n  {\n    json: {\n      textoCompleto,\n      urlDataprev, // 🔥 AQUI ESTÁ O OURO\n      dataSubmissao,\n      dataIdentificacao\n    }\n  }\n];"
+        "jsCode": "const allItems = items;\n\nlet urlDataprev = null;\n\nfunction extrairTextoEUrl(item) {\n  let textos = [];\n\n  // 🔥 OCR (formato merge \"0\")\n  if (item.json[\"0\"]?.content?.[0]?.text) {\n    const raw = item.json[\"0\"].content[0].text;\n\n    // 🔥 extrai URL CORRETA do OCR\n    let url = null;\n    \n    const labeledUrl = raw.match(/URL.*?:\\s*(https?:\\/\\/[^\\s]+)/i);\n    if (labeledUrl) {\n      url = labeledUrl[1];\n    } else {\n      const allUrls = raw.match(/https?:\\/\\/[^\\s]+/g);\n      if (allUrls && allUrls.length > 0) {\n        url = allUrls[allUrls.length - 1];\n      }\n    }\n\n    // 🔥 remove URL do texto\n    const textoLimpo = raw\n      .replace(/```/g, \"\")\n      .replace(/https?:\\/\\/[^\\s]+/g, \"\")\n      .replace(/\\*\\*URL do arquivo:\\*\\*/gi, \"\")\n      .trim();\n\n    // 🔥 DETECTA DATAPREV\n    const lower = textoLimpo.toLowerCase();\n\n    const isDataprev =\n      lower.includes(\"nb:\") &&\n      lower.includes(\"cpf:\") &&\n      lower.includes(\"espécie\") &&\n      lower.includes(\"dt. início\");\n\n    if (isDataprev && url) {\n      urlDataprev = url;\n    }\n\n    textos.push(textoLimpo);\n  }\n\n  // 🔥 OCR formato antigo\n  if (Array.isArray(item.json) && item.json[0]?.content?.[0]?.text) {\n    textos.push(item.json[0].content[0].text);\n  }\n\n  // 🔥 PDF extractor\n  if (Array.isArray(item.json.text)) {\n    textos.push(item.json.text.join(\"\\n\"));\n  }\n\n  // 🔥 fallback\n  if (item.json.textoExtraido) {\n    textos.push(item.json.textoExtraido);\n  }\n\n  return textos.join(\"\\n\\n\");\n}\n\n// ordena\nallItems.sort((a, b) => (a.json.pageIndex || 0) - (b.json.pageIndex || 0));\n\n// extrai textos\nconst textos = allItems\n  .map(item => extrairTextoEUrl(item))\n  .filter(t => t && t.trim().length > 0);\n\n// junta tudo\nconst textoCompleto = textos.join(\"\\n\\n\");\n\n// datas\nconst hoje = new Date();\n\nconst dataSubmissao = hoje.toLocaleDateString(\"pt-BR\");\n\nconst dataIdentificacao = hoje.toLocaleDateString(\"pt-BR\", {\n  month: \"long\",\n  year: \"numeric\"\n});\n\n// retorno final\nreturn [\n  {\n    json: {\n      textoCompleto,\n      urlDataprev, // 🔥 AQUI ESTÁ O OURO\n      dataSubmissao,\n      dataIdentificacao\n    }\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        976,
-        480
+        1104,
+        576
       ],
       "id": "e5c712e5-c1c4-47a1-b199-c58e957c04ec",
       "name": "Normaliza os textos"
@@ -279,8 +227,8 @@
       "type": "@n8n/n8n-nodes-langchain.informationExtractor",
       "typeVersion": 1.1,
       "position": [
-        1216,
-        480
+        1312,
+        576
       ],
       "id": "8dacc7cf-9ad3-4e7f-90af-8f3643997bd3",
       "name": "Extrair Dados",
@@ -294,8 +242,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1792,
-        480
+        1936,
+        576
       ],
       "id": "d047bf73-43d5-49a1-90c5-98e5dac98bf2",
       "name": "Busca dados via CNPJ",
@@ -321,8 +269,8 @@
       "type": "n8n-nodes-base.googleDocs",
       "typeVersion": 2,
       "position": [
-        3584,
-        448
+        3696,
+        592
       ],
       "id": "0bb1e3a2-ba12-4e24-bc89-3b1894a705cc",
       "name": "Update a document",
@@ -339,8 +287,8 @@
       "type": "n8n-nodes-base.googleDocs",
       "typeVersion": 2,
       "position": [
-        2752,
-        432
+        2896,
+        528
       ],
       "id": "0312f9bb-7cfd-4669-ac36-ccab47134084",
       "name": "Get a document",
@@ -365,8 +313,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2976,
-        432
+        3120,
+        528
       ],
       "id": "6d3b6d67-31d2-459d-b883-ccb7bb1ca33b",
       "name": "Edit Fields1"
@@ -381,8 +329,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        3152,
-        432
+        3296,
+        528
       ],
       "id": "f5c1b3ce-f7aa-4963-aa51-b5cc8c437a6b",
       "name": "Edit Fields2"
@@ -395,7 +343,7 @@
           "value": "={{ $('Processa as midias').first().json.templateGoogleDocId }}",
           "mode": "id"
         },
-        "name": "=CONTESTAÇÃO_NTAP_{{ $json.CPF_SEGURADO }}",
+        "name": "=CONTESTAÇÃO_NTP_{{ $json.CPF_SEGURADO }}",
         "sameFolder": false,
         "driveId": {
           "__rl": true,
@@ -416,8 +364,8 @@
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
       "position": [
-        2224,
-        464
+        2368,
+        560
       ],
       "id": "19f850f9-3fd0-4259-9627-44cb8f5ae6ef",
       "name": "Copy file",
@@ -442,8 +390,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3840,
-        432
+        3952,
+        576
       ],
       "id": "e3e764ae-c89b-414a-a061-7e79ac5abb41",
       "name": "Insere img no docs",
@@ -463,8 +411,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        2176,
-        256
+        2304,
+        320
       ],
       "id": "353f9ed7-861e-4821-af7c-dbd8b518b265",
       "name": "Sticky Note1"
@@ -561,8 +509,8 @@
       "type": "n8n-nodes-base.googleDocs",
       "typeVersion": 2,
       "position": [
-        2464,
-        448
+        2608,
+        544
       ],
       "id": "a2069a03-d24e-44b4-9827-de1dade20213",
       "name": "Update a document2",
@@ -581,8 +529,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        2688,
-        304
+        2832,
+        384
       ],
       "id": "d33c6d8d-b0c3-4a1d-b044-c665b0ba84be",
       "name": "Sticky Note2"
@@ -614,8 +562,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        3328,
-        432
+        3472,
+        528
       ],
       "id": "4d7a2c8d-adbd-4c02-91e2-b9441ce8bd58",
       "name": "Verifica se tem placeholder da img1"
@@ -627,19 +575,19 @@
             {
               "id": "06762f92-f585-4365-a4d3-425ce27c0bbd",
               "name": "url_view",
-              "value": "=https://docs.google.com/document/d/{{$('Insere img no docs').first().json.documentId}}/edit",
+              "value": "=https://docs.google.com/document/d/{{$('Update a document2').first().json.documentId}}/edit",
               "type": "string"
             },
             {
               "id": "de434c15-557a-4ee5-b0f9-a4bd8bef15cd",
               "name": "url_docx",
-              "value": "=https://docs.google.com/document/d/{{$('Insere img no docs').first().json.documentId}}/export?format=docx",
+              "value": "=https://docs.google.com/document/d/{{$('Update a document2').first().json.documentId}}/export?format=docx",
               "type": "string"
             },
             {
               "id": "3dd1d764-0d04-4192-9b3a-56902528d59b",
               "name": "url_pdf",
-              "value": "=https://docs.google.com/document/d/{{$('Insere img no docs').first().json.documentId}}/export?format=pdf",
+              "value": "=https://docs.google.com/document/d/{{$('Update a document2').first().json.documentId}}/export?format=pdf",
               "type": "string"
             }
           ]
@@ -649,8 +597,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        4144,
-        416
+        4304,
+        512
       ],
       "id": "1d83ef3d-c327-4723-96bc-7a4b17534112",
       "name": "Urls de download (docs e pdf)"
@@ -673,78 +621,83 @@
           "fieldValues": [
             {
               "fieldId": "nome_requerente",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.NOME_REQUERENTE }}"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.NOME_REQUERENTE }}"
             },
             {
               "fieldId": "cnpj_requerente",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.CNPJ_REQUERENTE }}"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.CNPJ_REQUERENTE }}"
             },
             {
               "fieldId": "endereco_requerente",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.ENDERECO_REQUERENTE }}"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.ENDERECO_REQUERENTE }}"
             },
             {
               "fieldId": "nome_segurado",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.NOME_SEGURADO }}"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.NOME_SEGURADO }}"
             },
             {
               "fieldId": "cpf_segurado",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.CPF_SEGURADO }}"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.CPF_SEGURADO }}"
             },
             {
               "fieldId": "funcao_segurado",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.FUNCAO_SEGURADO }}"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.FUNCAO_SEGURADO }}"
             },
             {
               "fieldId": "especie_beneficio",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.ESPECIE_BENEFICIO }}"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.ESPECIE_BENEFICIO }}"
             },
             {
               "fieldId": "descricao_beneficio",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.DESCRICAO_BENEFICIO }}"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.DESCRICAO_BENEFICIO }}"
             },
             {
               "fieldId": "numero_beneficio",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.NUMERO_BENEFICIO }}"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.NUMERO_BENEFICIO }}"
             },
             {
               "fieldId": "dib",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.DIB }}"
+              "fieldValue": "={{   (() => {     const raw = $('Normaliza os campos').first().json.DIB;     if (!raw) return null;     const parts = raw.includes('/') ? raw.split('/') : raw.split('-');     if (parts.length !== 3) return null;     const isYearFirst = parts[0].length === 4;     const [day, month, year] = isYearFirst       ? [parts[2], parts[1], parts[0]]       : [parts[0], parts[1], parts[2]];     if (isNaN(Number(day)) || isNaN(Number(month)) || isNaN(Number(year))) return null;     return `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;   })() }}"
             },
             {
               "fieldId": "dcb",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.DCB }}"
+              "fieldValue": "={{   (() => {     const raw = $('Normaliza os campos').first().json.DCB;     if (!raw) return null;     const parts = raw.includes('/') ? raw.split('/') : raw.split('-');     if (parts.length !== 3) return null;     const isYearFirst = parts[0].length === 4;     const [day, month, year] = isYearFirst       ? [parts[2], parts[1], parts[0]]       : [parts[0], parts[1], parts[2]];     if (isNaN(Number(day)) || isNaN(Number(month)) || isNaN(Number(year))) return null;     return `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;   })() }}"
             },
             {
               "fieldId": "cids_doencas",
-              "fieldValue": "={{ $('Normaliza os campos').item.json.CIDS_DOENCAS }}"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.CIDS_DOENCAS }}"
             },
             {
               "fieldId": "data_identificacao_concessao",
-              "fieldValue": "="
+              "fieldValue": "={{ $('Normaliza os campos').first().json.DATA_IDENTIFICACAO_CONCESSAO }}"
             },
             {
               "fieldId": "especie_novo_beneficio",
-              "fieldValue": "concluido"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.ESPECIE_NOVO_BENEFICIO }}"
             },
             {
               "fieldId": "descricao_novo_beneficio",
-              "fieldValue": "={{ $('Set Campos').item.json.cnpj }}"
+              "fieldValue": "={{ $('Normaliza os campos').first().json.DESCRICAO_NOVO_BENEFICIO }}"
             },
             {
               "fieldId": "data_submissao",
-              "fieldValue": "={{ $('Set Campos').item.json.valor_principal }}"
+              "fieldValue": "={{\n(() => {\n  const data = $('Normaliza os campos').first().json.DATA_SUBMISSAO;\n\n  const meses = {\n    janeiro: '01',\n    fevereiro: '02',\n    março: '03',\n    abril: '04',\n    maio: '05',\n    junho: '06',\n    julho: '07',\n    agosto: '08',\n    setembro: '09',\n    outubro: '10',\n    novembro: '11',\n    dezembro: '12'\n  };\n\n  const match = data.match(/(\\d{1,2}) de (\\w+) de (\\d{4})/i);\n\n  if (!match) return null;\n\n  const dia = match[1].padStart(2, '0');\n  const mes = meses[match[2].toLowerCase()];\n  const ano = match[3];\n\n  return `${ano}-${mes}-${dia}`;\n})()\n}}"
             },
             {
               "fieldId": "documento_gerado_url_pdf",
-              "fieldValue": "={{ $('Set Campos').item.json.valor_multa }}"
+              "fieldValue": "={{ $json.url_pdf }}"
             },
             {
               "fieldId": "documento_gerado_url_edit",
-              "fieldValue": "={{ $('Set Campos').item.json.valor_juros }}"
+              "fieldValue": "={{ $json.url_view }}"
             },
             {
-              "fieldId": "documento_gerado_url_docs"
+              "fieldId": "documento_gerado_url_docs",
+              "fieldValue": "={{ $json.url_docx }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "concluido"
             }
           ]
         }
@@ -752,8 +705,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        4368,
-        416
+        4528,
+        512
       ],
       "id": "cad14f2e-97f3-4719-b282-bd2f56d398a5",
       "name": "Atualiza o banco",
@@ -787,8 +740,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1104,
-        160
+        1312,
+        176
       ],
       "id": "562674dd-e9ff-4c86-8d59-0ca862d48730",
       "name": "API PDF Converter",
@@ -798,16 +751,17 @@
     },
     {
       "parameters": {
-        "jsCode": "// Pega a string de URLs\nconst conversionUrl = $json.conversionUrl || \"\";\n\n// Transforma em array\nconst urls = conversionUrl\n  .split(\",\")\n  .map(url => url.trim())\n  .filter(url => url.length > 0);\n\n// Cria um item por página\nreturn urls.map((url, index) => {\n  return {\n    json: {\n      defensaId: $json.defensaId,\n      templateGoogleDocId: $json.templateGoogleDocId,\n      pageIndex: index,\n      totalPages: urls.length,\n      url: url\n    }\n  };\n});"
+        "jsCode": "const output = [];\n\nfor (const item of items) {\n  const conversionUrl = item.json.conversionUrl || \"\";\n\n  const urls = conversionUrl\n    .split(\",\")\n    .map(url => url.trim())\n    .filter(url => url.length > 0);\n\n  urls.forEach((url, index) => {\n    output.push({\n      json: {\n        defensaId: item.json.defensaId,\n        templateGoogleDocId: item.json.templateGoogleDocId,\n        pageIndex: index,\n        totalPages: urls.length,\n        url: url\n      }\n    });\n  });\n}\n\nreturn output;"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1328,
-        160
+        1712,
+        144
       ],
       "id": "43482649-e5d9-417f-a628-4040fb02114c",
-      "name": "Split das pgs convertidas"
+      "name": "Split das pgs convertidas",
+      "alwaysOutputData": true
     },
     {
       "parameters": {
@@ -922,11 +876,97 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2016,
-        464
+        2160,
+        560
       ],
       "id": "223825de-f597-436b-9432-81314cfd6923",
       "name": "Normaliza os campos"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {
+          "includeUnpaired": true
+        }
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        896,
+        576
+      ],
+      "id": "ef44464d-dd6c-4b3c-bdfd-91c1670aa99b",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json;\n\n// 🔥 pega o output corretamente\nconst item = raw.output || {};\n\n// ===== TABELAS =====\nconst mapaBeneficios = {\n  \"31\": \"Auxílio-doença\",\n  \"32\": \"Aposentadoria por invalidez\",\n  \"36\": \"Auxílio-acidente\",\n  \"91\": \"Auxílio-doença acidentário\",\n  \"92\": \"Aposentadoria por invalidez acidentária\",\n  \"94\": \"Auxílio-acidente\"\n};\n\nconst regraConversao = {\n  \"91\": \"31\",\n  \"94\": \"36\",\n  \"92\": \"32\"\n};\n\n// ===== BENEFÍCIO =====\nconst especieOriginal = item.ESPECIE_BENEFICIO || null;\n\nconst especieNova =\n  regraConversao[especieOriginal] ||\n  item.ESPECIE_NOVO_BENEFICIO ||\n  especieOriginal;\n\nconst descricaoOriginal = mapaBeneficios[especieOriginal] || null;\nconst descricaoNova = mapaBeneficios[especieNova] || null;\n\n// ===== CIDs (se existir depois) =====\nlet cids = item.CIDS || [];\n\nif (typeof cids === \"string\") {\n  cids = [cids];\n}\n\nconst mapaCIDs = {\n  \"M54.5\": \"Dor lombar baixa\",\n  \"F41.1\": \"Ansiedade generalizada\"\n};\n\nconst cidsFormatados = cids.map(cid => ({\n  codigo: cid,\n  descricao: mapaCIDs[cid] || \"Descrição não encontrada\"\n}));\n\n// ===== OUTPUT FINAL =====\nreturn [\n  {\n    json: {\n      ...item,\n\n      ESPECIE_BENEFICIO: especieOriginal,\n      DESCRICAO_BENEFICIO: descricaoOriginal,\n\n      ESPECIE_NOVO_BENEFICIO: especieNova,\n      DESCRICAO_NOVO_BENEFICIO: descricaoNova,\n\n      CIDS_DOENCAS: cidsFormatados\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        576
+      ],
+      "id": "88a90e46-f181-4b7e-908c-27b7a17cdb3a",
+      "name": "Regras de negócio dos CIDs"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1104,
+        160
+      ],
+      "id": "f776abbd-7aa3-492a-a596-a167d1651f72",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "amount": 1
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1488,
+        176
+      ],
+      "id": "813218ca-2970-471c-94e3-762e3065af6a",
+      "name": "Wait",
+      "webhookId": "22edbda8-e193-4ad1-85e6-3c53e3b6e386"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        128,
+        192
+      ],
+      "id": "a00a2632-b3b2-4a25-84d0-e49cc3a54aca",
+      "name": "Baixar arquivos",
+      "retryOnFail": false,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        368,
+        608
+      ],
+      "id": "77c61c46-5bf4-4c60-b280-e4c6d14e32ba",
+      "name": "Merge1"
     },
     {
       "parameters": {
@@ -948,13 +988,14 @@
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 2.1,
       "position": [
-        1488,
-        160
+        608,
+        608
       ],
       "id": "2a472df2-135b-4856-8220-e4d2236d4330",
-      "name": "OCR1",
+      "name": "OCR",
       "retryOnFail": true,
       "maxTries": 2,
+      "alwaysOutputData": true,
       "credentials": {
         "openAiApi": {
           "id": "GNYM1RjawrdA7XKF",
@@ -965,31 +1006,16 @@
     },
     {
       "parameters": {
-        "mode": "combine",
-        "combineBy": "combineByPosition",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3.2,
-      "position": [
-        704,
-        480
-      ],
-      "id": "ef44464d-dd6c-4b3c-bdfd-91c1670aa99b",
-      "name": "Merge"
-    },
-    {
-      "parameters": {
-        "jsCode": "const raw = items[0].json;\n\n// 🔥 pega o output corretamente\nconst item = raw.output || {};\n\n// ===== TABELAS =====\nconst mapaBeneficios = {\n  \"31\": \"Auxílio-doença\",\n  \"32\": \"Aposentadoria por invalidez\",\n  \"36\": \"Auxílio-acidente\",\n  \"91\": \"Auxílio-doença acidentário\",\n  \"92\": \"Aposentadoria por invalidez acidentária\",\n  \"94\": \"Auxílio-acidente\"\n};\n\nconst regraConversao = {\n  \"91\": \"31\",\n  \"94\": \"36\",\n  \"92\": \"32\"\n};\n\n// ===== BENEFÍCIO =====\nconst especieOriginal = item.ESPECIE_BENEFICIO || null;\n\nconst especieNova =\n  regraConversao[especieOriginal] ||\n  item.ESPECIE_NOVO_BENEFICIO ||\n  especieOriginal;\n\nconst descricaoOriginal = mapaBeneficios[especieOriginal] || null;\nconst descricaoNova = mapaBeneficios[especieNova] || null;\n\n// ===== CIDs (se existir depois) =====\nlet cids = item.CIDS || [];\n\nif (typeof cids === \"string\") {\n  cids = [cids];\n}\n\nconst mapaCIDs = {\n  \"M54.5\": \"Dor lombar baixa\",\n  \"F41.1\": \"Ansiedade generalizada\"\n};\n\nconst cidsFormatados = cids.map(cid => ({\n  codigo: cid,\n  descricao: mapaCIDs[cid] || \"Descrição não encontrada\"\n}));\n\n// ===== OUTPUT FINAL =====\nreturn [\n  {\n    json: {\n      ...item,\n\n      ESPECIE_BENEFICIO: especieOriginal,\n      DESCRICAO_BENEFICIO: descricaoOriginal,\n\n      ESPECIE_NOVO_BENEFICIO: especieNova,\n      DESCRICAO_NOVO_BENEFICIO: descricaoNova,\n\n      CIDS_DOENCAS: cidsFormatados\n    }\n  }\n];"
+        "jsCode": "const output = [];\n\nfor (const item of items) {\n  let url = null;\n\n  // ✅ 1. URL no JSON\n  if (item.json?.url) {\n    url = item.json.url;\n  }\n\n  // ✅ 2. URL no binary\n  else if (item.binary?.data?.url) {\n    url = item.binary.data.url;\n  }\n\n  // ✅ 3. fallback (ignora se não tiver URL real)\n  else {\n    continue;\n  }\n\n  output.push({\n    json: {\n      url\n    }\n  });\n}\n\nreturn output;"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1568,
-        480
+        368,
+        400
       ],
-      "id": "88a90e46-f181-4b7e-908c-27b7a17cdb3a",
-      "name": "Regras de negócio dos CIDs"
+      "id": "74abe9a6-3a56-4436-9f27-acb625b91e15",
+      "name": "Urls de binarios"
     }
   ],
   "connections": {
@@ -1004,22 +1030,11 @@
         ]
       ]
     },
-    "Baixar PDF": {
-      "main": [
-        [
-          {
-            "node": "Verifica se é pdf",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Processa as midias": {
       "main": [
         [
           {
-            "node": "Baixar PDF",
+            "node": "Baixar arquivos",
             "type": "main",
             "index": 0
           }
@@ -1059,7 +1074,7 @@
         ],
         [
           {
-            "node": "OCR",
+            "node": "Urls de binarios",
             "type": "main",
             "index": 0
           }
@@ -1077,20 +1092,9 @@
         ],
         [
           {
-            "node": "API PDF Converter",
+            "node": "Loop Over Items",
             "type": "main",
             "index": 0
-          }
-        ]
-      ]
-    },
-    "OCR": {
-      "main": [
-        [
-          {
-            "node": "Merge",
-            "type": "main",
-            "index": 1
           }
         ]
       ]
@@ -1196,7 +1200,13 @@
     },
     "Verifica se tem placeholder da img1": {
       "main": [
-        [],
+        [
+          {
+            "node": "Urls de download (docs e pdf)",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Update a document",
@@ -1221,7 +1231,7 @@
       "main": [
         [
           {
-            "node": "Split das pgs convertidas",
+            "node": "Wait",
             "type": "main",
             "index": 0
           }
@@ -1232,9 +1242,9 @@
       "main": [
         [
           {
-            "node": "OCR1",
+            "node": "Merge1",
             "type": "main",
-            "index": 0
+            "index": 1
           }
         ]
       ]
@@ -1244,17 +1254,6 @@
         [
           {
             "node": "Regras de negócio dos CIDs",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "OCR1": {
-      "main": [
-        [
-          {
-            "node": "Merge",
             "type": "main",
             "index": 0
           }
@@ -1293,6 +1292,79 @@
           }
         ]
       ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Split das pgs convertidas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "API PDF Converter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixar arquivos": {
+      "main": [
+        [
+          {
+            "node": "Verifica se é pdf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OCR": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Urls de binarios": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -1304,8 +1376,8 @@
   },
   "staticData": null,
   "meta": null,
-  "versionId": "ca8b55af-5271-43bf-91ef-581fa878d65a",
-  "activeVersionId": "ca8b55af-5271-43bf-91ef-581fa878d65a",
+  "versionId": "2a801fcb-7753-49c0-956d-7fb394002b22",
+  "activeVersionId": "2a801fcb-7753-49c0-956d-7fb394002b22",
   "triggerCount": 1,
   "shared": [
     {
@@ -1317,9 +1389,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-04-28T22:50:40.146Z",
-    "createdAt": "2026-04-28T22:50:40.146Z",
-    "versionId": "ca8b55af-5271-43bf-91ef-581fa878d65a",
+    "updatedAt": "2026-04-30T01:00:11.845Z",
+    "createdAt": "2026-04-30T01:00:11.845Z",
+    "versionId": "2a801fcb-7753-49c0-956d-7fb394002b22",
     "workflowId": "hb7oOF29XUp2lS2v",
     "nodes": [
       {
@@ -1357,25 +1429,7 @@
       },
       {
         "parameters": {
-          "url": "={{ $json.url }}",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.2,
-        "position": [
-          128,
-          192
-        ],
-        "id": "a00a2632-b3b2-4a25-84d0-e49cc3a54aca",
-        "name": "Baixar PDF",
-        "retryOnFail": false,
-        "maxTries": 5,
-        "waitBetweenTries": 5000,
-        "onError": "continueErrorOutput"
-      },
-      {
-        "parameters": {
-          "jsCode": "const input = items[0].json.body;\n\nconst defensaId = input.defensaId;\nconst templateGoogleDocId = input.templateGoogleDocId;\nconst midias = input.midias || [];\n\nfunction getTipoMidia(nome, url) {\n  const lower = (nome || url || \"\").toLowerCase();\n\n  if (lower.endsWith(\".pdf\")) return \"pdf\";\n\n  if (\n    lower.endsWith(\".jpg\") ||\n    lower.endsWith(\".jpeg\") ||\n    lower.endsWith(\".png\") ||\n    lower.endsWith(\".gif\") ||\n    lower.endsWith(\".webp\")\n  ) return \"img\";\n\n  return \"outro\";\n}\n\n// 🚨 aqui muda tudo\nreturn midias.map(m => {\n  return {\n    json: {\n      defensaId,\n      templateGoogleDocId,\n      url: m.url,\n      nome: m.nome,\n      tipo: getTipoMidia(m.nome, m.url),\n      principal: m.principal || false\n    }\n  };\n});"
+          "jsCode": "const input = items[0].json.body;\n\nconst defensaId = input.defensaId;\nconst templateGoogleDocId = input.templateGoogleDocId;\nconst midias = input.midias || [];\n\nfunction getTipoMidia(nome, url) {\n  const lower = (nome || url || \"\").toLowerCase();\n\n  if (lower.endsWith(\".pdf\")) return \"pdf\";\n\n  if (\n    lower.endsWith(\".jpg\") ||\n    lower.endsWith(\".jpeg\") ||\n    lower.endsWith(\".png\") ||\n    lower.endsWith(\".gif\") ||\n    lower.endsWith(\".webp\")\n  ) return \"img\";\n\n  return \"outro\";\n}\n\n// 🚀 AGORA PREPARADO PRA ARQUITETURA CORRETA\nreturn midias.map((m, index) => {\n  const tipo = getTipoMidia(m.nome, m.url);\n\n  return {\n    json: {\n      defensaId,\n      templateGoogleDocId,\n\n      // 🔑 ESSENCIAL PRA NÃO PERDER CONTEXTO NO FLUXO\n      midiaIndex: index,\n\n      url: m.url,\n      nome: m.nome,\n      tipo,\n      principal: m.principal || false,\n\n      // 🔥 flags úteis pro fluxo (evita IF complexo depois)\n      isPdf: tipo === \"pdf\",\n      isImg: tipo === \"img\",\n\n      // 🔥 controle de fluxo\n      origem: \"upload\",\n\n      // 🔥 prepara campos que vão existir depois (padronização)\n      pageIndex: null,\n      totalPages: null\n    }\n  };\n});"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -1394,8 +1448,8 @@
         "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
         "typeVersion": 1,
         "position": [
-          1216,
-          672
+          1312,
+          768
         ],
         "id": "a3efc3c6-b7d5-418b-8465-3546ebe6b322",
         "name": "OpenRouter Chat Model1",
@@ -1438,7 +1492,8 @@
           176
         ],
         "id": "ab1d7c80-f476-4b05-bb9d-3c6fd6a8eb4f",
-        "name": "Verifica se é pdf"
+        "name": "Verifica se é pdf",
+        "alwaysOutputData": false
       },
       {
         "parameters": {
@@ -1476,48 +1531,13 @@
       },
       {
         "parameters": {
-          "resource": "image",
-          "operation": "analyze",
-          "modelId": {
-            "__rl": true,
-            "value": "gpt-4o-2024-11-20",
-            "mode": "list",
-            "cachedResultName": "GPT-4O-2024-11-20"
-          },
-          "text": "=Transcreva TODO o conteúdo do documento exatamente como está.\n\nRegras:\n- Não resuma\n- Não omita nenhuma informação\n- Preserve a estrutura (quebras de linha, listas, blocos)\n- Corrija apenas erros óbvios de OCR (ex: caracteres quebrados)\n- Não invente informações\n\nRetorne apenas o texto bruto do documento.\n\ndê de output também a url do arquivo na qual foi aplicado o OCR: {{ $json.url }}",
-          "imageUrls": "={{ $json.url }}",
-          "options": {
-            "detail": "high",
-            "maxTokens": "***REMOVIDO***"
-          }
-        },
-        "type": "@n8n/n8n-nodes-langchain.openAi",
-        "typeVersion": 2.1,
-        "position": [
-          400,
-          512
-        ],
-        "id": "c87e34eb-7b38-4d11-9ffe-9c870452bac8",
-        "name": "OCR",
-        "retryOnFail": true,
-        "maxTries": 2,
-        "credentials": {
-          "openAiApi": {
-            "id": "GNYM1RjawrdA7XKF",
-            "name": "OpenAi account"
-          }
-        },
-        "onError": "continueErrorOutput"
-      },
-      {
-        "parameters": {
-          "jsCode": "const allItems = items;\n\nlet urlDataprev = null;\n\nfunction extrairTextoEUrl(item) {\n  let textos = [];\n\n  // 🔥 OCR (formato merge \"0\")\n  if (item.json[\"0\"]?.content?.[0]?.text) {\n    const raw = item.json[\"0\"].content[0].text;\n\n    // 🔥 extrai URL do OCR (se existir)\n    const urlMatch = raw.match(/https?:\\/\\/[^\\s]+/);\n    const url = urlMatch ? urlMatch[0] : null;\n\n    // 🔥 remove URL do texto\n    const textoLimpo = raw\n      .replace(/```/g, \"\")\n      .replace(/https?:\\/\\/[^\\s]+/g, \"\")\n      .replace(/\\*\\*URL do arquivo:\\*\\*/gi, \"\")\n      .trim();\n\n    // 🔥 DETECTA DATAPREV\n    const lower = textoLimpo.toLowerCase();\n\n    const isDataprev =\n      lower.includes(\"nb:\") &&\n      lower.includes(\"cpf:\") &&\n      lower.includes(\"espécie\") &&\n      lower.includes(\"dt. início\");\n\n    if (isDataprev && url) {\n      urlDataprev = url;\n    }\n\n    textos.push(textoLimpo);\n  }\n\n  // 🔥 OCR formato antigo\n  if (Array.isArray(item.json) && item.json[0]?.content?.[0]?.text) {\n    textos.push(item.json[0].content[0].text);\n  }\n\n  // 🔥 PDF extractor\n  if (Array.isArray(item.json.text)) {\n    textos.push(item.json.text.join(\"\\n\"));\n  }\n\n  // 🔥 fallback\n  if (item.json.textoExtraido) {\n    textos.push(item.json.textoExtraido);\n  }\n\n  return textos.join(\"\\n\\n\");\n}\n\n// ordena\nallItems.sort((a, b) => (a.json.pageIndex || 0) - (b.json.pageIndex || 0));\n\n// extrai textos\nconst textos = allItems\n  .map(item => extrairTextoEUrl(item))\n  .filter(t => t && t.trim().length > 0);\n\n// junta tudo\nconst textoCompleto = textos.join(\"\\n\\n\");\n\n// datas\nconst hoje = new Date();\n\nconst dataSubmissao = hoje.toLocaleDateString(\"pt-BR\");\n\nconst dataIdentificacao = hoje.toLocaleDateString(\"pt-BR\", {\n  month: \"long\",\n  year: \"numeric\"\n});\n\n// retorno final\nreturn [\n  {\n    json: {\n      textoCompleto,\n      urlDataprev, // 🔥 AQUI ESTÁ O OURO\n      dataSubmissao,\n      dataIdentificacao\n    }\n  }\n];"
+          "jsCode": "const allItems = items;\n\nlet urlDataprev = null;\n\nfunction extrairTextoEUrl(item) {\n  let textos = [];\n\n  // 🔥 OCR (formato merge \"0\")\n  if (item.json[\"0\"]?.content?.[0]?.text) {\n    const raw = item.json[\"0\"].content[0].text;\n\n    // 🔥 extrai URL CORRETA do OCR\n    let url = null;\n    \n    const labeledUrl = raw.match(/URL.*?:\\s*(https?:\\/\\/[^\\s]+)/i);\n    if (labeledUrl) {\n      url = labeledUrl[1];\n    } else {\n      const allUrls = raw.match(/https?:\\/\\/[^\\s]+/g);\n      if (allUrls && allUrls.length > 0) {\n        url = allUrls[allUrls.length - 1];\n      }\n    }\n\n    // 🔥 remove URL do texto\n    const textoLimpo = raw\n      .replace(/```/g, \"\")\n      .replace(/https?:\\/\\/[^\\s]+/g, \"\")\n      .replace(/\\*\\*URL do arquivo:\\*\\*/gi, \"\")\n      .trim();\n\n    // 🔥 DETECTA DATAPREV\n    const lower = textoLimpo.toLowerCase();\n\n    const isDataprev =\n      lower.includes(\"nb:\") &&\n      lower.includes(\"cpf:\") &&\n      lower.includes(\"espécie\") &&\n      lower.includes(\"dt. início\");\n\n    if (isDataprev && url) {\n      urlDataprev = url;\n    }\n\n    textos.push(textoLimpo);\n  }\n\n  // 🔥 OCR formato antigo\n  if (Array.isArray(item.json) && item.json[0]?.content?.[0]?.text) {\n    textos.push(item.json[0].content[0].text);\n  }\n\n  // 🔥 PDF extractor\n  if (Array.isArray(item.json.text)) {\n    textos.push(item.json.text.join(\"\\n\"));\n  }\n\n  // 🔥 fallback\n  if (item.json.textoExtraido) {\n    textos.push(item.json.textoExtraido);\n  }\n\n  return textos.join(\"\\n\\n\");\n}\n\n// ordena\nallItems.sort((a, b) => (a.json.pageIndex || 0) - (b.json.pageIndex || 0));\n\n// extrai textos\nconst textos = allItems\n  .map(item => extrairTextoEUrl(item))\n  .filter(t => t && t.trim().length > 0);\n\n// junta tudo\nconst textoCompleto = textos.join(\"\\n\\n\");\n\n// datas\nconst hoje = new Date();\n\nconst dataSubmissao = hoje.toLocaleDateString(\"pt-BR\");\n\nconst dataIdentificacao = hoje.toLocaleDateString(\"pt-BR\", {\n  month: \"long\",\n  year: \"numeric\"\n});\n\n// retorno final\nreturn [\n  {\n    json: {\n      textoCompleto,\n      urlDataprev, // 🔥 AQUI ESTÁ O OURO\n      dataSubmissao,\n      dataIdentificacao\n    }\n  }\n];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          976,
-          480
+          1104,
+          576
         ],
         "id": "e5c712e5-c1c4-47a1-b199-c58e957c04ec",
         "name": "Normaliza os textos"
@@ -1595,8 +1615,8 @@
         "type": "@n8n/n8n-nodes-langchain.informationExtractor",
         "typeVersion": 1.1,
         "position": [
-          1216,
-          480
+          1312,
+          576
         ],
         "id": "8dacc7cf-9ad3-4e7f-90af-8f3643997bd3",
         "name": "Extrair Dados",
@@ -1610,8 +1630,8 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          1792,
-          480
+          1936,
+          576
         ],
         "id": "d047bf73-43d5-49a1-90c5-98e5dac98bf2",
         "name": "Busca dados via CNPJ",
@@ -1637,8 +1657,8 @@
         "type": "n8n-nodes-base.googleDocs",
         "typeVersion": 2,
         "position": [
-          3584,
-          448
+          3696,
+          592
         ],
         "id": "0bb1e3a2-ba12-4e24-bc89-3b1894a705cc",
         "name": "Update a document",
@@ -1655,8 +1675,8 @@
         "type": "n8n-nodes-base.googleDocs",
         "typeVersion": 2,
         "position": [
-          2752,
-          432
+          2896,
+          528
         ],
         "id": "0312f9bb-7cfd-4669-ac36-ccab47134084",
         "name": "Get a document",
@@ -1681,8 +1701,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          2976,
-          432
+          3120,
+          528
         ],
         "id": "6d3b6d67-31d2-459d-b883-ccb7bb1ca33b",
         "name": "Edit Fields1"
@@ -1697,8 +1717,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          3152,
-          432
+          3296,
+          528
         ],
         "id": "f5c1b3ce-f7aa-4963-aa51-b5cc8c437a6b",
         "name": "Edit Fields2"
@@ -1711,7 +1731,7 @@
             "value": "={{ $('Processa as midias').first().json.templateGoogleDocId }}",
             "mode": "id"
           },
-          "name": "=CONTESTAÇÃO_NTAP_{{ $json.CPF_SEGURADO }}",
+          "name": "=CONTESTAÇÃO_NTP_{{ $json.CPF_SEGURADO }}",
           "sameFolder": false,
           "driveId": {
             "__rl": true,
@@ -1732,8 +1752,8 @@
         "type": "n8n-nodes-base.googleDrive",
         "typeVersion": 3,
         "position": [
-          2224,
-          464
+          2368,
+          560
         ],
         "id": "19f850f9-3fd0-4259-9627-44cb8f5ae6ef",
         "name": "Copy file",
@@ -1758,8 +1778,8 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          3840,
-          432
+          3952,
+          576
         ],
         "id": "e3e764ae-c89b-414a-a061-7e79ac5abb41",
         "name": "Insere img no docs",
@@ -1779,8 +1799,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          2176,
-          256
+          2304,
+          320
         ],
         "id": "353f9ed7-861e-4821-af7c-dbd8b518b265",
         "name": "Sticky Note1"
@@ -1877,8 +1897,8 @@
         "type": "n8n-nodes-base.googleDocs",
         "typeVersion": 2,
         "position": [
-          2464,
-          448
+          2608,
+          544
         ],
         "id": "a2069a03-d24e-44b4-9827-de1dade20213",
         "name": "Update a document2",
@@ -1897,8 +1917,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          2688,
-          304
+          2832,
+          384
         ],
         "id": "d33c6d8d-b0c3-4a1d-b044-c665b0ba84be",
         "name": "Sticky Note2"
@@ -1930,8 +1950,8 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.2,
         "position": [
-          3328,
-          432
+          3472,
+          528
         ],
         "id": "4d7a2c8d-adbd-4c02-91e2-b9441ce8bd58",
         "name": "Verifica se tem placeholder da img1"
@@ -1943,19 +1963,19 @@
               {
                 "id": "06762f92-f585-4365-a4d3-425ce27c0bbd",
                 "name": "url_view",
-                "value": "=https://docs.google.com/document/d/{{$('Insere img no docs').first().json.documentId}}/edit",
+                "value": "=https://docs.google.com/document/d/{{$('Update a document2').first().json.documentId}}/edit",
                 "type": "string"
               },
               {
                 "id": "de434c15-557a-4ee5-b0f9-a4bd8bef15cd",
                 "name": "url_docx",
-                "value": "=https://docs.google.com/document/d/{{$('Insere img no docs').first().json.documentId}}/export?format=docx",
+                "value": "=https://docs.google.com/document/d/{{$('Update a document2').first().json.documentId}}/export?format=docx",
                 "type": "string"
               },
               {
                 "id": "3dd1d764-0d04-4192-9b3a-56902528d59b",
                 "name": "url_pdf",
-                "value": "=https://docs.google.com/document/d/{{$('Insere img no docs').first().json.documentId}}/export?format=pdf",
+                "value": "=https://docs.google.com/document/d/{{$('Update a document2').first().json.documentId}}/export?format=pdf",
                 "type": "string"
               }
             ]
@@ -1965,8 +1985,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          4144,
-          416
+          4304,
+          512
         ],
         "id": "1d83ef3d-c327-4723-96bc-7a4b17534112",
         "name": "Urls de download (docs e pdf)"
@@ -1989,78 +2009,83 @@
             "fieldValues": [
               {
                 "fieldId": "nome_requerente",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.NOME_REQUERENTE }}"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.NOME_REQUERENTE }}"
               },
               {
                 "fieldId": "cnpj_requerente",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.CNPJ_REQUERENTE }}"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.CNPJ_REQUERENTE }}"
               },
               {
                 "fieldId": "endereco_requerente",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.ENDERECO_REQUERENTE }}"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.ENDERECO_REQUERENTE }}"
               },
               {
                 "fieldId": "nome_segurado",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.NOME_SEGURADO }}"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.NOME_SEGURADO }}"
               },
               {
                 "fieldId": "cpf_segurado",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.CPF_SEGURADO }}"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.CPF_SEGURADO }}"
               },
               {
                 "fieldId": "funcao_segurado",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.FUNCAO_SEGURADO }}"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.FUNCAO_SEGURADO }}"
               },
               {
                 "fieldId": "especie_beneficio",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.ESPECIE_BENEFICIO }}"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.ESPECIE_BENEFICIO }}"
               },
               {
                 "fieldId": "descricao_beneficio",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.DESCRICAO_BENEFICIO }}"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.DESCRICAO_BENEFICIO }}"
               },
               {
                 "fieldId": "numero_beneficio",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.NUMERO_BENEFICIO }}"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.NUMERO_BENEFICIO }}"
               },
               {
                 "fieldId": "dib",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.DIB }}"
+                "fieldValue": "={{   (() => {     const raw = $('Normaliza os campos').first().json.DIB;     if (!raw) return null;     const parts = raw.includes('/') ? raw.split('/') : raw.split('-');     if (parts.length !== 3) return null;     const isYearFirst = parts[0].length === 4;     const [day, month, year] = isYearFirst       ? [parts[2], parts[1], parts[0]]       : [parts[0], parts[1], parts[2]];     if (isNaN(Number(day)) || isNaN(Number(month)) || isNaN(Number(year))) return null;     return `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;   })() }}"
               },
               {
                 "fieldId": "dcb",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.DCB }}"
+                "fieldValue": "={{   (() => {     const raw = $('Normaliza os campos').first().json.DCB;     if (!raw) return null;     const parts = raw.includes('/') ? raw.split('/') : raw.split('-');     if (parts.length !== 3) return null;     const isYearFirst = parts[0].length === 4;     const [day, month, year] = isYearFirst       ? [parts[2], parts[1], parts[0]]       : [parts[0], parts[1], parts[2]];     if (isNaN(Number(day)) || isNaN(Number(month)) || isNaN(Number(year))) return null;     return `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;   })() }}"
               },
               {
                 "fieldId": "cids_doencas",
-                "fieldValue": "={{ $('Normaliza os campos').item.json.CIDS_DOENCAS }}"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.CIDS_DOENCAS }}"
               },
               {
                 "fieldId": "data_identificacao_concessao",
-                "fieldValue": "="
+                "fieldValue": "={{ $('Normaliza os campos').first().json.DATA_IDENTIFICACAO_CONCESSAO }}"
               },
               {
                 "fieldId": "especie_novo_beneficio",
-                "fieldValue": "concluido"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.ESPECIE_NOVO_BENEFICIO }}"
               },
               {
                 "fieldId": "descricao_novo_beneficio",
-                "fieldValue": "={{ $('Set Campos').item.json.cnpj }}"
+                "fieldValue": "={{ $('Normaliza os campos').first().json.DESCRICAO_NOVO_BENEFICIO }}"
               },
               {
                 "fieldId": "data_submissao",
-                "fieldValue": "={{ $('Set Campos').item.json.valor_principal }}"
+                "fieldValue": "={{\n(() => {\n  const data = $('Normaliza os campos').first().json.DATA_SUBMISSAO;\n\n  const meses = {\n    janeiro: '01',\n    fevereiro: '02',\n    março: '03',\n    abril: '04',\n    maio: '05',\n    junho: '06',\n    julho: '07',\n    agosto: '08',\n    setembro: '09',\n    outubro: '10',\n    novembro: '11',\n    dezembro: '12'\n  };\n\n  const match = data.match(/(\\d{1,2}) de (\\w+) de (\\d{4})/i);\n\n  if (!match) return null;\n\n  const dia = match[1].padStart(2, '0');\n  const mes = meses[match[2].toLowerCase()];\n  const ano = match[3];\n\n  return `${ano}-${mes}-${dia}`;\n})()\n}}"
               },
               {
                 "fieldId": "documento_gerado_url_pdf",
-                "fieldValue": "={{ $('Set Campos').item.json.valor_multa }}"
+                "fieldValue": "={{ $json.url_pdf }}"
               },
               {
                 "fieldId": "documento_gerado_url_edit",
-                "fieldValue": "={{ $('Set Campos').item.json.valor_juros }}"
+                "fieldValue": "={{ $json.url_view }}"
               },
               {
-                "fieldId": "documento_gerado_url_docs"
+                "fieldId": "documento_gerado_url_docs",
+                "fieldValue": "={{ $json.url_docx }}"
+              },
+              {
+                "fieldId": "status",
+                "fieldValue": "concluido"
               }
             ]
           }
@@ -2068,8 +2093,8 @@
         "type": "n8n-nodes-base.supabase",
         "typeVersion": 1,
         "position": [
-          4368,
-          416
+          4528,
+          512
         ],
         "id": "cad14f2e-97f3-4719-b282-bd2f56d398a5",
         "name": "Atualiza o banco",
@@ -2103,8 +2128,8 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.3,
         "position": [
-          1104,
-          160
+          1312,
+          176
         ],
         "id": "562674dd-e9ff-4c86-8d59-0ca862d48730",
         "name": "API PDF Converter",
@@ -2114,16 +2139,17 @@
       },
       {
         "parameters": {
-          "jsCode": "// Pega a string de URLs\nconst conversionUrl = $json.conversionUrl || \"\";\n\n// Transforma em array\nconst urls = conversionUrl\n  .split(\",\")\n  .map(url => url.trim())\n  .filter(url => url.length > 0);\n\n// Cria um item por página\nreturn urls.map((url, index) => {\n  return {\n    json: {\n      defensaId: $json.defensaId,\n      templateGoogleDocId: $json.templateGoogleDocId,\n      pageIndex: index,\n      totalPages: urls.length,\n      url: url\n    }\n  };\n});"
+          "jsCode": "const output = [];\n\nfor (const item of items) {\n  const conversionUrl = item.json.conversionUrl || \"\";\n\n  const urls = conversionUrl\n    .split(\",\")\n    .map(url => url.trim())\n    .filter(url => url.length > 0);\n\n  urls.forEach((url, index) => {\n    output.push({\n      json: {\n        defensaId: item.json.defensaId,\n        templateGoogleDocId: item.json.templateGoogleDocId,\n        pageIndex: index,\n        totalPages: urls.length,\n        url: url\n      }\n    });\n  });\n}\n\nreturn output;"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1328,
-          160
+          1712,
+          144
         ],
         "id": "43482649-e5d9-417f-a628-4040fb02114c",
-        "name": "Split das pgs convertidas"
+        "name": "Split das pgs convertidas",
+        "alwaysOutputData": true
       },
       {
         "parameters": {
@@ -2238,11 +2264,97 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          2016,
-          464
+          2160,
+          560
         ],
         "id": "223825de-f597-436b-9432-81314cfd6923",
         "name": "Normaliza os campos"
+      },
+      {
+        "parameters": {
+          "mode": "combine",
+          "combineBy": "combineByPosition",
+          "options": {
+            "includeUnpaired": true
+          }
+        },
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          896,
+          576
+        ],
+        "id": "ef44464d-dd6c-4b3c-bdfd-91c1670aa99b",
+        "name": "Merge"
+      },
+      {
+        "parameters": {
+          "jsCode": "const raw = items[0].json;\n\n// 🔥 pega o output corretamente\nconst item = raw.output || {};\n\n// ===== TABELAS =====\nconst mapaBeneficios = {\n  \"31\": \"Auxílio-doença\",\n  \"32\": \"Aposentadoria por invalidez\",\n  \"36\": \"Auxílio-acidente\",\n  \"91\": \"Auxílio-doença acidentário\",\n  \"92\": \"Aposentadoria por invalidez acidentária\",\n  \"94\": \"Auxílio-acidente\"\n};\n\nconst regraConversao = {\n  \"91\": \"31\",\n  \"94\": \"36\",\n  \"92\": \"32\"\n};\n\n// ===== BENEFÍCIO =====\nconst especieOriginal = item.ESPECIE_BENEFICIO || null;\n\nconst especieNova =\n  regraConversao[especieOriginal] ||\n  item.ESPECIE_NOVO_BENEFICIO ||\n  especieOriginal;\n\nconst descricaoOriginal = mapaBeneficios[especieOriginal] || null;\nconst descricaoNova = mapaBeneficios[especieNova] || null;\n\n// ===== CIDs (se existir depois) =====\nlet cids = item.CIDS || [];\n\nif (typeof cids === \"string\") {\n  cids = [cids];\n}\n\nconst mapaCIDs = {\n  \"M54.5\": \"Dor lombar baixa\",\n  \"F41.1\": \"Ansiedade generalizada\"\n};\n\nconst cidsFormatados = cids.map(cid => ({\n  codigo: cid,\n  descricao: mapaCIDs[cid] || \"Descrição não encontrada\"\n}));\n\n// ===== OUTPUT FINAL =====\nreturn [\n  {\n    json: {\n      ...item,\n\n      ESPECIE_BENEFICIO: especieOriginal,\n      DESCRICAO_BENEFICIO: descricaoOriginal,\n\n      ESPECIE_NOVO_BENEFICIO: especieNova,\n      DESCRICAO_NOVO_BENEFICIO: descricaoNova,\n\n      CIDS_DOENCAS: cidsFormatados\n    }\n  }\n];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1712,
+          576
+        ],
+        "id": "88a90e46-f181-4b7e-908c-27b7a17cdb3a",
+        "name": "Regras de negócio dos CIDs"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          1104,
+          160
+        ],
+        "id": "f776abbd-7aa3-492a-a596-a167d1651f72",
+        "name": "Loop Over Items"
+      },
+      {
+        "parameters": {
+          "amount": 1
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          1488,
+          176
+        ],
+        "id": "813218ca-2970-471c-94e3-762e3065af6a",
+        "name": "Wait",
+        "webhookId": "22edbda8-e193-4ad1-85e6-3c53e3b6e386"
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.url }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          128,
+          192
+        ],
+        "id": "a00a2632-b3b2-4a25-84d0-e49cc3a54aca",
+        "name": "Baixar arquivos",
+        "retryOnFail": false,
+        "maxTries": 5,
+        "waitBetweenTries": 5000,
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          368,
+          608
+        ],
+        "id": "77c61c46-5bf4-4c60-b280-e4c6d14e32ba",
+        "name": "Merge1"
       },
       {
         "parameters": {
@@ -2264,13 +2376,14 @@
         "type": "@n8n/n8n-nodes-langchain.openAi",
         "typeVersion": 2.1,
         "position": [
-          1488,
-          160
+          608,
+          608
         ],
         "id": "2a472df2-135b-4856-8220-e4d2236d4330",
-        "name": "OCR1",
+        "name": "OCR",
         "retryOnFail": true,
         "maxTries": 2,
+        "alwaysOutputData": true,
         "credentials": {
           "openAiApi": {
             "id": "GNYM1RjawrdA7XKF",
@@ -2281,31 +2394,16 @@
       },
       {
         "parameters": {
-          "mode": "combine",
-          "combineBy": "combineByPosition",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.merge",
-        "typeVersion": 3.2,
-        "position": [
-          704,
-          480
-        ],
-        "id": "ef44464d-dd6c-4b3c-bdfd-91c1670aa99b",
-        "name": "Merge"
-      },
-      {
-        "parameters": {
-          "jsCode": "const raw = items[0].json;\n\n// 🔥 pega o output corretamente\nconst item = raw.output || {};\n\n// ===== TABELAS =====\nconst mapaBeneficios = {\n  \"31\": \"Auxílio-doença\",\n  \"32\": \"Aposentadoria por invalidez\",\n  \"36\": \"Auxílio-acidente\",\n  \"91\": \"Auxílio-doença acidentário\",\n  \"92\": \"Aposentadoria por invalidez acidentária\",\n  \"94\": \"Auxílio-acidente\"\n};\n\nconst regraConversao = {\n  \"91\": \"31\",\n  \"94\": \"36\",\n  \"92\": \"32\"\n};\n\n// ===== BENEFÍCIO =====\nconst especieOriginal = item.ESPECIE_BENEFICIO || null;\n\nconst especieNova =\n  regraConversao[especieOriginal] ||\n  item.ESPECIE_NOVO_BENEFICIO ||\n  especieOriginal;\n\nconst descricaoOriginal = mapaBeneficios[especieOriginal] || null;\nconst descricaoNova = mapaBeneficios[especieNova] || null;\n\n// ===== CIDs (se existir depois) =====\nlet cids = item.CIDS || [];\n\nif (typeof cids === \"string\") {\n  cids = [cids];\n}\n\nconst mapaCIDs = {\n  \"M54.5\": \"Dor lombar baixa\",\n  \"F41.1\": \"Ansiedade generalizada\"\n};\n\nconst cidsFormatados = cids.map(cid => ({\n  codigo: cid,\n  descricao: mapaCIDs[cid] || \"Descrição não encontrada\"\n}));\n\n// ===== OUTPUT FINAL =====\nreturn [\n  {\n    json: {\n      ...item,\n\n      ESPECIE_BENEFICIO: especieOriginal,\n      DESCRICAO_BENEFICIO: descricaoOriginal,\n\n      ESPECIE_NOVO_BENEFICIO: especieNova,\n      DESCRICAO_NOVO_BENEFICIO: descricaoNova,\n\n      CIDS_DOENCAS: cidsFormatados\n    }\n  }\n];"
+          "jsCode": "const output = [];\n\nfor (const item of items) {\n  let url = null;\n\n  // ✅ 1. URL no JSON\n  if (item.json?.url) {\n    url = item.json.url;\n  }\n\n  // ✅ 2. URL no binary\n  else if (item.binary?.data?.url) {\n    url = item.binary.data.url;\n  }\n\n  // ✅ 3. fallback (ignora se não tiver URL real)\n  else {\n    continue;\n  }\n\n  output.push({\n    json: {\n      url\n    }\n  });\n}\n\nreturn output;"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1568,
-          480
+          368,
+          400
         ],
-        "id": "88a90e46-f181-4b7e-908c-27b7a17cdb3a",
-        "name": "Regras de negócio dos CIDs"
+        "id": "74abe9a6-3a56-4436-9f27-acb625b91e15",
+        "name": "Urls de binarios"
       }
     ],
     "connections": {
@@ -2320,22 +2418,11 @@
           ]
         ]
       },
-      "Baixar PDF": {
-        "main": [
-          [
-            {
-              "node": "Verifica se é pdf",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "Processa as midias": {
         "main": [
           [
             {
-              "node": "Baixar PDF",
+              "node": "Baixar arquivos",
               "type": "main",
               "index": 0
             }
@@ -2375,7 +2462,7 @@
           ],
           [
             {
-              "node": "OCR",
+              "node": "Urls de binarios",
               "type": "main",
               "index": 0
             }
@@ -2393,20 +2480,9 @@
           ],
           [
             {
-              "node": "API PDF Converter",
+              "node": "Loop Over Items",
               "type": "main",
               "index": 0
-            }
-          ]
-        ]
-      },
-      "OCR": {
-        "main": [
-          [
-            {
-              "node": "Merge",
-              "type": "main",
-              "index": 1
             }
           ]
         ]
@@ -2512,7 +2588,13 @@
       },
       "Verifica se tem placeholder da img1": {
         "main": [
-          [],
+          [
+            {
+              "node": "Urls de download (docs e pdf)",
+              "type": "main",
+              "index": 0
+            }
+          ],
           [
             {
               "node": "Update a document",
@@ -2537,7 +2619,7 @@
         "main": [
           [
             {
-              "node": "Split das pgs convertidas",
+              "node": "Wait",
               "type": "main",
               "index": 0
             }
@@ -2548,9 +2630,9 @@
         "main": [
           [
             {
-              "node": "OCR1",
+              "node": "Merge1",
               "type": "main",
-              "index": 0
+              "index": 1
             }
           ]
         ]
@@ -2560,17 +2642,6 @@
           [
             {
               "node": "Regras de negócio dos CIDs",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "OCR1": {
-        "main": [
-          [
-            {
-              "node": "Merge",
               "type": "main",
               "index": 0
             }
@@ -2604,6 +2675,79 @@
           [
             {
               "node": "Copy file",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Over Items": {
+        "main": [
+          [
+            {
+              "node": "Split das pgs convertidas",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "API PDF Converter",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Items",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Baixar arquivos": {
+        "main": [
+          [
+            {
+              "node": "Verifica se é pdf",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge1": {
+        "main": [
+          [
+            {
+              "node": "OCR",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OCR": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Urls de binarios": {
+        "main": [
+          [
+            {
+              "node": "Merge1",
               "type": "main",
               "index": 0
             }
