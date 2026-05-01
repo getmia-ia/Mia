@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-30T01:00:11.843Z",
+  "updatedAt": "2026-04-30T16:58:49.007Z",
   "createdAt": "2026-04-24T16:53:22.853Z",
   "id": "hb7oOF29XUp2lS2v",
   "name": "BMS - 5.6 - Contestação NTAP",
@@ -54,7 +54,7 @@
     },
     {
       "parameters": {
-        "model": "openai/gpt-4o",
+        "model": "openai/gpt-5",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
@@ -161,7 +161,7 @@
           "attributes": [
             {
               "name": "NOME_REQUERENTE",
-              "description": "Nome da empresa ou razão social presente no PPP (Perfil Profissiográfico Previdenciário). Geralmente aparece próximo ao CNPJ.",
+              "description": "  - Retorne exatamente como aparece no documento oficial (CNPJ ou rodapé institucional)\n  - NÃO resuma\n  - NÃO remova palavras \"SUPER MERCADO\", \"LTDA\", \"S.A\"\n  - Priorize a versão mais completa encontrada \n  - Geralmente aparece próximo ao CNPJ.",
               "required": true
             },
             {
@@ -206,7 +206,7 @@
             },
             {
               "name": "FUNCAO_SEGURADO",
-              "description": "Cargo ou função exercida pelo trabalhador.",
+              "description": "Cargo ou função exercida pelo trabalhador.\n  - Ajuste o gênero com base no sexo do trabalhador\n  - Se sexo = feminino → usar forma feminina (ex: OPERADORA)\n  - Se masculino → manter masculino",
               "required": true
             },
             {
@@ -216,12 +216,18 @@
             },
             {
               "name": "DESCRICAO_NOVO_BENEFICIO",
-              "description": "Descrição correspondente ao novo código de benefício."
+              "description": "Descrição correspondente ao novo código de benefício.",
+              "required": true
+            },
+            {
+              "name": "CIDS_DOENCAS",
+              "description": "Retorne uma frase contendo:\n- Nome das doenças correspondentes aos CIDs\n- E os códigos entre parênteses\n\nFormato obrigatório:\n\"nome da doença 1 e nome da doença 2 (CID CODIGO1 e CODIGO2)\"\n\nRegras:\n- Traduzir os CIDs para seus nomes médicos\n- Manter ordem\n- Não repetir",
+              "required": true
             }
           ]
         },
         "options": {
-          "systemPromptTemplate": "={{ $json.prompt }}"
+          "systemPromptTemplate": "FORMATO DE SAÍDA (OBRIGATÓRIO):\n- Retorne APENAS JSON válido\n- NÃO use ```json\n- NÃO use crases (```)\n- NÃO adicione explicações\n- NÃO adicione texto antes ou depois\n\nO output deve começar diretamente com {{ e terminar com }}\nREGRAS CRÍTICAS:\n\n- NUNCA invente informações\n- Se o dado NÃO estiver explicitamente presente no texto, retorne null\n- NÃO deduza, NÃO estime, NÃO complete\n- NÃO use conhecimento externo\n- NÃO infira baseado em contexto\n\nCRITÉRIO:\n- Só preencha se houver evidência textual EXATA\n\nSe houver dúvida → retorne null"
         }
       },
       "type": "@n8n/n8n-nodes-langchain.informationExtractor",
@@ -782,7 +788,7 @@
             {
               "id": "ff7fdcbb-8ad0-48d8-a9c3-f3a38b58611f",
               "name": "ENDERECO_REQUERENTE",
-              "value": "={{\n(() => {\n  const logradouro = $json[\"logradouro\"] || \"\";\n  const numero = $json[\"numero\"] || \"\";\n  const complemento = $json[\"complemento\"] ? \" - \" + $json[\"complemento\"] : \"\";\n  const bairro = $json[\"bairro\"] || \"\";\n  const municipio = $json[\"municipio\"] || \"\";\n  const uf = ($json[\"uf\"] || \"\").toUpperCase();\n  const cep = ($json[\"cep\"] || \"\").replace(/\\D/g, \"\").replace(/(\\d{5})(\\d{3})/, \"$1-$2\");\n\n  // Função para colocar a primeira letra de cada palavra em maiúscula\n  const titleCase = (str) =>\n    str\n      .toLowerCase()\n      .replace(/\\b[a-zà-ú]/gi, (c) => c.toUpperCase());\n\n  return `${titleCase(logradouro)}, ${numero}${complemento}, ${titleCase(bairro)}, ${titleCase(municipio)}, ${uf}, ${cep}`;\n})()\n}}",
+              "value": "={{\n(() => {\n  const logradouroRaw = $json[\"logradouro\"] || \"\";\n  const numero = $json[\"numero\"] || \"\";\n  const complemento = $json[\"complemento\"] ? \" - \" + $json[\"complemento\"] : \"\";\n  const bairro = $json[\"bairro\"] || \"\";\n  const municipio = $json[\"municipio\"] || \"\";\n  const uf = ($json[\"uf\"] || \"\").toUpperCase();\n  const cep = ($json[\"cep\"] || \"\")\n    .replace(/\\D/g, \"\")\n    .replace(/(\\d{5})(\\d{3})/, \"$1-$2\");\n\n  // 🔥 1. expandir abreviações comuns\n  const expandirLogradouro = (str) => {\n    return str\n      .replace(/^r\\b\\.?/i, \"Rua\")\n      .replace(/^av\\b\\.?/i, \"Avenida\")\n      .replace(/^rod\\b\\.?/i, \"Rodovia\")\n      .replace(/^trav\\b\\.?/i, \"Travessa\")\n      .replace(/^al\\b\\.?/i, \"Alameda\");\n  };\n\n  // 🔥 2. palavras que NÃO devem ser capitalizadas\n  const excecoes = [\"de\", \"da\", \"do\", \"das\", \"dos\", \"e\"];\n\n  const titleCase = (str) =>\n    str\n      .toLowerCase()\n      .split(\" \")\n      .map((word, index) => {\n        if (index !== 0 && excecoes.includes(word)) {\n          return word; // mantém minúsculo\n        }\n        return word.charAt(0).toUpperCase() + word.slice(1);\n      })\n      .join(\" \");\n\n  const logradouro = titleCase(expandirLogradouro(logradouroRaw));\n\n  return `${logradouro}, ${numero}${complemento}, ${titleCase(bairro)}, ${titleCase(municipio)}, ${uf}, ${cep}`;\n})()\n}}",
               "type": "string"
             },
             {
@@ -836,7 +842,7 @@
             {
               "id": "dea1f3c3-3a7b-4d34-ad75-1a956dfa3c14",
               "name": "CIDS_DOENCAS",
-              "value": "",
+              "value": "={{ $('Regras de negócio dos CIDs').item.json.CIDS_DOENCAS }}",
               "type": "string"
             },
             {
@@ -901,7 +907,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = items[0].json;\n\n// 🔥 pega o output corretamente\nconst item = raw.output || {};\n\n// ===== TABELAS =====\nconst mapaBeneficios = {\n  \"31\": \"Auxílio-doença\",\n  \"32\": \"Aposentadoria por invalidez\",\n  \"36\": \"Auxílio-acidente\",\n  \"91\": \"Auxílio-doença acidentário\",\n  \"92\": \"Aposentadoria por invalidez acidentária\",\n  \"94\": \"Auxílio-acidente\"\n};\n\nconst regraConversao = {\n  \"91\": \"31\",\n  \"94\": \"36\",\n  \"92\": \"32\"\n};\n\n// ===== BENEFÍCIO =====\nconst especieOriginal = item.ESPECIE_BENEFICIO || null;\n\nconst especieNova =\n  regraConversao[especieOriginal] ||\n  item.ESPECIE_NOVO_BENEFICIO ||\n  especieOriginal;\n\nconst descricaoOriginal = mapaBeneficios[especieOriginal] || null;\nconst descricaoNova = mapaBeneficios[especieNova] || null;\n\n// ===== CIDs (se existir depois) =====\nlet cids = item.CIDS || [];\n\nif (typeof cids === \"string\") {\n  cids = [cids];\n}\n\nconst mapaCIDs = {\n  \"M54.5\": \"Dor lombar baixa\",\n  \"F41.1\": \"Ansiedade generalizada\"\n};\n\nconst cidsFormatados = cids.map(cid => ({\n  codigo: cid,\n  descricao: mapaCIDs[cid] || \"Descrição não encontrada\"\n}));\n\n// ===== OUTPUT FINAL =====\nreturn [\n  {\n    json: {\n      ...item,\n\n      ESPECIE_BENEFICIO: especieOriginal,\n      DESCRICAO_BENEFICIO: descricaoOriginal,\n\n      ESPECIE_NOVO_BENEFICIO: especieNova,\n      DESCRICAO_NOVO_BENEFICIO: descricaoNova,\n\n      CIDS_DOENCAS: cidsFormatados\n    }\n  }\n];"
+        "jsCode": "const raw = items[0].json;\nconst item = raw.output || {};\n\n// ===== TABELAS =====\nconst mapaBeneficios = {\n  \"31\": \"Auxílio-doença\",\n  \"32\": \"Aposentadoria por invalidez\",\n  \"36\": \"Auxílio-acidente\",\n  \"91\": \"Auxílio-doença acidentário\",\n  \"92\": \"Aposentadoria por invalidez acidentária\",\n  \"94\": \"Auxílio-acidente\"\n};\n\nconst regraConversao = {\n  \"91\": \"31\",\n  \"94\": \"36\",\n  \"92\": \"32\"\n};\n\n// ===== BENEFÍCIO =====\nconst especieOriginal = item.ESPECIE_BENEFICIO || null;\n\nconst especieNova =\n  regraConversao[especieOriginal] ||\n  item.ESPECIE_NOVO_BENEFICIO ||\n  especieOriginal;\n\n// 🔥 mantém descrição do extractor\nconst descricaoOriginal =\n  item.DESCRICAO_BENEFICIO ||\n  mapaBeneficios[especieOriginal] ||\n  null;\n\nconst descricaoNova =\n  item.DESCRICAO_NOVO_BENEFICIO ||\n  mapaBeneficios[especieNova] ||\n  null;\n\n\n// ===== CIDs (TEXTO) =====\nlet textoCID = item.CIDS_DOENCAS || \"\";\n\n// 🔥 extrai CIDs do texto\nconst matches = textoCID.match(/[A-Z]\\d{2}\\.?\\d/g) || [];\n\n// 🔥 normaliza (S925 → S92.5)\nfunction normalizarCID(cid) {\n  cid = cid.toUpperCase().replace(/\\s/g, \"\");\n\n  if (/^[A-Z]\\d{3,4}$/.test(cid)) {\n    return cid.slice(0, 3) + \".\" + cid.slice(3);\n  }\n\n  return cid;\n}\n\nlet cidsNormalizados = matches.map(normalizarCID);\n\n// 🔥 remove duplicados\ncidsNormalizados = [...new Set(cidsNormalizados)];\n\n// 🔥 reconstrói string padronizada\nlet cidsFormatadosTexto = \"\";\n\nif (cidsNormalizados.length > 0) {\n  const lista = cidsNormalizados.join(\" e \");\n  cidsFormatadosTexto = `(CID ${lista})`;\n}\n\n// 🔥 remove CIDs antigos do texto original\nlet descricaoDoenca = textoCID\n  .replace(/\\(.*?CID.*?\\)/gi, \"\")\n  .trim();\n\n// 🔥 junta tudo limpo\nconst cidsFinal = descricaoDoenca\n  ? `${descricaoDoenca} ${cidsFormatadosTexto}`.trim()\n  : cidsFormatadosTexto;\n\n\n// ===== OUTPUT FINAL =====\nreturn [\n  {\n    json: {\n      ...item,\n\n      ESPECIE_BENEFICIO: especieOriginal,\n      DESCRICAO_BENEFICIO: descricaoOriginal,\n\n      ESPECIE_NOVO_BENEFICIO: especieNova,\n      DESCRICAO_NOVO_BENEFICIO: descricaoNova,\n\n      // 🔥 só isso agora\n      CIDS_DOENCAS: cidsFinal\n    }\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1376,8 +1382,8 @@
   },
   "staticData": null,
   "meta": null,
-  "versionId": "2a801fcb-7753-49c0-956d-7fb394002b22",
-  "activeVersionId": "2a801fcb-7753-49c0-956d-7fb394002b22",
+  "versionId": "2ec2fb1e-c470-4e0f-9f6f-47c25d263469",
+  "activeVersionId": "2ec2fb1e-c470-4e0f-9f6f-47c25d263469",
   "triggerCount": 1,
   "shared": [
     {
@@ -1389,9 +1395,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-04-30T01:00:11.845Z",
-    "createdAt": "2026-04-30T01:00:11.845Z",
-    "versionId": "2a801fcb-7753-49c0-956d-7fb394002b22",
+    "updatedAt": "2026-04-30T16:58:49.010Z",
+    "createdAt": "2026-04-30T16:58:49.010Z",
+    "versionId": "2ec2fb1e-c470-4e0f-9f6f-47c25d263469",
     "workflowId": "hb7oOF29XUp2lS2v",
     "nodes": [
       {
@@ -1442,7 +1448,7 @@
       },
       {
         "parameters": {
-          "model": "openai/gpt-4o",
+          "model": "openai/gpt-5",
           "options": {}
         },
         "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
@@ -1549,7 +1555,7 @@
             "attributes": [
               {
                 "name": "NOME_REQUERENTE",
-                "description": "Nome da empresa ou razão social presente no PPP (Perfil Profissiográfico Previdenciário). Geralmente aparece próximo ao CNPJ.",
+                "description": "  - Retorne exatamente como aparece no documento oficial (CNPJ ou rodapé institucional)\n  - NÃO resuma\n  - NÃO remova palavras \"SUPER MERCADO\", \"LTDA\", \"S.A\"\n  - Priorize a versão mais completa encontrada \n  - Geralmente aparece próximo ao CNPJ.",
                 "required": true
               },
               {
@@ -1594,7 +1600,7 @@
               },
               {
                 "name": "FUNCAO_SEGURADO",
-                "description": "Cargo ou função exercida pelo trabalhador.",
+                "description": "Cargo ou função exercida pelo trabalhador.\n  - Ajuste o gênero com base no sexo do trabalhador\n  - Se sexo = feminino → usar forma feminina (ex: OPERADORA)\n  - Se masculino → manter masculino",
                 "required": true
               },
               {
@@ -1604,12 +1610,18 @@
               },
               {
                 "name": "DESCRICAO_NOVO_BENEFICIO",
-                "description": "Descrição correspondente ao novo código de benefício."
+                "description": "Descrição correspondente ao novo código de benefício.",
+                "required": true
+              },
+              {
+                "name": "CIDS_DOENCAS",
+                "description": "Retorne uma frase contendo:\n- Nome das doenças correspondentes aos CIDs\n- E os códigos entre parênteses\n\nFormato obrigatório:\n\"nome da doença 1 e nome da doença 2 (CID CODIGO1 e CODIGO2)\"\n\nRegras:\n- Traduzir os CIDs para seus nomes médicos\n- Manter ordem\n- Não repetir",
+                "required": true
               }
             ]
           },
           "options": {
-            "systemPromptTemplate": "={{ $json.prompt }}"
+            "systemPromptTemplate": "FORMATO DE SAÍDA (OBRIGATÓRIO):\n- Retorne APENAS JSON válido\n- NÃO use ```json\n- NÃO use crases (```)\n- NÃO adicione explicações\n- NÃO adicione texto antes ou depois\n\nO output deve começar diretamente com {{ e terminar com }}\nREGRAS CRÍTICAS:\n\n- NUNCA invente informações\n- Se o dado NÃO estiver explicitamente presente no texto, retorne null\n- NÃO deduza, NÃO estime, NÃO complete\n- NÃO use conhecimento externo\n- NÃO infira baseado em contexto\n\nCRITÉRIO:\n- Só preencha se houver evidência textual EXATA\n\nSe houver dúvida → retorne null"
           }
         },
         "type": "@n8n/n8n-nodes-langchain.informationExtractor",
@@ -2170,7 +2182,7 @@
               {
                 "id": "ff7fdcbb-8ad0-48d8-a9c3-f3a38b58611f",
                 "name": "ENDERECO_REQUERENTE",
-                "value": "={{\n(() => {\n  const logradouro = $json[\"logradouro\"] || \"\";\n  const numero = $json[\"numero\"] || \"\";\n  const complemento = $json[\"complemento\"] ? \" - \" + $json[\"complemento\"] : \"\";\n  const bairro = $json[\"bairro\"] || \"\";\n  const municipio = $json[\"municipio\"] || \"\";\n  const uf = ($json[\"uf\"] || \"\").toUpperCase();\n  const cep = ($json[\"cep\"] || \"\").replace(/\\D/g, \"\").replace(/(\\d{5})(\\d{3})/, \"$1-$2\");\n\n  // Função para colocar a primeira letra de cada palavra em maiúscula\n  const titleCase = (str) =>\n    str\n      .toLowerCase()\n      .replace(/\\b[a-zà-ú]/gi, (c) => c.toUpperCase());\n\n  return `${titleCase(logradouro)}, ${numero}${complemento}, ${titleCase(bairro)}, ${titleCase(municipio)}, ${uf}, ${cep}`;\n})()\n}}",
+                "value": "={{\n(() => {\n  const logradouroRaw = $json[\"logradouro\"] || \"\";\n  const numero = $json[\"numero\"] || \"\";\n  const complemento = $json[\"complemento\"] ? \" - \" + $json[\"complemento\"] : \"\";\n  const bairro = $json[\"bairro\"] || \"\";\n  const municipio = $json[\"municipio\"] || \"\";\n  const uf = ($json[\"uf\"] || \"\").toUpperCase();\n  const cep = ($json[\"cep\"] || \"\")\n    .replace(/\\D/g, \"\")\n    .replace(/(\\d{5})(\\d{3})/, \"$1-$2\");\n\n  // 🔥 1. expandir abreviações comuns\n  const expandirLogradouro = (str) => {\n    return str\n      .replace(/^r\\b\\.?/i, \"Rua\")\n      .replace(/^av\\b\\.?/i, \"Avenida\")\n      .replace(/^rod\\b\\.?/i, \"Rodovia\")\n      .replace(/^trav\\b\\.?/i, \"Travessa\")\n      .replace(/^al\\b\\.?/i, \"Alameda\");\n  };\n\n  // 🔥 2. palavras que NÃO devem ser capitalizadas\n  const excecoes = [\"de\", \"da\", \"do\", \"das\", \"dos\", \"e\"];\n\n  const titleCase = (str) =>\n    str\n      .toLowerCase()\n      .split(\" \")\n      .map((word, index) => {\n        if (index !== 0 && excecoes.includes(word)) {\n          return word; // mantém minúsculo\n        }\n        return word.charAt(0).toUpperCase() + word.slice(1);\n      })\n      .join(\" \");\n\n  const logradouro = titleCase(expandirLogradouro(logradouroRaw));\n\n  return `${logradouro}, ${numero}${complemento}, ${titleCase(bairro)}, ${titleCase(municipio)}, ${uf}, ${cep}`;\n})()\n}}",
                 "type": "string"
               },
               {
@@ -2224,7 +2236,7 @@
               {
                 "id": "dea1f3c3-3a7b-4d34-ad75-1a956dfa3c14",
                 "name": "CIDS_DOENCAS",
-                "value": "",
+                "value": "={{ $('Regras de negócio dos CIDs').item.json.CIDS_DOENCAS }}",
                 "type": "string"
               },
               {
@@ -2289,7 +2301,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const raw = items[0].json;\n\n// 🔥 pega o output corretamente\nconst item = raw.output || {};\n\n// ===== TABELAS =====\nconst mapaBeneficios = {\n  \"31\": \"Auxílio-doença\",\n  \"32\": \"Aposentadoria por invalidez\",\n  \"36\": \"Auxílio-acidente\",\n  \"91\": \"Auxílio-doença acidentário\",\n  \"92\": \"Aposentadoria por invalidez acidentária\",\n  \"94\": \"Auxílio-acidente\"\n};\n\nconst regraConversao = {\n  \"91\": \"31\",\n  \"94\": \"36\",\n  \"92\": \"32\"\n};\n\n// ===== BENEFÍCIO =====\nconst especieOriginal = item.ESPECIE_BENEFICIO || null;\n\nconst especieNova =\n  regraConversao[especieOriginal] ||\n  item.ESPECIE_NOVO_BENEFICIO ||\n  especieOriginal;\n\nconst descricaoOriginal = mapaBeneficios[especieOriginal] || null;\nconst descricaoNova = mapaBeneficios[especieNova] || null;\n\n// ===== CIDs (se existir depois) =====\nlet cids = item.CIDS || [];\n\nif (typeof cids === \"string\") {\n  cids = [cids];\n}\n\nconst mapaCIDs = {\n  \"M54.5\": \"Dor lombar baixa\",\n  \"F41.1\": \"Ansiedade generalizada\"\n};\n\nconst cidsFormatados = cids.map(cid => ({\n  codigo: cid,\n  descricao: mapaCIDs[cid] || \"Descrição não encontrada\"\n}));\n\n// ===== OUTPUT FINAL =====\nreturn [\n  {\n    json: {\n      ...item,\n\n      ESPECIE_BENEFICIO: especieOriginal,\n      DESCRICAO_BENEFICIO: descricaoOriginal,\n\n      ESPECIE_NOVO_BENEFICIO: especieNova,\n      DESCRICAO_NOVO_BENEFICIO: descricaoNova,\n\n      CIDS_DOENCAS: cidsFormatados\n    }\n  }\n];"
+          "jsCode": "const raw = items[0].json;\nconst item = raw.output || {};\n\n// ===== TABELAS =====\nconst mapaBeneficios = {\n  \"31\": \"Auxílio-doença\",\n  \"32\": \"Aposentadoria por invalidez\",\n  \"36\": \"Auxílio-acidente\",\n  \"91\": \"Auxílio-doença acidentário\",\n  \"92\": \"Aposentadoria por invalidez acidentária\",\n  \"94\": \"Auxílio-acidente\"\n};\n\nconst regraConversao = {\n  \"91\": \"31\",\n  \"94\": \"36\",\n  \"92\": \"32\"\n};\n\n// ===== BENEFÍCIO =====\nconst especieOriginal = item.ESPECIE_BENEFICIO || null;\n\nconst especieNova =\n  regraConversao[especieOriginal] ||\n  item.ESPECIE_NOVO_BENEFICIO ||\n  especieOriginal;\n\n// 🔥 mantém descrição do extractor\nconst descricaoOriginal =\n  item.DESCRICAO_BENEFICIO ||\n  mapaBeneficios[especieOriginal] ||\n  null;\n\nconst descricaoNova =\n  item.DESCRICAO_NOVO_BENEFICIO ||\n  mapaBeneficios[especieNova] ||\n  null;\n\n\n// ===== CIDs (TEXTO) =====\nlet textoCID = item.CIDS_DOENCAS || \"\";\n\n// 🔥 extrai CIDs do texto\nconst matches = textoCID.match(/[A-Z]\\d{2}\\.?\\d/g) || [];\n\n// 🔥 normaliza (S925 → S92.5)\nfunction normalizarCID(cid) {\n  cid = cid.toUpperCase().replace(/\\s/g, \"\");\n\n  if (/^[A-Z]\\d{3,4}$/.test(cid)) {\n    return cid.slice(0, 3) + \".\" + cid.slice(3);\n  }\n\n  return cid;\n}\n\nlet cidsNormalizados = matches.map(normalizarCID);\n\n// 🔥 remove duplicados\ncidsNormalizados = [...new Set(cidsNormalizados)];\n\n// 🔥 reconstrói string padronizada\nlet cidsFormatadosTexto = \"\";\n\nif (cidsNormalizados.length > 0) {\n  const lista = cidsNormalizados.join(\" e \");\n  cidsFormatadosTexto = `(CID ${lista})`;\n}\n\n// 🔥 remove CIDs antigos do texto original\nlet descricaoDoenca = textoCID\n  .replace(/\\(.*?CID.*?\\)/gi, \"\")\n  .trim();\n\n// 🔥 junta tudo limpo\nconst cidsFinal = descricaoDoenca\n  ? `${descricaoDoenca} ${cidsFormatadosTexto}`.trim()\n  : cidsFormatadosTexto;\n\n\n// ===== OUTPUT FINAL =====\nreturn [\n  {\n    json: {\n      ...item,\n\n      ESPECIE_BENEFICIO: especieOriginal,\n      DESCRICAO_BENEFICIO: descricaoOriginal,\n\n      ESPECIE_NOVO_BENEFICIO: especieNova,\n      DESCRICAO_NOVO_BENEFICIO: descricaoNova,\n\n      // 🔥 só isso agora\n      CIDS_DOENCAS: cidsFinal\n    }\n  }\n];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
