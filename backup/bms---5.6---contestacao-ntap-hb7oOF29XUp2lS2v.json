@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-30T16:58:49.007Z",
+  "updatedAt": "2026-05-04T19:18:30.610Z",
   "createdAt": "2026-04-24T16:53:22.853Z",
   "id": "hb7oOF29XUp2lS2v",
   "name": "BMS - 5.6 - Contestação NTAP",
@@ -143,7 +143,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const allItems = items;\n\nlet urlDataprev = null;\n\nfunction extrairTextoEUrl(item) {\n  let textos = [];\n\n  // 🔥 OCR (formato merge \"0\")\n  if (item.json[\"0\"]?.content?.[0]?.text) {\n    const raw = item.json[\"0\"].content[0].text;\n\n    // 🔥 extrai URL CORRETA do OCR\n    let url = null;\n    \n    const labeledUrl = raw.match(/URL.*?:\\s*(https?:\\/\\/[^\\s]+)/i);\n    if (labeledUrl) {\n      url = labeledUrl[1];\n    } else {\n      const allUrls = raw.match(/https?:\\/\\/[^\\s]+/g);\n      if (allUrls && allUrls.length > 0) {\n        url = allUrls[allUrls.length - 1];\n      }\n    }\n\n    // 🔥 remove URL do texto\n    const textoLimpo = raw\n      .replace(/```/g, \"\")\n      .replace(/https?:\\/\\/[^\\s]+/g, \"\")\n      .replace(/\\*\\*URL do arquivo:\\*\\*/gi, \"\")\n      .trim();\n\n    // 🔥 DETECTA DATAPREV\n    const lower = textoLimpo.toLowerCase();\n\n    const isDataprev =\n      lower.includes(\"nb:\") &&\n      lower.includes(\"cpf:\") &&\n      lower.includes(\"espécie\") &&\n      lower.includes(\"dt. início\");\n\n    if (isDataprev && url) {\n      urlDataprev = url;\n    }\n\n    textos.push(textoLimpo);\n  }\n\n  // 🔥 OCR formato antigo\n  if (Array.isArray(item.json) && item.json[0]?.content?.[0]?.text) {\n    textos.push(item.json[0].content[0].text);\n  }\n\n  // 🔥 PDF extractor\n  if (Array.isArray(item.json.text)) {\n    textos.push(item.json.text.join(\"\\n\"));\n  }\n\n  // 🔥 fallback\n  if (item.json.textoExtraido) {\n    textos.push(item.json.textoExtraido);\n  }\n\n  return textos.join(\"\\n\\n\");\n}\n\n// ordena\nallItems.sort((a, b) => (a.json.pageIndex || 0) - (b.json.pageIndex || 0));\n\n// extrai textos\nconst textos = allItems\n  .map(item => extrairTextoEUrl(item))\n  .filter(t => t && t.trim().length > 0);\n\n// junta tudo\nconst textoCompleto = textos.join(\"\\n\\n\");\n\n// datas\nconst hoje = new Date();\n\nconst dataSubmissao = hoje.toLocaleDateString(\"pt-BR\");\n\nconst dataIdentificacao = hoje.toLocaleDateString(\"pt-BR\", {\n  month: \"long\",\n  year: \"numeric\"\n});\n\n// retorno final\nreturn [\n  {\n    json: {\n      textoCompleto,\n      urlDataprev, // 🔥 AQUI ESTÁ O OURO\n      dataSubmissao,\n      dataIdentificacao\n    }\n  }\n];"
+        "jsCode": "const allItems = items;\n\nlet urlDataprev = null;\nlet urlArquivoOCR = null; // 🔥 novo\n\nfunction extrairTextoEUrl(item) {\n  let textos = [];\n\n  if (item.json[\"0\"]?.content?.[0]?.text) {\n    const raw = item.json[\"0\"].content[0].text;\n\n    let url = null;\n\n    // 🔥 PRIORIDADE: URL rotulada\n    const labeledUrl = raw.match(/URL.*?:\\s*(https?:\\/\\/[^\\s]+)/i);\n\n    if (labeledUrl) {\n      url = labeledUrl[1];\n    } else {\n      // 🔥 fallback: pega última URL\n      const allUrls = raw.match(/https?:\\/\\/[^\\s]+/g);\n      if (allUrls && allUrls.length > 0) {\n        url = allUrls[allUrls.length - 1];\n      }\n    }\n\n    // 🔥 guarda QUALQUER URL encontrada (independente de ser dataprev)\n    if (url && !urlArquivoOCR) {\n      urlArquivoOCR = url;\n    }\n\n    const textoLimpo = raw\n      .replace(/```/g, \"\")\n      .replace(/https?:\\/\\/[^\\s]+/g, \"\")\n      .replace(/URL.*?:/gi, \"\")\n      .trim();\n\n    const lower = textoLimpo.toLowerCase();\n\n    // 🔥 detector MAIS FLEXÍVEL de Dataprev\n    const isDataprev =\n      lower.includes(\"nb\") &&\n      lower.includes(\"cpf\") &&\n      (\n        lower.includes(\"espécie\") ||\n        lower.includes(\"auxílio\") ||\n        lower.includes(\"benefício\")\n      );\n\n    if (isDataprev && url) {\n      urlDataprev = url;\n    }\n\n    textos.push(textoLimpo);\n  }\n\n  if (Array.isArray(item.json.text)) {\n    textos.push(item.json.text.join(\"\\n\"));\n  }\n\n  if (item.json.textoExtraido) {\n    textos.push(item.json.textoExtraido);\n  }\n\n  return textos.join(\"\\n\\n\");\n}\n\n// ordena páginas\nallItems.sort((a, b) => (a.json.pageIndex || 0) - (b.json.pageIndex || 0));\n\n// extrai textos\nconst textos = allItems\n  .map(item => extrairTextoEUrl(item))\n  .filter(t => t && t.trim().length > 0);\n\nconst textoCompleto = textos.join(\"\\n\\n\");\n\n// datas\nconst hoje = new Date();\n\nconst dataSubmissao = hoje.toLocaleDateString(\"pt-BR\");\n\nconst dataIdentificacao = hoje.toLocaleDateString(\"pt-BR\", {\n  month: \"long\",\n  year: \"numeric\"\n});\n\n// 🔥 fallback inteligente\nif (!urlDataprev) {\n  urlDataprev = null;\n}\n\n// retorno\nreturn [\n  {\n    json: {\n      textoCompleto,\n      urlDataprev,\n      urlArquivoOCR, // 🔥 opcional mas MUITO útil\n      dataSubmissao,\n      dataIdentificacao\n    }\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -396,8 +396,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3952,
-        576
+        4080,
+        416
       ],
       "id": "e3e764ae-c89b-414a-a061-7e79ac5abb41",
       "name": "Insere img no docs",
@@ -603,7 +603,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        4304,
+        4432,
         512
       ],
       "id": "1d83ef3d-c327-4723-96bc-7a4b17534112",
@@ -711,7 +711,7 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        4528,
+        4656,
         512
       ],
       "id": "cad14f2e-97f3-4719-b282-bd2f56d398a5",
@@ -984,7 +984,7 @@
           "mode": "list",
           "cachedResultName": "GPT-4O-2024-11-20"
         },
-        "text": "=Transcreva TODO o conteúdo do documento exatamente como está.\n\nRegras:\n- Não resuma\n- Não omita nenhuma informação\n- Preserve a estrutura (quebras de linha, listas, blocos)\n- Corrija apenas erros óbvios de OCR (ex: caracteres quebrados)\n- Não invente informações\n\nRetorne apenas o texto bruto do documento.\n\ndê de output também a url do arquivo na qual foi aplicado o OCR: {{ $json.url }}",
+        "text": "=Extraia TODO o conteúdo visível do documento utilizando OCR.\n\nRegras:\n- Capture todo o texto, mesmo que esteja em tabelas ou colunas\n- Reorganize o conteúdo de forma legível (linha a linha)\n- Corrija erros comuns de OCR (letras trocadas, palavras quebradas)\n- NÃO invente informações que não estejam visíveis\n- Preserve todos os dados importantes (nomes, datas, números, benefícios, NB, CPF, etc.)\n\nIMPORTANTE:\n- Se houver tabelas, converta para texto organizado\n- Se houver campos (ex: NB, CPF, benefício), mantenha o rótulo junto do valor\n\nRetorne apenas o texto bruto do documento.\n\ndê de output também a url do arquivo na qual foi aplicado o OCR: {{ $json.url }}",
         "imageUrls": "={{ $json.url }}",
         "options": {
           "detail": "high",
@@ -1022,6 +1022,40 @@
       ],
       "id": "74abe9a6-3a56-4436-9f27-acb625b91e15",
       "name": "Urls de binarios"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "bf8ec021-2cb6-4790-b533-6d2f49986f17",
+              "leftValue": "={{ $('Normaliza os textos').first().json.urlDataprev }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3920,
+        576
+      ],
+      "id": "96f2a8dc-cc22-4672-8a04-b393febe499f",
+      "name": "Verifica se captou img do dataprev"
     }
   ],
   "connections": {
@@ -1131,7 +1165,7 @@
       "main": [
         [
           {
-            "node": "Insere img no docs",
+            "node": "Verifica se captou img do dataprev",
             "type": "main",
             "index": 0
           }
@@ -1371,6 +1405,24 @@
           }
         ]
       ]
+    },
+    "Verifica se captou img do dataprev": {
+      "main": [
+        [
+          {
+            "node": "Insere img no docs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Urls de download (docs e pdf)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -1382,8 +1434,8 @@
   },
   "staticData": null,
   "meta": null,
-  "versionId": "2ec2fb1e-c470-4e0f-9f6f-47c25d263469",
-  "activeVersionId": "2ec2fb1e-c470-4e0f-9f6f-47c25d263469",
+  "versionId": "061116b0-27eb-4568-9c70-bd3e8a25ecfa",
+  "activeVersionId": "061116b0-27eb-4568-9c70-bd3e8a25ecfa",
   "triggerCount": 1,
   "shared": [
     {
@@ -1395,9 +1447,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-04-30T16:58:49.010Z",
-    "createdAt": "2026-04-30T16:58:49.010Z",
-    "versionId": "2ec2fb1e-c470-4e0f-9f6f-47c25d263469",
+    "updatedAt": "2026-05-04T19:18:30.614Z",
+    "createdAt": "2026-05-04T19:18:30.614Z",
+    "versionId": "061116b0-27eb-4568-9c70-bd3e8a25ecfa",
     "workflowId": "hb7oOF29XUp2lS2v",
     "nodes": [
       {
@@ -1537,7 +1589,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const allItems = items;\n\nlet urlDataprev = null;\n\nfunction extrairTextoEUrl(item) {\n  let textos = [];\n\n  // 🔥 OCR (formato merge \"0\")\n  if (item.json[\"0\"]?.content?.[0]?.text) {\n    const raw = item.json[\"0\"].content[0].text;\n\n    // 🔥 extrai URL CORRETA do OCR\n    let url = null;\n    \n    const labeledUrl = raw.match(/URL.*?:\\s*(https?:\\/\\/[^\\s]+)/i);\n    if (labeledUrl) {\n      url = labeledUrl[1];\n    } else {\n      const allUrls = raw.match(/https?:\\/\\/[^\\s]+/g);\n      if (allUrls && allUrls.length > 0) {\n        url = allUrls[allUrls.length - 1];\n      }\n    }\n\n    // 🔥 remove URL do texto\n    const textoLimpo = raw\n      .replace(/```/g, \"\")\n      .replace(/https?:\\/\\/[^\\s]+/g, \"\")\n      .replace(/\\*\\*URL do arquivo:\\*\\*/gi, \"\")\n      .trim();\n\n    // 🔥 DETECTA DATAPREV\n    const lower = textoLimpo.toLowerCase();\n\n    const isDataprev =\n      lower.includes(\"nb:\") &&\n      lower.includes(\"cpf:\") &&\n      lower.includes(\"espécie\") &&\n      lower.includes(\"dt. início\");\n\n    if (isDataprev && url) {\n      urlDataprev = url;\n    }\n\n    textos.push(textoLimpo);\n  }\n\n  // 🔥 OCR formato antigo\n  if (Array.isArray(item.json) && item.json[0]?.content?.[0]?.text) {\n    textos.push(item.json[0].content[0].text);\n  }\n\n  // 🔥 PDF extractor\n  if (Array.isArray(item.json.text)) {\n    textos.push(item.json.text.join(\"\\n\"));\n  }\n\n  // 🔥 fallback\n  if (item.json.textoExtraido) {\n    textos.push(item.json.textoExtraido);\n  }\n\n  return textos.join(\"\\n\\n\");\n}\n\n// ordena\nallItems.sort((a, b) => (a.json.pageIndex || 0) - (b.json.pageIndex || 0));\n\n// extrai textos\nconst textos = allItems\n  .map(item => extrairTextoEUrl(item))\n  .filter(t => t && t.trim().length > 0);\n\n// junta tudo\nconst textoCompleto = textos.join(\"\\n\\n\");\n\n// datas\nconst hoje = new Date();\n\nconst dataSubmissao = hoje.toLocaleDateString(\"pt-BR\");\n\nconst dataIdentificacao = hoje.toLocaleDateString(\"pt-BR\", {\n  month: \"long\",\n  year: \"numeric\"\n});\n\n// retorno final\nreturn [\n  {\n    json: {\n      textoCompleto,\n      urlDataprev, // 🔥 AQUI ESTÁ O OURO\n      dataSubmissao,\n      dataIdentificacao\n    }\n  }\n];"
+          "jsCode": "const allItems = items;\n\nlet urlDataprev = null;\nlet urlArquivoOCR = null; // 🔥 novo\n\nfunction extrairTextoEUrl(item) {\n  let textos = [];\n\n  if (item.json[\"0\"]?.content?.[0]?.text) {\n    const raw = item.json[\"0\"].content[0].text;\n\n    let url = null;\n\n    // 🔥 PRIORIDADE: URL rotulada\n    const labeledUrl = raw.match(/URL.*?:\\s*(https?:\\/\\/[^\\s]+)/i);\n\n    if (labeledUrl) {\n      url = labeledUrl[1];\n    } else {\n      // 🔥 fallback: pega última URL\n      const allUrls = raw.match(/https?:\\/\\/[^\\s]+/g);\n      if (allUrls && allUrls.length > 0) {\n        url = allUrls[allUrls.length - 1];\n      }\n    }\n\n    // 🔥 guarda QUALQUER URL encontrada (independente de ser dataprev)\n    if (url && !urlArquivoOCR) {\n      urlArquivoOCR = url;\n    }\n\n    const textoLimpo = raw\n      .replace(/```/g, \"\")\n      .replace(/https?:\\/\\/[^\\s]+/g, \"\")\n      .replace(/URL.*?:/gi, \"\")\n      .trim();\n\n    const lower = textoLimpo.toLowerCase();\n\n    // 🔥 detector MAIS FLEXÍVEL de Dataprev\n    const isDataprev =\n      lower.includes(\"nb\") &&\n      lower.includes(\"cpf\") &&\n      (\n        lower.includes(\"espécie\") ||\n        lower.includes(\"auxílio\") ||\n        lower.includes(\"benefício\")\n      );\n\n    if (isDataprev && url) {\n      urlDataprev = url;\n    }\n\n    textos.push(textoLimpo);\n  }\n\n  if (Array.isArray(item.json.text)) {\n    textos.push(item.json.text.join(\"\\n\"));\n  }\n\n  if (item.json.textoExtraido) {\n    textos.push(item.json.textoExtraido);\n  }\n\n  return textos.join(\"\\n\\n\");\n}\n\n// ordena páginas\nallItems.sort((a, b) => (a.json.pageIndex || 0) - (b.json.pageIndex || 0));\n\n// extrai textos\nconst textos = allItems\n  .map(item => extrairTextoEUrl(item))\n  .filter(t => t && t.trim().length > 0);\n\nconst textoCompleto = textos.join(\"\\n\\n\");\n\n// datas\nconst hoje = new Date();\n\nconst dataSubmissao = hoje.toLocaleDateString(\"pt-BR\");\n\nconst dataIdentificacao = hoje.toLocaleDateString(\"pt-BR\", {\n  month: \"long\",\n  year: \"numeric\"\n});\n\n// 🔥 fallback inteligente\nif (!urlDataprev) {\n  urlDataprev = null;\n}\n\n// retorno\nreturn [\n  {\n    json: {\n      textoCompleto,\n      urlDataprev,\n      urlArquivoOCR, // 🔥 opcional mas MUITO útil\n      dataSubmissao,\n      dataIdentificacao\n    }\n  }\n];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -1790,8 +1842,8 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          3952,
-          576
+          4080,
+          416
         ],
         "id": "e3e764ae-c89b-414a-a061-7e79ac5abb41",
         "name": "Insere img no docs",
@@ -1997,7 +2049,7 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          4304,
+          4432,
           512
         ],
         "id": "1d83ef3d-c327-4723-96bc-7a4b17534112",
@@ -2105,7 +2157,7 @@
         "type": "n8n-nodes-base.supabase",
         "typeVersion": 1,
         "position": [
-          4528,
+          4656,
           512
         ],
         "id": "cad14f2e-97f3-4719-b282-bd2f56d398a5",
@@ -2378,7 +2430,7 @@
             "mode": "list",
             "cachedResultName": "GPT-4O-2024-11-20"
           },
-          "text": "=Transcreva TODO o conteúdo do documento exatamente como está.\n\nRegras:\n- Não resuma\n- Não omita nenhuma informação\n- Preserve a estrutura (quebras de linha, listas, blocos)\n- Corrija apenas erros óbvios de OCR (ex: caracteres quebrados)\n- Não invente informações\n\nRetorne apenas o texto bruto do documento.\n\ndê de output também a url do arquivo na qual foi aplicado o OCR: {{ $json.url }}",
+          "text": "=Extraia TODO o conteúdo visível do documento utilizando OCR.\n\nRegras:\n- Capture todo o texto, mesmo que esteja em tabelas ou colunas\n- Reorganize o conteúdo de forma legível (linha a linha)\n- Corrija erros comuns de OCR (letras trocadas, palavras quebradas)\n- NÃO invente informações que não estejam visíveis\n- Preserve todos os dados importantes (nomes, datas, números, benefícios, NB, CPF, etc.)\n\nIMPORTANTE:\n- Se houver tabelas, converta para texto organizado\n- Se houver campos (ex: NB, CPF, benefício), mantenha o rótulo junto do valor\n\nRetorne apenas o texto bruto do documento.\n\ndê de output também a url do arquivo na qual foi aplicado o OCR: {{ $json.url }}",
           "imageUrls": "={{ $json.url }}",
           "options": {
             "detail": "high",
@@ -2416,6 +2468,40 @@
         ],
         "id": "74abe9a6-3a56-4436-9f27-acb625b91e15",
         "name": "Urls de binarios"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "bf8ec021-2cb6-4790-b533-6d2f49986f17",
+                "leftValue": "={{ $('Normaliza os textos').first().json.urlDataprev }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "exists",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          3920,
+          576
+        ],
+        "id": "96f2a8dc-cc22-4672-8a04-b393febe499f",
+        "name": "Verifica se captou img do dataprev"
       }
     ],
     "connections": {
@@ -2525,7 +2611,7 @@
         "main": [
           [
             {
-              "node": "Insere img no docs",
+              "node": "Verifica se captou img do dataprev",
               "type": "main",
               "index": 0
             }
@@ -2760,6 +2846,24 @@
           [
             {
               "node": "Merge1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se captou img do dataprev": {
+        "main": [
+          [
+            {
+              "node": "Insere img no docs",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Urls de download (docs e pdf)",
               "type": "main",
               "index": 0
             }
