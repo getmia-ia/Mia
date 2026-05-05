@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-30T10:27:44.447Z",
+  "updatedAt": "2026-05-04T16:19:05.077Z",
   "createdAt": "2026-04-30T10:26:46.411Z",
   "id": "ayB7slT4r0tB9e9W",
   "name": "AVLog - 2.2 - Estruturação de JSON",
@@ -18,15 +18,47 @@
       ],
       "id": "97ee4ffb-c318-4f8c-965e-e3c0ccb49f20",
       "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n//  N8N – Code Node  |  Parser robusto de NF-e\n//  Trata: string JSON escapada, objeto direto, array, texto\n//  quebrado, campos ausentes, etc.\n// ============================================================\n\nfunction parseNFe(input) {\n  // ---------------------------------------------------------\n  // 1. NORMALIZA A ENTRADA – extrai um objeto JS de qualquer coisa\n  // ---------------------------------------------------------\n  let raw = input;\n\n  // Se vier um array, pega o primeiro elemento\n  if (Array.isArray(raw)) raw = raw[0];\n\n  // Se vier um objeto com chave \"query\", desembrulha\n  if (raw && typeof raw === 'object' && 'query' in raw) raw = raw.query;\n\n  // Se agora for string, tenta fazer o parse\n  if (typeof raw === 'string') {\n    // Remove escapes de nova linha e tabs desnecessários\n    let cleaned = raw\n      .replace(/\\\\n/g, ' ')\n      .replace(/\\\\t/g, ' ')\n      .replace(/\\\\/g, '')          // remove barras sobrando\n      .replace(/\\s+/g, ' ')\n      .trim();\n\n    // Tenta JSON.parse direto\n    try {\n      raw = JSON.parse(cleaned);\n    } catch (_) {\n      // Se falhar, tenta extrair o JSON com regex (pega o maior bloco {…})\n      const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n      if (match) {\n        try { raw = JSON.parse(match[0]); } catch (__) { raw = {}; }\n      } else {\n        raw = {};\n      }\n    }\n  }\n\n  // Garante que raw é objeto\n  if (typeof raw !== 'object' || raw === null) raw = {};\n\n  // ---------------------------------------------------------\n  // 2. HELPERS para leitura segura de campos\n  // ---------------------------------------------------------\n  const get = (obj, ...keys) => {\n    for (const key of keys) {\n      if (obj && typeof obj === 'object' && key in obj) return obj[key];\n    }\n    return null;\n  };\n\n  const str = (v) => (v == null ? null : String(v).trim() || null);\n\n  const num = (v) => {\n    if (v == null) return null;\n    const n = parseFloat(String(v).replace(/\\./g, '').replace(',', '.'));\n    return isNaN(n) ? null : n;\n  };\n\n  // ---------------------------------------------------------\n  // 3. MONTA O JSON FINAL NORMALIZADO\n  // ---------------------------------------------------------\n  const emitente   = get(raw, 'emitente')   || {};\n  const dest       = get(raw, 'destinatario') || {};\n  const endDest    = get(dest, 'endereco')  || {};\n  const nf         = get(raw, 'nota_fiscal') || {};\n  const transp     = get(raw, 'transporte') || {};\n  const transporta = get(transp, 'transportadora') || {};\n  const volumes    = get(transp, 'volumes')  || {};\n  const entrega    = get(raw, 'entrega')    || {};\n  const confirm    = get(raw, 'confirmacao') || {};\n\n  const naoInf = (v) => (str(v) === 'NAO_INFORMADO' ? null : str(v));\n\n  return {\n    emitente: {\n      razao_social : str(get(emitente, 'razao_social')),\n      cnpj         : str(get(emitente, 'cnpj')),\n    },\n\n    destinatario: {\n      razao_social : str(get(dest, 'razao_social')),\n      cnpj         : str(get(dest, 'cnpj')),\n      endereco: {\n        logradouro : str(get(endDest, 'logradouro')),\n        bairro     : str(get(endDest, 'bairro')),\n        municipio  : str(get(endDest, 'municipio')),\n        uf         : str(get(endDest, 'uf')),\n        cep        : str(get(endDest, 'cep')),\n      },\n    },\n\n    nota_fiscal: {\n      numero            : str(get(nf, 'numero')),\n      serie             : str(get(nf, 'serie')),\n      chave_acesso      : str(get(nf, 'chave_acesso')),\n      natureza_operacao : str(get(nf, 'natureza_operacao')),\n      data_emissao      : str(get(nf, 'data_emissao')),\n      hora_emissao      : str(get(nf, 'hora_emissao')),\n      valor_produtos    : num(get(nf, 'valor_produtos')),\n      valor_frete       : num(get(nf, 'valor_frete')),\n      valor_total       : num(get(nf, 'valor_total')),\n    },\n\n    transporte: {\n      transportadora: {\n        razao_social : str(get(transporta, 'razao_social')),\n        cnpj         : str(get(transporta, 'cnpj')),\n      },\n      volumes: {\n        quantidade   : naoInf(get(volumes, 'quantidade')),\n        especie      : str(get(volumes, 'especie')),\n        peso_bruto   : num(get(volumes, 'peso_bruto')),\n        peso_liquido : num(get(volumes, 'peso_liquido')),\n      },\n    },\n\n    entrega: {\n      endereco_fiscal   : str(get(entrega, 'endereco_fiscal')),\n      endereco_entrega  : str(get(entrega, 'endereco_entrega')),\n      endereco_utilizar : str(get(entrega, 'endereco_utilizar')),\n      numero_pedido     : str(get(entrega, 'numero_pedido')),\n      observacoes       : naoInf(get(entrega, 'observacoes')),\n    },\n\n    confirmacao: {\n      confirmado_por_entregador : Boolean(get(confirm, 'confirmado_por_entregador')),\n      data_confirmacao          : str(get(confirm, 'data_confirmacao')),\n      hora_confirmacao          : str(get(confirm, 'hora_confirmacao')),\n    },\n  };\n}\n\n// ============================================================\n//  PONTO DE ENTRADA DO N8N\n// ============================================================\nconst items = $input.all();\nconst output = [];\n\nfor (const item of items) {\n  try {\n    // Tenta pegar o dado de várias formas possíveis\n    const raw =\n      item.json?.query ??   // formato atual (foto)\n      item.json ??           // objeto direto\n      item;                  // fallback\n\n    const nfe = parseNFe(raw);\n\n    output.push({ json: nfe });\n  } catch (err) {\n    // Nunca deixa o workflow quebrar – devolve o erro junto\n    output.push({\n      json: {\n        erro      : true,\n        mensagem  : err.message,\n        item_raw  : item?.json ?? null,\n      },\n    });\n  }\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "b5953625-0fed-41f0-a9e4-6b75603d0484",
+      "name": "Estrutura JSON"
     }
   ],
-  "connections": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Estrutura JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
   },
   "staticData": null,
   "meta": null,
-  "versionId": "33dfee6f-9698-4db8-a326-28ef97b843d2",
+  "versionId": "b865c55e-3edc-4fed-8933-919da23848c4",
   "activeVersionId": null,
   "triggerCount": 0,
   "shared": [
