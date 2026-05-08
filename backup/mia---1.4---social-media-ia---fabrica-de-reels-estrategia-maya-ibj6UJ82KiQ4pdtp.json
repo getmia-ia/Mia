@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-05T18:09:37.582Z",
+  "updatedAt": "2026-05-08T03:06:57.490Z",
   "createdAt": "2026-05-05T14:55:00.646Z",
   "id": "ibj6UJ82KiQ4pdtp",
   "name": "Mia - 1.4 - Social Media IA - Fábrica de reels (Estratégia Maya)",
@@ -9,13 +9,13 @@
     {
       "parameters": {
         "inputSource": "jsonExample",
-        "jsonExample": "{\n  \"chat_id\": \"100\",\n  \"nome\": \"Herik Willian\",\n  \"contato\": \"5538998634756\",\n  \"video\": \"https://....\"\n}"
+        "jsonExample": "{\n    \"chat_id\": \"100\",\n    \"nome\": \"Herik Willian\",\n    \"contato\": \"5538998634756\",\n    \"video\": \"https://chat.miabuilder.com/rails/active_storage/blobs/redirect/eyJfcmFpbHMiOnsibWVzc2FnZSI6IkJBaHBBa2l5IiwiZXhwIjpudWxsLCJwdXIiOiJibG9iX2lkIn19--a3ff39edf6617c20dbff1e967cebddde79580eb7/File.mp4\",\n    \"empresa\": \"M[IA]\",\n    \"logo_empresa\": \"https://i.ibb.co/zVTrQcpk/Captura-de-tela-2026-05-07-094250.png\",\n    \"instagram\": \"@getmia.ai\"\n  }"
       },
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
       "position": [
-        0,
-        0
+        592,
+        -224
       ],
       "id": "34f9a782-0402-47e0-9861-7587859bb590",
       "name": "When Executed by Another Workflow"
@@ -61,8 +61,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        896,
-        -272
+        4752,
+        -240
       ],
       "id": "ec8e95dd-5709-4784-9899-9bdadf50bbe0",
       "name": "Envia vídeo pronto",
@@ -77,8 +77,8 @@
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 2.1,
       "position": [
-        608,
-        -288
+        1088,
+        -112
       ],
       "id": "272ab73a-dc02-49af-8652-b79cd13d4207",
       "name": "Transcribe a recording",
@@ -88,9 +88,657 @@
           "name": "OpenAi account"
         }
       }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.video }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        816,
+        -224
+      ],
+      "id": "19f270bd-3755-4d0e-9c10-00c1236309c6",
+      "name": "Baixa o Vídeo"
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "cdn.miabuilder.com",
+        "fileName": "={{ $('When Executed by Another Workflow').first().json.empresa }}/videos/tmp/{{$now.toFormat(\"yyyyMMddHHmmssSSS\")}}_original.mp4",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        -368
+      ],
+      "id": "1df7c58e-cafe-4914-8475-2cae4fc169e8",
+      "name": "Sobe Vídeo Original no S3 (temp)",
+      "credentials": {
+        "aws": {
+          "id": "NL1DGPqJZ3XHyml8",
+          "name": "MIA CDN AWS S3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Você é um especialista em copywriting para redes sociais, especialmente para o perfil {{ $('When Executed by Another Workflow').first().json.instragram }} da empresa {{ $('When Executed by Another Workflow').first().json.empresa }}.\n\nAbaixo está a transcrição de um vídeo curto (Reel/Short):\n\n---\n{{ $json.transcricao }}\n---\n\nCom base nessa transcrição, gere EXATAMENTE o seguinte JSON (sem texto adicional, sem markdown):\n\n{\n  \"titulo\": \"texto chamativo de até 12 palavras. Palavras-chave importantes devem estar entre <span class='destaque'>palavra</span>. Sem aspas externas. Sem emoji.\",\n  \"legenda\": \"legenda completa para o post no Instagram. Deve ter: 1 frase de gancho forte (1ª linha), 2-3 linhas de desenvolvimento do tema do vídeo, 1 linha de CTA (ex: Salva esse vídeo, Comenta aí, Segue pra mais). Máximo 150 palavras. Sem hashtags aqui.\",\n  \"hashtags\": \"5 a 8 hashtags relevantes separadas por espaço, começando com #, relacionadas ao tema do vídeo e ao nicho de IA/tecnologia/automação\"\n}\n\nRETORNE APENAS O JSON, sem nenhum texto antes ou depois.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1776,
+        -240
+      ],
+      "id": "40b2b65e-599d-44d3-aa7d-ec3cd66d4781",
+      "name": "IA - Gera Título e Legenda"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst item = items[0];\n\nlet output = item.output || item.json?.output || item.json?.text || '';\noutput = output.replace(/```json|```/g, '').trim();\n\nlet resultado;\ntry {\n  resultado = JSON.parse(output);\n} catch (err) {\n  throw new Error('❌ JSON inválido da IA: ' + err.message + ' | Raw: ' + output);\n}\n\nif (!resultado.titulo || !resultado.legenda) {\n  throw new Error('❌ JSON incompleto: ' + JSON.stringify(resultado));\n}\n\nreturn [{\n  json: {\n    titulo: resultado.titulo,\n    legenda: resultado.legenda,\n    hashtags: resultado.hashtags || '',\n    video_url_s3: $('URL S3 + Transcrição do vídeo + Dados').first().json.video_url_s3\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        -240
+      ],
+      "id": "8228075b-51f7-4c16-84c9-82903e70b414",
+      "name": "Processa Output da IA"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "set-html",
+              "name": "html_code",
+              "value": "=<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head>\n  <meta charset=\"UTF-8\" />\n  <link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap\" rel=\"stylesheet\">\n  <style>\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    html, body {\n      font-family: 'Inter', sans-serif;\n      background: #000000;\n      overflow: hidden;\n    }\n    .wrapper {\n      background: #000000;\n      padding: 0;\n      display: inline-flex;\n      flex-direction: column;\n      width: 1000px;\n    }\n    .top-row {\n      display: flex;\n      align-items: center;\n      justify-content: space-between;\n      margin-bottom: 8px;\n    }\n    .profile {\n      display: flex;\n      align-items: center;\n      gap: 16px;\n    }\n    .logo-circle {\n      width: 80px;\n      height: 80px;\n      border-radius: 50%;\n      background: #1a1a1a;\n      border: 2.5px solid #FFD700;\n      display: flex;\n      align-items: center;\n      justify-content: center;\n      overflow: hidden;\n      flex-shrink: 0;\n    }\n    .logo-circle img {\n      width: 100%;\n      height: 100%;\n      object-fit: cover;\n    }\n    .profile-info {\n      display: flex;\n      flex-direction: column;\n      gap: 4px;\n    }\n    .name-row {\n      display: flex;\n      align-items: center;\n      gap: 8px;\n    }\n    .empresa-nome {\n      color: #FFFFFF;\n      font-size: 32px;\n      font-weight: 700;\n      letter-spacing: -0.5px;\n      font-family: 'Inter', sans-serif;\n    }\n    .verified {\n      color: #1D9BF0;\n      font-size: 28px;\n    }\n    .instagram-handle {\n      color: #888888;\n      font-size: 22px;\n      font-weight: 400;\n      font-family: 'Inter', sans-serif;\n    }\n    .icon-right {\n      color: #FFD700;\n      font-size: 42px;\n      font-weight: 900;\n      font-family: monospace;\n      letter-spacing: -4px;\n      align-self: flex-start;\n    }\n    .titulo {\n      color: #FFFFFF;\n      font-size: 34px;\n      font-weight: 600;\n      line-height: 1.4;\n      margin-top: 20px;\n      font-family: 'Inter', sans-serif;\n    }\n    .titulo .destaque {\n      color: #FFD700;\n    }\n  </style>\n</head>\n<body>\n  <div class=\"wrapper\">\n    <div class=\"top-row\">\n      <div class=\"profile\">\n        <div class=\"logo-circle\">\n          <img src=\"{{ $('When Executed by Another Workflow').first().json.logo_empresa }}\" />\n        </div>\n        <div class=\"profile-info\">\n          <div class=\"name-row\">\n            <span class=\"empresa-nome\">{{ $('When Executed by Another Workflow').first().json.empresa }}</span>\n            <span class=\"verified\">✓</span>\n          </div>\n          <span class=\"instagram-handle\">{{ $('When Executed by Another Workflow').first().json.instagram }}</span>\n        </div>\n      </div>\n      <div class=\"icon-right\">>_</div>\n    </div>\n    <div class=\"titulo\">{{ $('Processa Output da IA').first().json.titulo }}</div>\n  </div>\n</body>\n</html>",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2352,
+        -240
+      ],
+      "id": "193aaed3-0ba9-4bbf-b638-e9ea0c2a78d5",
+      "name": "Monta HTML do Header"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "param-origem",
+              "name": "origem (html, url)",
+              "value": "html",
+              "type": "string"
+            },
+            {
+              "id": "param-conteudo",
+              "name": "conteudo",
+              "value": "={{ $json.html_code }}",
+              "type": "string"
+            },
+            {
+              "id": "param-recortar",
+              "name": "recortar?",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "param-dimensoes",
+              "name": "recortar inicio (x,y) e tamanho (altura,largura) [x,y,height,width]",
+              "value": "[0,0,1080,1920]",
+              "type": "array"
+            },
+            {
+              "id": "param-tipo",
+              "name": "Tipo (png, jpeg, webp)",
+              "value": "png",
+              "type": "string"
+            },
+            {
+              "id": "param-base64",
+              "name": "base64?",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2608,
+        -240
+      ],
+      "id": "ff7305c6-d3bf-445c-91ae-af7e9afd9d8b",
+      "name": "HTML-Render - Parâmetros Header"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://html-render.miabuilder.com/1/screenshot",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"{{ $json['origem (html, url)'] }}\" : {{ JSON.stringify($json.conteudo) }},\n  \"export\": {\n    \"fullPage\": {{ !$json['recortar?'] }},\n    {{ !$json['recortar?'] ? \"\" : `\n      \"clip\": {\n        \"x\": `+$json['recortar inicio (x,y) e tamanho (altura,largura) ']['x,y,height,width'][0]+`,\n        \"y\": `+$json['recortar inicio (x,y) e tamanho (altura,largura) ']['x,y,height,width'][1]+`,\n        \"width\": `+$json['recortar inicio (x,y) e tamanho (altura,largura) ']['x,y,height,width'][2]+`,\n        \"height\": `+$json['recortar inicio (x,y) e tamanho (altura,largura) ']['x,y,height,width'][3]+`\n      },\n    ` }}\n    \"type\": \"{{ $json['Tipo (png, jpeg, webp)'] }}\",\n    \"encoding\": \"{{ $json['base64?'] ? 'base64' : 'binary' }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2896,
+        -240
+      ],
+      "id": "348c9853-d1b0-40a5-b3c7-2651848acc54",
+      "name": "HTML Render - Gera PNG do Header"
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3152,
+        -240
+      ],
+      "id": "6f77a848-a2b6-461f-a0ad-9ac9061d9966",
+      "name": "Aguarda Render",
+      "webhookId": "4e2d7001-f2fa-4170-ae6d-2e8368a822a8"
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "cdn.miabuilder.com",
+        "fileName": "={{ $('When Executed by Another Workflow').first().json.empresa }}/videos/headers/{{$now.toFormat(\"yyyyMMddHHmmssSSS\")}}_header.png",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 2,
+      "position": [
+        3376,
+        -240
+      ],
+      "id": "1a07b285-2530-422d-a676-62a1b1ebdcce",
+      "name": "Sobe Header PNG no S3",
+      "credentials": {
+        "aws": {
+          "id": "NL1DGPqJZ3XHyml8",
+          "name": "MIA CDN AWS S3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "set-header-url",
+              "name": "header_png_url",
+              "value": "={{ $json.Location }}",
+              "type": "string"
+            },
+            {
+              "id": "set-video-url-3",
+              "name": "video_url_s3",
+              "value": "={{ $('Processa Output da IA').item.json.video_url_s3 }}",
+              "type": "string"
+            },
+            {
+              "id": "set-titulo-final",
+              "name": "titulo",
+              "value": "={{ $('Processa Output da IA').item.json.titulo }}",
+              "type": "string"
+            },
+            {
+              "id": "set-legenda-final",
+              "name": "legenda",
+              "value": "={{ $('Processa Output da IA').item.json.legenda }}",
+              "type": "string"
+            },
+            {
+              "id": "set-hashtags-final",
+              "name": "hashtags",
+              "value": "={{ $('Processa Output da IA').item.json.hashtags }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3616,
+        -240
+      ],
+      "id": "66103b66-316f-4f8a-9cc9-40a1afe8e74e",
+      "name": "Salva URL do Header"
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "cdn.miabuilder.com",
+        "fileName": "={{ $('When Executed by Another Workflow').item.json.empresa }}/videos/reels/{{$now.toFormat(\"yyyyMMddHHmmssSSS\")}}_reel.mp4",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 2,
+      "position": [
+        4272,
+        -240
+      ],
+      "id": "9e6a4ac7-49a8-4e21-a41f-aec7a96c41a9",
+      "name": "Sobe Vídeo Final no S3",
+      "credentials": {
+        "aws": {
+          "id": "NL1DGPqJZ3XHyml8",
+          "name": "MIA CDN AWS S3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "set-url-final",
+              "name": "video_final_url",
+              "value": "={{ $json.Location }}",
+              "type": "string"
+            },
+            {
+              "id": "set-titulo-ret",
+              "name": "titulo",
+              "value": "={{ $('Salva URL do Header').item.json.titulo }}",
+              "type": "string"
+            },
+            {
+              "id": "set-legenda-ret",
+              "name": "legenda",
+              "value": "={{ $('Salva URL do Header').item.json.legenda }}",
+              "type": "string"
+            },
+            {
+              "id": "set-hashtags-ret",
+              "name": "hashtags",
+              "value": "={{ $('Salva URL do Header').item.json.hashtags }}",
+              "type": "string"
+            },
+            {
+              "id": "set-chat-id",
+              "name": "chat_id",
+              "value": "={{ $('When Executed by Another Workflow').item.json.chat_id }}",
+              "type": "string"
+            },
+            {
+              "id": "set-contato",
+              "name": "contato",
+              "value": "={{ $('When Executed by Another Workflow').item.json.contato }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4496,
+        -240
+      ],
+      "id": "c2651bcf-79fd-43ba-bf95-9dd0ec1b4408",
+      "name": "Monta Resposta Final"
+    },
+    {
+      "parameters": {
+        "command": "=VIDEO_URL=\"{{ $('URL S3 + Transcrição do vídeo + Dados').first().json.video_url_s3 }}\" && \\\nBG_URL=\"{{ $json.header_png_url }}\" && \\\nTMP_DIR=\"/n8n_data/tmp\" && \\\nmkdir -p \"$TMP_DIR\" && \\\nVIDEO_IN=\"$TMP_DIR/input_$$.mp4\" && \\\nHEADER_PNG=\"$TMP_DIR/header_$$.png\" && \\\nHEADER_SCALED=\"$TMP_DIR/header_scaled_$$.png\" && \\\nMASK_PNG=\"$TMP_DIR/mask_$$.png\" && \\\nVIDEO_OUT=\"$TMP_DIR/output_$$.mp4\" && \\\nwget -q -O \"$VIDEO_IN\" \"$VIDEO_URL\" && \\\nwget -q -O \"$HEADER_PNG\" \"$BG_URL\" && \\\nCANVAS_W=1080 && \\\nCANVAS_H=1920 && \\\nMARGIN=40 && \\\nGAP=28 && \\\nRADIUS=35 && \\\nVIDEO_W=$((CANVAS_W - MARGIN * 2)) && \\\nORIG_W=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 \"$VIDEO_IN\") && \\\nORIG_H=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 \"$VIDEO_IN\") && \\\nVIDEO_H=$(echo \"$ORIG_H $ORIG_W $VIDEO_W\" | awk '{printf \"%d\", int($1 * $3 / $2)}') && \\\nMAX_VIDEO_H=$((CANVAS_H - MARGIN * 2 - GAP * 2 - 200)) && \\\nif [ \"$VIDEO_H\" -gt \"$MAX_VIDEO_H\" ]; then VIDEO_H=$MAX_VIDEO_H; fi && \\\nmagick \"$HEADER_PNG\" -resize ${VIDEO_W}x \"$HEADER_SCALED\" 2>/dev/null && \\\nHEADER_H=$(magick identify -format \"%h\" \"$HEADER_SCALED\" 2>/dev/null) && \\\nBLOCK_H=$((HEADER_H + GAP + VIDEO_H)) && \\\nHEADER_Y=$(( (CANVAS_H - BLOCK_H) / 2 )) && \\\nif [ \"$HEADER_Y\" -lt \"$MARGIN\" ]; then HEADER_Y=$MARGIN; fi && \\\nVIDEO_Y=$((HEADER_Y + HEADER_H + GAP)) && \\\nmagick -size ${VIDEO_W}x${VIDEO_H} xc:black \\\n  -fill white \\\n  -draw \"roundrectangle 0,0,$((VIDEO_W-1)),$((VIDEO_H-1)),${RADIUS},${RADIUS}\" \\\n  \"$MASK_PNG\" 2>/dev/null && \\\nffmpeg -f lavfi -i color=black:s=${CANVAS_W}x${CANVAS_H}:r=30 \\\n  -i \"$VIDEO_IN\" \\\n  -i \"$MASK_PNG\" \\\n  -i \"$HEADER_SCALED\" \\\n  -filter_complex \"\\\n    [1:v]scale=${VIDEO_W}:${VIDEO_H}:force_original_aspect_ratio=decrease,\\\n    pad=${VIDEO_W}:${VIDEO_H}:(ow-iw)/2:(oh-ih)/2:#000000[vscaled];\\\n    [vscaled][2:v]alphamerge[vmasked];\\\n    [0:v][vmasked]overlay=${MARGIN}:${VIDEO_Y}[vcomp];\\\n    [vcomp][3:v]overlay=${MARGIN}:${HEADER_Y}[out]\" \\\n  -map \"[out]\" \\\n  -map \"1:a?\" \\\n  -c:v libx264 -preset ultrafast -crf 26 \\\n  -c:a aac \\\n  -shortest \\\n  -y \"$VIDEO_OUT\" 2>/dev/null && \\\necho \"$VIDEO_OUT\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3856,
+        -240
+      ],
+      "id": "7ba2b804-879c-4dba-9fe1-853784b7d323",
+      "name": "Execute Command"
+    },
+    {
+      "parameters": {
+        "fileSelector": "={{ $json.stdout.trim() }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        4080,
+        -240
+      ],
+      "id": "6516c0ed-1c53-48dd-94c8-14929a926807",
+      "name": "Read/Write Files from Disk"
+    },
+    {
+      "parameters": {
+        "model": "anthropic/claude-opus-4.7",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1712,
+        0
+      ],
+      "id": "774b562a-f29d-4ba8-bb57-3e215dc7ab47",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://video-composer.miabuilder.com/compose",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"video_url\": \"{{ $json.video_url_s3 }}\",\n  \"header_png_url\": \"{{ $json.header_png_url }}\",\n  \"instagram\": \"{{ $('When Executed by Another Workflow').item.json.instagram }}\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3952,
+        -592
+      ],
+      "id": "c6e6f415-79b9-4c8e-9d9b-ac01e7d74640",
+      "name": "FFmpeg Service - Compõe Vídeo Final"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b3d9e080-1b8e-4b13-a812-7af33943d787",
+              "name": "video_url_s3",
+              "value": "={{ $json.Location }}",
+              "type": "string"
+            },
+            {
+              "id": "set-transcricao",
+              "name": "transcricao",
+              "value": "={{ $('Transcribe a recording').first().json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "72eef92f-d7aa-41c4-84e0-50732c7cdac2",
+              "name": "dados",
+              "value": "={{ $('When Executed by Another Workflow').item.json }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1568,
+        -240
+      ],
+      "id": "962c1296-f47c-4163-8d32-f0529f1e052c",
+      "name": "URL S3 + Transcrição do vídeo + Dados"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1344,
+        -240
+      ],
+      "id": "0bb76068-4943-4bfd-b2dd-4961062c6805",
+      "name": "Merge"
     }
   ],
-  "connections": {},
+  "connections": {
+    "Baixa o Vídeo": {
+      "main": [
+        [
+          {
+            "node": "Sobe Vídeo Original no S3 (temp)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Transcribe a recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sobe Vídeo Original no S3 (temp)": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA - Gera Título e Legenda": {
+      "main": [
+        [
+          {
+            "node": "Processa Output da IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processa Output da IA": {
+      "main": [
+        [
+          {
+            "node": "Monta HTML do Header",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta HTML do Header": {
+      "main": [
+        [
+          {
+            "node": "HTML-Render - Parâmetros Header",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML-Render - Parâmetros Header": {
+      "main": [
+        [
+          {
+            "node": "HTML Render - Gera PNG do Header",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML Render - Gera PNG do Header": {
+      "main": [
+        [
+          {
+            "node": "Aguarda Render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguarda Render": {
+      "main": [
+        [
+          {
+            "node": "Sobe Header PNG no S3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sobe Header PNG no S3": {
+      "main": [
+        [
+          {
+            "node": "Salva URL do Header",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salva URL do Header": {
+      "main": [
+        [
+          {
+            "node": "Execute Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sobe Vídeo Final no S3": {
+      "main": [
+        [
+          {
+            "node": "Monta Resposta Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta Resposta Final": {
+      "main": [
+        []
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Baixa o Vídeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Command": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        []
+      ]
+    },
+    "Transcribe a recording": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "IA - Gera Título e Legenda",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FFmpeg Service - Compõe Vídeo Final": {
+      "main": [
+        []
+      ]
+    },
+    "URL S3 + Transcrição do vídeo + Dados": {
+      "main": [
+        [
+          {
+            "node": "IA - Gera Título e Legenda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "URL S3 + Transcrição do vídeo + Dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
   "settings": {
     "executionOrder": "v1",
     "timeSavedMode": "fixed",
@@ -105,7 +753,7 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "1fb0315f-ee29-47dd-8e6b-29226e2475d7",
+  "versionId": "617bb491-8046-4a9f-a52c-903798faa0e9",
   "activeVersionId": null,
   "triggerCount": 1,
   "shared": [
