@@ -1,0 +1,285 @@
+{
+  "updatedAt": "2026-05-13T22:56:53.804Z",
+  "createdAt": "2026-05-13T20:58:11.901Z",
+  "id": "yuzWCWRBhXQc56q5",
+  "name": "LLM Open Router (Verificação de disponibilidade)",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Valida se o modelo requerido pelo usuário está disponível, se não estiver ele buscar um equivalente",
+        "height": 544,
+        "width": 1104
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -624,
+        -288
+      ],
+      "id": "b049027e-cc88-4e92-85c7-d3b76e1cf3f2",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "open-router-verificacao",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -368,
+        0
+      ],
+      "id": "a34232f6-59cb-4dc3-ad8f-0fb8412c5026",
+      "name": "Webhook",
+      "webhookId": "520ae470-5421-46ec-b937-3d045babbf5b"
+    },
+    {
+      "parameters": {
+        "content": "### Exemplo de Payload\n{\n\"model\": \"anthropic/claude-3.5-sonnet\"\n}",
+        "height": 176,
+        "width": 304,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -608,
+        -192
+      ],
+      "id": "cb78065a-6401-4db8-9414-68209d36886c",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "### Exemplo de retorno\n  {\n\"requestedModel\": \"anthropic/claude-3.5-sonnet\",\n\"resolvedModel\": \"anthropic/claude-sonnet-4\",\n\"fallbackUsed\": true,\n\"strategy\": \"smart_fallback\",\n\"score\": 245\n  }\n",
+        "height": 192,
+        "width": 384,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        64,
+        -208
+      ],
+      "id": "5062d34c-e3dc-4810-ad98-bbf1b178f9cb",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "url": "https://openrouter.ai/api/v1/models",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -144,
+        0
+      ],
+      "id": "92981b9c-1b5a-4146-b85d-f6e1355aeb26",
+      "name": "Busca modelos no openRouter"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ======================================================\n// Modelo solicitado pelo usuário via Webhook\n// ======================================================\n//\n// Exemplo recebido:\n//\n// {\n//   \"model\": \"claude-3.5-sonnet\"\n// }\n//\n// ou:\n//\n// {\n//   \"model\": \"anthropic/claude-3.5-sonnet\"\n// }\n//\n// Esse será o modelo que tentaremos resolver.\n//\nconst requestedModel =\n  $('Webhook').first().json.body.model;\n\n\n// ======================================================\n// Lista de modelos disponíveis atualmente na OpenRouter\n// ======================================================\n//\n// Esse node faz:\n// GET https://openrouter.ai/api/v1/models\n//\n// E retorna algo como:\n//\n// [\n//   { id: \"anthropic/claude-4-sonnet\" },\n//   { id: \"openai/gpt-4.1\" },\n//   ...\n// ]\n//\nconst availableModels =\n  $('Busca modelos no openRouter')\n    .first()\n    .json\n    .data;\n\n\n// ======================================================\n// FUNÇÃO parseModel()\n// ======================================================\n//\n// Objetivo:\n// Transformar um nome de modelo em uma estrutura padronizada\n// para facilitar comparações inteligentes.\n//\n// Exemplo:\n//\n// \"anthropic/claude-3.5-sonnet\"\n//\n// vira:\n//\n// {\n//   provider: \"anthropic\",\n//   family: \"claude\",\n//   tier: \"sonnet\",\n//   version: 3.5\n// }\n//\n// Isso permite:\n//\n// - comparar providers\n// - comparar versões\n// - comparar tiers\n// - encontrar equivalentes\n//\nfunction parseModel(model) {\n\n  // transforma tudo em lowercase\n  // para evitar problemas com maiúsculas/minúsculas\n  const lower = model.toLowerCase();\n\n  // provider = empresa/model provider\n  // ex:\n  // anthropic\n  // openai\n  // google\n  let provider = '';\n\n  // nome puro do modelo\n  // ex:\n  // claude-3.5-sonnet\n  let name = '';\n\n  // ======================================================\n  // CASO 1:\n  // Modelo possui provider\n  //\n  // Ex:\n  // anthropic/claude-3.5-sonnet\n  // ======================================================\n  if (lower.includes('/')) {\n\n    const parts = lower.split('/');\n\n    provider = parts[0] || '';\n    name = parts[1] || '';\n\n  } else {\n\n    // ======================================================\n    // CASO 2:\n    // Modelo NÃO possui provider\n    //\n    // Ex:\n    // claude-3.5-sonnet\n    // ======================================================\n\n    name = lower;\n\n    // inferimos o provider baseado no nome\n\n    if (name.includes('claude')) {\n      provider = 'anthropic';\n    }\n    else if (\n      name.includes('gpt') ||\n      name.includes('o1') ||\n      name.includes('o3')\n    ) {\n      provider = 'openai';\n    }\n    else if (name.includes('gemini')) {\n      provider = 'google';\n    }\n    else if (name.includes('llama')) {\n      provider = 'meta-llama';\n    }\n\n  }\n\n  // ======================================================\n  // EXTRAÇÃO DA VERSÃO\n  // ======================================================\n  //\n  // Procura números dentro do nome\n  //\n  // Ex:\n  // claude-3.5-sonnet\n  //\n  // encontra:\n  // 3.5\n  //\n  const versionMatch =\n    name.match(/(\\d+(\\.\\d+)?)/);\n\n  const version =\n    versionMatch\n      ? parseFloat(versionMatch[1])\n      : 0;\n\n  // ======================================================\n  // EXTRAÇÃO DO TIER\n  // ======================================================\n  //\n  // Alguns providers possuem tiers:\n  //\n  // sonnet\n  // opus\n  // haiku\n  // flash\n  // mini\n  // etc\n  //\n  // Isso ajuda a encontrar equivalentes.\n  //\n  let tier = '';\n\n  if (name.includes('sonnet')) tier = 'sonnet';\n  else if (name.includes('opus')) tier = 'opus';\n  else if (name.includes('haiku')) tier = 'haiku';\n  else if (name.includes('flash')) tier = 'flash';\n  else if (name.includes('pro')) tier = 'pro';\n  else if (name.includes('mini')) tier = 'mini';\n  else if (name.includes('nano')) tier = 'nano';\n\n  // ======================================================\n  // EXTRAÇÃO DA FAMÍLIA\n  // ======================================================\n  //\n  // Família = linha principal do modelo\n  //\n  // Ex:\n  // claude\n  // gpt\n  // gemini\n  // llama\n  //\n  let family = '';\n\n  if (name.includes('claude')) family = 'claude';\n  else if (name.includes('gpt')) family = 'gpt';\n  else if (name.includes('gemini')) family = 'gemini';\n  else if (name.includes('llama')) family = 'llama';\n\n  // retorna estrutura padronizada\n  return {\n    raw: model,\n    provider,\n    name,\n    version,\n    tier,\n    family\n  };\n\n}\n\n\n// ======================================================\n// Parse do modelo solicitado\n// ======================================================\n//\n// Converte o modelo pedido pelo usuário\n// em estrutura comparável.\n//\nconst requested =\n  parseModel(requestedModel);\n\n\n// ======================================================\n// Lista de IDs disponíveis\n// ======================================================\n//\n// Transformamos:\n//\n// [\n//   { id: \"openai/gpt-4.1\" },\n//   { id: \"anthropic/claude-4-sonnet\" }\n// ]\n//\n// em:\n//\n// [\n//   \"openai/gpt-4.1\",\n//   \"anthropic/claude-4-sonnet\"\n// ]\n//\nconst availableIds =\n  availableModels.map(\n    m => m.id.toLowerCase()\n  );\n\n\n// ======================================================\n// MATCH EXATO\n// ======================================================\n//\n// Primeiro tentamos encontrar exatamente\n// o modelo solicitado.\n//\n// Ex:\n//\n// usuário pediu:\n// anthropic/claude-4-sonnet\n//\n// e ele existe.\n//\n// então retornamos imediatamente.\n//\nif (\n  availableIds.includes(\n    requestedModel.toLowerCase()\n  )\n) {\n\n  const exact =\n    availableModels.find(\n      m =>\n        m.id.toLowerCase() ===\n        requestedModel.toLowerCase()\n    );\n\n  return [{\n    json: {\n      requestedModel,\n\n      // modelo final escolhido\n      resolvedModel: exact.id,\n\n      // fallback não foi necessário\n      fallbackUsed: false,\n\n      // estratégia utilizada\n      strategy: 'exact'\n    }\n  }];\n\n}\n\n\n// ======================================================\n// MATCH EXATO SEM PROVIDER\n// ======================================================\n//\n// Caso o usuário mande:\n//\n// claude-3.5-sonnet\n//\n// ao invés de:\n//\n// anthropic/claude-3.5-sonnet\n//\n// tentamos comparar apenas o nome.\n//\nconst shortExact =\n  availableModels.find(m => {\n\n    const parsed =\n      parseModel(m.id);\n\n    return (\n      parsed.name ===\n      requested.name\n    );\n\n  });\n\nif (shortExact) {\n\n  return [{\n    json: {\n      requestedModel,\n      resolvedModel: shortExact.id,\n      fallbackUsed: false,\n      strategy: 'short_exact'\n    }\n  }];\n\n}\n\n\n// ======================================================\n// BUSCA DE MODELOS EQUIVALENTES\n// ======================================================\n//\n// Se não encontrou match exato,\n// tentamos encontrar modelos parecidos.\n//\n// Primeiro:\n//\n// pegamos apenas modelos do mesmo provider\n//\n// Ex:\n// se pediu Claude,\n// não queremos retornar GPT.\n//\nconst candidates =\n  availableModels\n    .map(m => ({\n      id: m.id,\n\n      // parse do modelo disponível\n      parsed: parseModel(m.id)\n    }))\n    .filter(m =>\n      m.parsed.provider ===\n      requested.provider\n    );\n\n\n// ======================================================\n// SISTEMA DE SCORE\n// ======================================================\n//\n// Agora damos pontos para cada candidato.\n//\n// Quanto maior a pontuação,\n// mais parecido com o modelo solicitado.\n//\nfor (const candidate of candidates) {\n\n  let score = 0;\n\n  // ======================================================\n  // MESMA FAMÍLIA\n  // ======================================================\n  //\n  // Ex:\n  // Claude -> Claude\n  //\n  // recebe muitos pontos\n  //\n  if (\n    candidate.parsed.family ===\n    requested.family\n  ) {\n    score += 100;\n  }\n\n  // ======================================================\n  // MESMO TIER\n  // ======================================================\n  //\n  // Ex:\n  // Sonnet -> Sonnet\n  //\n  // recebe pontos extras\n  //\n  if (\n    candidate.parsed.tier ===\n    requested.tier\n  ) {\n    score += 80;\n  }\n\n  // ======================================================\n  // VERSÃO PRÓXIMA\n  // ======================================================\n  //\n  // Quanto mais próxima a versão,\n  // maior o score.\n  //\n  // Ex:\n  //\n  // pediu 3.5\n  //\n  // 4.0 é melhor que 8.0\n  //\n  const diff =\n    Math.abs(\n      candidate.parsed.version -\n      requested.version\n    );\n\n  score += Math.max(\n    0,\n    50 - diff * 10\n  );\n\n  // ======================================================\n  // BÔNUS PARA VERSÃO MAIS NOVA\n  // ======================================================\n  //\n  // Se a versão do candidato\n  // for maior ou igual,\n  // recebe bônus.\n  //\n  // Ex:\n  // 4.0 substitui melhor 3.5\n  // do que 2.0.\n  //\n  if (\n    candidate.parsed.version >=\n    requested.version\n  ) {\n    score += 20;\n  }\n\n  // salva score final\n  candidate.score = score;\n\n}\n\n\n// ======================================================\n// ORDENAÇÃO\n// ======================================================\n//\n// Ordena do MAIOR score\n// para o MENOR.\n//\ncandidates.sort(\n  (a, b) => b.score - a.score\n);\n\n\n// melhor candidato\nconst best = candidates[0];\n\n\n// ======================================================\n// CASO NÃO ENCONTRE NADA\n// ======================================================\nif (!best) {\n\n  return [{\n    json: {\n      error:\n        'Nenhum modelo equivalente encontrado',\n\n      requestedModel\n    }\n  }];\n\n}\n\n\n// ======================================================\n// RESULTADO FINAL\n// ======================================================\n//\n// Retorna:\n//\n// - modelo solicitado\n// - modelo resolvido\n// - estratégia utilizada\n// - score obtido\n//\nreturn [{\n  json: {\n    requestedModel,\n\n    // modelo final escolhido\n    resolvedModel: best.id,\n\n    // indica que fallback foi usado\n    fallbackUsed: true,\n\n    // estratégia utilizada\n    strategy: 'smart_fallback',\n\n    // score do candidato vencedor\n    score: best.score\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        0
+      ],
+      "id": "558d26f7-56c3-4c47-956a-4d8fcf5b7925",
+      "name": "Verifica disponibilidade e encontra equivalencia"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Busca modelos no openRouter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca modelos no openRouter": {
+      "main": [
+        [
+          {
+            "node": "Verifica disponibilidade e encontra equivalencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica disponibilidade e encontra equivalencia": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "68b4c291-c246-4361-b3ad-8c3760d37318",
+  "activeVersionId": "68b4c291-c246-4361-b3ad-8c3760d37318",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-05-13T20:58:11.901Z",
+      "createdAt": "2026-05-13T20:58:11.901Z",
+      "role": "workflow:owner",
+      "workflowId": "yuzWCWRBhXQc56q5",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-05-13T21:22:21.596Z",
+    "createdAt": "2026-05-13T21:22:21.596Z",
+    "versionId": "68b4c291-c246-4361-b3ad-8c3760d37318",
+    "workflowId": "yuzWCWRBhXQc56q5",
+    "nodes": [
+      {
+        "parameters": {
+          "content": "## Valida se o modelo requerido pelo usuário está disponível, se não estiver ele buscar um equivalente",
+          "height": 544,
+          "width": 1104
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -624,
+          -288
+        ],
+        "id": "b049027e-cc88-4e92-85c7-d3b76e1cf3f2",
+        "name": "Sticky Note"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "open-router-verificacao",
+          "responseMode": "lastNode",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -368,
+          0
+        ],
+        "id": "a34232f6-59cb-4dc3-ad8f-0fb8412c5026",
+        "name": "Webhook",
+        "webhookId": "520ae470-5421-46ec-b937-3d045babbf5b"
+      },
+      {
+        "parameters": {
+          "content": "### Exemplo de Payload\n{\n\"model\": \"anthropic/claude-3.5-sonnet\"\n}",
+          "height": 176,
+          "width": 304,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -608,
+          -192
+        ],
+        "id": "cb78065a-6401-4db8-9414-68209d36886c",
+        "name": "Sticky Note1"
+      },
+      {
+        "parameters": {
+          "content": "### Exemplo de retorno\n  {\n\"requestedModel\": \"anthropic/claude-3.5-sonnet\",\n\"resolvedModel\": \"anthropic/claude-sonnet-4\",\n\"fallbackUsed\": true,\n\"strategy\": \"smart_fallback\",\n\"score\": 245\n  }\n",
+          "height": 192,
+          "width": 384,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          64,
+          -208
+        ],
+        "id": "5062d34c-e3dc-4810-ad98-bbf1b178f9cb",
+        "name": "Sticky Note2"
+      },
+      {
+        "parameters": {
+          "url": "https://openrouter.ai/api/v1/models",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          -144,
+          0
+        ],
+        "id": "92981b9c-1b5a-4146-b85d-f6e1355aeb26",
+        "name": "Busca modelos no openRouter"
+      },
+      {
+        "parameters": {
+          "jsCode": "// ======================================================\n// Modelo solicitado pelo usuário via Webhook\n// ======================================================\n//\n// Exemplo recebido:\n//\n// {\n//   \"model\": \"claude-3.5-sonnet\"\n// }\n//\n// ou:\n//\n// {\n//   \"model\": \"anthropic/claude-3.5-sonnet\"\n// }\n//\n// Esse será o modelo que tentaremos resolver.\n//\nconst requestedModel =\n  $('Webhook').first().json.body.model;\n\n\n// ======================================================\n// Lista de modelos disponíveis atualmente na OpenRouter\n// ======================================================\n//\n// Esse node faz:\n// GET https://openrouter.ai/api/v1/models\n//\n// E retorna algo como:\n//\n// [\n//   { id: \"anthropic/claude-4-sonnet\" },\n//   { id: \"openai/gpt-4.1\" },\n//   ...\n// ]\n//\nconst availableModels =\n  $('Busca modelos no openRouter')\n    .first()\n    .json\n    .data;\n\n\n// ======================================================\n// FUNÇÃO parseModel()\n// ======================================================\n//\n// Objetivo:\n// Transformar um nome de modelo em uma estrutura padronizada\n// para facilitar comparações inteligentes.\n//\n// Exemplo:\n//\n// \"anthropic/claude-3.5-sonnet\"\n//\n// vira:\n//\n// {\n//   provider: \"anthropic\",\n//   family: \"claude\",\n//   tier: \"sonnet\",\n//   version: 3.5\n// }\n//\n// Isso permite:\n//\n// - comparar providers\n// - comparar versões\n// - comparar tiers\n// - encontrar equivalentes\n//\nfunction parseModel(model) {\n\n  // transforma tudo em lowercase\n  // para evitar problemas com maiúsculas/minúsculas\n  const lower = model.toLowerCase();\n\n  // provider = empresa/model provider\n  // ex:\n  // anthropic\n  // openai\n  // google\n  let provider = '';\n\n  // nome puro do modelo\n  // ex:\n  // claude-3.5-sonnet\n  let name = '';\n\n  // ======================================================\n  // CASO 1:\n  // Modelo possui provider\n  //\n  // Ex:\n  // anthropic/claude-3.5-sonnet\n  // ======================================================\n  if (lower.includes('/')) {\n\n    const parts = lower.split('/');\n\n    provider = parts[0] || '';\n    name = parts[1] || '';\n\n  } else {\n\n    // ======================================================\n    // CASO 2:\n    // Modelo NÃO possui provider\n    //\n    // Ex:\n    // claude-3.5-sonnet\n    // ======================================================\n\n    name = lower;\n\n    // inferimos o provider baseado no nome\n\n    if (name.includes('claude')) {\n      provider = 'anthropic';\n    }\n    else if (\n      name.includes('gpt') ||\n      name.includes('o1') ||\n      name.includes('o3')\n    ) {\n      provider = 'openai';\n    }\n    else if (name.includes('gemini')) {\n      provider = 'google';\n    }\n    else if (name.includes('llama')) {\n      provider = 'meta-llama';\n    }\n\n  }\n\n  // ======================================================\n  // EXTRAÇÃO DA VERSÃO\n  // ======================================================\n  //\n  // Procura números dentro do nome\n  //\n  // Ex:\n  // claude-3.5-sonnet\n  //\n  // encontra:\n  // 3.5\n  //\n  const versionMatch =\n    name.match(/(\\d+(\\.\\d+)?)/);\n\n  const version =\n    versionMatch\n      ? parseFloat(versionMatch[1])\n      : 0;\n\n  // ======================================================\n  // EXTRAÇÃO DO TIER\n  // ======================================================\n  //\n  // Alguns providers possuem tiers:\n  //\n  // sonnet\n  // opus\n  // haiku\n  // flash\n  // mini\n  // etc\n  //\n  // Isso ajuda a encontrar equivalentes.\n  //\n  let tier = '';\n\n  if (name.includes('sonnet')) tier = 'sonnet';\n  else if (name.includes('opus')) tier = 'opus';\n  else if (name.includes('haiku')) tier = 'haiku';\n  else if (name.includes('flash')) tier = 'flash';\n  else if (name.includes('pro')) tier = 'pro';\n  else if (name.includes('mini')) tier = 'mini';\n  else if (name.includes('nano')) tier = 'nano';\n\n  // ======================================================\n  // EXTRAÇÃO DA FAMÍLIA\n  // ======================================================\n  //\n  // Família = linha principal do modelo\n  //\n  // Ex:\n  // claude\n  // gpt\n  // gemini\n  // llama\n  //\n  let family = '';\n\n  if (name.includes('claude')) family = 'claude';\n  else if (name.includes('gpt')) family = 'gpt';\n  else if (name.includes('gemini')) family = 'gemini';\n  else if (name.includes('llama')) family = 'llama';\n\n  // retorna estrutura padronizada\n  return {\n    raw: model,\n    provider,\n    name,\n    version,\n    tier,\n    family\n  };\n\n}\n\n\n// ======================================================\n// Parse do modelo solicitado\n// ======================================================\n//\n// Converte o modelo pedido pelo usuário\n// em estrutura comparável.\n//\nconst requested =\n  parseModel(requestedModel);\n\n\n// ======================================================\n// Lista de IDs disponíveis\n// ======================================================\n//\n// Transformamos:\n//\n// [\n//   { id: \"openai/gpt-4.1\" },\n//   { id: \"anthropic/claude-4-sonnet\" }\n// ]\n//\n// em:\n//\n// [\n//   \"openai/gpt-4.1\",\n//   \"anthropic/claude-4-sonnet\"\n// ]\n//\nconst availableIds =\n  availableModels.map(\n    m => m.id.toLowerCase()\n  );\n\n\n// ======================================================\n// MATCH EXATO\n// ======================================================\n//\n// Primeiro tentamos encontrar exatamente\n// o modelo solicitado.\n//\n// Ex:\n//\n// usuário pediu:\n// anthropic/claude-4-sonnet\n//\n// e ele existe.\n//\n// então retornamos imediatamente.\n//\nif (\n  availableIds.includes(\n    requestedModel.toLowerCase()\n  )\n) {\n\n  const exact =\n    availableModels.find(\n      m =>\n        m.id.toLowerCase() ===\n        requestedModel.toLowerCase()\n    );\n\n  return [{\n    json: {\n      requestedModel,\n\n      // modelo final escolhido\n      resolvedModel: exact.id,\n\n      // fallback não foi necessário\n      fallbackUsed: false,\n\n      // estratégia utilizada\n      strategy: 'exact'\n    }\n  }];\n\n}\n\n\n// ======================================================\n// MATCH EXATO SEM PROVIDER\n// ======================================================\n//\n// Caso o usuário mande:\n//\n// claude-3.5-sonnet\n//\n// ao invés de:\n//\n// anthropic/claude-3.5-sonnet\n//\n// tentamos comparar apenas o nome.\n//\nconst shortExact =\n  availableModels.find(m => {\n\n    const parsed =\n      parseModel(m.id);\n\n    return (\n      parsed.name ===\n      requested.name\n    );\n\n  });\n\nif (shortExact) {\n\n  return [{\n    json: {\n      requestedModel,\n      resolvedModel: shortExact.id,\n      fallbackUsed: false,\n      strategy: 'short_exact'\n    }\n  }];\n\n}\n\n\n// ======================================================\n// BUSCA DE MODELOS EQUIVALENTES\n// ======================================================\n//\n// Se não encontrou match exato,\n// tentamos encontrar modelos parecidos.\n//\n// Primeiro:\n//\n// pegamos apenas modelos do mesmo provider\n//\n// Ex:\n// se pediu Claude,\n// não queremos retornar GPT.\n//\nconst candidates =\n  availableModels\n    .map(m => ({\n      id: m.id,\n\n      // parse do modelo disponível\n      parsed: parseModel(m.id)\n    }))\n    .filter(m =>\n      m.parsed.provider ===\n      requested.provider\n    );\n\n\n// ======================================================\n// SISTEMA DE SCORE\n// ======================================================\n//\n// Agora damos pontos para cada candidato.\n//\n// Quanto maior a pontuação,\n// mais parecido com o modelo solicitado.\n//\nfor (const candidate of candidates) {\n\n  let score = 0;\n\n  // ======================================================\n  // MESMA FAMÍLIA\n  // ======================================================\n  //\n  // Ex:\n  // Claude -> Claude\n  //\n  // recebe muitos pontos\n  //\n  if (\n    candidate.parsed.family ===\n    requested.family\n  ) {\n    score += 100;\n  }\n\n  // ======================================================\n  // MESMO TIER\n  // ======================================================\n  //\n  // Ex:\n  // Sonnet -> Sonnet\n  //\n  // recebe pontos extras\n  //\n  if (\n    candidate.parsed.tier ===\n    requested.tier\n  ) {\n    score += 80;\n  }\n\n  // ======================================================\n  // VERSÃO PRÓXIMA\n  // ======================================================\n  //\n  // Quanto mais próxima a versão,\n  // maior o score.\n  //\n  // Ex:\n  //\n  // pediu 3.5\n  //\n  // 4.0 é melhor que 8.0\n  //\n  const diff =\n    Math.abs(\n      candidate.parsed.version -\n      requested.version\n    );\n\n  score += Math.max(\n    0,\n    50 - diff * 10\n  );\n\n  // ======================================================\n  // BÔNUS PARA VERSÃO MAIS NOVA\n  // ======================================================\n  //\n  // Se a versão do candidato\n  // for maior ou igual,\n  // recebe bônus.\n  //\n  // Ex:\n  // 4.0 substitui melhor 3.5\n  // do que 2.0.\n  //\n  if (\n    candidate.parsed.version >=\n    requested.version\n  ) {\n    score += 20;\n  }\n\n  // salva score final\n  candidate.score = score;\n\n}\n\n\n// ======================================================\n// ORDENAÇÃO\n// ======================================================\n//\n// Ordena do MAIOR score\n// para o MENOR.\n//\ncandidates.sort(\n  (a, b) => b.score - a.score\n);\n\n\n// melhor candidato\nconst best = candidates[0];\n\n\n// ======================================================\n// CASO NÃO ENCONTRE NADA\n// ======================================================\nif (!best) {\n\n  return [{\n    json: {\n      error:\n        'Nenhum modelo equivalente encontrado',\n\n      requestedModel\n    }\n  }];\n\n}\n\n\n// ======================================================\n// RESULTADO FINAL\n// ======================================================\n//\n// Retorna:\n//\n// - modelo solicitado\n// - modelo resolvido\n// - estratégia utilizada\n// - score obtido\n//\nreturn [{\n  json: {\n    requestedModel,\n\n    // modelo final escolhido\n    resolvedModel: best.id,\n\n    // indica que fallback foi usado\n    fallbackUsed: true,\n\n    // estratégia utilizada\n    strategy: 'smart_fallback',\n\n    // score do candidato vencedor\n    score: best.score\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          64,
+          0
+        ],
+        "id": "558d26f7-56c3-4c47-956a-4d8fcf5b7925",
+        "name": "Verifica disponibilidade e encontra equivalencia"
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Busca modelos no openRouter",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca modelos no openRouter": {
+        "main": [
+          [
+            {
+              "node": "Verifica disponibilidade e encontra equivalencia",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica disponibilidade e encontra equivalencia": {
+        "main": [
+          []
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
