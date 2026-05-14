@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-04T19:18:30.610Z",
+  "updatedAt": "2026-05-13T17:37:21.326Z",
   "createdAt": "2026-04-24T16:53:22.853Z",
   "id": "hb7oOF29XUp2lS2v",
   "name": "BMS - 5.6 - Contestação NTAP",
@@ -26,7 +26,8 @@
       "parameters": {
         "operation": "pdf",
         "options": {
-          "joinPages": false
+          "joinPages": false,
+          "keepSource": "both"
         }
       },
       "type": "n8n-nodes-base.extractFromFile",
@@ -41,7 +42,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = items[0].json.body;\n\nconst defensaId = input.defensaId;\nconst templateGoogleDocId = input.templateGoogleDocId;\nconst midias = input.midias || [];\n\nfunction getTipoMidia(nome, url) {\n  const lower = (nome || url || \"\").toLowerCase();\n\n  if (lower.endsWith(\".pdf\")) return \"pdf\";\n\n  if (\n    lower.endsWith(\".jpg\") ||\n    lower.endsWith(\".jpeg\") ||\n    lower.endsWith(\".png\") ||\n    lower.endsWith(\".gif\") ||\n    lower.endsWith(\".webp\")\n  ) return \"img\";\n\n  return \"outro\";\n}\n\n// 🚀 AGORA PREPARADO PRA ARQUITETURA CORRETA\nreturn midias.map((m, index) => {\n  const tipo = getTipoMidia(m.nome, m.url);\n\n  return {\n    json: {\n      defensaId,\n      templateGoogleDocId,\n\n      // 🔑 ESSENCIAL PRA NÃO PERDER CONTEXTO NO FLUXO\n      midiaIndex: index,\n\n      url: m.url,\n      nome: m.nome,\n      tipo,\n      principal: m.principal || false,\n\n      // 🔥 flags úteis pro fluxo (evita IF complexo depois)\n      isPdf: tipo === \"pdf\",\n      isImg: tipo === \"img\",\n\n      // 🔥 controle de fluxo\n      origem: \"upload\",\n\n      // 🔥 prepara campos que vão existir depois (padronização)\n      pageIndex: null,\n      totalPages: null\n    }\n  };\n});"
+        "jsCode": "const input = items[0].json.body;\n\nconst defensaId = input.defensaId;\nconst templateGoogleDocId = input.templateGoogleDocId;\n\n// aceita os dois formatos\nconst midias = input.midias || input.pdfsAnexos || [];\n\nfunction getTipoMidia(nome, url) {\n  const lower = (nome || url || \"\").toLowerCase();\n\n  if (lower.endsWith(\".pdf\")) return \"pdf\";\n\n  if (\n    lower.endsWith(\".jpg\") ||\n    lower.endsWith(\".jpeg\") ||\n    lower.endsWith(\".png\") ||\n    lower.endsWith(\".gif\") ||\n    lower.endsWith(\".webp\")\n  ) return \"img\";\n\n  return \"outro\";\n}\n\nreturn midias.map((m, index) => {\n  const tipo = getTipoMidia(m.nome, m.url);\n\n  return {\n    json: {\n      defensaId,\n      templateGoogleDocId,\n\n      midiaIndex: index,\n\n      url: m.url,\n      nome: m.nome,\n      tipo,\n      principal: m.principal || false,\n\n      isPdf: tipo === \"pdf\",\n      isImg: tipo === \"img\",\n\n      origem: \"upload\",\n\n      pageIndex: null,\n      totalPages: null\n    }\n  };\n});"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -735,18 +736,30 @@
           "parameters": [
             {
               "name": "pdf_url",
-              "value": "={{ $('Verifica se é pdf').item.json.url }}"
+              "value": "={{ $json.url }}"
+            },
+            {
+              "name": "page_to",
+              "value": "={{ $json.page_to }}"
+            },
+            {
+              "name": "page_from",
+              "value": "={{ $json.page_from }}"
+            },
+            {
+              "name": "page_mode",
+              "value": "range"
             }
           ]
         },
         "options": {
-          "timeout": 60000
+          "timeout": 6000000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1312,
+        1472,
         176
       ],
       "id": "562674dd-e9ff-4c86-8d59-0ca862d48730",
@@ -762,7 +775,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1712,
+        1872,
         144
       ],
       "id": "43482649-e5d9-417f-a628-4040fb02114c",
@@ -925,7 +938,7 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        1104,
+        1264,
         160
       ],
       "id": "f776abbd-7aa3-492a-a596-a167d1651f72",
@@ -933,12 +946,12 @@
     },
     {
       "parameters": {
-        "amount": 1
+        "amount": 2
       },
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        1488,
+        1648,
         176
       ],
       "id": "813218ca-2970-471c-94e3-762e3065af6a",
@@ -1056,6 +1069,19 @@
       ],
       "id": "96f2a8dc-cc22-4672-8a04-b393febe499f",
       "name": "Verifica se captou img do dataprev"
+    },
+    {
+      "parameters": {
+        "jsCode": "const RANGE_SIZE = 3;\n\nconst output = [];\n\nfor (const item of items) {\n\n  const pdf = item.json;\n\n  const totalPages = pdf.numpages || 1;\n\n  for (let page = 1; page <= totalPages; page += RANGE_SIZE) {\n\n    const pageFrom = page;\n\n    const pageTo = Math.min(\n      page + RANGE_SIZE - 1,\n      totalPages\n    );\n\n    output.push({\n      json: {\n\n        // mantém dados originais\n        defensaId: pdf.defensaId,\n        templateGoogleDocId: pdf.templateGoogleDocId,\n        midiaIndex: pdf.midiaIndex,\n        nome: pdf.nome,\n        url: pdf.url,\n\n        // info do chunk\n        totalPages,\n        page_from: pageFrom,\n        page_to: pageTo,\n\n        // identificador útil\n        chunk_id: `${pdf.midiaIndex}_${pageFrom}_${pageTo}`,\n\n        // opcional\n        is_last_chunk: pageTo === totalPages\n      }\n    });\n\n  }\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        160
+      ],
+      "id": "e0aabe14-cea3-4120-a5e5-b2514055f5bb",
+      "name": "Range de pgs"
     }
   ],
   "connections": {
@@ -1132,7 +1158,7 @@
         ],
         [
           {
-            "node": "Loop Over Items",
+            "node": "Range de pgs",
             "type": "main",
             "index": 0
           }
@@ -1423,6 +1449,17 @@
           }
         ]
       ]
+    },
+    "Range de pgs": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -1434,8 +1471,8 @@
   },
   "staticData": null,
   "meta": null,
-  "versionId": "061116b0-27eb-4568-9c70-bd3e8a25ecfa",
-  "activeVersionId": "061116b0-27eb-4568-9c70-bd3e8a25ecfa",
+  "versionId": "50e5061c-77b1-4976-803d-00097e0daf17",
+  "activeVersionId": "50e5061c-77b1-4976-803d-00097e0daf17",
   "triggerCount": 1,
   "shared": [
     {
@@ -1447,9 +1484,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-05-04T19:18:30.614Z",
-    "createdAt": "2026-05-04T19:18:30.614Z",
-    "versionId": "061116b0-27eb-4568-9c70-bd3e8a25ecfa",
+    "updatedAt": "2026-05-13T17:37:21.328Z",
+    "createdAt": "2026-05-13T17:37:21.328Z",
+    "versionId": "50e5061c-77b1-4976-803d-00097e0daf17",
     "workflowId": "hb7oOF29XUp2lS2v",
     "nodes": [
       {
@@ -1472,7 +1509,8 @@
         "parameters": {
           "operation": "pdf",
           "options": {
-            "joinPages": false
+            "joinPages": false,
+            "keepSource": "both"
           }
         },
         "type": "n8n-nodes-base.extractFromFile",
@@ -1487,7 +1525,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const input = items[0].json.body;\n\nconst defensaId = input.defensaId;\nconst templateGoogleDocId = input.templateGoogleDocId;\nconst midias = input.midias || [];\n\nfunction getTipoMidia(nome, url) {\n  const lower = (nome || url || \"\").toLowerCase();\n\n  if (lower.endsWith(\".pdf\")) return \"pdf\";\n\n  if (\n    lower.endsWith(\".jpg\") ||\n    lower.endsWith(\".jpeg\") ||\n    lower.endsWith(\".png\") ||\n    lower.endsWith(\".gif\") ||\n    lower.endsWith(\".webp\")\n  ) return \"img\";\n\n  return \"outro\";\n}\n\n// 🚀 AGORA PREPARADO PRA ARQUITETURA CORRETA\nreturn midias.map((m, index) => {\n  const tipo = getTipoMidia(m.nome, m.url);\n\n  return {\n    json: {\n      defensaId,\n      templateGoogleDocId,\n\n      // 🔑 ESSENCIAL PRA NÃO PERDER CONTEXTO NO FLUXO\n      midiaIndex: index,\n\n      url: m.url,\n      nome: m.nome,\n      tipo,\n      principal: m.principal || false,\n\n      // 🔥 flags úteis pro fluxo (evita IF complexo depois)\n      isPdf: tipo === \"pdf\",\n      isImg: tipo === \"img\",\n\n      // 🔥 controle de fluxo\n      origem: \"upload\",\n\n      // 🔥 prepara campos que vão existir depois (padronização)\n      pageIndex: null,\n      totalPages: null\n    }\n  };\n});"
+          "jsCode": "const input = items[0].json.body;\n\nconst defensaId = input.defensaId;\nconst templateGoogleDocId = input.templateGoogleDocId;\n\n// aceita os dois formatos\nconst midias = input.midias || input.pdfsAnexos || [];\n\nfunction getTipoMidia(nome, url) {\n  const lower = (nome || url || \"\").toLowerCase();\n\n  if (lower.endsWith(\".pdf\")) return \"pdf\";\n\n  if (\n    lower.endsWith(\".jpg\") ||\n    lower.endsWith(\".jpeg\") ||\n    lower.endsWith(\".png\") ||\n    lower.endsWith(\".gif\") ||\n    lower.endsWith(\".webp\")\n  ) return \"img\";\n\n  return \"outro\";\n}\n\nreturn midias.map((m, index) => {\n  const tipo = getTipoMidia(m.nome, m.url);\n\n  return {\n    json: {\n      defensaId,\n      templateGoogleDocId,\n\n      midiaIndex: index,\n\n      url: m.url,\n      nome: m.nome,\n      tipo,\n      principal: m.principal || false,\n\n      isPdf: tipo === \"pdf\",\n      isImg: tipo === \"img\",\n\n      origem: \"upload\",\n\n      pageIndex: null,\n      totalPages: null\n    }\n  };\n});"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -2181,18 +2219,30 @@
             "parameters": [
               {
                 "name": "pdf_url",
-                "value": "={{ $('Verifica se é pdf').item.json.url }}"
+                "value": "={{ $json.url }}"
+              },
+              {
+                "name": "page_to",
+                "value": "={{ $json.page_to }}"
+              },
+              {
+                "name": "page_from",
+                "value": "={{ $json.page_from }}"
+              },
+              {
+                "name": "page_mode",
+                "value": "range"
               }
             ]
           },
           "options": {
-            "timeout": 60000
+            "timeout": 6000000
           }
         },
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.3,
         "position": [
-          1312,
+          1472,
           176
         ],
         "id": "562674dd-e9ff-4c86-8d59-0ca862d48730",
@@ -2208,7 +2258,7 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1712,
+          1872,
           144
         ],
         "id": "43482649-e5d9-417f-a628-4040fb02114c",
@@ -2371,7 +2421,7 @@
         "type": "n8n-nodes-base.splitInBatches",
         "typeVersion": 3,
         "position": [
-          1104,
+          1264,
           160
         ],
         "id": "f776abbd-7aa3-492a-a596-a167d1651f72",
@@ -2379,12 +2429,12 @@
       },
       {
         "parameters": {
-          "amount": 1
+          "amount": 2
         },
         "type": "n8n-nodes-base.wait",
         "typeVersion": 1.1,
         "position": [
-          1488,
+          1648,
           176
         ],
         "id": "813218ca-2970-471c-94e3-762e3065af6a",
@@ -2502,6 +2552,19 @@
         ],
         "id": "96f2a8dc-cc22-4672-8a04-b393febe499f",
         "name": "Verifica se captou img do dataprev"
+      },
+      {
+        "parameters": {
+          "jsCode": "const RANGE_SIZE = 3;\n\nconst output = [];\n\nfor (const item of items) {\n\n  const pdf = item.json;\n\n  const totalPages = pdf.numpages || 1;\n\n  for (let page = 1; page <= totalPages; page += RANGE_SIZE) {\n\n    const pageFrom = page;\n\n    const pageTo = Math.min(\n      page + RANGE_SIZE - 1,\n      totalPages\n    );\n\n    output.push({\n      json: {\n\n        // mantém dados originais\n        defensaId: pdf.defensaId,\n        templateGoogleDocId: pdf.templateGoogleDocId,\n        midiaIndex: pdf.midiaIndex,\n        nome: pdf.nome,\n        url: pdf.url,\n\n        // info do chunk\n        totalPages,\n        page_from: pageFrom,\n        page_to: pageTo,\n\n        // identificador útil\n        chunk_id: `${pdf.midiaIndex}_${pageFrom}_${pageTo}`,\n\n        // opcional\n        is_last_chunk: pageTo === totalPages\n      }\n    });\n\n  }\n}\n\nreturn output;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1072,
+          160
+        ],
+        "id": "e0aabe14-cea3-4120-a5e5-b2514055f5bb",
+        "name": "Range de pgs"
       }
     ],
     "connections": {
@@ -2578,7 +2641,7 @@
           ],
           [
             {
-              "node": "Loop Over Items",
+              "node": "Range de pgs",
               "type": "main",
               "index": 0
             }
@@ -2864,6 +2927,17 @@
           [
             {
               "node": "Urls de download (docs e pdf)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Range de pgs": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Items",
               "type": "main",
               "index": 0
             }
