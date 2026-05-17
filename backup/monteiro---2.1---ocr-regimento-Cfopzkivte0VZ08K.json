@@ -1,15 +1,15 @@
 {
-  "updatedAt": "2026-05-15T21:03:34.374Z",
+  "updatedAt": "2026-05-16T15:10:02.193Z",
   "createdAt": "2026-05-15T20:59:04.486Z",
   "id": "Cfopzkivte0VZ08K",
   "name": "Monteiro - 2.1 - OCR Regimento",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "ocr-regimento",
+        "path": "ocr-doc",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
@@ -24,30 +24,103 @@
     },
     {
       "parameters": {
-        "resource": "image",
-        "operation": "analyze",
-        "modelId": {
-          "__rl": true,
-          "value": "gpt-4o-2024-11-20",
-          "mode": "list",
-          "cachedResultName": "GPT-4O-2024-11-20"
+        "operation": "pdf",
+        "options": {
+          "joinPages": false,
+          "keepSource": "both"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        736,
+        -96
+      ],
+      "id": "6e8b322e-a1e3-403b-921a-74ed061cc23b",
+      "name": "Extrai os dados do pdf separando por página",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = items[0].json.body;\n\nconst defensaId = input.defensaId;\nconst templateGoogleDocId = input.templateGoogleDocId;\n\n// aceita os dois formatos\nconst midias = input.midias || input.pdfsAnexos || [];\n\nfunction getTipoMidia(nome, url) {\n  const lower = (nome || url || \"\").toLowerCase();\n\n  if (lower.endsWith(\".pdf\")) return \"pdf\";\n\n  if (\n    lower.endsWith(\".jpg\") ||\n    lower.endsWith(\".jpeg\") ||\n    lower.endsWith(\".png\") ||\n    lower.endsWith(\".gif\") ||\n    lower.endsWith(\".webp\")\n  ) return \"img\";\n\n  return \"outro\";\n}\n\nreturn midias.map((m, index) => {\n  const tipo = getTipoMidia(m.nome, m.url);\n\n  return {\n    json: {\n      defensaId,\n      templateGoogleDocId,\n\n      midiaIndex: index,\n\n      url: m.url,\n      nome: m.nome,\n      tipo,\n      principal: m.principal || false,\n\n      isPdf: tipo === \"pdf\",\n      isImg: tipo === \"img\",\n\n      origem: \"upload\",\n\n      pageIndex: null,\n      totalPages: null\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        -64
+      ],
+      "id": "adb1474d-aaf7-410f-b020-7dfe48a83753",
+      "name": "Processa as midias"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5d777eb3-590b-441c-abd5-9d1222cb72e3",
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "pdf",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
         },
         "options": {}
       },
-      "type": "@n8n/n8n-nodes-langchain.openAi",
-      "typeVersion": 2.1,
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
       "position": [
-        976,
+        480,
         -80
       ],
-      "id": "d45c0414-1d47-4b65-a320-7a8654233b49",
-      "name": "Analyze image",
-      "credentials": {
-        "openAiApi": {
-          "id": "GNYM1RjawrdA7XKF",
-          "name": "OpenAi account"
-        }
-      }
+      "id": "05301f68-49b9-4bba-b3c7-a614e71e0a30",
+      "name": "Verifica se é pdf",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c54d32f5-3f7c-4895-a0d7-b8c8da500f9e",
+              "leftValue": "={{ $json.text && $json.text.join('').trim().length > 50 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        992,
+        -112
+      ],
+      "id": "ccb87097-184b-4133-9d9b-c1cc2d9eb833",
+      "name": "Verifica se extraiu texto do documento"
     },
     {
       "parameters": {
@@ -83,14 +156,28 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        384,
-        -48
+        1584,
+        -80
       ],
-      "id": "41e37633-f73d-472b-87d3-8f816325d355",
+      "id": "c994d508-1ae0-4d41-a6fc-b70ff8d085a6",
       "name": "API PDF Converter",
       "credentials": {
         "httpBearerAuth": "***REMOVIDO***"
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = [];\n\nfor (const item of items) {\n  const conversionUrl = item.json.conversionUrl || \"\";\n\n  const urls = conversionUrl\n    .split(\",\")\n    .map(url => url.trim())\n    .filter(url => url.length > 0);\n\n  urls.forEach((url, index) => {\n    output.push({\n      json: {\n        defensaId: item.json.defensaId,\n        templateGoogleDocId: item.json.templateGoogleDocId,\n        pageIndex: index,\n        totalPages: urls.length,\n        url: url\n      }\n    });\n  });\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        -112
+      ],
+      "id": "9eac2eed-e6d0-47e5-98b0-1159c93dc8d7",
+      "name": "Split das pgs convertidas",
+      "alwaysOutputData": true
     },
     {
       "parameters": {
@@ -99,10 +186,10 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        176,
-        -64
+        1376,
+        -96
       ],
-      "id": "83f496fa-fc38-4a69-9b87-8c0923b20f99",
+      "id": "b4357352-c555-4184-b823-6c3706b879ba",
       "name": "Loop Over Items"
     },
     {
@@ -112,12 +199,90 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        560,
-        -48
+        1760,
+        -80
       ],
-      "id": "ecfbcdbd-2c71-4e0c-a3a4-7a629affee58",
+      "id": "9eb018f0-68c9-4ce2-9af3-3f46e8989efd",
       "name": "Wait",
       "webhookId": "22edbda8-e193-4ad1-85e6-3c53e3b6e386"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        -64
+      ],
+      "id": "b0a1f210-45ee-43b6-9ca0-2ffd4175cb25",
+      "name": "Baixar arquivos",
+      "retryOnFail": false,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        480,
+        352
+      ],
+      "id": "e0aef169-ae67-47e2-98ce-42e35d25ea7e",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-2024-11-20",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-2024-11-20"
+        },
+        "text": "=Extraia TODO o conteúdo visível do documento utilizando OCR.\n\nRegras:\n- Capture todo o texto, mesmo que esteja em tabelas ou colunas\n- Reorganize o conteúdo de forma legível (linha a linha)\n- Corrija erros comuns de OCR (letras trocadas, palavras quebradas)\n- NÃO invente informações que não estejam visíveis\n- Preserve todos os dados importantes (nomes, datas, números, benefícios, NB, CPF, etc.)\n\nIMPORTANTE:\n- Se houver tabelas, converta para texto organizado\n- Se houver campos (ex: NB, CPF, benefício), mantenha o rótulo junto do valor\n\nRetorne apenas o texto bruto do documento.\n\ndê de output também a url do arquivo na qual foi aplicado o OCR: {{ $json.url }}",
+        "imageUrls": "={{ $json.url }}",
+        "options": {
+          "detail": "high",
+          "maxTokens": "***REMOVIDO***"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        352
+      ],
+      "id": "5bce5548-3b10-4b3b-904f-dffee99afaf5",
+      "name": "OCR",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "alwaysOutputData": true,
+      "credentials": {
+        "openAiApi": {
+          "id": "GNYM1RjawrdA7XKF",
+          "name": "OpenAi account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = [];\n\nfor (const item of items) {\n  let url = null;\n\n  // ✅ 1. URL no JSON\n  if (item.json?.url) {\n    url = item.json.url;\n  }\n\n  // ✅ 2. URL no binary\n  else if (item.binary?.data?.url) {\n    url = item.binary.data.url;\n  }\n\n  // ✅ 3. fallback (ignora se não tiver URL real)\n  else {\n    continue;\n  }\n\n  output.push({\n    json: {\n      url\n    }\n  });\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        144
+      ],
+      "id": "ecb76d41-513f-4a14-80f7-178bec83c7a2",
+      "name": "Urls de binarios"
     },
     {
       "parameters": {
@@ -126,30 +291,62 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -16,
-        -64
+        1184,
+        -96
       ],
-      "id": "48070dc6-e59b-4d9a-a5af-bf62ba354e9a",
+      "id": "516a7861-3670-4d66-96a9-41943f50da20",
       "name": "Range de pgs"
-    },
-    {
-      "parameters": {
-        "jsCode": "const output = [];\n\nfor (const item of items) {\n  const conversionUrl = item.json.conversionUrl || \"\";\n\n  const urls = conversionUrl\n    .split(\",\")\n    .map(url => url.trim())\n    .filter(url => url.length > 0);\n\n  urls.forEach((url, index) => {\n    output.push({\n      json: {\n        defensaId: item.json.defensaId,\n        templateGoogleDocId: item.json.templateGoogleDocId,\n        pageIndex: index,\n        totalPages: urls.length,\n        url: url\n      }\n    });\n  });\n}\n\nreturn output;"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        784,
-        -80
-      ],
-      "id": "f435bd11-e936-4fc3-a9a1-fe78a3feaee7",
-      "name": "Split das pgs convertidas",
-      "alwaysOutputData": true
     }
   ],
   "connections": {
     "Webhook": {
       "main": [
+        []
+      ]
+    },
+    "Extrai os dados do pdf separando por página": {
+      "main": [
+        [
+          {
+            "node": "Verifica se extraiu texto do documento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processa as midias": {
+      "main": [
+        [
+          {
+            "node": "Baixar arquivos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se é pdf": {
+      "main": [
+        [
+          {
+            "node": "Extrai os dados do pdf separando por página",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Urls de binarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se extraiu texto do documento": {
+      "main": [
+        [],
         [
           {
             "node": "Range de pgs",
@@ -166,6 +363,17 @@
             "node": "Wait",
             "type": "main",
             "index": 0
+          }
+        ]
+      ]
+    },
+    "Split das pgs convertidas": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
           }
         ]
       ]
@@ -199,6 +407,39 @@
         ]
       ]
     },
+    "Baixar arquivos": {
+      "main": [
+        [
+          {
+            "node": "Verifica se é pdf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Urls de binarios": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Range de pgs": {
       "main": [
         [
@@ -209,29 +450,22 @@
           }
         ]
       ]
-    },
-    "Split das pgs convertidas": {
-      "main": [
-        [
-          {
-            "node": "Analyze image",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
   },
   "staticData": null,
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "f3e016a7-f693-412b-b783-44be1186c03d",
-  "activeVersionId": null,
-  "triggerCount": 0,
+  "versionId": "601b8a18-c8d1-4bca-8fb3-80a2f0ad7a89",
+  "activeVersionId": "601b8a18-c8d1-4bca-8fb3-80a2f0ad7a89",
+  "triggerCount": 1,
   "shared": [
     {
       "updatedAt": "2026-05-15T20:59:04.486Z",
@@ -241,6 +475,461 @@
       "projectId": "nRxOu1L1N41Jyveq"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "updatedAt": "2026-05-16T15:10:02.195Z",
+    "createdAt": "2026-05-16T15:10:02.195Z",
+    "versionId": "601b8a18-c8d1-4bca-8fb3-80a2f0ad7a89",
+    "workflowId": "Cfopzkivte0VZ08K",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "ocr-doc",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -224,
+          -64
+        ],
+        "id": "21ef1ccc-3e36-4468-b411-579055432cdc",
+        "name": "Webhook",
+        "webhookId": "4126557a-bb76-4016-a8f4-dfd9f5b78792"
+      },
+      {
+        "parameters": {
+          "operation": "pdf",
+          "options": {
+            "joinPages": false,
+            "keepSource": "both"
+          }
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          736,
+          -96
+        ],
+        "id": "6e8b322e-a1e3-403b-921a-74ed061cc23b",
+        "name": "Extrai os dados do pdf separando por página",
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const input = items[0].json.body;\n\nconst defensaId = input.defensaId;\nconst templateGoogleDocId = input.templateGoogleDocId;\n\n// aceita os dois formatos\nconst midias = input.midias || input.pdfsAnexos || [];\n\nfunction getTipoMidia(nome, url) {\n  const lower = (nome || url || \"\").toLowerCase();\n\n  if (lower.endsWith(\".pdf\")) return \"pdf\";\n\n  if (\n    lower.endsWith(\".jpg\") ||\n    lower.endsWith(\".jpeg\") ||\n    lower.endsWith(\".png\") ||\n    lower.endsWith(\".gif\") ||\n    lower.endsWith(\".webp\")\n  ) return \"img\";\n\n  return \"outro\";\n}\n\nreturn midias.map((m, index) => {\n  const tipo = getTipoMidia(m.nome, m.url);\n\n  return {\n    json: {\n      defensaId,\n      templateGoogleDocId,\n\n      midiaIndex: index,\n\n      url: m.url,\n      nome: m.nome,\n      tipo,\n      principal: m.principal || false,\n\n      isPdf: tipo === \"pdf\",\n      isImg: tipo === \"img\",\n\n      origem: \"upload\",\n\n      pageIndex: null,\n      totalPages: null\n    }\n  };\n});"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          16,
+          -64
+        ],
+        "id": "adb1474d-aaf7-410f-b020-7dfe48a83753",
+        "name": "Processa as midias"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "5d777eb3-590b-441c-abd5-9d1222cb72e3",
+                "leftValue": "={{ $json.tipo }}",
+                "rightValue": "pdf",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          480,
+          -80
+        ],
+        "id": "05301f68-49b9-4bba-b3c7-a614e71e0a30",
+        "name": "Verifica se é pdf",
+        "alwaysOutputData": false
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "c54d32f5-3f7c-4895-a0d7-b8c8da500f9e",
+                "leftValue": "={{ $json.text && $json.text.join('').trim().length > 50 }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          992,
+          -112
+        ],
+        "id": "ccb87097-184b-4133-9d9b-c1cc2d9eb833",
+        "name": "Verifica se extraiu texto do documento"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.miabuilder.com/ws/pdf-converter",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "httpBearerAuth",
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "pdf_url",
+                "value": "={{ $json.url }}"
+              },
+              {
+                "name": "page_to",
+                "value": "={{ $json.page_to }}"
+              },
+              {
+                "name": "page_from",
+                "value": "={{ $json.page_from }}"
+              },
+              {
+                "name": "page_mode",
+                "value": "range"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 6000000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1584,
+          -80
+        ],
+        "id": "c994d508-1ae0-4d41-a6fc-b70ff8d085a6",
+        "name": "API PDF Converter",
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const output = [];\n\nfor (const item of items) {\n  const conversionUrl = item.json.conversionUrl || \"\";\n\n  const urls = conversionUrl\n    .split(\",\")\n    .map(url => url.trim())\n    .filter(url => url.length > 0);\n\n  urls.forEach((url, index) => {\n    output.push({\n      json: {\n        defensaId: item.json.defensaId,\n        templateGoogleDocId: item.json.templateGoogleDocId,\n        pageIndex: index,\n        totalPages: urls.length,\n        url: url\n      }\n    });\n  });\n}\n\nreturn output;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1984,
+          -112
+        ],
+        "id": "9eac2eed-e6d0-47e5-98b0-1159c93dc8d7",
+        "name": "Split das pgs convertidas",
+        "alwaysOutputData": true
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          1376,
+          -96
+        ],
+        "id": "b4357352-c555-4184-b823-6c3706b879ba",
+        "name": "Loop Over Items"
+      },
+      {
+        "parameters": {
+          "amount": 2
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          1760,
+          -80
+        ],
+        "id": "9eb018f0-68c9-4ce2-9af3-3f46e8989efd",
+        "name": "Wait",
+        "webhookId": "22edbda8-e193-4ad1-85e6-3c53e3b6e386"
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.url }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          240,
+          -64
+        ],
+        "id": "b0a1f210-45ee-43b6-9ca0-2ffd4175cb25",
+        "name": "Baixar arquivos",
+        "retryOnFail": false,
+        "maxTries": 5,
+        "waitBetweenTries": 5000,
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          480,
+          352
+        ],
+        "id": "e0aef169-ae67-47e2-98ce-42e35d25ea7e",
+        "name": "Merge1"
+      },
+      {
+        "parameters": {
+          "resource": "image",
+          "operation": "analyze",
+          "modelId": {
+            "__rl": true,
+            "value": "gpt-4o-2024-11-20",
+            "mode": "list",
+            "cachedResultName": "GPT-4O-2024-11-20"
+          },
+          "text": "=Extraia TODO o conteúdo visível do documento utilizando OCR.\n\nRegras:\n- Capture todo o texto, mesmo que esteja em tabelas ou colunas\n- Reorganize o conteúdo de forma legível (linha a linha)\n- Corrija erros comuns de OCR (letras trocadas, palavras quebradas)\n- NÃO invente informações que não estejam visíveis\n- Preserve todos os dados importantes (nomes, datas, números, benefícios, NB, CPF, etc.)\n\nIMPORTANTE:\n- Se houver tabelas, converta para texto organizado\n- Se houver campos (ex: NB, CPF, benefício), mantenha o rótulo junto do valor\n\nRetorne apenas o texto bruto do documento.\n\ndê de output também a url do arquivo na qual foi aplicado o OCR: {{ $json.url }}",
+          "imageUrls": "={{ $json.url }}",
+          "options": {
+            "detail": "high",
+            "maxTokens": "***REMOVIDO***"
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.openAi",
+        "typeVersion": 2.1,
+        "position": [
+          720,
+          352
+        ],
+        "id": "5bce5548-3b10-4b3b-904f-dffee99afaf5",
+        "name": "OCR",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "alwaysOutputData": true,
+        "credentials": {
+          "openAiApi": {
+            "id": "GNYM1RjawrdA7XKF",
+            "name": "OpenAi account"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const output = [];\n\nfor (const item of items) {\n  let url = null;\n\n  // ✅ 1. URL no JSON\n  if (item.json?.url) {\n    url = item.json.url;\n  }\n\n  // ✅ 2. URL no binary\n  else if (item.binary?.data?.url) {\n    url = item.binary.data.url;\n  }\n\n  // ✅ 3. fallback (ignora se não tiver URL real)\n  else {\n    continue;\n  }\n\n  output.push({\n    json: {\n      url\n    }\n  });\n}\n\nreturn output;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          144
+        ],
+        "id": "ecb76d41-513f-4a14-80f7-178bec83c7a2",
+        "name": "Urls de binarios"
+      },
+      {
+        "parameters": {
+          "jsCode": "const RANGE_SIZE = 3;\n\nconst output = [];\n\nfor (const item of items) {\n\n  const pdf = item.json;\n\n  const totalPages = pdf.numpages || 1;\n\n  for (let page = 1; page <= totalPages; page += RANGE_SIZE) {\n\n    const pageFrom = page;\n\n    const pageTo = Math.min(\n      page + RANGE_SIZE - 1,\n      totalPages\n    );\n\n    output.push({\n      json: {\n\n        // mantém dados originais\n        defensaId: pdf.defensaId,\n        templateGoogleDocId: pdf.templateGoogleDocId,\n        midiaIndex: pdf.midiaIndex,\n        nome: pdf.nome,\n        url: pdf.url,\n\n        // info do chunk\n        totalPages,\n        page_from: pageFrom,\n        page_to: pageTo,\n\n        // identificador útil\n        chunk_id: `${pdf.midiaIndex}_${pageFrom}_${pageTo}`,\n\n        // opcional\n        is_last_chunk: pageTo === totalPages\n      }\n    });\n\n  }\n}\n\nreturn output;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1184,
+          -96
+        ],
+        "id": "516a7861-3670-4d66-96a9-41943f50da20",
+        "name": "Range de pgs"
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          []
+        ]
+      },
+      "Extrai os dados do pdf separando por página": {
+        "main": [
+          [
+            {
+              "node": "Verifica se extraiu texto do documento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Processa as midias": {
+        "main": [
+          [
+            {
+              "node": "Baixar arquivos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se é pdf": {
+        "main": [
+          [
+            {
+              "node": "Extrai os dados do pdf separando por página",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Urls de binarios",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se extraiu texto do documento": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Range de pgs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "API PDF Converter": {
+        "main": [
+          [
+            {
+              "node": "Wait",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Split das pgs convertidas": {
+        "main": [
+          [
+            {
+              "node": "Merge1",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Loop Over Items": {
+        "main": [
+          [
+            {
+              "node": "Split das pgs convertidas",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "API PDF Converter",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Items",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Baixar arquivos": {
+        "main": [
+          [
+            {
+              "node": "Verifica se é pdf",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge1": {
+        "main": [
+          [
+            {
+              "node": "OCR",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Urls de binarios": {
+        "main": [
+          [
+            {
+              "node": "Merge1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Range de pgs": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Items",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
   "tags": []
 }
