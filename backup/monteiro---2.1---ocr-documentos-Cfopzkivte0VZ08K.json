@@ -1,0 +1,975 @@
+{
+  "updatedAt": "2026-05-18T21:58:00.327Z",
+  "createdAt": "2026-05-15T20:59:04.486Z",
+  "id": "Cfopzkivte0VZ08K",
+  "name": "Monteiro - 2.1 - OCR Documentos",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ocr-doc",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        -64
+      ],
+      "id": "21ef1ccc-3e36-4468-b411-579055432cdc",
+      "name": "Webhook",
+      "webhookId": "4126557a-bb76-4016-a8f4-dfd9f5b78792"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {
+          "joinPages": false,
+          "keepSource": "both"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        480,
+        -80
+      ],
+      "id": "6e8b322e-a1e3-403b-921a-74ed061cc23b",
+      "name": "Extrai os dados do pdf separando por página",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c54d32f5-3f7c-4895-a0d7-b8c8da500f9e",
+              "leftValue": "={{ $json.text && $json.text.join('').trim().length > 50 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        736,
+        -96
+      ],
+      "id": "ccb87097-184b-4133-9d9b-c1cc2d9eb833",
+      "name": "Verifica se extraiu texto do documento"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.miabuilder.com/ws/pdf-converter",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "pdf_url",
+              "value": "={{ $json.url }}"
+            },
+            {
+              "name": "page_to",
+              "value": "={{ $json.page_to }}"
+            },
+            {
+              "name": "page_from",
+              "value": "={{ $json.page_from }}"
+            },
+            {
+              "name": "page_mode",
+              "value": "range"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 6000000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1392,
+        -752
+      ],
+      "id": "c994d508-1ae0-4d41-a6fc-b70ff8d085a6",
+      "name": "API PDF Converter",
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = [];\n\nfor (const item of items) {\n  const conversionUrl = item.json.conversionUrl || \"\";\n\n  const urls = conversionUrl\n    .split(\",\")\n    .map(url => url.trim())\n    .filter(url => url.length > 0);\n\n  urls.forEach((url, index) => {\n    output.push({\n      json: {\n        defensaId: item.json.defensaId,\n        templateGoogleDocId: item.json.templateGoogleDocId,\n        pageIndex: index,\n        totalPages: urls.length,\n        url: url\n      }\n    });\n  });\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        -784
+      ],
+      "id": "9eac2eed-e6d0-47e5-98b0-1159c93dc8d7",
+      "name": "Split das pgs convertidas",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1184,
+        -768
+      ],
+      "id": "b4357352-c555-4184-b823-6c3706b879ba",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        -752
+      ],
+      "id": "9eb018f0-68c9-4ce2-9af3-3f46e8989efd",
+      "name": "Wait",
+      "webhookId": "22edbda8-e193-4ad1-85e6-3c53e3b6e386"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        736,
+        176
+      ],
+      "id": "e0aef169-ae67-47e2-98ce-42e35d25ea7e",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const RANGE_SIZE = 3;\n\nconst output = [];\n\nfor (const item of items) {\n\n  const pdf = item.json;\n\n  const totalPages = pdf.numpages || 1;\n\n  for (let page = 1; page <= totalPages; page += RANGE_SIZE) {\n\n    const pageFrom = page;\n\n    const pageTo = Math.min(\n      page + RANGE_SIZE - 1,\n      totalPages\n    );\n\n    output.push({\n      json: {\n\n        // URL correta\n        url: pdf.body.document_url,\n\n        // info do chunk\n        totalPages,\n        page_from: pageFrom,\n        page_to: pageTo,\n\n        // identificador útil\n        chunk_id: `${pdf.midiaIndex}_${pageFrom}_${pageTo}`,\n\n        // opcional\n        is_last_chunk: pageTo === totalPages\n      }\n    });\n\n  }\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        976,
+        -768
+      ],
+      "id": "516a7861-3670-4d66-96a9-41943f50da20",
+      "name": "Range de pgs"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.body.document_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        208,
+        -64
+      ],
+      "id": "b0a1f210-45ee-43b6-9ca0-2ffd4175cb25",
+      "name": "Baixar arquivo",
+      "retryOnFail": false,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Webhook').first().json.body.callback_url }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-callback-key",
+              "value": "Mia@2025"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "condominio_id",
+              "value": "={{ $('Webhook').first().json.body.condominio_id }}"
+            },
+            {
+              "name": "document_type",
+              "value": "={{ $('Webhook').first().json.body.document_type }}"
+            },
+            {
+              "name": "status",
+              "value": "concluido"
+            },
+            {
+              "name": "texto_extraido",
+              "value": "={{ $json.extractedText }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        960,
+        176
+      ],
+      "id": "fd0c5ff4-d505-4ee0-8548-ddf37629f814",
+      "name": "Resposta do processamento"
+    },
+    {
+      "parameters": {
+        "jsCode": "const pages = [];\n\n// percorre todos os itens\nfor (const item of items) {\n\n  // alguns outputs vêm como array dentro do json\n  const data = Array.isArray(item.json)\n    ? item.json\n    : [item.json];\n\n  for (const msg of data) {\n\n    // pega o texto do OCR\n    const text = msg?.content?.[0]?.text || '';\n\n    // remove markdown ```txt\n    const cleaned = text\n      .replace(/```txt/g, '')\n      .replace(/```/g, '')\n      .trim();\n\n    pages.push(cleaned);\n  }\n}\n\n// junta tudo\nconst fullDocument = pages.join('\\n\\n');\n\n// retorna um único item\nreturn [\n  {\n    json: {\n      document: fullDocument\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        -784
+      ],
+      "id": "baa80a65-72d6-489e-bcbf-0150e53b234e",
+      "name": "Junta os OCRs das pgs"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mistralAi",
+      "typeVersion": 1,
+      "position": [
+        960,
+        -80
+      ],
+      "id": "813a3568-73bc-47af-8a16-11cd62fc5ef0",
+      "name": "Extract text",
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "V81QQS8om3rLYwbV",
+          "name": "Mistral Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-2024-11-20",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-2024-11-20"
+        },
+        "text": "=Você é um especialista em OCR e extração documental.\nSua tarefa é analisar a imagem enviada (documento escaneado) e extrair ABSOLUTAMENTE TODO o texto visível presente nela.\n\nRegras importantes:\n\n* Extraia o texto completo exatamente como aparece no documento.\n* Preserve a estrutura original sempre que possível:\n\n  * títulos\n  * parágrafos\n  * listas\n  * tabelas\n  * quebras de linha\n  * campos de formulários\n* NÃO resuma.\n* NÃO interprete.\n* NÃO traduza.\n* NÃO corrija ortografia.\n* NÃO invente informações ausentes.\n* Caso alguma parte esteja ilegível, indique:\n  [TEXTO ILEGÍVEL]\n* Caso existam assinaturas, carimbos ou textos manuscritos, extraia também.\n* Caso existam tabelas, tente reproduzir em formato markdown.\n* Retorne SOMENTE o conteúdo extraído do documento.\n* Ignore elementos puramente decorativos.\n\nSe houver múltiplas páginas/imagens, extraia o conteúdo em ordem sequencial.\n\nFormato esperado da resposta:\n\n```txt\n[INÍCIO OCR]\n\n(conteúdo extraído)\n\n[FIM OCR]\n```\n",
+        "imageUrls": "={{ $json.url }}",
+        "options": {
+          "detail": "high",
+          "maxTokens": "***REMOVIDO***"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        2240,
+        -784
+      ],
+      "id": "5bce5548-3b10-4b3b-904f-dffee99afaf5",
+      "name": "OCR",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "alwaysOutputData": true,
+      "credentials": {
+        "openAiApi": {
+          "id": "GNYM1RjawrdA7XKF",
+          "name": "OpenAi account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        -784
+      ],
+      "id": "fe244f29-1ecd-462b-929d-1d1604918225",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Baixar arquivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai os dados do pdf separando por página": {
+      "main": [
+        [
+          {
+            "node": "Verifica se extraiu texto do documento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se extraiu texto do documento": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API PDF Converter": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split das pgs convertidas": {
+      "main": [
+        []
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Split das pgs convertidas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "API PDF Converter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Resposta do processamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Range de pgs": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixar arquivo": {
+      "main": [
+        [
+          {
+            "node": "Extrai os dados do pdf separando por página",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Junta os OCRs das pgs": {
+      "main": [
+        []
+      ]
+    },
+    "Extract text": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "OCR": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "c96db49a-305f-4141-958b-993224107751",
+  "activeVersionId": "c96db49a-305f-4141-958b-993224107751",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-05-15T20:59:04.486Z",
+      "createdAt": "2026-05-15T20:59:04.486Z",
+      "role": "workflow:owner",
+      "workflowId": "Cfopzkivte0VZ08K",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-05-18T21:58:00.329Z",
+    "createdAt": "2026-05-18T21:58:00.329Z",
+    "versionId": "c96db49a-305f-4141-958b-993224107751",
+    "workflowId": "Cfopzkivte0VZ08K",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "ocr-doc",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          -64
+        ],
+        "id": "21ef1ccc-3e36-4468-b411-579055432cdc",
+        "name": "Webhook",
+        "webhookId": "4126557a-bb76-4016-a8f4-dfd9f5b78792"
+      },
+      {
+        "parameters": {
+          "operation": "pdf",
+          "options": {
+            "joinPages": false,
+            "keepSource": "both"
+          }
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          480,
+          -80
+        ],
+        "id": "6e8b322e-a1e3-403b-921a-74ed061cc23b",
+        "name": "Extrai os dados do pdf separando por página",
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "c54d32f5-3f7c-4895-a0d7-b8c8da500f9e",
+                "leftValue": "={{ $json.text && $json.text.join('').trim().length > 50 }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          736,
+          -96
+        ],
+        "id": "ccb87097-184b-4133-9d9b-c1cc2d9eb833",
+        "name": "Verifica se extraiu texto do documento"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.miabuilder.com/ws/pdf-converter",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "httpBearerAuth",
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "pdf_url",
+                "value": "={{ $json.url }}"
+              },
+              {
+                "name": "page_to",
+                "value": "={{ $json.page_to }}"
+              },
+              {
+                "name": "page_from",
+                "value": "={{ $json.page_from }}"
+              },
+              {
+                "name": "page_mode",
+                "value": "range"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 6000000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1392,
+          -752
+        ],
+        "id": "c994d508-1ae0-4d41-a6fc-b70ff8d085a6",
+        "name": "API PDF Converter",
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const output = [];\n\nfor (const item of items) {\n  const conversionUrl = item.json.conversionUrl || \"\";\n\n  const urls = conversionUrl\n    .split(\",\")\n    .map(url => url.trim())\n    .filter(url => url.length > 0);\n\n  urls.forEach((url, index) => {\n    output.push({\n      json: {\n        defensaId: item.json.defensaId,\n        templateGoogleDocId: item.json.templateGoogleDocId,\n        pageIndex: index,\n        totalPages: urls.length,\n        url: url\n      }\n    });\n  });\n}\n\nreturn output;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1792,
+          -784
+        ],
+        "id": "9eac2eed-e6d0-47e5-98b0-1159c93dc8d7",
+        "name": "Split das pgs convertidas",
+        "alwaysOutputData": true
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          1184,
+          -768
+        ],
+        "id": "b4357352-c555-4184-b823-6c3706b879ba",
+        "name": "Loop Over Items"
+      },
+      {
+        "parameters": {
+          "amount": 2
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          1568,
+          -752
+        ],
+        "id": "9eb018f0-68c9-4ce2-9af3-3f46e8989efd",
+        "name": "Wait",
+        "webhookId": "22edbda8-e193-4ad1-85e6-3c53e3b6e386"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          736,
+          176
+        ],
+        "id": "e0aef169-ae67-47e2-98ce-42e35d25ea7e",
+        "name": "Merge1"
+      },
+      {
+        "parameters": {
+          "jsCode": "const RANGE_SIZE = 3;\n\nconst output = [];\n\nfor (const item of items) {\n\n  const pdf = item.json;\n\n  const totalPages = pdf.numpages || 1;\n\n  for (let page = 1; page <= totalPages; page += RANGE_SIZE) {\n\n    const pageFrom = page;\n\n    const pageTo = Math.min(\n      page + RANGE_SIZE - 1,\n      totalPages\n    );\n\n    output.push({\n      json: {\n\n        // URL correta\n        url: pdf.body.document_url,\n\n        // info do chunk\n        totalPages,\n        page_from: pageFrom,\n        page_to: pageTo,\n\n        // identificador útil\n        chunk_id: `${pdf.midiaIndex}_${pageFrom}_${pageTo}`,\n\n        // opcional\n        is_last_chunk: pageTo === totalPages\n      }\n    });\n\n  }\n}\n\nreturn output;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          976,
+          -768
+        ],
+        "id": "516a7861-3670-4d66-96a9-41943f50da20",
+        "name": "Range de pgs"
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.body.document_url }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          208,
+          -64
+        ],
+        "id": "b0a1f210-45ee-43b6-9ca0-2ffd4175cb25",
+        "name": "Baixar arquivo",
+        "retryOnFail": false,
+        "maxTries": 5,
+        "waitBetweenTries": 5000,
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $('Webhook').first().json.body.callback_url }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "x-callback-key",
+                "value": "Mia@2025"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "condominio_id",
+                "value": "={{ $('Webhook').first().json.body.condominio_id }}"
+              },
+              {
+                "name": "document_type",
+                "value": "={{ $('Webhook').first().json.body.document_type }}"
+              },
+              {
+                "name": "status",
+                "value": "concluido"
+              },
+              {
+                "name": "texto_extraido",
+                "value": "={{ $json.extractedText }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          960,
+          176
+        ],
+        "id": "fd0c5ff4-d505-4ee0-8548-ddf37629f814",
+        "name": "Resposta do processamento"
+      },
+      {
+        "parameters": {
+          "jsCode": "const pages = [];\n\n// percorre todos os itens\nfor (const item of items) {\n\n  // alguns outputs vêm como array dentro do json\n  const data = Array.isArray(item.json)\n    ? item.json\n    : [item.json];\n\n  for (const msg of data) {\n\n    // pega o texto do OCR\n    const text = msg?.content?.[0]?.text || '';\n\n    // remove markdown ```txt\n    const cleaned = text\n      .replace(/```txt/g, '')\n      .replace(/```/g, '')\n      .trim();\n\n    pages.push(cleaned);\n  }\n}\n\n// junta tudo\nconst fullDocument = pages.join('\\n\\n');\n\n// retorna um único item\nreturn [\n  {\n    json: {\n      document: fullDocument\n    }\n  }\n];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2016,
+          -784
+        ],
+        "id": "baa80a65-72d6-489e-bcbf-0150e53b234e",
+        "name": "Junta os OCRs das pgs"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.mistralAi",
+        "typeVersion": 1,
+        "position": [
+          960,
+          -80
+        ],
+        "id": "813a3568-73bc-47af-8a16-11cd62fc5ef0",
+        "name": "Extract text",
+        "credentials": {
+          "mistralCloudApi": {
+            "id": "V81QQS8om3rLYwbV",
+            "name": "Mistral Cloud account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "resource": "image",
+          "operation": "analyze",
+          "modelId": {
+            "__rl": true,
+            "value": "gpt-4o-2024-11-20",
+            "mode": "list",
+            "cachedResultName": "GPT-4O-2024-11-20"
+          },
+          "text": "=Você é um especialista em OCR e extração documental.\nSua tarefa é analisar a imagem enviada (documento escaneado) e extrair ABSOLUTAMENTE TODO o texto visível presente nela.\n\nRegras importantes:\n\n* Extraia o texto completo exatamente como aparece no documento.\n* Preserve a estrutura original sempre que possível:\n\n  * títulos\n  * parágrafos\n  * listas\n  * tabelas\n  * quebras de linha\n  * campos de formulários\n* NÃO resuma.\n* NÃO interprete.\n* NÃO traduza.\n* NÃO corrija ortografia.\n* NÃO invente informações ausentes.\n* Caso alguma parte esteja ilegível, indique:\n  [TEXTO ILEGÍVEL]\n* Caso existam assinaturas, carimbos ou textos manuscritos, extraia também.\n* Caso existam tabelas, tente reproduzir em formato markdown.\n* Retorne SOMENTE o conteúdo extraído do documento.\n* Ignore elementos puramente decorativos.\n\nSe houver múltiplas páginas/imagens, extraia o conteúdo em ordem sequencial.\n\nFormato esperado da resposta:\n\n```txt\n[INÍCIO OCR]\n\n(conteúdo extraído)\n\n[FIM OCR]\n```\n",
+          "imageUrls": "={{ $json.url }}",
+          "options": {
+            "detail": "high",
+            "maxTokens": "***REMOVIDO***"
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.openAi",
+        "typeVersion": 2.1,
+        "position": [
+          2240,
+          -784
+        ],
+        "id": "5bce5548-3b10-4b3b-904f-dffee99afaf5",
+        "name": "OCR",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "alwaysOutputData": true,
+        "credentials": {
+          "openAiApi": {
+            "id": "GNYM1RjawrdA7XKF",
+            "name": "OpenAi account"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\n\nreturn $input.all();"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          768,
+          -784
+        ],
+        "id": "fe244f29-1ecd-462b-929d-1d1604918225",
+        "name": "Code in JavaScript"
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Baixar arquivo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai os dados do pdf separando por página": {
+        "main": [
+          [
+            {
+              "node": "Verifica se extraiu texto do documento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se extraiu texto do documento": {
+        "main": [
+          [
+            {
+              "node": "Merge1",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Extract text",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "API PDF Converter": {
+        "main": [
+          [
+            {
+              "node": "Wait",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Split das pgs convertidas": {
+        "main": [
+          []
+        ]
+      },
+      "Loop Over Items": {
+        "main": [
+          [
+            {
+              "node": "Split das pgs convertidas",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "API PDF Converter",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Items",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge1": {
+        "main": [
+          [
+            {
+              "node": "Resposta do processamento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Range de pgs": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Items",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Baixar arquivo": {
+        "main": [
+          [
+            {
+              "node": "Extrai os dados do pdf separando por página",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Junta os OCRs das pgs": {
+        "main": [
+          []
+        ]
+      },
+      "Extract text": {
+        "main": [
+          [
+            {
+              "node": "Merge1",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "OCR": {
+        "main": [
+          []
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
