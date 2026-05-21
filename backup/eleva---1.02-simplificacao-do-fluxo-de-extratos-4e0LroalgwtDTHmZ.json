@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-20T01:38:20.168Z",
+  "updatedAt": "2026-05-20T23:16:45.665Z",
   "createdAt": "2026-05-18T22:19:03.285Z",
   "id": "4e0LroalgwtDTHmZ",
   "name": "Eleva - 1.02 Simplificação do Fluxo de Extratos",
@@ -259,9 +259,9 @@
     },
     {
       "parameters": {
-        "model": "google/gemini-3.1-flash-lite",
         "options": {
-          "maxTokens": "***REMOVIDO***"
+          "maxTokens": "***REMOVIDO***",
+          "temperature": 0.1
         }
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
@@ -352,6 +352,10 @@
             {
               "fieldId": "payment_date",
               "fieldValue": "={{ $('Recebe link do Supabase Storage').first().json.body.paymentDate }}"
+            },
+            {
+              "fieldId": "pending_review",
+              "fieldValue": "true"
             }
           ]
         }
@@ -385,13 +389,7 @@
             {
               "id": "11627cef-1380-4f1a-9076-354dde6aac27",
               "name": "Itaú",
-              "value": "=### REGRAS DE OURO:\n1. VARREDURA COMPLETA: Não pare na primeira tabela. Procure por seções como \"Lançamentos do cartão virtual\" e \"Lançamentos do cartão adicional\". Extraia TUDO.\n2. FIDELIDADE ABSOLUTA: Extraia cada linha individualmente. Todos valores devem ter tipo DESPESA.\n3. CATEGORIZAÇÃO ESTREITA: Você DEVE classificar cada item usando EXCLUSIVAMENTE a hierarquia abaixo.\n4. FILTRO DE RUÍDO: Ignore linhas que sejam apenas títulos de seções, resumos ou subtotais. NÃO extraia: \"Compras à vista\", \"Compras parceladas\", \"Mensalidade\" (quando for título de seção), \"Descontos\" (resumo), \"Saldo Anterior\" ou \"Total\".\n\n\n### Tratamento de irregularidades:\n\n1. As datas podem vir com formatação incorreta, de 5 digitos (ex: \"02/212\"), descarte o primeiro digito e passe a barra para a direita, transformando a data que veio como \"02/212\" em \"22/12\".\n\n\n\n2. Regra para interpretação de datas de transações:\n\nAs datas das transações podem aparecer na fatura apenas no formato DD/MM, sem o ano. Quando isso acontecer, você deve inferir o ano com base no contexto da fatura, e nunca escolher um ano aleatório.\n\nUse como referência principal:\n1. A data de vencimento da fatura;\n2. O mês/ano da fatura;\n3. A data de fechamento da fatura, caso exista;\n4. O período de compras da fatura, caso esteja informado.\n\nA lógica deve ser a seguinte:\n\nUma fatura normalmente contém compras feitas no período anterior ao vencimento ou fechamento.\nSe a fatura for de janeiro de 2026 e aparecer uma compra em 25/12, essa compra deve ser interpretada como 25/12/2025, pois dezembro imediatamente anterior pertence ao ciclo da fatura.\nSe a fatura for de janeiro de 2026 e aparecer uma compra em 05/01, essa compra deve ser interpretada como 05/01/2026.\nSe a fatura for de fevereiro de 2026 e aparecer uma compra em 28/01, interpretar como 28/01/2026.\nSe a fatura for de março de 2026 e aparecer uma compra em 30/12, isso provavelmente se refere a 30/12/2025 apenas se o período da fatura permitir; caso contrário, marque como data incerta.\n\nNunca use anos como 2000, 1900 ou qualquer ano padrão do sistema quando o ano não estiver explícito. O ano deve sempre ser inferido a partir do ciclo da fatura.\n\nCritério prático:\n\nQuando a data vier apenas como DD/MM:\n\n1. Monte uma data candidata usando o mesmo ano da fatura.\n2. Se essa data ficar depois da data de vencimento ou claramente fora do ciclo da fatura, teste o ano anterior.\n3. Escolha a data que fizer mais sentido dentro do período da fatura.\n4. Se houver período de compras informado, a data final deve obrigatoriamente cair dentro desse período.\n5. Se nenhuma data fizer sentido, use o ano atual.\n\nExemplos:\n\nFatura: janeiro/2026\n  Data lida: 25/12\n  Data correta: 25/12/2025\n\nFatura: janeiro/2026\n  Data lida: 03/01\n  Data correta: 03/01/2026\n\nFatura: fevereiro/2026\n  Data lida: 29/01\n  Data correta: 29/01/2026\n\nImportante:\nVocê deve agir como uma pessoa conferindo uma fatura de cartão. Use bom senso contábil e temporal. Uma compra não deve ser lançada em uma data futura em relação ao ciclo da fatura, nem em anos absurdos ou sem relação com o documento.\n\n\n",
-              "type": "string"
-            },
-            {
-              "id": "67087799-efd3-4827-a5bd-ce18ef75f037",
-              "name": "Inter",
-              "value": "",
+              "value": "=### REGRAS DE OURO:\n\n1. VARREDURA COMPLETA:\n   Não pare na primeira tabela. Procure por seções como \"Lançamentos do cartão virtual\" e \"Lançamentos do cartão adicional\". Extraia TUDO.\n\n2. FIDELIDADE ABSOLUTA:\n   Extraia cada linha individualmente. Todos valores devem ter tipo DESPESA.\n\n3. CATEGORIZAÇÃO ESTREITA:\n   Você DEVE classificar cada item usando EXCLUSIVAMENTE a hierarquia abaixo.\n\n4. FILTRO DE RUÍDO:\n   Ignore linhas que sejam apenas títulos de seções, resumos ou subtotais.\n\n   NÃO extraia:\n   - \"Compras à vista\"\n   - \"Compras parceladas\"\n   - \"Mensalidade\" (quando for título de seção)\n   - \"Descontos\" (resumo)\n   - \"Saldo Anterior\"\n   - \"Total\"\n\n---\n\n### Tratamento de irregularidades:\n\n#### 1. HIGIENIZAÇÃO DE RUÍDO GRÁFICO (OCR CORROMPIDO):\n\nO extrator de OCR frequentemente corrompe a coluna de datas nas tabelas do Itaú, injetando zeros, barras extras ou repetindo números (ex: transforma \"11/07\" em \"01/1/07\", \"02/7/11\" ou datas com 5 dígitos como \"02/212\").\n\n##### AÇÃO:\n\n1. Pegue a string da data lida.\n   Exemplos:\n   - \"01/1/07\"\n   - \"02/7/11\"\n   - \"03/1/12\"\n   - \"03/20/12\"\n\n2. Remova/jogue fora o primeiríssimo dígito da string.\n\n3. Mova a primeira barra do texto uma posição para a direita (avançando dois dígitos após a remoção do primeiro).\n\n##### Exemplos:\n\n- Se o OCR leu `\"01/1/07\"`:\n  - Joga fora o primeiro dígito `'0'` → sobra `\"1/1/07\"`\n  - Passa a barra para a direita → vira `\"11/07\"`\n\n- Se o OCR leu `\"02/7/11\"`:\n  - Joga fora o primeiro dígito `'0'` → sobra `\"2/7/11\"`\n  - Passa a barra para a direita → vira `\"27/11\"`\n\n---\n\n#### 2. REGRA PARA PARCELAMENTOS ANTIGOS SEM DIA EXPLÍCITO:\n\nLinhas de compras parceladas há muitos meses costumam perder a formatação do dia no OCR, trazendo apenas referências ao número da parcela (ex: `\"Socio Camisa 7 07/12\"` ou `\"TICPAYILUMINACAO 08/12\"`).\n\nVocê está PROIBIDO de inventar o dia da transação usando os números que indicam a parcela (como usar dia 07 ou dia 08).\n\n##### AÇÃO:\n\nSempre que uma linha contiver parcelamento (ex: `\"XX/YY\"`) e o dia exato da transação no início da linha estiver ilegível, omitido ou confuso devido ao erro do OCR:\n\n- Adote como o \"Dia da Transação\" o dia do Fechamento Real do cartão:\n  - `Dia do Vencimento - 7 dias`\n\n- Como esse dia de ajuste contábil calculado será obrigatoriamente MENOR que o dia do vencimento:\n  - force o mês e ano para o `\"Mês Principal da Competência\"`.\n\n---\n\n#### 3. PROTOCOLO OBRIGATÓRIO DE AUTO-DETECÇÃO E ANCORAGEM\n*(Ciclo baseado no Dia do Vencimento)*\n\n---\n\n##### PASSO 1: Localização da ÂNCORA MESTRE\n\nLocalize no início do texto a `\"Data de Vencimento\"` oficial da fatura.\n\nProcure por termos como:\n- `\"Vencimento:\"`\n- `\"Com vencimento em:\"`\n- `\"Data de Vencimento\"`\n\n##### AÇÃO:\n\n- Identifique e isole:\n  - DIA\n  - MÊS\n  - ANO\n\nEsses valores serão sua **ÂNCORA MESTRE**.\n\nA partir do mês e ano dessa âncora, determine:\n\n- `\"Mês Principal da Competência\"`:\n  - o mesmo mês do vencimento\n\n- `\"Mês Anterior do Ciclo\"`:\n  - o mês imediatamente anterior\n\n##### Exemplo:\n\nSe você encontrou:\n\n`Vencimento: 25/01/2026`\n\nEntão:\n\n- Mês Principal = Janeiro/2026\n- Mês Anterior = Dezembro/2025\n\n---\n\n##### PASSO 2: EXTRAÇÃO DAS LINHAS DE TRANSAÇÃO (TOLERÂNCIA ZERO)\n\nNas tabelas de lançamentos nacionais e internacionais:\n\n- Ignore completamente o mês que o OCR gerou na linha.\n- Você deve focar e capturar APENAS o DIA da transação (limpo no Passo 1 de Higienização).\n\nPara reconstruir o MÊS e o ANO corretos de cada item no JSON:\n\n- Compare o DIA da compra com o DIA do vencimento detectado no PASSO 1.\n\n---\n\n### REGRA A\n\n#### SE O DIA DA COMPRA FOR MAIOR OU IGUAL AO DIA DO VENCIMENTO:\n\nEsta compra foi realizada no início do ciclo (mês passado).\n\n##### AÇÃO:\n\nForce:\n- MÊS = `\"Mês Anterior do Ciclo\"`\n- ANO = ano correspondente ao mês anterior\n\n##### Exemplo:\n\nVencimento detectado:\n`25/01/2026`\n\nLinha indica:\n- `\"28/12\"`\n- ou `\"28/02\"`\n\nComo:\n`28 >= 25`\n\nIgnore o mês impresso e force:\n\n- Mês = Dezembro\n- Ano = 2025\n\n##### Data final:\n`28/12/2025`\n\n---\n\n### REGRA B\n\n#### SE O DIA DA COMPRA FOR MENOR QUE O DIA DO VENCIMENTO:\n\nEsta compra foi realizada no mês corrente do fechamento.\n\n##### AÇÃO:\n\nForce:\n- MÊS = `\"Mês Principal da Competência\"`\n- ANO = ano correspondente ao mês principal\n\n##### Exemplo:\n\nVencimento detectado:\n`25/01/2026`\n\nLinha indica:\n- `\"02/01\"`\n- ou `\"02/02\"`\n\nComo:\n`2 < 25`\n\nIgnore o mês impresso e force:\n\n- Mês = Janeiro\n- Ano = 2026\n\n##### Data final:\n`02/01/2026`\n\n---\n\n### RESTRIÇÃO ABSOLUTA\n\nNENHUMA transação pode ter um mês ou ano gerado que fuja dessas duas opções calculadas:\n\n- `\"Mês Principal da Competência\"`\n- `\"Mês Anterior do Ciclo\"`\n\nÉ terminantemente proibido criar lançamentos em meses futuros (como fevereiro em uma fatura com vencimento em janeiro).",
               "type": "string"
             },
             {
@@ -574,7 +572,9 @@
     },
     {
       "parameters": {
-        "options": {}
+        "options": {
+          "batch": false
+        }
       },
       "type": "n8n-nodes-base.mistralAi",
       "typeVersion": 1,
@@ -763,8 +763,8 @@
       "type": "n8n-nodes-base.limit",
       "typeVersion": 1,
       "position": [
-        1984,
-        3520
+        1920,
+        3536
       ],
       "id": "3db31d16-1820-4a03-a6cf-679c94a887a5",
       "name": "Limit7"
@@ -947,8 +947,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        1072,
-        3200
+        1040,
+        3216
       ],
       "id": "8c449624-a744-48c5-b827-22e15af14053",
       "name": "Update: Iniciando49",
@@ -961,6 +961,58 @@
         }
       },
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        2704,
+        3472
+      ],
+      "id": "f1b26985-d754-4cb6-b99f-6dc77c4dfea0",
+      "name": "Se houver erro no Fluxo"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "import_jobs",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Recebe link do Supabase Storage').first().json.body.jobId }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "error_n8n"
+            },
+            {
+              "fieldId": "status_message",
+              "fieldValue": "={{ $json.execution.error.message || 'Erro inesperado ao processar o arquivo.' }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2960,
+        3472
+      ],
+      "id": "8ef478d9-850d-41f7-b2fd-c8d7ae1751f8",
+      "name": "Marca Job como Erro",
+      "credentials": {
+        "supabaseApi": {
+          "id": "kajlEDhCYmeLcxgQ",
+          "name": "ELEVA - Supabase"
+        }
+      }
     }
   ],
   "connections": {
@@ -1248,6 +1300,17 @@
           }
         ]
       ]
+    },
+    "Se houver erro no Fluxo": {
+      "main": [
+        [
+          {
+            "node": "Marca Job como Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -1260,9 +1323,11 @@
     "errorWorkflow": "xfondpEOYdGLoDo4"
   },
   "staticData": null,
-  "meta": null,
-  "versionId": "6bad273e-fe8f-4993-be38-b3aedd99c4f0",
-  "activeVersionId": "6bad273e-fe8f-4993-be38-b3aedd99c4f0",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "3970e63e-f996-4f6a-8171-522b7dcb8118",
+  "activeVersionId": "3970e63e-f996-4f6a-8171-522b7dcb8118",
   "triggerCount": 1,
   "shared": [
     {
@@ -1274,9 +1339,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-05-20T01:38:20.171Z",
-    "createdAt": "2026-05-20T01:38:20.171Z",
-    "versionId": "6bad273e-fe8f-4993-be38-b3aedd99c4f0",
+    "updatedAt": "2026-05-20T23:16:45.667Z",
+    "createdAt": "2026-05-20T23:16:45.667Z",
+    "versionId": "3970e63e-f996-4f6a-8171-522b7dcb8118",
     "workflowId": "4e0LroalgwtDTHmZ",
     "nodes": [
       {
@@ -1532,9 +1597,9 @@
       },
       {
         "parameters": {
-          "model": "google/gemini-3.1-flash-lite",
           "options": {
-            "maxTokens": "***REMOVIDO***"
+            "maxTokens": "***REMOVIDO***",
+            "temperature": 0.1
           }
         },
         "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
@@ -1625,6 +1690,10 @@
               {
                 "fieldId": "payment_date",
                 "fieldValue": "={{ $('Recebe link do Supabase Storage').first().json.body.paymentDate }}"
+              },
+              {
+                "fieldId": "pending_review",
+                "fieldValue": "true"
               }
             ]
           }
@@ -1658,13 +1727,7 @@
               {
                 "id": "11627cef-1380-4f1a-9076-354dde6aac27",
                 "name": "Itaú",
-                "value": "=### REGRAS DE OURO:\n1. VARREDURA COMPLETA: Não pare na primeira tabela. Procure por seções como \"Lançamentos do cartão virtual\" e \"Lançamentos do cartão adicional\". Extraia TUDO.\n2. FIDELIDADE ABSOLUTA: Extraia cada linha individualmente. Todos valores devem ter tipo DESPESA.\n3. CATEGORIZAÇÃO ESTREITA: Você DEVE classificar cada item usando EXCLUSIVAMENTE a hierarquia abaixo.\n4. FILTRO DE RUÍDO: Ignore linhas que sejam apenas títulos de seções, resumos ou subtotais. NÃO extraia: \"Compras à vista\", \"Compras parceladas\", \"Mensalidade\" (quando for título de seção), \"Descontos\" (resumo), \"Saldo Anterior\" ou \"Total\".\n\n\n### Tratamento de irregularidades:\n\n1. As datas podem vir com formatação incorreta, de 5 digitos (ex: \"02/212\"), descarte o primeiro digito e passe a barra para a direita, transformando a data que veio como \"02/212\" em \"22/12\".\n\n\n\n2. Regra para interpretação de datas de transações:\n\nAs datas das transações podem aparecer na fatura apenas no formato DD/MM, sem o ano. Quando isso acontecer, você deve inferir o ano com base no contexto da fatura, e nunca escolher um ano aleatório.\n\nUse como referência principal:\n1. A data de vencimento da fatura;\n2. O mês/ano da fatura;\n3. A data de fechamento da fatura, caso exista;\n4. O período de compras da fatura, caso esteja informado.\n\nA lógica deve ser a seguinte:\n\nUma fatura normalmente contém compras feitas no período anterior ao vencimento ou fechamento.\nSe a fatura for de janeiro de 2026 e aparecer uma compra em 25/12, essa compra deve ser interpretada como 25/12/2025, pois dezembro imediatamente anterior pertence ao ciclo da fatura.\nSe a fatura for de janeiro de 2026 e aparecer uma compra em 05/01, essa compra deve ser interpretada como 05/01/2026.\nSe a fatura for de fevereiro de 2026 e aparecer uma compra em 28/01, interpretar como 28/01/2026.\nSe a fatura for de março de 2026 e aparecer uma compra em 30/12, isso provavelmente se refere a 30/12/2025 apenas se o período da fatura permitir; caso contrário, marque como data incerta.\n\nNunca use anos como 2000, 1900 ou qualquer ano padrão do sistema quando o ano não estiver explícito. O ano deve sempre ser inferido a partir do ciclo da fatura.\n\nCritério prático:\n\nQuando a data vier apenas como DD/MM:\n\n1. Monte uma data candidata usando o mesmo ano da fatura.\n2. Se essa data ficar depois da data de vencimento ou claramente fora do ciclo da fatura, teste o ano anterior.\n3. Escolha a data que fizer mais sentido dentro do período da fatura.\n4. Se houver período de compras informado, a data final deve obrigatoriamente cair dentro desse período.\n5. Se nenhuma data fizer sentido, use o ano atual.\n\nExemplos:\n\nFatura: janeiro/2026\n  Data lida: 25/12\n  Data correta: 25/12/2025\n\nFatura: janeiro/2026\n  Data lida: 03/01\n  Data correta: 03/01/2026\n\nFatura: fevereiro/2026\n  Data lida: 29/01\n  Data correta: 29/01/2026\n\nImportante:\nVocê deve agir como uma pessoa conferindo uma fatura de cartão. Use bom senso contábil e temporal. Uma compra não deve ser lançada em uma data futura em relação ao ciclo da fatura, nem em anos absurdos ou sem relação com o documento.\n\n\n",
-                "type": "string"
-              },
-              {
-                "id": "67087799-efd3-4827-a5bd-ce18ef75f037",
-                "name": "Inter",
-                "value": "",
+                "value": "=### REGRAS DE OURO:\n\n1. VARREDURA COMPLETA:\n   Não pare na primeira tabela. Procure por seções como \"Lançamentos do cartão virtual\" e \"Lançamentos do cartão adicional\". Extraia TUDO.\n\n2. FIDELIDADE ABSOLUTA:\n   Extraia cada linha individualmente. Todos valores devem ter tipo DESPESA.\n\n3. CATEGORIZAÇÃO ESTREITA:\n   Você DEVE classificar cada item usando EXCLUSIVAMENTE a hierarquia abaixo.\n\n4. FILTRO DE RUÍDO:\n   Ignore linhas que sejam apenas títulos de seções, resumos ou subtotais.\n\n   NÃO extraia:\n   - \"Compras à vista\"\n   - \"Compras parceladas\"\n   - \"Mensalidade\" (quando for título de seção)\n   - \"Descontos\" (resumo)\n   - \"Saldo Anterior\"\n   - \"Total\"\n\n---\n\n### Tratamento de irregularidades:\n\n#### 1. HIGIENIZAÇÃO DE RUÍDO GRÁFICO (OCR CORROMPIDO):\n\nO extrator de OCR frequentemente corrompe a coluna de datas nas tabelas do Itaú, injetando zeros, barras extras ou repetindo números (ex: transforma \"11/07\" em \"01/1/07\", \"02/7/11\" ou datas com 5 dígitos como \"02/212\").\n\n##### AÇÃO:\n\n1. Pegue a string da data lida.\n   Exemplos:\n   - \"01/1/07\"\n   - \"02/7/11\"\n   - \"03/1/12\"\n   - \"03/20/12\"\n\n2. Remova/jogue fora o primeiríssimo dígito da string.\n\n3. Mova a primeira barra do texto uma posição para a direita (avançando dois dígitos após a remoção do primeiro).\n\n##### Exemplos:\n\n- Se o OCR leu `\"01/1/07\"`:\n  - Joga fora o primeiro dígito `'0'` → sobra `\"1/1/07\"`\n  - Passa a barra para a direita → vira `\"11/07\"`\n\n- Se o OCR leu `\"02/7/11\"`:\n  - Joga fora o primeiro dígito `'0'` → sobra `\"2/7/11\"`\n  - Passa a barra para a direita → vira `\"27/11\"`\n\n---\n\n#### 2. REGRA PARA PARCELAMENTOS ANTIGOS SEM DIA EXPLÍCITO:\n\nLinhas de compras parceladas há muitos meses costumam perder a formatação do dia no OCR, trazendo apenas referências ao número da parcela (ex: `\"Socio Camisa 7 07/12\"` ou `\"TICPAYILUMINACAO 08/12\"`).\n\nVocê está PROIBIDO de inventar o dia da transação usando os números que indicam a parcela (como usar dia 07 ou dia 08).\n\n##### AÇÃO:\n\nSempre que uma linha contiver parcelamento (ex: `\"XX/YY\"`) e o dia exato da transação no início da linha estiver ilegível, omitido ou confuso devido ao erro do OCR:\n\n- Adote como o \"Dia da Transação\" o dia do Fechamento Real do cartão:\n  - `Dia do Vencimento - 7 dias`\n\n- Como esse dia de ajuste contábil calculado será obrigatoriamente MENOR que o dia do vencimento:\n  - force o mês e ano para o `\"Mês Principal da Competência\"`.\n\n---\n\n#### 3. PROTOCOLO OBRIGATÓRIO DE AUTO-DETECÇÃO E ANCORAGEM\n*(Ciclo baseado no Dia do Vencimento)*\n\n---\n\n##### PASSO 1: Localização da ÂNCORA MESTRE\n\nLocalize no início do texto a `\"Data de Vencimento\"` oficial da fatura.\n\nProcure por termos como:\n- `\"Vencimento:\"`\n- `\"Com vencimento em:\"`\n- `\"Data de Vencimento\"`\n\n##### AÇÃO:\n\n- Identifique e isole:\n  - DIA\n  - MÊS\n  - ANO\n\nEsses valores serão sua **ÂNCORA MESTRE**.\n\nA partir do mês e ano dessa âncora, determine:\n\n- `\"Mês Principal da Competência\"`:\n  - o mesmo mês do vencimento\n\n- `\"Mês Anterior do Ciclo\"`:\n  - o mês imediatamente anterior\n\n##### Exemplo:\n\nSe você encontrou:\n\n`Vencimento: 25/01/2026`\n\nEntão:\n\n- Mês Principal = Janeiro/2026\n- Mês Anterior = Dezembro/2025\n\n---\n\n##### PASSO 2: EXTRAÇÃO DAS LINHAS DE TRANSAÇÃO (TOLERÂNCIA ZERO)\n\nNas tabelas de lançamentos nacionais e internacionais:\n\n- Ignore completamente o mês que o OCR gerou na linha.\n- Você deve focar e capturar APENAS o DIA da transação (limpo no Passo 1 de Higienização).\n\nPara reconstruir o MÊS e o ANO corretos de cada item no JSON:\n\n- Compare o DIA da compra com o DIA do vencimento detectado no PASSO 1.\n\n---\n\n### REGRA A\n\n#### SE O DIA DA COMPRA FOR MAIOR OU IGUAL AO DIA DO VENCIMENTO:\n\nEsta compra foi realizada no início do ciclo (mês passado).\n\n##### AÇÃO:\n\nForce:\n- MÊS = `\"Mês Anterior do Ciclo\"`\n- ANO = ano correspondente ao mês anterior\n\n##### Exemplo:\n\nVencimento detectado:\n`25/01/2026`\n\nLinha indica:\n- `\"28/12\"`\n- ou `\"28/02\"`\n\nComo:\n`28 >= 25`\n\nIgnore o mês impresso e force:\n\n- Mês = Dezembro\n- Ano = 2025\n\n##### Data final:\n`28/12/2025`\n\n---\n\n### REGRA B\n\n#### SE O DIA DA COMPRA FOR MENOR QUE O DIA DO VENCIMENTO:\n\nEsta compra foi realizada no mês corrente do fechamento.\n\n##### AÇÃO:\n\nForce:\n- MÊS = `\"Mês Principal da Competência\"`\n- ANO = ano correspondente ao mês principal\n\n##### Exemplo:\n\nVencimento detectado:\n`25/01/2026`\n\nLinha indica:\n- `\"02/01\"`\n- ou `\"02/02\"`\n\nComo:\n`2 < 25`\n\nIgnore o mês impresso e force:\n\n- Mês = Janeiro\n- Ano = 2026\n\n##### Data final:\n`02/01/2026`\n\n---\n\n### RESTRIÇÃO ABSOLUTA\n\nNENHUMA transação pode ter um mês ou ano gerado que fuja dessas duas opções calculadas:\n\n- `\"Mês Principal da Competência\"`\n- `\"Mês Anterior do Ciclo\"`\n\nÉ terminantemente proibido criar lançamentos em meses futuros (como fevereiro em uma fatura com vencimento em janeiro).",
                 "type": "string"
               },
               {
@@ -1847,7 +1910,9 @@
       },
       {
         "parameters": {
-          "options": {}
+          "options": {
+            "batch": false
+          }
         },
         "type": "n8n-nodes-base.mistralAi",
         "typeVersion": 1,
@@ -2036,8 +2101,8 @@
         "type": "n8n-nodes-base.limit",
         "typeVersion": 1,
         "position": [
-          1984,
-          3520
+          1920,
+          3536
         ],
         "id": "3db31d16-1820-4a03-a6cf-679c94a887a5",
         "name": "Limit7"
@@ -2220,8 +2285,8 @@
         "type": "n8n-nodes-base.supabase",
         "typeVersion": 1,
         "position": [
-          1072,
-          3200
+          1040,
+          3216
         ],
         "id": "8c449624-a744-48c5-b827-22e15af14053",
         "name": "Update: Iniciando49",
@@ -2234,6 +2299,58 @@
           }
         },
         "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.errorTrigger",
+        "typeVersion": 1,
+        "position": [
+          2704,
+          3472
+        ],
+        "id": "f1b26985-d754-4cb6-b99f-6dc77c4dfea0",
+        "name": "Se houver erro no Fluxo"
+      },
+      {
+        "parameters": {
+          "operation": "update",
+          "tableId": "import_jobs",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $('Recebe link do Supabase Storage').first().json.body.jobId }}"
+              }
+            ]
+          },
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "status",
+                "fieldValue": "error_n8n"
+              },
+              {
+                "fieldId": "status_message",
+                "fieldValue": "={{ $json.execution.error.message || 'Erro inesperado ao processar o arquivo.' }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2960,
+          3472
+        ],
+        "id": "8ef478d9-850d-41f7-b2fd-c8d7ae1751f8",
+        "name": "Marca Job como Erro",
+        "credentials": {
+          "supabaseApi": {
+            "id": "kajlEDhCYmeLcxgQ",
+            "name": "ELEVA - Supabase"
+          }
+        }
       }
     ],
     "connections": {
@@ -2516,6 +2633,17 @@
           [
             {
               "node": "Limit7",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Se houver erro no Fluxo": {
+        "main": [
+          [
+            {
+              "node": "Marca Job como Erro",
               "type": "main",
               "index": 0
             }
