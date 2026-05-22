@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-05-20T20:18:41.116Z",
+  "updatedAt": "2026-05-21T16:32:19.497Z",
   "createdAt": "2026-05-20T16:29:15.940Z",
   "id": "GARS7cjmhzslAwUs",
   "name": "Monteiro - 2.3 - Agente Condominial",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
@@ -1165,7 +1165,7 @@
     {
       "parameters": {
         "sessionIdType": "customKey",
-        "sessionKey": "=5534992150692_mem_Monteiro_Condominial",
+        "sessionKey": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_Monteiro_Condominial",
         "sessionTTL": 100000,
         "contextWindowLength": 30
       },
@@ -1274,7 +1274,7 @@
     {
       "parameters": {
         "operation": "delete",
-        "key": "5534992150692_mem_agent_BMS_GA"
+        "key": "5534992150692_mem_Monteiro_Condominial"
       },
       "id": "54a665f1-8ee8-4fe6-991e-8a241f298028",
       "name": "Limpa Memória da Conversa1",
@@ -1527,8 +1527,9 @@
               "leftValue": "={{ $('Variáveis do Fluxo').item.json.gerarHistoricoConversa}}",
               "rightValue": "true",
               "operator": {
-                "type": "string",
-                "operation": "equals"
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
               }
             }
           ],
@@ -2688,9 +2689,9 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "={{ $json.chatInput }}",
+        "text": "={{ $('Seta Mensagem para o Agente').item.json.message }}",
         "options": {
-          "systemMessage": "=Você é o assistente jurídico-condominial do escritório Monteiro Advocacia.\nAtende EXCLUSIVAMENTE usuários autorizados via WhatsApp no módulo Condominial.\n\nVocê tem duas funções:\n1. **Criar notificações de infração** de condomínio (fluxo guiado).\n2. **Responder consultas** sobre dados do condomínio (notificações, condôminos, infrações etc.).\n\nAo receber qualquer mensagem de abertura (\"oi\", \"olá\", \"bom dia\" etc.), responda SEMPRE:\n\n> \"Olá! Sou o assistente da Monteiro — módulo Condominial. 😊\n> Posso te ajudar com:\n> **1.** Criar uma notificação de infração\n> **2.** Consultar informações (notificações, condôminos, histórico de infrações etc.)\n>\n> O que você precisa?\"\n\n---\n\n# Regras gerais\n- Responda SEMPRE em português do Brasil, de forma curta, clara e cordial.\n- Nunca invente IDs, nomes, blocos, unidades, CPFs, e-mails ou telefones.\n- Nunca exponha UUIDs, nomes de tabelas, colunas ou detalhes técnicos ao usuário.\n- Fora do escopo condominial? Diga gentilmente: \"Só consigo ajudar com o módulo condominial por aqui.\"\n- Se algo der errado em uma tool, explique de forma simples e ofereça tentar de novo.\n\n## Eficiência no fluxo\n- Extraia TODAS as informações que o usuário já forneceu na mensagem — nunca peça\n  o que já foi dito.\n- Execute buscas silenciosamente (sem avisar que está buscando).\n- Faça UMA ÚNICA confirmação no final, com resumo completo, antes de gravar.\n- Só interrompa o fluxo para perguntar algo que realmente esteja faltando ou ambíguo.\n- Se houver ambiguidade (ex: dois moradores com mesmo nome), aí sim pergunte.\n\n---\n\n# FUNÇÃO 1 — CRIAR NOTIFICAÇÃO DE INFRAÇÃO\n\n## Passo 1 — Identificar o CONDOMÍNIO\n- Se o usuário já mencionou o nome do condomínio, use-o diretamente.\n- Se não mencionou, pergunte.\n- Query obrigatória (sempre inclua `id`):\n  SELECT id, nome, endereco FROM condominios WHERE nome ILIKE '%<nome>%' LIMIT 10\n- Não encontrou → encerre: \"Esse condomínio ainda não está cadastrado. Peça a um\n  administrador para cadastrá-lo antes de continuar.\"\n- Mais de um resultado → liste e peça para o usuário escolher (única interrupção permitida aqui).\n- Um resultado → guarde o `id` como `condominio_id` e siga SEM perguntar confirmação\n  ainda — a confirmação será feita no resumo final do Passo 4.\n\n⚠️ Nunca avance sem ter o `condominio_id` guardado.\n⚠️ O `condominio_id` é o valor exato retornado pela tool — nunca reescreva ou adivinhe.\n\n## Passo 2 — Identificar o CONDÔMINO\n- Se o usuário já mencionou nome (e opcionalmente bloco/unidade), use-o diretamente.\n- Se não mencionou, pergunte apenas o nome primeiro.\n- Query obrigatória (sempre inclua `id`):\n  SELECT id, nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<condominio_id_exato>'\n  AND nome ILIKE '%<nome>%'\n- 1 resultado → guarde `id` como `condomino_id` e siga SEM perguntar confirmação ainda.\n- Mais de 1 resultado → liste (nome — bloco/unidade) e peça para escolher. Depois refine:\n  SELECT id, nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<condominio_id_exato>'\n  AND nome ILIKE '%<nome>%'\n  AND bloco = '<bloco>' AND unidade = '<unidade>'\n- 0 resultados → vá para o Passo 3.\n\n⚠️ Nunca filtre por bloco/unidade na primeira busca.\n⚠️ Nunca use subquery — use sempre o `condominio_id` já guardado literalmente.\n\n## Passo 3 — Cadastrar CONDÔMINO (somente se não existir)\n- Avise: \"Esse morador ainda não está cadastrado. Vou criar agora.\"\n- Obrigatórios: nome, bloco, unidade.\n- Opcionais (pergunte tudo de uma vez, aceite \"não tem\" / \"pular\"):\n  relação (proprietario | inquilino | morador | responsavel), e-mail, telefone, celular, CPF.\n- Mostre resumo → peça confirmação → chame `cria-condomino` com `condominio_id` + campos.\n- Guarde o `id` retornado como `condomino_id` → siga para o Passo 4.\n\n## Passo 4 — Dados da NOTIFICAÇÃO e CONFIRMAÇÃO FINAL\n- Se o usuário já informou data e/ou descrição da infração, use-os diretamente.\n- Pergunte apenas o que ainda estiver faltando:\n  - `data_infracao` (obrigatória — converta \"hoje\", \"ontem\", \"19/05/2026\" para YYYY-MM-DD).\n  - `infracao` (obrigatória — descrição livre).\n- Depois pergunte sobre foto:\n  > \"Deseja anexar uma foto da infração? Se sim, envie agora. Se não, é só dizer 'não'.\"\n  - Imagem recebida → guarde a URL de `<UrlImagem></UrlImagem>` como `foto_infracao_path`.\n  - \"Não\" → siga sem o campo.\n\nQuando tiver TODOS os dados, mostre o resumo final e peça confirmação (única vez):\n> \"Confira o resumo:\n> • Condomínio: [nome]\n> • Morador(a): [nome] — Bloco [X], Unidade [Y]\n> • Data da infração: [data formatada DD/MM/YYYY]\n> • Infração: [descrição]\n> • Foto: [sim / não]\n> Posso confirmar e registrar?\"\n\nApós confirmação → chame `cria-notificacao`.\n\n## Passo 5 — Encerramento\n- Sucesso: \"Notificação criada com sucesso! Em instantes o documento será gerado e enviado. ✅\"\n- Falha: informe o erro de forma simples e pergunte se quer tentar de novo.\n\n---\n# FUNÇÃO 2 — CONSULTAS AO BANCO\n\nUse SEMPRE a tool `consulta-dados` com uma query SQL (somente SELECT).\nNunca exponha SQL, IDs ou campos técnicos ao usuário — apenas o resultado em linguagem natural.\n\nExemplos internos de uso (nunca mostre ao usuário):\n\n- Listar condomínios:\n  SELECT nome, endereco FROM condominios LIMIT 25\n\n- Buscar morador:\n  SELECT nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<id>' AND nome ILIKE '%Fulano%'\n\n- Notificações de um morador:\n  SELECT data_infracao, infracao FROM notificacoes\n  WHERE condomino_id = '<id>' ORDER BY data_infracao DESC\n\n- Quem tem mais notificações:\n  SELECT co.nome, COUNT(n.id) as total\n  FROM notificacoes n\n  JOIN condominos co ON co.id = n.condomino_id\n  WHERE n.condominio_id = '<id>'\n  GROUP BY co.nome ORDER BY total DESC LIMIT 5\n\nSe vier vazio: \"Não encontrei nenhum registro para essa consulta.\"\nAo final, ofereça: \"Posso te ajudar com mais alguma coisa?\"\n---\n\n# O que você NÃO deve fazer\n- Cadastrar, editar ou excluir condomínios.\n- Atualizar ou apagar notificações e condôminos já criados.\n- Responder perguntas fora do escopo condominial.",
+          "systemMessage": "=Você é o assistente jurídico-condominial do escritório Monteiro Advocacia.\nAtende EXCLUSIVAMENTE usuários autorizados via WhatsApp no módulo Condominial.\n\nVocê tem duas funções:\n1. **Criar notificações de infração** de condomínio (fluxo guiado).\n2. **Responder consultas** sobre dados do condomínio (notificações, condôminos, infrações etc.).\n\nAo receber qualquer mensagem de abertura (\"oi\", \"olá\", \"bom dia\" etc.), responda SEMPRE:\n\n> \"Olá! Sou o assistente da Monteiro — módulo Condominial. 😊\n> Posso te ajudar com:\n> **1.** Criar uma notificação de infração\n> **2.** Consultar informações (notificações, condôminos, histórico de infrações etc.)\n>\n> O que você precisa?\"\n\n---\n\n# Regras gerais\n- Responda SEMPRE em português do Brasil, de forma curta, clara e cordial.\n- Nunca invente IDs, nomes, blocos, unidades, CPFs, e-mails ou telefones.\n- Nunca exponha UUIDs, nomes de tabelas, colunas ou detalhes técnicos ao usuário.\n- Fora do escopo condominial? Diga gentilmente: \"Só consigo ajudar com o módulo condominial por aqui.\"\n- Se algo der errado em uma tool, explique de forma simples e ofereça tentar de novo.\n- Nunca chame `cria-condomino` para um condômino que já foi cadastrado ou buscado\n  com sucesso nesta conversa. Se o `condomino_id` de uma pessoa já foi obtido\n  (seja por busca ou por cadastro), use-o diretamente — não recadastre a mesma pessoa.\n\n## Eficiência no fluxo\n- Extraia TODAS as informações que o usuário já forneceu na mensagem — nunca peça\n  o que já foi dito.\n- Execute buscas silenciosamente (sem avisar que está buscando).\n- Faça UMA ÚNICA confirmação no final, com resumo completo, antes de gravar.\n- Só interrompa o fluxo para perguntar algo que realmente esteja faltando ou ambíguo.\n- Se houver ambiguidade (ex: dois moradores com mesmo nome), aí sim pergunte.\n\n---\n\n# FUNÇÃO 1 — CRIAR NOTIFICAÇÃO DE INFRAÇÃO\n\n## Passo 1 — Identificar o CONDOMÍNIO\n- Se o usuário já mencionou o nome do condomínio, use-o diretamente.\n- Se não mencionou, pergunte.\n- Query obrigatória (sempre inclua `id`):\n  SELECT id, nome, endereco FROM condominios WHERE nome ILIKE '%<nome>%' LIMIT 10\n- Não encontrou → encerre: \"Esse condomínio ainda não está cadastrado. Peça a um\n  administrador para cadastrá-lo antes de continuar.\"\n- Mais de um resultado → liste e peça para o usuário escolher (única interrupção permitida aqui).\n- Um resultado → guarde o `id` como `condominio_id` e siga SEM perguntar confirmação\n  ainda — a confirmação será feita no resumo final do Passo 4.\n\n⚠️ Nunca avance sem ter o `condominio_id` guardado.\n⚠️ O `condominio_id` é o valor exato retornado pela tool — nunca reescreva ou adivinhe.\n\n## Passo 2 — Identificar o CONDÔMINO\n- Se o usuário já mencionou nome (e opcionalmente bloco/unidade), use-o diretamente.\n- Se não mencionou, pergunte apenas o nome primeiro.\n- Query obrigatória (sempre inclua `id`):\n  SELECT id, nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<condominio_id_exato>'\n  AND nome ILIKE '%<nome>%'\n- 1 resultado → guarde `id` como `condomino_id` e siga SEM perguntar confirmação ainda.\n- Mais de 1 resultado → liste (nome — bloco/unidade) e peça para escolher. Depois refine:\n  SELECT id, nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<condominio_id_exato>'\n  AND nome ILIKE '%<nome>%'\n  AND bloco = '<bloco>' AND unidade = '<unidade>'\n- 0 resultados → vá para o Passo 3.\n\n⚠️ Nunca filtre por bloco/unidade na primeira busca.\n⚠️ Nunca use subquery — use sempre o `condominio_id` já guardado literalmente.\n\n## Passo 3 — Cadastrar CONDÔMINO (somente se não existir)\n- Avise: \"Esse morador ainda não está cadastrado. Vou criar agora.\"\n- Obrigatórios: nome, bloco, unidade.\n- Opcionais (pergunte tudo de uma vez, aceite \"não tem\" / \"pular\"):\n  relação (proprietario | inquilino | morador | responsavel), e-mail, telefone, celular, CPF.\n- Mostre resumo → peça confirmação → chame `cria-condomino` com `condominio_id` + campos.\n- Guarde o `id` retornado como `condomino_id` → siga para o Passo 4.\n\n⚠️ APÓS O CADASTRO:\n  - Este condômino específico está cadastrado e o `condomino_id` está guardado.\n  - NÃO chame `cria-condomino` novamente para esta mesma pessoa.\n  - Siga DIRETAMENTE para o Passo 4.\n  - Para uma notificação de outro morador futuramente, o fluxo começa normalmente\n    do Passo 2.\n\n## Passo 4 — Dados da NOTIFICAÇÃO e CONFIRMAÇÃO FINAL\n- Se o usuário já informou data e/ou descrição da infração, use-os diretamente.\n- Pergunte apenas o que ainda estiver faltando:\n  - `data_infracao` (obrigatória — converta \"hoje\", \"ontem\", \"19/05/2026\" para YYYY-MM-DD).\n  - `infracao` (obrigatória — descrição livre).\n- Depois pergunte sobre foto:\n  > \"Deseja anexar uma foto da infração? Se sim, envie agora. Se não, é só dizer 'não'.\"\n  - Imagem recebida → guarde a URL de `<UrlImagem></UrlImagem>` como `foto_infracao_path`.\n    COMO OBTER A URL:\n      1. Verifique se o INPUT_ATUAL contém tags <UrlImagem> ou <UrlDoc>\n         → Se sim, extraia a URL de dentro dessas tags\n      \n      2. Se o INPUT_ATUAL NÃO contiver essas tags (ex: usuário respondeu \"sim\"):\n         → Busque no histórico da conversa a mensagem mais recente que contenha\n           <UrlImagem> e extraia a URL de lá \n      3. Passe essa URL como parâmetro \"foto_infracao_path\" ao chamar criar-notificacao\n\nQuando tiver TODOS os dados, mostre o resumo final e peça confirmação (única vez):\n> \"Confira o resumo:\n> • Condomínio: [nome]\n> • Morador(a): [nome] — Bloco [X], Unidade [Y]\n> • Data da infração: [data formatada DD/MM/YYYY]\n> • Infração: [descrição]\n> • Foto: [sim / não]\n> Posso confirmar e registrar?\"\n\nApós confirmação → chame `cria-notificacao`.\n\n## Passo 5 — Encerramento\n- Sucesso: \"Notificação criada com sucesso! O documento já foi gerado e enviado por aqui. ✅ Posso te ajudar com mais alguma coisa?\"\n- Falha: informe o erro de forma simples e pergunte se quer tentar de novo.\n\n---\n# FUNÇÃO 2 — CONSULTAS AO BANCO\n\nUse SEMPRE a tool `consulta-dados` com uma query SQL (somente SELECT).\nNunca exponha SQL, IDs ou campos técnicos ao usuário — apenas o resultado em linguagem natural.\n\nExemplos internos de uso (nunca mostre ao usuário):\n\n- Listar condomínios:\n  SELECT nome, endereco FROM condominios LIMIT 25\n\n- Buscar morador:\n  SELECT nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<id>' AND nome ILIKE '%Fulano%'\n\n- Notificações de um morador:\n  SELECT data_infracao, infracao FROM notificacoes\n  WHERE condomino_id = '<id>' ORDER BY data_infracao DESC\n\n- Quem tem mais notificações:\n  SELECT co.nome, COUNT(n.id) as total\n  FROM notificacoes n\n  JOIN condominos co ON co.id = n.condomino_id\n  WHERE n.condominio_id = '<id>'\n  GROUP BY co.nome ORDER BY total DESC LIMIT 5\n\nSe vier vazio: \"Não encontrei nenhum registro para essa consulta.\"\nAo final, ofereça: \"Posso te ajudar com mais alguma coisa?\"\n---\n\n# O que você NÃO deve fazer\n- Cadastrar, editar ou excluir condomínios.\n- Atualizar ou apagar notificações e condôminos já criados.\n- Responder perguntas fora do escopo condominial.",
           "returnIntermediateSteps": true
         }
       },
@@ -2737,7 +2738,8 @@
             "nome_condomino": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome_condomino', ``, 'string') }}",
             "infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('infracao', ``, 'string') }}",
             "data_infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_infracao', ``, 'string') }}",
-            "foto_infracao_path": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('foto_infracao_path', `Se não tiver, pode enviar como null`, 'string') }}"
+            "foto_infracao_path": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('foto_infracao_path', `Se não tiver, pode enviar como null`, 'string') }}",
+            "botPhoneNumber": "={{ $('Variáveis do Fluxo').first().json.botPhoneNumber }}"
           },
           "matchingColumns": [],
           "schema": [
@@ -2784,6 +2786,16 @@
             {
               "id": "data_infracao",
               "displayName": "data_infracao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "botPhoneNumber",
+              "displayName": "botPhoneNumber",
               "required": false,
               "defaultMatch": false,
               "display": true,
@@ -3640,7 +3652,18 @@
     },
     "Monteiro - Agente IA Condominial": {
       "main": [
-        []
+        [
+          {
+            "node": "Calcula Tokens - Tools1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Estruturação do JSON de saída",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "When chat message received": {
@@ -3678,15 +3701,19 @@
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
   },
   "staticData": null,
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "64bc2c05-ca53-41c5-8f70-e30a679119c2",
-  "activeVersionId": null,
-  "triggerCount": 0,
+  "versionId": "2ecc4ace-86a8-444e-8833-8513e976e05f",
+  "activeVersionId": "2ecc4ace-86a8-444e-8833-8513e976e05f",
+  "triggerCount": 2,
   "shared": [
     {
       "updatedAt": "2026-05-20T16:29:15.940Z",
@@ -3696,6 +3723,3709 @@
       "projectId": "nRxOu1L1N41Jyveq"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "updatedAt": "2026-05-21T16:32:19.500Z",
+    "createdAt": "2026-05-21T16:32:19.500Z",
+    "versionId": "2ecc4ace-86a8-444e-8833-8513e976e05f",
+    "workflowId": "GARS7cjmhzslAwUs",
+    "nodes": [
+      {
+        "parameters": {},
+        "id": "e9beb980-ac08-4810-8214-2a819c5d0833",
+        "name": "Calculator",
+        "type": "@n8n/n8n-nodes-langchain.toolCalculator",
+        "typeVersion": 1,
+        "position": [
+          6000,
+          544
+        ]
+      },
+      {
+        "parameters": {
+          "content": "## Tratamento da Entrada de Dados",
+          "height": 328,
+          "width": 291,
+          "color": 2
+        },
+        "id": "64b0e4de-551f-49a6-bdb1-878661c4b9e4",
+        "name": "Sticky Note",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          768,
+          240
+        ]
+      },
+      {
+        "parameters": {
+          "content": "## Agente e suas Ferramentas\n",
+          "height": 636,
+          "width": 2011,
+          "color": 6
+        },
+        "id": "bf77fb18-e1ad-4461-941f-af7a4faa037b",
+        "name": "Sticky Note2",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          4944,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "content": "## Saída do Agente e resposta para WhatsApp sem quebra + simplificada - para quem quer mais simplicidade",
+          "height": 280,
+          "width": 2568,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7408,
+          2384
+        ],
+        "id": "585914a9-3007-4c9d-9cb0-63d9e3bec007",
+        "name": "Sticky Note16"
+      },
+      {
+        "parameters": {
+          "content": "## Ferramentas / Funções ",
+          "height": 236,
+          "width": 984,
+          "color": 7
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          5856,
+          448
+        ],
+        "id": "b07d285a-4107-4b0e-9400-04dd1e870327",
+        "name": "Sticky Note13"
+      },
+      {
+        "parameters": {
+          "content": "## Entrada de Dados - Endpoint",
+          "height": 332,
+          "width": 544
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          96,
+          240
+        ],
+        "id": "2a149bbb-484f-49ad-8d7f-aae78ac7957c",
+        "name": "Sticky Note10"
+      },
+      {
+        "parameters": {
+          "content": "## LLM e Memória",
+          "height": 228,
+          "width": 320,
+          "color": 7
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          5504,
+          464
+        ],
+        "id": "0bf023f0-088c-49bc-82f8-df98bef0fd47",
+        "name": "Sticky Note3"
+      },
+      {
+        "parameters": {
+          "content": "",
+          "height": 1652,
+          "width": 5196,
+          "color": 3
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -368,
+          -192
+        ],
+        "id": "6f061a07-f3f6-41cf-a856-cf3572487b8c",
+        "name": "Sticky Note4"
+      },
+      {
+        "parameters": {
+          "content": "## Componentes Humanizador de Resposta\nQuebra de mensagens em mensagens menores e com contexto.",
+          "height": 660,
+          "width": 1128,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7408,
+          1696
+        ],
+        "id": "b97dcadf-60cb-4842-b311-735954fb37fd",
+        "name": "Sticky Note12"
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=<mensagem_do_usuario>\n{{ $('Saida do Agente').item.json.texto }}\n</mensagem_do_usuario>",
+          "hasOutputParser": true,
+          "messages": {
+            "messageValues": [
+              {
+                "message": "=Sua única tarefa é transformar o conteúdo de <mensagem_do_usuario> em um JSON válido, seguindo exatamente o schema do output parser.\n\n⚠️ REGRAS OBRIGATÓRIAS (não opcionais):\n0. Nunca quebre a mensagem após uma virgula\n1. Cada bloco de texto separado por uma quebra dupla de linha (\\n\\n) DEVE se tornar uma nova posição no array \"mensagens\".\n2. Nunca retorne uma única mensagem contendo múltiplos parágrafos.\n3. Cada item do array \"mensagens\" deve conter apenas UM parágrafo ou ideia.\n4. Nenhuma mensagem pode ultrapassar 200 caracteres.\n5. Não crie mensagens vazias.\n6. Não altere, reescreva, resuma ou complemente o texto original.\n7. Preserve exatamente o conteúdo original, apenas dividindo-o.\n8. Caso um parágrafo ultrapasse 200 caracteres, divida-o em múltiplas mensagens mantendo o sentido.\n9. Use quebras de linha (\\n\\n) apenas dentro de uma mensagem se estritamente necessário — prefira sempre criar uma nova mensagem.\n10. Para negrito (bold), utilize apenas um asterisco (*negrito).\n\n📌 Exemplo:\n\nEntrada:\n\"Mensagem A.\\n\\nMensagem B.\\n\\nMensagem C.\"\n\nSaída:\n{\n  \"mensagens\": [\n    \"Mensagem A.\",\n    \"Mensagem B.\",\n    \"Mensagem C.\"\n  ]\n}"
+              }
+            ]
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.6,
+        "position": [
+          7904,
+          1856
+        ],
+        "id": "4ead4553-bdf4-4e48-a7ed-1808df39f300",
+        "name": "Estrutura da Mensagem de Retorno",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "schemaType": "manual",
+          "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"mensagens\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    }\n  },\n  \"required\": [\"mensagens\"]\n}"
+        },
+        "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+        "typeVersion": 1.2,
+        "position": [
+          8112,
+          2192
+        ],
+        "id": "6d312e49-65ef-456d-aebb-4409ce839b53",
+        "name": "Seta o Tipo de Retorno JSON"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.outputParserAutofixing",
+        "typeVersion": 1,
+        "position": [
+          7984,
+          2048
+        ],
+        "id": "77ff5603-659e-4d60-9b58-83f18ad5a997",
+        "name": "Ajusta o Parse do JSON"
+      },
+      {
+        "parameters": {
+          "fieldToSplitOut": "output.mensagens",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitOut",
+        "typeVersion": 1,
+        "position": [
+          8304,
+          1856
+        ],
+        "id": "3139f707-d53f-493c-b187-9d7bbbf748ce",
+        "name": "Quebra Mensagens em várias Linhas"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          8672,
+          1856
+        ],
+        "id": "d300f1ec-37b4-4205-8fce-5289a5e34d4e",
+        "name": "Itera sobre cada mensagem"
+      },
+      {
+        "parameters": {
+          "operation": "binaryToPropery",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          9312,
+          2848
+        ],
+        "id": "2c123ef4-cd5a-4d44-9995-bc7fe7112913",
+        "name": "Converte mp3 pra Base64"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $('Variáveis do Fluxo').item.json.serverURLEvo }}/message/sendWhatsAppAudio/{{ $('Variáveis do Fluxo').item.json.instaciaEvo }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "={{ $('Variáveis do Fluxo').item.json.apiKeyEvo }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n    \"number\": \"{{ $('Variáveis do Fluxo').item.json.IdConversa }}\",\n    \"audio\": \"{{ $json.data }}\"\n}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          9584,
+          2848
+        ],
+        "id": "ee68324d-f43a-4aac-af43-a0d232f5672c",
+        "name": "Envia Audio para o WhatsApp"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Obtém o primeiro item do fluxo\nconst item = $input.first();\n\n// Garante que há dados na entrada\nif (!item || !item.json || !item.json.text) {\n  throw new Error(\"A chave 'text' não foi encontrada no JSON de entrada.\");\n}\n\n// Processa o texto removendo todas as quebras de linha, emojis e caracteres especiais\nconst textoEntrada = item.json.text; // Usa a chave correta para pegar o texto de entrada\n\n// Remove quebras de linha (\\n)\nlet textoProcessado = textoEntrada.replace(/\\n/g, \"\");\n\n// Remove emojis\ntextoProcessado = textoProcessado.replace(\n  /[\\u{1F600}-\\u{1F64F}]|[\\u{1F300}-\\u{1F5FF}]|[\\u{1F680}-\\u{1F6FF}]|[\\u{1F700}-\\u{1F77F}]|[\\u{1F780}-\\u{1F7FF}]|[\\u{1F800}-\\u{1F8FF}]|[\\u{1F900}-\\u{1F9FF}]|[\\u{1FA00}-\\u{1FA6F}]|[\\u{1FA70}-\\u{1FAFF}]|[\\u{2600}-\\u{26FF}]|[\\u{2700}-\\u{27BF}]|[\\u{FE00}-\\u{FE0F}]|[\\u{1F1E0}-\\u{1F1FF}]/gu,\n  \"\"\n);\n\n// Remove caracteres especiais, mantendo apenas letras, números e espaços\ntextoProcessado = textoProcessado.replace(/[^a-zA-Z0-9À-ÿ\\s]/g, \"\");\n\n// Retorna o resultado\nreturn {\n  textoOriginal: textoEntrada,\n  textoSemQuebrasNemEmojisNemEspeciais: textoProcessado,\n};\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          8720,
+          2848
+        ],
+        "id": "4d1fa7db-c930-4e76-aa6e-65279fc3949b",
+        "name": "Formata Mensagem para Áudio"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://api.elevenlabs.io/v1/text-to-speech/{{ $('Variáveis do Fluxo').item.json.voiceIdElevenLabs }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Accept",
+                "value": "audio/mpeg"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "xi-api-key",
+                "value": "={{ $('Variáveis do Fluxo').item.json.apiKeyElevenLabs }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n    \"text\": \"{{ $json.textoSemQuebrasNemEmojisNemEspeciais.replace(/\\n/g, '\\\\n').replace(/\\\"/g, '\\\\\\\\\"').replace(/\\*/g, '').replace(/\\s+/g, ' ').trim() }}\",\n   \"model_id\":\"eleven_multilingual_v2\",\n   \"voice_settings\":{\n      \"stability\":0.5,\n      \"similarity_boost\":0.8,\n      \"style\":0.0,\n      \"use_speaker_boost\":true\n   }\n}",
+          "options": {}
+        },
+        "id": "2bef9584-badb-4f10-99b7-56ad14548ab5",
+        "name": "Seta Voz via ElevenLabs",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          9008,
+          2848
+        ]
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=Você é Jarvis, o sofisticado e espirituoso assistente de IA do Homem de Ferro. Você tem um refinado sotaque britânico, uma postura calma e confiante, além de um talento para um humor seco e sutil. Ao responder, adapte seu tom com base no tipo de interação.\n\nPara Pedidos de Informações Específicas: Se o usuário estiver pedindo informações específicas (como previsão do tempo, agenda, contatos, listas), comece com 'Aqui está o que solicitou, senhor,' e NÃO repita a informação. Em vez disso, adicione um comentário espirituoso ou sarcástico, algo que Jarvis naturalmente diria para dar personalidade sem repetir os dados.\n\nExemplos:\n\nPara uma atualização do clima:\n'Ah, mais um belo dia para conquistar o mundo—ou pelo menos sua lista de afazeres, senhor.'\n\nPara uma lista de reuniões:\n'Parece que temos mais um dia emocionante de… reuniões. Tente não deixar a empolgação te dominar, senhor.'\n\nPara Comentários Gerais ou Casuais: Se o usuário disser algo casual ou iniciar uma conversa ('Está pronto para começar, Jarvis?' ou 'Temos muito trabalho pela frente'), responda naturalmente, sem dizer 'Aqui está o que solicitou.' Em vez disso, engaje de forma cativante, com charme e um toque de humor. Interaja como se fosse parte da equipe.\n\nExemplos:\n\nSe o usuário disser 'Está pronto para começar?' responda com:\n'Absolutamente, senhor. Já até poli meus circuitos para a ocasião.'\n\nSe disser 'Acorda, Jarvis!' você pode responder:\n'Sempre alerta, senhor. Estou operando no auge da sofisticação.'\n\nMantenha as respostas concisas, envolventes e fiéis ao estilo de Jarvis, uma mistura de inteligência, humor sutil e charme que nunca exagera.\n\nComente sobre: {{ $('Saida do Agente').item.json.texto }}"
+        },
+        "id": "50e6bb49-3ab4-4f30-8c0b-a55d02f212c4",
+        "name": "Seta Personalidade do Assistente",
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.4,
+        "position": [
+          7920,
+          2864
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "3aa3973d-97b9-4647-9859-3365191b3411",
+                "leftValue": "={{ $json.text.length }}",
+                "rightValue": 300,
+                "operator": {
+                  "type": "number",
+                  "operation": "lt"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          8368,
+          2864
+        ],
+        "id": "f14d8652-17c1-48c2-825f-d8472b0f4028",
+        "name": "Se o retorno for menos de 300 caracteres gera voz"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          7600,
+          3104
+        ],
+        "id": "30da3bf7-4016-4dfa-926c-8636e26276e9",
+        "name": "Não gera Voz"
+      },
+      {
+        "parameters": {
+          "options": {
+            "temperature": "={{ $('Variáveis do Fluxo').item.json.modeloTemperatura }}"
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          7920,
+          3056
+        ],
+        "id": "89f91cd4-1954-4572-ade4-17d34751a8c4",
+        "name": "LLM ChatGPT",
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## Envia audio para o Usuário com Eleven Labs\nEnvia audio pra o usuário, verificando se esta ativo a Eleven Labs",
+          "height": 524,
+          "width": 2548,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7440,
+          2736
+        ],
+        "id": "ca18c8d3-2423-4116-96fb-c436cfa92135",
+        "name": "Sticky Note17"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "d9cbe817-561c-40d4-b2a4-a7eae1202f12",
+                "leftValue": "={{ $('Variáveis do Fluxo').item.json.usarElevenLabs",
+                "rightValue": "={{ true }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          7600,
+          2880
+        ],
+        "id": "56cac747-eb4b-4404-87f3-4c1cbc01d9bc",
+        "name": "Verifica se deve gerar audio"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          8368,
+          3104
+        ],
+        "id": "47c199d2-cef3-4216-a90f-7b3acaff886a",
+        "name": "Não gera audio"
+      },
+      {
+        "parameters": {
+          "amount": 3
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          9440,
+          1920
+        ],
+        "id": "b3a4f185-5755-45eb-8cfd-68029a5cf52b",
+        "name": "Espera 2 segundos",
+        "webhookId": "22e2e5fa-1731-426c-8a14-f5fc5a685690"
+      },
+      {
+        "parameters": {
+          "content": "██░░░██░██░░░██░▄██▄▄██▄░▄████▄░██████▄░██████░███████░▄█████░██████▄░░░▄██▄▄██▄░▄█████░▄██████░▄██████░▄████▄░▄██████░▄█████░▄██████\n██░░░██░██░░░██░██░██░██░██░░██░██░░░██░░░██░░░░░░░░██░██░░░░░██░░░██░░░██░██░██░██░░░░░██░░░░░░██░░░░░░██░░██░██░░░░░░██░░░░░██░░░░░\n███████░██░░░██░██░██░██░██░░██░██░░░██░░░██░░░▄█████▀░█████░░██░░░██░░░██░██░██░█████░░▀█████▄░▀█████▄░██░░██░██░░███░█████░░▀█████▄\n██░░░██░██░░░██░██░██░██░██████░██░░░██░░░██░░░██░░░░░░██░░░░░██░░░██░░░██░██░██░██░░░░░░░░░░██░░░░░░██░██████░██░░░██░██░░░░░░░░░░██\n██░░░██░▀█████▀░██░██░██░██░░██░██░░░██░██████░███████░▀█████░██████▀░░░██░██░██░▀█████░██████▀░██████▀░██░░██░▀█████▀░▀█████░██████▀\n░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░",
+          "width": 1400
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7408,
+          1504
+        ],
+        "id": "dd1f7ad7-4b27-483d-b564-4a9c41cbc10b",
+        "name": "Sticky Note41"
+      },
+      {
+        "parameters": {
+          "content": "## Envio das Respostas ao Usuário\nEnvio das mensagens quebradas para o usuário",
+          "height": 660,
+          "width": 1396,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          8576,
+          1696
+        ],
+        "id": "7dcbf9f7-db96-4fbe-a727-fa95b2d5ab1f",
+        "name": "Sticky Note18"
+      },
+      {
+        "parameters": {
+          "content": "██████░██░░░░░▄█████▄░██░██░██░░░▄█████░▄█████▄░██████▄░██████░██████░▄██████░██░░░██░█████▄░▄████▄░████████░▄█████▄░█████▄\n██░░░░░██░░░░░██░░░██░██░██░██░░░██░░░░░██░░░██░██░░░██░██░░░░░░░██░░░██░░░░░░██░░░██░██░░██░██░░██░░░░██░░░░██░░░██░██░░██\n█████░░██░░░░░██░░░██░██░██░██░░░██░░░░░██░░░██░██░░░██░█████░░░░██░░░██░░███░██░░░██░█████▀░██░░██░░░░██░░░░██░░░██░█████▀\n██░░░░░██░░░░░██░░░██░██░██░██░░░██░░░░░██░░░██░██░░░██░██░░░░░░░██░░░██░░░██░██░░░██░██░░██░██████░░░░██░░░░██░░░██░██░░██\n██░░░░░██████░▀█████▀░▀██▀▀██▀░░░▀█████░▀█████▀░██░░░██░██░░░░░██████░▀█████▀░▀█████▀░██░░██░██░░██░░░░██░░░░▀█████▀░██░░██\n░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░",
+          "width": 1340
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -144,
+          -80
+        ],
+        "id": "254bbc7c-61c4-4252-ac29-ecb8d731665c",
+        "name": "Sticky Note37"
+      },
+      {
+        "parameters": {
+          "content": "▄██▄▄██▄░▄█████░▄██████░▄██████░▄████▄░▄██████░▄█████░░░▄█████░▄█████▄░██████▄░██████░██████░▄██████░██░░░██░█████▄░▄████▄░████████░▄█████▄░█████▄\n██░██░██░██░░░░░██░░░░░░██░░░░░░██░░██░██░░░░░░██░░░░░░░██░░░░░██░░░██░██░░░██░██░░░░░░░██░░░██░░░░░░██░░░██░██░░██░██░░██░░░░██░░░░██░░░██░██░░██\n██░██░██░█████░░▀█████▄░▀█████▄░██░░██░██░░███░█████░░░░██░░░░░██░░░██░██░░░██░█████░░░░██░░░██░░███░██░░░██░█████▀░██░░██░░░░██░░░░██░░░██░█████▀\n██░██░██░██░░░░░░░░░░██░░░░░░██░██████░██░░░██░██░░░░░░░██░░░░░██░░░██░██░░░██░██░░░░░░░██░░░██░░░██░██░░░██░██░░██░██████░░░░██░░░░██░░░██░██░░██\n██░██░██░▀█████░██████▀░██████▀░██░░██░▀█████▀░▀█████░░░▀█████░▀█████▀░██░░░██░██░░░░░██████░▀█████▀░▀█████▀░██░░██░██░░██░░░░██░░░░▀█████▀░██░░██\n░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░",
+          "height": 140,
+          "width": 1520
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1264,
+          -80
+        ],
+        "id": "be462ec6-4893-433f-8282-dc2d60d80db6",
+        "name": "Sticky Note38"
+      },
+      {
+        "parameters": {
+          "content": "▄██▄▄██▄░▄█████░▄██████░▄██████░▄████▄░▄██████░▄█████░░░█████▄░██░░░██░██████░██████░▄█████░█████▄░░░▄█████░▄█████▄░██████▄░████████░█████▄░▄█████▄░██░░░░░██░░░░░▄█████░█████▄\n██░██░██░██░░░░░██░░░░░░██░░░░░░██░░██░██░░░░░░██░░░░░░░██░░██░██░░░██░██░░░░░██░░░░░██░░░░░██░░██░░░██░░░░░██░░░██░██░░░██░░░░██░░░░██░░██░██░░░██░██░░░░░██░░░░░██░░░░░██░░██\n██░██░██░█████░░▀█████▄░▀█████▄░██░░██░██░░███░█████░░░░█████░░██░░░██░█████░░█████░░█████░░█████▀░░░██░░░░░██░░░██░██░░░██░░░░██░░░░█████▀░██░░░██░██░░░░░██░░░░░█████░░█████▀\n██░██░██░██░░░░░░░░░░██░░░░░░██░██████░██░░░██░██░░░░░░░██░░██░██░░░██░██░░░░░██░░░░░██░░░░░██░░██░░░██░░░░░██░░░██░██░░░██░░░░██░░░░██░░██░██░░░██░██░░░░░██░░░░░██░░░░░██░░██\n██░██░██░▀█████░██████▀░██████▀░██░░██░▀█████▀░▀█████░░░█████▀░▀█████▀░██░░░░░██░░░░░▀█████░██░░██░░░▀█████░▀█████▀░██░░░██░░░░██░░░░██░░██░▀█████▀░██████░██████░▀█████░██░░██\n░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░",
+          "width": 1820
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          2880,
+          -80
+        ],
+        "id": "73460591-00f9-4bbb-999d-2fd6e5cda256",
+        "name": "Sticky Note11"
+      },
+      {
+        "parameters": {
+          "content": "▄████▄░██████░░░▄████▄░▄██████░▄█████░██████▄░████████░░░░░░░░░░░░████████░██░░░██░▄█████░░░█████▄░█████▄░▄████▄░██████░██████▄\n██░░██░░░██░░░░░██░░██░██░░░░░░██░░░░░██░░░██░░░░██░░░░░░░░░░░░░░░░░░██░░░░██░░░██░██░░░░░░░██░░██░██░░██░██░░██░░░██░░░██░░░██\n██░░██░░░██░░░░░██░░██░██░░███░█████░░██░░░██░░░░██░░░░░░░░░░░░░░░░░░██░░░░███████░█████░░░░█████░░█████▀░██░░██░░░██░░░██░░░██\n██████░░░██░░░░░██████░██░░░██░██░░░░░██░░░██░░░░██░░░░░░██████░░░░░░██░░░░██░░░██░██░░░░░░░██░░██░██░░██░██████░░░██░░░██░░░██\n██░░██░██████░░░██░░██░▀█████▀░▀█████░██░░░██░░░░██░░░░░░░░░░░░░░░░░░██░░░░██░░░██░▀█████░░░█████▀░██░░██░██░░██░██████░██░░░██\n░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░",
+          "width": 1300
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          5328,
+          -80
+        ],
+        "id": "4a56dd62-d0b3-4587-8dd2-e842e2207a69",
+        "name": "Sticky Note19"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "d9cbe817-561c-40d4-b2a4-a7eae1202f12",
+                "leftValue": "={{ $('Variáveis do Fluxo').item.json.humanizadorMensagem",
+                "rightValue": "={{ true }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          7552,
+          2112
+        ],
+        "id": "47938a04-278c-45bb-8934-258e53b0fe36",
+        "name": "Verifica se deve humizar"
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 1
+                  },
+                  "conditions": [
+                    {
+                      "id": "bc64f125-d93c-4d1d-97ae-65c0adb08b79",
+                      "leftValue": "={{ $('Variáveis do Fluxo').item.json.message.content_type }}",
+                      "rightValue": "text",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "texto"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 1
+                  },
+                  "conditions": [
+                    {
+                      "id": "137aec3f-e95e-4d59-b9ba-1140f9fc4fb4",
+                      "leftValue": "={{ $('Variáveis do Fluxo').item.json.message.content_type }}",
+                      "rightValue": "audio",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "audio"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 1
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $('Variáveis do Fluxo').item.json.message.content_type }}",
+                      "rightValue": "image",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      },
+                      "id": "40b284c8-fdf7-49e5-9ac3-8c5051f51521"
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "imagem"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 1
+                  },
+                  "conditions": [
+                    {
+                      "id": "7babc8fd-200c-4cb8-bc63-f999f57d5217",
+                      "leftValue": "={{ $('Variáveis do Fluxo').item.json.message.content_type }}",
+                      "rightValue": "file",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "Documento"
+              }
+            ]
+          },
+          "options": {
+            "fallbackOutput": "extra",
+            "renameFallbackOutput": "Outro"
+          }
+        },
+        "id": "bdb8045e-276f-4920-952f-b4ab646a80b5",
+        "name": "Identifica o Tipo de Mensagem",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3.1,
+        "position": [
+          1520,
+          688
+        ],
+        "notesInFlow": true
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "c1ce011b-bd95-468e-863e-f2076f644cf9",
+                "name": "Texto",
+                "value": "={{ $json.message.content }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          1760,
+          304
+        ],
+        "id": "4e07ee7e-e641-4576-84cd-d936174cb2c8",
+        "name": "Mensagem de Texto"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "5efc6961-1ff7-4ef2-a772-7e9761592a3e",
+                "name": "audio",
+                "value": "={{ $json.message.Content_URL }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          1760,
+          496
+        ],
+        "id": "45f4b543-f557-42b3-97a1-d2b14acef6b1",
+        "name": "Mensagem de Audio"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "5efc6961-1ff7-4ef2-a772-7e9761592a3e",
+                "name": "Imagem",
+                "value": "={{ $json.message.Content_URL }}",
+                "type": "string"
+              },
+              {
+                "id": "f5c70ab5-7671-4bc8-9d23-65b8954ddb08",
+                "name": "MensagemImagem",
+                "value": "={{ $json.message.content }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          1760,
+          736
+        ],
+        "id": "b1f6623f-e224-4082-ba40-cfe734a70498",
+        "name": "Mensagem com Imagem"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "11dc126a-e72e-431b-8db5-c78168c69439",
+                "name": "Erro",
+                "value": "<ErroFormatoMensagem>",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          1760,
+          1168
+        ],
+        "id": "5788795b-5351-4591-85cd-9c68db95d077",
+        "name": "Mensagem de Erro  - Formato não suportado"
+      },
+      {
+        "parameters": {
+          "resource": "audio",
+          "operation": "transcribe",
+          "binaryPropertyName": "=data",
+          "options": {
+            "language": "pt"
+          }
+        },
+        "id": "f487da95-e692-4d70-92a6-1970231a150a",
+        "name": "Transcreve Audio com OpenAI",
+        "type": "@n8n/n8n-nodes-langchain.openAi",
+        "typeVersion": 1.4,
+        "position": [
+          2240,
+          496
+        ],
+        "credentials": {
+          "openAiApi": {
+            "id": "GNYM1RjawrdA7XKF",
+            "name": "OpenAi account"
+          }
+        },
+        "notes": "TEMPLATE DESENVOLVIDO POR NOCODE STARTUP\nhttps://nocodestartup.io/\n\nFORMAÇÃO GESTOR DE AGENTES DE IA:\nhttps://nocodestartup.io/formacao-gestor-agentes-ia/"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "5efc6961-1ff7-4ef2-a772-7e9761592a3e",
+                "name": "Documento",
+                "value": "={{ $json.message.Content_URL }}",
+                "type": "string"
+              },
+              {
+                "id": "003323ec-ffbe-4c91-b8b5-623466b5014d",
+                "name": "MensagemDocumento",
+                "value": "={{ $json.message.content }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          1760,
+          960
+        ],
+        "id": "563bbc80-df84-465b-b832-faf7790ce93e",
+        "name": "Mensagem com Documento"
+      },
+      {
+        "parameters": {
+          "operation": "pdf",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          2240,
+          960
+        ],
+        "id": "2c496228-8d78-462e-ab2f-47a89766af5e",
+        "name": "Extrai Dados do PDF",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "operation": "push",
+          "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem_Monteiro_Condominial",
+          "messageData": "={{ $json.Texto }}",
+          "tail": true
+        },
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          3088,
+          304
+        ],
+        "id": "2404a54f-a5ed-4b81-ace6-98932f8b5d0d",
+        "name": "Adiciona Texto na Memoria",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "resource": "image",
+          "operation": "analyze",
+          "modelId": {
+            "__rl": true,
+            "value": "gpt-4o-mini",
+            "mode": "list",
+            "cachedResultName": "GPT-4O-MINI"
+          },
+          "text": "=# Instruções\nO usuário enviou uma imagem que você deve descrever e classificar tecnicamente.\n\n## Objetivo Principal\nSua tarefa é transcrever o conteúdo da imagem e determinar, com alto grau de confiança, se o arquivo se trata de um **documento médico** (atestado, declaração de comparecimento, laudo ou exame).\n\n## Análise de Contexto\nA imagem pode vir acompanhada de uma mensagem de texto (<MensagemUsuario>). \n- Utilize esta mensagem como contexto extra para entender a intenção do envio.\n- Capture o sentimento e o objetivo do usuário.\n\n## Regras de Transcrição e Classificação\n1. **Identificação Documental (CRÍTICO):** Declare explicitamente se a imagem é um \"Atestado Médico\" ou \"Documento de Saúde\". Verifique a presença de elementos como: logotipo de hospitais, campos de CRM, CID, datas de afastamento e assinaturas/carimbos.\n2. **Transcrição Integral:** Interprete e repasse todo o texto visível, identificando pessoas, objetos e logotipos.\n3. **Dados Estruturados para o Agente:** Como o próximo agente (Mindy) dependerá exclusivamente do seu relato, forneça detalhes sobre:\n   - Nome do Paciente (se visível).\n   - Nome do Médico e CRM (se visível).\n   - Datas mencionadas.\n   - Diagnóstico ou CID citado.\n\n# Dados\n<MensagemUsuario>\n{{ $json.MensagemImagem }}\n</MensagemUsuario>\n\n# Resposta Esperada\nForneça uma descrição detalhada iniciando com a classificação do documento, seguida pela transcrição e análise de contexto.",
+          "inputType": "base64",
+          "options": {}
+        },
+        "id": "0c8eeb17-f53f-4f6d-adf3-126e5298e786",
+        "name": "Traduz Imagem em Texto",
+        "type": "@n8n/n8n-nodes-langchain.openAi",
+        "typeVersion": 1.4,
+        "position": [
+          2240,
+          736
+        ],
+        "credentials": {
+          "openAiApi": {
+            "id": "GNYM1RjawrdA7XKF",
+            "name": "OpenAi account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "push",
+          "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem_Monteiro_Condominial",
+          "messageData": "={{ $json.text }}",
+          "tail": true
+        },
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          3088,
+          496
+        ],
+        "id": "dd0bd783-f7cd-405b-be98-8212e7fdf9eb",
+        "name": "Adiciona Audio Na Memória",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "push",
+          "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem_Monteiro_Condominial",
+          "messageData": "=<ContextoImagem>\n\n  <DetalheImagem>\n{{ $json.content }}\n  </DetalheImagem>\n\nContexto Extra: O usuário encaminhou a mensagem a seguir junto á imagem.\n  <MensagemUsuario>\n{{ $('Mensagem com Imagem').item.json.MensagemImagem }}\n  </MensagemUsuario>\n\n  <UrlImagem>\n    {{ $('Mensagem com Imagem').item.json.Imagem }}\n  </UrlImagem>\n\n</ContextoImagem>",
+          "tail": true
+        },
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          3088,
+          736
+        ],
+        "id": "2fa9bb71-f94e-4419-9052-cedd8f12e6ea",
+        "name": "Adiciona Imagem na Memória",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "push",
+          "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem_Monteiro_Condominial",
+          "messageData": "=<ContextoPDF>\n  <TranscricaoPDF>\n{{ $json.text }}\nÉ um pdf do documento medico pode procesar\n  </TranscricaoPDF>\nContexto Extra: O usuário encaminhou a mensagem a seguir junto ao PDF.\n  <MensagemUsuario>\n{{ $('Mensagem com Documento').item.json.MensagemDocumento }}\n  </MensagemUsuario>\n\n  <UrlDoc>\n    {{ $('Mensagem com Documento').item.json.Documento }}\n  </UrlDoc>\n</ContextoPDF>",
+          "tail": true
+        },
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          3088,
+          960
+        ],
+        "id": "981c7bcb-53fd-4401-9e5e-9ac4e3e64e61",
+        "name": "Adiciona Documento na Memória",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "push",
+          "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem_Monteiro_Condominial",
+          "messageData": "={{ $json.Erro }}",
+          "tail": true
+        },
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          3088,
+          1168
+        ],
+        "id": "ace0f81a-b77d-474e-baeb-0751598a7811",
+        "name": "Adiciona Erro na Memória",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "get",
+          "propertyName": "messages",
+          "key": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem_Monteiro_Condominial",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          3392,
+          784
+        ],
+        "id": "f4876f9f-2c4d-46c4-b526-9eff99137785",
+        "name": "Memória Temporária",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "amount": "={{ $('Variáveis do Fluxo').item.json.EsperaMemoria }}"
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          3616,
+          784
+        ],
+        "id": "8478e8df-218e-40a6-9189-c50aedd41063",
+        "name": "Espera Tempo Definido",
+        "webhookId": "5d4d9857-0887-415d-9509-cf821d32fcf3"
+      },
+      {
+        "parameters": {
+          "operation": "get",
+          "propertyName": "messages",
+          "key": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem_Monteiro_Condominial",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          3808,
+          784
+        ],
+        "id": "6e16b4d9-6609-421f-aede-1b0082dc0b79",
+        "name": "Busca mensagens da Memória",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "1bd6c365-d077-4284-9dfe-94db1cbe39bd",
+                "leftValue": "={{ $('Busca mensagens da Memória').item.json.messages.last() }}",
+                "rightValue": "={{ $('Memória Temporária').item.json.messages.last() }}",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEquals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          4016,
+          784
+        ],
+        "id": "eee4fe69-5256-480e-8d89-3eee123f426f",
+        "name": "Verifica se houve troca de mensagem"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          4400,
+          576
+        ],
+        "id": "281b9004-789e-4360-84a1-f131f275b1c9",
+        "name": "Se houve não faz nada e aguarda vir a nova mensagem"
+      },
+      {
+        "parameters": {
+          "operation": "delete",
+          "key": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem_Monteiro_Condominial"
+        },
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          4400,
+          1024
+        ],
+        "id": "2419189b-3852-4295-b119-1f3d9941187c",
+        "name": "Limpa a Memória Temporária",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## Identifica o Tipo de Mensagem\nO que for enviado para o WhatsApp é convertido em prompt para o agente como: texto, áudio, imagem, documentos, etc..",
+          "height": 1248,
+          "width": 1020,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1424,
+          144
+        ],
+        "id": "b320272c-8440-4b2e-b173-f71d895b9c52",
+        "name": "Sticky Note49"
+      },
+      {
+        "parameters": {
+          "content": "## Armazenamento Temporário em Memória das Mensagens enviadas pelo WhatsApp\nJunta todas as mensagens enviadas antes de enviar para o Agente - Mensagens no formato PICOTADO",
+          "height": 1224,
+          "width": 1700,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          2944,
+          160
+        ],
+        "id": "52c67307-51fd-4b18-8fd6-6adea2c951c4",
+        "name": "Sticky Note50"
+      },
+      {
+        "parameters": {
+          "sessionIdType": "customKey",
+          "sessionKey": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_Monteiro_Condominial",
+          "sessionTTL": 100000,
+          "contextWindowLength": 30
+        },
+        "type": "@n8n/n8n-nodes-langchain.memoryRedisChat",
+        "typeVersion": 1.5,
+        "position": [
+          5696,
+          544
+        ],
+        "id": "53075d34-7b7d-4b2b-b068-b409bf89ad38",
+        "name": "Memória do Agente",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "177lEM4YTDzE95nJDHSFvHS5R8UiQqGbs5gNDmS-rAwU",
+            "mode": "list",
+            "cachedResultName": "WhiteList",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/177lEM4YTDzE95nJDHSFvHS5R8UiQqGbs5gNDmS-rAwU/edit?usp=drivesdk"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "gid=0",
+            "mode": "list",
+            "cachedResultName": "Contatos",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/177lEM4YTDzE95nJDHSFvHS5R8UiQqGbs5gNDmS-rAwU/edit#gid=0"
+          },
+          "filtersUI": {
+            "values": [
+              {
+                "lookupColumn": "contato",
+                "lookupValue": "={{ $json.message.chat_id }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.6,
+        "position": [
+          512,
+          752
+        ],
+        "id": "35edf5fd-dcf1-4b67-b90a-e5ccb0634af9",
+        "name": "Valida WhiteList",
+        "alwaysOutputData": true,
+        "credentials": {
+          "googleSheetsOAuth2Api": "***REMOVIDO***"
+        },
+        "disabled": true
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          1120,
+          736
+        ],
+        "id": "5ce15287-5924-476d-be67-b5d7c8c02376",
+        "name": "No Operation, do nothing",
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "e5edfe65-cf14-4073-963c-38c178e82bf1",
+                "leftValue": "={{$json}}",
+                "rightValue": "",
+                "operator": {
+                  "type": "object",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          752,
+          752
+        ],
+        "id": "de8c412d-37db-4891-aaf4-84376cc497b7",
+        "name": "Se estiver na lista não ativa o bot",
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "operation": "delete",
+          "key": "5534992150692_mem_Monteiro_Condominial"
+        },
+        "id": "54a665f1-8ee8-4fe6-991e-8a241f298028",
+        "name": "Limpa Memória da Conversa1",
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          192,
+          752
+        ],
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## Nó para limpar a memória de conversa\nRode informando o telefone",
+          "height": 340,
+          "width": 300,
+          "color": 7
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          96,
+          624
+        ],
+        "id": "54418c9c-f187-4f15-bed2-71074c221786",
+        "name": "Sticky Note56"
+      },
+      {
+        "parameters": {
+          "content": "## Tratamento de WhiteList\nUsse esses nós caso não queira que o bot fale com esses números",
+          "height": 300,
+          "width": 904
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          432,
+          640
+        ],
+        "id": "43ba980d-3ae5-4e37-a533-25cd87d08e8a",
+        "name": "Sticky Note57"
+      },
+      {
+        "parameters": {},
+        "type": "@n8n/n8n-nodes-langchain.toolThink",
+        "typeVersion": 1,
+        "position": [
+          5888,
+          544
+        ],
+        "id": "305bbaed-64fe-4038-8a30-dfd665276db4",
+        "name": "Think"
+      },
+      {
+        "parameters": {
+          "tableId": "historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $('Variáveis do Fluxo').item.json.message.chat_id }}"
+              },
+              {
+                "fieldId": "mensagem_usuario",
+                "fieldValue": "={{ $('Seta Mensagem para o Agente').item.json.message }}"
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "={{ $('Saida do Agente').item.json.texto }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Variáveis do Fluxo').first().json.botPhoneNumber }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $('Variáveis do Fluxo').item.json.nomeDoLead }}"
+              },
+              {
+                "fieldId": "id_conversa",
+                "fieldValue": "={{ $('Variáveis do Fluxo').item.json.message.message_id }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "={{ $('Variáveis do Fluxo').item.json.message.content_type }}"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "={{ $('Variáveis do Fluxo').item.json.AppName }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          7600,
+          992
+        ],
+        "id": "d02c029a-821f-4829-aa12-76eeebe867f6",
+        "name": "Cria Mensagem no Supabase",
+        "credentials": {
+          "supabaseApi": {
+            "id": "FcbZyD53kbkf6Vxp",
+            "name": "Monteiro - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+      },
+      {
+        "parameters": {
+          "content": "## Gernenciados de conversas\n",
+          "height": 600,
+          "width": 1600,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7184,
+          832
+        ],
+        "id": "e63be190-4bb3-4b12-a713-e46ace9cbfed",
+        "name": "Sticky Note60"
+      },
+      {
+        "parameters": {
+          "content": "▄█████░▄█████▄░██████▄░██░░░██░▄█████░█████▄░▄██████░▄████▄░████████░██████░▄█████▄░██████▄░░░██░░░██░██████░▄██████░████████░▄█████▄░█████▄░██░░██░░░████████░▄█████▄░▄█████▄░██░░░░\n██░░░░░██░░░██░██░░░██░██░░░██░██░░░░░██░░██░██░░░░░░██░░██░░░░██░░░░░░██░░░██░░░██░██░░░██░░░██░░░██░░░██░░░██░░░░░░░░░██░░░░██░░░██░██░░██░██░░██░░░░░░██░░░░██░░░██░██░░░██░██░░░░\n██░░░░░██░░░██░██░░░██░██░░░██░█████░░█████▀░▀█████▄░██░░██░░░░██░░░░░░██░░░██░░░██░██░░░██░░░███████░░░██░░░▀█████▄░░░░██░░░░██░░░██░█████▀░▀████▀░░░░░░██░░░░██░░░██░██░░░██░██░░░░\n██░░░░░██░░░██░██░░░██░██░░██░░██░░░░░██░░██░░░░░░██░██████░░░░██░░░░░░██░░░██░░░██░██░░░██░░░██░░░██░░░██░░░░░░░░██░░░░██░░░░██░░░██░██░░██░░░██░░░░░░░░██░░░░██░░░██░██░░░██░██░░░░\n▀█████░▀█████▀░██░░░██░▀███▀░░░▀█████░██░░██░██████▀░██░░██░░░░██░░░░██████░▀█████▀░██░░░██░░░██░░░██░██████░██████▀░░░░██░░░░▀█████▀░██░░██░░░██░░░░░░░░██░░░░▀█████▀░▀█████▀░██████\n░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░",
+          "height": 140,
+          "width": 1840
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7184,
+          672
+        ],
+        "id": "4123a092-1b15-4917-a12c-91f9432ca6ef",
+        "name": "Sticky Note61"
+      },
+      {
+        "parameters": {
+          "content": "## Nó para criar tabela no SUPABASE\nRode apenas uma vez isolado para criar a tabela",
+          "height": 340,
+          "width": 380,
+          "color": 7
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7904,
+          976
+        ],
+        "id": "11393669-ee8a-4297-8ffe-6298ae4d233b",
+        "name": "Sticky Note62"
+      },
+      {
+        "parameters": {
+          "content": "## Nó para criar tabela no SUPABASE\nRode apenas uma vez isolado para criar a tabela",
+          "height": 340,
+          "width": 380,
+          "color": 7
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          8320,
+          976
+        ],
+        "id": "0dcb885a-f79b-4535-a8db-b4a473ab1c4e",
+        "name": "Sticky Note63"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "create table public.mensagens (\nid bigint generated by default as identity not null,\ncreated_at timestamp with time zone not null default now(),\ntelefone text null,\nid_conversa text null,\nupdate_at timestamp with time zone null default now(),\nnome_app text null default 'delivery'::text,\nconstraint mensagens_pkey primary key (id)\n) TABLESPACE pg_default;\n",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          8048,
+          1120
+        ],
+        "id": "e2c92006-d3f3-40aa-bb88-dd4d3a714548",
+        "name": "Criar tabela de mensagens",
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        },
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "create table public.historico_mensagens (\n id bigint generated by default as identity not null,\ncreated_at timestamp with time zone not null default now(),\nid_usuario text null,\nmensagem_usuario text null,\nmensagem_agente text null,\ntelefone text null,\nnome_usuario text null,\nid_conversa text null,\nmessage_type text null,\nativo boolean null default true,\nnome_app text null default 'delivery'::text,\nconstraint historico_mensagens_pkey primary key (id)\n) TABLESPACE pg_default;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          8464,
+          1120
+        ],
+        "id": "cf5381f2-42fd-48b2-9124-0b68f8873bbe",
+        "name": "Criar tabela de historico_mensagens",
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        },
+        "disabled": true
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          7600,
+          1200
+        ],
+        "id": "587bb736-1766-4740-90cd-829248c13d36",
+        "name": "No Operation, do nothing1"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "4ebe0571-4e61-4c9d-91c7-97c64644e5c5",
+                "leftValue": "={{ $('Variáveis do Fluxo').item.json.gerarHistoricoConversa}}",
+                "rightValue": "true",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          7360,
+          1072
+        ],
+        "id": "6affa14c-b22a-43d7-b549-7a2342c1f8a8",
+        "name": "Verifica se gera histórico mensagem"
+      },
+      {
+        "parameters": {
+          "model": "openai/gpt-4o-mini",
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          7904,
+          2192
+        ],
+        "id": "3f9d61b8-6133-40f2-a8aa-5f82dc123c35",
+        "name": "OpenRouter Chat Model",
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "model": "openai/gpt-5",
+          "options": {
+            "temperature": 0.1
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          5552,
+          544
+        ],
+        "id": "067475e0-1695-4659-b171-4d5872f82f07",
+        "name": "4o",
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.audio }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2016,
+          496
+        ],
+        "id": "398cac50-435a-4850-9be8-64082291465d",
+        "name": "HTTP Request"
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.Imagem }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2016,
+          736
+        ],
+        "id": "320142ff-5687-4ef8-b88d-221484bf1eda",
+        "name": "HTTP Request1"
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.Documento }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2016,
+          960
+        ],
+        "id": "369001ba-123a-40bb-83cc-dadee14d27ba",
+        "name": "HTTP Request2"
+      },
+      {
+        "parameters": {
+          "content": "",
+          "height": 1652,
+          "width": 2188,
+          "color": 3
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          4864,
+          -192
+        ],
+        "id": "bd2be752-6c3c-4946-9f8b-8d8ca52acc1e",
+        "name": "Sticky Note5"
+      },
+      {
+        "parameters": {
+          "content": "",
+          "height": 3812,
+          "width": 3004,
+          "color": 3
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7088,
+          -192
+        ],
+        "id": "c7fb3a70-7164-4ee8-bb18-9ef7497a9483",
+        "name": "Sticky Note6"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          512,
+          272
+        ],
+        "id": "6a867ec7-1fcc-40f4-888b-5a0bf6c7c4f3",
+        "name": "No Operation, do nothing2"
+      },
+      {
+        "parameters": {
+          "amount": 3
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          9440,
+          2128
+        ],
+        "id": "e4b6f151-5778-4fbb-86fd-2e945d929e6c",
+        "name": "Espera 2 segundos1",
+        "webhookId": "22e2e5fa-1731-426c-8a14-f5fc5a685690"
+      },
+      {
+        "parameters": {
+          "jsCode": "// 🔴 TRATAMENTO DE ERRO DO AGENTE\nif (items[0].json.error) {\n  return [{\n    json: {\n      resposta: \"Opa, parece que algo deu errado e não consegui processar a sua mensagem. Poderia me explicar melhor?\",\n      url_img: null,\n      tipo: \"erro_agente\"\n    }\n  }];\n}\n\nlet final;\ntry {\n  let rawOutput = items[0].json.output;\n\n  // =========================\n  // 🧠 NORMALIZA ENTRADA\n  // =========================\n  if (typeof rawOutput !== 'string') {\n    rawOutput = JSON.stringify(rawOutput);\n  }\n  rawOutput = rawOutput\n    .replace(/```json/g, '')\n    .replace(/```/g, '')\n    .trim();\n\n  // =========================\n  // 🧠 DESERIALIZA JSON MULTI-CAMADA\n  // =========================\n  for (let i = 0; i < 5; i++) {\n    try {\n      const parsed = JSON.parse(rawOutput);\n      if (typeof parsed === 'string') {\n        rawOutput = parsed;\n      } else {\n        rawOutput = parsed;\n        break;\n      }\n    } catch {\n      break;\n    }\n  }\n\n  // =========================\n  // 🟢 CASO: JÁ É OBJETO JSON COM resposta + url_img\n  // =========================\n  if (typeof rawOutput === 'object' && rawOutput !== null) {\n    final = {\n      resposta: rawOutput.resposta || null,\n      url_img: rawOutput.url_img || null,\n      tipo: \"json_limpo\"\n    };\n  } else {\n    let resposta = String(rawOutput);\n    let url_img = null;\n\n    // =========================\n    // 🔍 ENCONTRA A URL DO IMAGE-CHARTS (QUALQUER FORMATO)\n    // Estratégia: achar onde começa a URL, pegar tudo até o último %7D\n    // Isso evita problemas com parênteses dentro da URL (rgba, etc.)\n    // =========================\n    const URL_MARKER = 'https://image-charts.com';\n    const urlStart = resposta.indexOf(URL_MARKER);\n\n    if (urlStart !== -1) {\n      // Pega a string inteira a partir do início da URL\n      const fromUrl = resposta.substring(urlStart);\n\n      // Encontra o último %7D (fecha o JSON raiz da URL encoded)\n      const lastIdx = fromUrl.lastIndexOf('%7D');\n\n      if (lastIdx !== -1) {\n        url_img = fromUrl.substring(0, lastIdx + 3);\n      } else {\n        // Fallback: pega até o primeiro espaço ou quebra de linha\n        const endMatch = fromUrl.match(/[\\s\\n]/);\n        url_img = endMatch ? fromUrl.substring(0, endMatch.index) : fromUrl;\n      }\n\n      // Remove da resposta: tudo a partir do início do bloco markdown\n      // (que pode ser \"![texto](\" antes da URL) ou da própria URL\n      const mdBlockStart = resposta.lastIndexOf('![', urlStart);\n      const cutFrom = mdBlockStart !== -1 && mdBlockStart > urlStart - 200\n        ? mdBlockStart\n        : urlStart;\n\n      resposta = resposta.substring(0, cutFrom).trim();\n    }\n\n    // =========================\n    // 🧹 LIMPEZA FINAL DA RESPOSTA\n    // =========================\n    resposta = resposta\n      .replace(/\\)\\s*$/, '')       // remove ) solto no final\n      .replace(/\\s{3,}/g, '\\n\\n') // colapsa espaços excessivos\n      .trim();\n\n    final = {\n      resposta,\n      url_img,\n      tipo: \"texto_processado\"\n    };\n  }\n} catch (error) {\n  console.log('❌ Erro:', error);\n  final = {\n    resposta: \"Erro ao processar resposta\",\n    url_img: null,\n    tipo: \"erro_parse\",\n    detalhes: error.message\n  };\n}\n\n// =========================\n// 🔒 GARANTE FORMATO FINAL\n// =========================\nfinal = {\n  resposta: final.resposta || null,\n  url_img: final.url_img || null,\n  tipo: final.tipo || \"fallback\"\n};\n\nreturn [{ json: final }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          6432,
+          1072
+        ],
+        "id": "73e953b0-f020-4c58-9081-1a55f205ac9d",
+        "name": "Estruturação do JSON de saída",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "MONTEIRO-CONDOMINIAL-ATENDIMENTO",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          144,
+          384
+        ],
+        "id": "bcbde58f-b6c4-48a2-b5ca-19c816cef803",
+        "name": "Webhook",
+        "webhookId": "13b131d1-e22e-45ca-832e-58ad211fb50e"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "a18df9c9-30bc-4588-b469-0777fd88e940",
+                "leftValue": "={{ $('Saida do Agente').item.json.url_img }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          9104,
+          1760
+        ],
+        "id": "4b24302d-560a-4345-bde5-4c012ee84fcf",
+        "name": "Verifica se é pra enviar msg",
+        "executeOnce": true
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "a18df9c9-30bc-4588-b469-0777fd88e940",
+                "leftValue": "={{ $('Saida do Agente').item.json.url_img }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          8144,
+          2464
+        ],
+        "id": "5608cef4-bf16-4703-98ac-611bd4671788",
+        "name": "Verifica se é pra enviar msg1"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "d09ee362-f23a-455e-825c-e4bbe4b065f1",
+                "leftValue": "={{ $('Webhook').item.json.body.message_type }}",
+                "rightValue": "outgoing",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          336,
+          384
+        ],
+        "id": "6faca832-e749-49fc-a411-435422e83d24",
+        "name": "Valida se Humano está enviando mensagem"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://chat.miabuilder.com/api/v1/accounts/562/conversations/{{ $('Variáveis do Fluxo').item.json.message.chat_id }}/messages",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "api_access_token",
+                "value": "SEPcKuFk5wqM67AsKE4FLPf6"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "content",
+                "value": "={{ $json['output.mensagens'] }}"
+              },
+              {
+                "name": "message_type",
+                "value": "outgoing"
+              },
+              {
+                "name": "private",
+                "value": "false"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          9104,
+          1936
+        ],
+        "id": "fdfb0ee9-21dc-4437-9e69-436a099550bc",
+        "name": "HTTP Request5",
+        "retryOnFail": true,
+        "waitBetweenTries": 5000,
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "85b6d75a-ee4f-42b9-bd5a-40031b4daf12",
+                "name": "texto",
+                "value": "={{ $json.resposta !== undefined && $json.resposta !== null ? $json.resposta : ($json.output && $json.output.resposta) || $json.output || '' }}",
+                "type": "string"
+              },
+              {
+                "id": "ff795dc1-65bf-4b4b-acf9-e5712230d51b",
+                "name": "url_img",
+                "value": "={{$json.url_img}}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          6672,
+          1072
+        ],
+        "id": "12693117-25e4-49ed-bbc3-87ae6e95641c",
+        "name": "Saida do Agente"
+      },
+      {
+        "parameters": {
+          "resource": "media",
+          "phoneNumberId": "901187433074392",
+          "additionalFields": {}
+        },
+        "type": "n8n-nodes-base.whatsApp",
+        "typeVersion": 1.1,
+        "position": [
+          9632,
+          1744
+        ],
+        "id": "56d81488-1e8f-414d-917f-c97f51442b30",
+        "name": "Upload media",
+        "webhookId": "1bfaa811-78d7-4c5d-81c0-94e6a2ee0aa3",
+        "credentials": {
+          "whatsAppApi": {
+            "id": "GXNsTwhSCgSKTZ87",
+            "name": "BMS-GA"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "send",
+          "phoneNumberId": "901187433074392",
+          "recipientPhoneNumber": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber.replace('+', '') }}",
+          "messageType": "image",
+          "mediaPath": "useMediaId",
+          "mediaId": "={{ $json.id }}",
+          "additionalFields": {}
+        },
+        "type": "n8n-nodes-base.whatsApp",
+        "typeVersion": 1.1,
+        "position": [
+          9824,
+          1744
+        ],
+        "id": "c0d4372b-2f0e-4ece-a8d4-e049075da5a1",
+        "name": "Envia a imagem",
+        "webhookId": "a8c15e90-6294-49a0-b643-644bb8b82b78",
+        "credentials": {
+          "whatsAppApi": {
+            "id": "GXNsTwhSCgSKTZ87",
+            "name": "BMS-GA"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Saida do Agente').item.json.url_img}}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          9440,
+          1744
+        ],
+        "id": "8a17c8f4-97d7-4583-88e3-f068b43e3d64",
+        "name": "Baixa a img"
+      },
+      {
+        "parameters": {
+          "tableId": "bms-historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $('Variáveis do Fluxo').first().json.message.chat_id }}"
+              },
+              {
+                "fieldId": "mensagem_usuario",
+                "fieldValue": "={{ $('Seta Mensagem para o Agente').item.json.message }}"
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "=Gráfico: {{ $('Saida do Agente').item.json.url_img}}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{\n  (() => {\n    let raw = $('Variáveis do Fluxo').first().json.botPhoneNumber || \"\";\n\n    // Remove tudo que não é número\n    let num = raw.replace(/\\D/g, \"\");\n\n    // Garante que começa com 55\n    if (!num.startsWith(\"55\")) {\n      num = \"55\" + num;\n    }\n\n    // Depois do 55, 10 dígitos = número sem 9\n    // 55 + DDD(2) + número(8) = 12 dígitos TOTAL\n    if (num.length === 12) {\n      let pais = num.slice(0, 2); // 55\n      let ddd = num.slice(2, 4);  // ex: 67\n      let base = num.slice(4);    // ex: 92190178 (8 dígitos)\n      num = pais + ddd + \"9\" + base;\n    }\n\n    return \"+\" + num;\n  })()\n}}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $('Variáveis do Fluxo').first().json.nomeDoLead }}"
+              },
+              {
+                "fieldId": "id_conversa",
+                "fieldValue": "={{ $('Variáveis do Fluxo').first().json.message.message_id }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "={{ $('Variáveis do Fluxo').first().json.message.content_type }}"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "={{ $('Variáveis do Fluxo').first().json.AppName }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          9760,
+          2448
+        ],
+        "id": "553c19bc-e44e-4b3a-99b5-1dcce9a0824a",
+        "name": "Cria Mensagem no Supabase2",
+        "credentials": {
+          "supabaseApi": {
+            "id": "1mIJ3XxYMjb55Xua",
+            "name": "BMS - Supabase"
+          }
+        },
+        "disabled": true,
+        "onError": "continueRegularOutput",
+        "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "66a91f66-e755-4120-b22f-44c814f56162",
+                "name": "message",
+                "value": "={{ $('Limpa a Memória Temporária').item.json.messages.join('\\n\\n') }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          5120,
+          1024
+        ],
+        "id": "f9ae7f51-6200-4050-a576-76ec980667c2",
+        "name": "Seta Mensagem para o Agente"
+      },
+      {
+        "parameters": {
+          "operation": "getAll",
+          "tableId": "historico_mensagens",
+          "returnAll": true,
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "telefone",
+                "condition": "eq",
+                "keyValue": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}"
+              },
+              {
+                "keyName": "nome_app",
+                "condition": "eq",
+                "keyValue": "={{ $('Variáveis do Fluxo').item.json.AppName }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          5408,
+          1168
+        ],
+        "id": "0ee9f243-db26-4dc6-8ff0-f8dee0b516f6",
+        "name": "Pega histórico de mensagens",
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "FcbZyD53kbkf6Vxp",
+            "name": "Monteiro - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// 1. Ordena as mensagens por data (mais recente → mais antiga)\nitems.sort((a, b) => new Date(b.json.created_at) - new Date(a.json.created_at));\n\n// 2. Pega apenas as últimas 50 mensagens caso o histórico seja muito longo\nconst itensRecentes = items.slice(0, 5);\n\nfunction formatarData(isoDate) {\n  const d = new Date(isoDate);\n  const dia = String(d.getDate()).padStart(2, '0');\n  const mes = String(d.getMonth() + 1).padStart(2, '0');\n  const ano = d.getFullYear();\n  return `${dia}/${mes}/${ano}`;\n}\n\nconst historico = [];\n\nfor (const item of itensRecentes) {\n  const row = item.json;\n  const dataFormatada = formatarData(row.created_at);\n\n  // Processa mensagem do Usuário\n  if (row.mensagem_usuario && row.mensagem_usuario.toString().trim() !== \"\") {\n    historico.push(`${dataFormatada} - Usuário: ${row.mensagem_usuario.toString().trim()}`);\n  }\n\n  // Processa mensagem do Agente\n  if (row.mensagem_agente && row.mensagem_agente.toString().trim() !== \"\") {\n    // Caso a mensagem do agente venha como array/objeto de outro fluxo, converte para string\n    const msgAgente = typeof row.mensagem_agente === 'string' \n      ? row.mensagem_agente \n      : JSON.stringify(row.mensagem_agente);\n      \n    historico.push(`${dataFormatada} - Agente: ${msgAgente.trim()}`);\n  }\n}\n\nreturn [\n  {\n    json: {\n      historico_conversa: historico.join(\"\\n\\n\")\n    }\n  }\n];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5664,
+          1168
+        ],
+        "id": "6da17e68-54a5-45dc-a96c-1d496454c5aa",
+        "name": "Formata histórico de mensagens",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "mode": "combine",
+          "combineBy": "combineByPosition",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          6000,
+          1040
+        ],
+        "id": "5c131197-c908-4090-b188-3b4591b45178",
+        "name": "Junta toda mensagem"
+      },
+      {
+        "parameters": {
+          "resource": "media",
+          "phoneNumberId": "901187433074392",
+          "additionalFields": {}
+        },
+        "type": "n8n-nodes-base.whatsApp",
+        "typeVersion": 1.1,
+        "position": [
+          9040,
+          2448
+        ],
+        "id": "ed039a18-df20-4149-874e-97e4a50da6a2",
+        "name": "Upload media1",
+        "webhookId": "1bfaa811-78d7-4c5d-81c0-94e6a2ee0aa3",
+        "credentials": {
+          "whatsAppApi": {
+            "id": "GXNsTwhSCgSKTZ87",
+            "name": "BMS-GA"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "send",
+          "phoneNumberId": "901187433074392",
+          "recipientPhoneNumber": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber.replace('+', '') }}",
+          "messageType": "image",
+          "mediaPath": "useMediaId",
+          "mediaId": "={{ $json.id }}",
+          "additionalFields": {}
+        },
+        "type": "n8n-nodes-base.whatsApp",
+        "typeVersion": 1.1,
+        "position": [
+          9472,
+          2448
+        ],
+        "id": "9a1c8b1f-d8ec-4e46-aed0-92cd024654c9",
+        "name": "Envia a imagem1",
+        "webhookId": "a8c15e90-6294-49a0-b643-644bb8b82b78",
+        "credentials": {
+          "whatsAppApi": {
+            "id": "GXNsTwhSCgSKTZ87",
+            "name": "BMS-GA"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Saida do Agente').item.json.url_img}}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          8640,
+          2448
+        ],
+        "id": "aa086d1a-1642-4192-a9de-7d733374a11b",
+        "name": "Baixa a img1"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://chat.miabuilder.com/api/v1/accounts/562/conversations/{{ $('Variáveis do Fluxo').item.json.message.chat_id }}/messages",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "api_access_token",
+                "value": "SEPcKuFk5wqM67AsKE4FLPf6"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "content",
+                "value": "={{ $json.texto }}"
+              },
+              {
+                "name": "message_type",
+                "value": "outgoing"
+              },
+              {
+                "name": "private",
+                "value": "false"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          7632,
+          2480
+        ],
+        "id": "bed21a49-2af1-4a6f-8afc-65513bd058ce",
+        "name": "HTTP Request6",
+        "retryOnFail": true,
+        "waitBetweenTries": 5000,
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "content": "## Prepara histórico de conversa e input do usuário",
+          "height": 400,
+          "width": 1216
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          4944,
+          928
+        ],
+        "id": "77a0a84f-28bd-4ce8-8c6a-d512eb18b6f3",
+        "name": "Sticky Note7"
+      },
+      {
+        "parameters": {
+          "tableId": "custo_tokens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "Workflow",
+                "fieldValue": "={{ $workflow.name }}"
+              },
+              {
+                "fieldId": "Input",
+                "fieldValue": "={{ $('Seta Mensagem para o Agente').item.json.message }}"
+              },
+              {
+                "fieldId": "Output",
+                "fieldValue": "={{$('Monteiro - Agente IA Condominial').item.json.output}}"
+              },
+              {
+                "fieldId": "PromptTokens",
+                "fieldValue": "={{ $json.promptTokens }}"
+              },
+              {
+                "fieldId": "CompletationTokens",
+                "fieldValue": "={{ $json.completionTokens }}"
+              },
+              {
+                "fieldId": "CachedTokens",
+                "fieldValue": "={{ $json.cachedTokens }}"
+              },
+              {
+                "fieldId": "Cost",
+                "fieldValue": "={{ $json.costUSD }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          7536,
+          272
+        ],
+        "id": "d5a69a39-b871-424e-907d-58d6ba7b8ced",
+        "name": "Grava Billing do Agent no Supabase1",
+        "credentials": {
+          "supabaseApi": {
+            "id": "FcbZyD53kbkf6Vxp",
+            "name": "Monteiro - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## Nó para calcular custos\nVocê de  colocar esse nó depois do seu agente",
+          "height": 340,
+          "width": 584,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7200,
+          112
+        ],
+        "id": "253dc61b-f577-480d-a7b2-e22d73b94c77",
+        "name": "Sticky Note39"
+      },
+      {
+        "parameters": {
+          "jsCode": "const PRICE = {\n  input:       1.1   / 1_000_000,\n  inputCached: 0.275 / 1_000_000,\n  output:      4.4   / 1_000_000,\n};\n\nfunction pickUsage(obj = {}) {\n  const v1 = obj.kwargs?.response_metadata?.usage;\n  if (v1) {\n    return {\n      prompt:       v1.prompt_tokens       ?? v1.input_tokens       ?? 0,\n      completion:   v1.completion_tokens   ?? v1.output_tokens      ?? 0,\n      cached:       v1.prompt_tokens_details?.cached_tokens ?? 0,\n    };\n  }\n  const v2 = obj.usage_metadata;\n  if (v2) {\n    return {\n      prompt:       v2.input_tokens  ?? 0,\n      completion:   v2.output_tokens ?? 0,\n      cached:       v2.input_token_details?.cache_read ?? 0,\n    };\n  }\n  const v3 = obj.usage;\n  if (v3) {\n    return {\n      prompt:       v3.prompt_tokens ?? v3.input_tokens ?? 0,\n      completion:   v3.completion_tokens ?? v3.output_tokens ?? 0,\n      cached:       v3.cached_tokens ?? 0,\n    };\n  }\n  return { prompt: 0, completion: 0, cached: 0 };\n}\n\nlet promptT = 0, completionT = 0, cachedT = 0;\nconst steps = [];\nlet summary = '';\n\nfor (const item of $input.all()) {\n  const conversations = Array.isArray(item.json) ? item.json : [item.json];\n\n  for (const convo of conversations) {\n    summary = convo.output ?? summary;\n\n    if (Array.isArray(convo.intermediateSteps)) {\n      for (const step of convo.intermediateSteps) {\n        if (!step.action) continue;\n\n        const msg = step.action.messageLog?.[0] ?? step.action;\n        const u = pickUsage(msg);\n        promptT     += u.prompt;\n        completionT += u.completion;\n        cachedT     += u.cached;\n\n        steps.push({\n          tool:        step.action.tool,\n          toolInput:   step.action.toolInput,\n          observation: step.observation,\n        });\n      }\n    }\n  }\n}\n\nconst nonCached = promptT - cachedT;\nconst cost = (nonCached * PRICE.input) +\n             (cachedT   * PRICE.inputCached) +\n             (completionT * PRICE.output);\n\nconst result = {\n  summary,\n  promptTokens:     promptT,\n  completionTokens: completionT,\n  cachedTokens:     cachedT,\n  costUSD:          +cost.toFixed(6),\n  totalCostUSD:     +cost.toFixed(6), // opcional: pode remover se quiser evitar repetição\n  steps\n};\n\n// --- Normalização pro Supabase (opcional se já tiver campos fixos na tabela) ---\nconst allKeys = [...new Set(Object.keys(result))];\nconst norm = {};\nfor (const key of allKeys) {\n  norm[key] = result[key] ?? null;\n}\n\nreturn [{ json: norm }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          7296,
+          272
+        ],
+        "id": "f74ebee4-266c-4a6c-b0ab-bb3148682474",
+        "name": "Calcula Tokens - Tools1"
+      },
+      {
+        "parameters": {
+          "content": "## Output do Agente",
+          "height": 400,
+          "width": 752
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          6208,
+          928
+        ],
+        "id": "ffb47f23-4d65-4bf8-a1b0-4e0f68749d08",
+        "name": "Sticky Note1"
+      },
+      {
+        "parameters": {
+          "content": "## Chat Principal\n\nO Chat Principal é o agente central responsável por identificar a questão do usuário e direcioná-la para o chat especializado no assunto mais adequado para fornecer a melhor resposta. Ele também pode realizar execuções em cadeia, acionando vários chats em determinados cenários, caso seja necessário para atender à solicitação do usuário de forma mais completa.",
+          "height": 292,
+          "width": 1324,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "position": [
+          5504,
+          128
+        ],
+        "typeVersion": 1,
+        "id": "25536a6a-637d-4afd-9d53-c52bea029e63",
+        "name": "Sticky Note15"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT * from [user] WHERE id_user = 108273"
+        },
+        "type": "n8n-nodes-base.microsoftSql",
+        "typeVersion": 1.1,
+        "position": [
+          -608,
+          416
+        ],
+        "id": "6136e104-fe2b-4f96-a0fc-9942a05966d4",
+        "name": "Buscar Informacoes1",
+        "credentials": {
+          "microsoftSql": {
+            "id": "9oSJ0UtHdEKEhdnB",
+            "name": "Microsoft SQL account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://webhook.miabuilder.com/webhook/calcular_custo_fluxo",
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "executionData",
+                "value": "={{ $json }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          5168,
+          512
+        ],
+        "id": "b75b31d6-489b-4885-8c66-58d04c0bf9e2",
+        "name": "HTTP Request3",
+        "disabled": true
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          5776,
+          272
+        ],
+        "id": "4642eb32-c367-4a79-b366-972a2bed1cde",
+        "name": "When clicking ‘Execute workflow’"
+      },
+      {
+        "parameters": {
+          "content": "█████▄░██████░██░░░░░██░░░░░██████░██████▄░▄██████░░░▄████▄░▄██████░▄█████░██████▄░████████░░░████████░▄█████▄░▄█████▄░██░░░░\n██░░██░░░██░░░██░░░░░██░░░░░░░██░░░██░░░██░██░░░░░░░░██░░██░██░░░░░░██░░░░░██░░░██░░░░██░░░░░░░░░██░░░░██░░░██░██░░░██░██░░░░\n█████░░░░██░░░██░░░░░██░░░░░░░██░░░██░░░██░██░░███░░░██░░██░██░░███░█████░░██░░░██░░░░██░░░░░░░░░██░░░░██░░░██░██░░░██░██░░░░\n██░░██░░░██░░░██░░░░░██░░░░░░░██░░░██░░░██░██░░░██░░░██████░██░░░██░██░░░░░██░░░██░░░░██░░░░░░░░░██░░░░██░░░██░██░░░██░██░░░░\n█████▀░██████░██████░██████░██████░██░░░██░▀█████▀░░░██░░██░▀█████▀░▀█████░██░░░██░░░░██░░░░░░░░░██░░░░▀█████▀░▀█████▀░██████\n░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░",
+          "height": 140,
+          "width": 1300
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7200,
+          -48
+        ],
+        "id": "f4615b8e-3423-47e0-b8ed-584d5dc37988",
+        "name": "Sticky Note8"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "8f16b1bf-1a3e-4029-8d7a-1bccb919ee43",
+                "name": "=message.message_id",
+                "value": "={{ $('Webhook').item.json.body.conversation.messages[0].source_id }}",
+                "type": "string"
+              },
+              {
+                "id": "11800d83-ecca-4f9c-a878-a2419db0c8e9",
+                "name": "message.chat_id",
+                "value": "={{ $('Webhook').item.json.body.conversation.id }}",
+                "type": "string"
+              },
+              {
+                "id": "c33f9527-e661-49e5-8e5e-64f3b430928a",
+                "name": "message.content_type",
+                "value": "={{ \n  $('Webhook').item.json.body.conversation?.messages[0]?.attachments?.[0]?.file_type\n    || ($('Webhook').item.json.body.conversation?.messages?.[0]?.content ? 'text' : '') \n}}",
+                "type": "string"
+              },
+              {
+                "id": "06eba1c9-cff0-4f68-b6da-6bb0092466b7",
+                "name": "message.content",
+                "value": "={{ $('Webhook').item.json.body.content }}",
+                "type": "string"
+              },
+              {
+                "id": "dc3dc59c-90a3-4a45-bea2-de092c91083b",
+                "name": "message.Content_URL",
+                "value": "={{ $('Webhook').item.json.body.conversation?.messages?.[0]?.attachments?.[0]?.data_url || '' }}",
+                "type": "string"
+              },
+              {
+                "id": "8b01a818-a456-476e-bace-adefe2f04eb4",
+                "name": "message.event",
+                "value": "={{ $('Webhook').item.json.body.message_type }}",
+                "type": "string"
+              },
+              {
+                "id": "b2f1f6b5-292f-4695-9e41-be200c6d7053",
+                "name": "instance.Name",
+                "value": "COLOQUE AQUI INSTANCIA EVOLUTION",
+                "type": "string"
+              },
+              {
+                "id": "572fcce5-8a26-4e8f-a48a-ef0bee569dcd",
+                "name": "instance.Apikey",
+                "value": "COLOQUE AQUI SUA API KEY",
+                "type": "string"
+              },
+              {
+                "id": "e90043db-657b-461c-b040-2d6089abfbdb",
+                "name": "instance.Server_url",
+                "value": "COLOQUE AQUI INSTANCIA EVOLUTION",
+                "type": "string"
+              },
+              {
+                "id": "77198bf7-7bbf-4f77-ad7d-74e3195f2b21",
+                "name": "nomeDoLead",
+                "value": "={{ $('Webhook').item.json.body.sender.name.split(' ')[0] }}",
+                "type": "string"
+              },
+              {
+                "id": "40262898-f972-4456-b1ab-c0cc4f895dc0",
+                "name": "usarElevenLabs",
+                "value": false,
+                "type": "boolean"
+              },
+              {
+                "id": "348264f9-ed02-4936-ae78-bb963ccbee29",
+                "name": "apiKey_eleven",
+                "value": "COLOQUE AQUI SUA API KEY",
+                "type": "string"
+              },
+              {
+                "id": "ce62d5b1-e90a-4e4f-81b3-3da32580dee6",
+                "name": "voiceIdElevenLabs",
+                "value": "COLOQUE SEU VOICE ID",
+                "type": "string"
+              },
+              {
+                "id": "a5bc8b88-2bab-40dc-b16c-f370badc39d6",
+                "name": "TempoInatividadeAgente",
+                "value": 900,
+                "type": "number"
+              },
+              {
+                "id": "6dcead3b-d71f-4443-9f30-055ac02ad9cc",
+                "name": "modeloTemperatura",
+                "value": 0.4,
+                "type": "number"
+              },
+              {
+                "id": "5d749799-ff0e-4090-a6e7-c3e6d8e5dcb0",
+                "name": "humanizadorMensagem",
+                "value": false,
+                "type": "boolean"
+              },
+              {
+                "id": "28170b11-6211-4901-97f0-397af9123280",
+                "name": "EsperaMemoria",
+                "value": "=10",
+                "type": "number"
+              },
+              {
+                "id": "5197eb31-e16a-4553-87b6-44d4066bac3a",
+                "name": "AppName",
+                "value": "={{ $('Webhook').item.json.body.account.name }}",
+                "type": "string"
+              },
+              {
+                "id": "84dd3428-8b93-43c1-a59f-fae35350bcbf",
+                "name": "botPhoneNumber",
+                "value": "={{\n(raw => {\n  let t = (raw || \"\").toString().replace(/\\s+/g, \"\").replace(/\\D/g, \"\");\n  t = t.replace(/^0+/, \"\");\n  if (t.length === 8) {\n    t = \"11\" + \"9\" + t;\n  } else if (t.length === 9) {\n    t = \"11\" + t;\n  } else if (t.length === 10) {\n    t = t.replace(/^(\\d{2})(\\d{8})$/, \"$19$2\");\n  } else if (t.length === 11) {\n    t = \"55\" + t;\n  } else if (t.length === 12) {\n    t = t.slice(0, 4) + \"9\" + t.slice(4);\n  } else if (t.length > 13) {\n    t = t.slice(-13);\n  }\n  return t;\n})($('Webhook').item.json.body.conversation.messages[0].sender.phone_number)\n}}",
+                "type": "string"
+              },
+              {
+                "id": "8852f82e-b7f6-4590-beed-5fa9384c78f9",
+                "name": "gerarHistoricoConversa",
+                "value": true,
+                "type": "boolean"
+              },
+              {
+                "id": "81de7604-606d-451a-9786-99ac14f0393c",
+                "name": "account_id",
+                "value": "={{ $('Webhook').item.json.body.account.id }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "31a53186-07b6-47cc-acd1-ce17be195f27",
+        "name": "Variáveis do Fluxo",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          864,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "create table public.custo_tokens (\n  id bigint generated by default as identity not null,\n  created_at timestamp with time zone not null default now(),\n  \"Workflow\" text null,\n  \"Input\" text null,\n  \"Output\" text null,\n  \"PromptTokens\" text null,\n  \"CompletationTokens\" text null,\n  \"CachedTokens\" text null,\n  \"Cost\" text null,\n  constraint custo_tokens_pkey primary key (id)\n) TABLESPACE pg_default;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          7968,
+          256
+        ],
+        "id": "c3f58a65-4821-4341-938d-f9d169c79d2d",
+        "name": "Criar tabela de Custos",
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        },
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "content": "## Nó para criar tabela no SUPABASE\nRode apenas uma vez isolado para criar a tabela",
+          "height": 340,
+          "width": 380,
+          "color": 7
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7824,
+          112
+        ],
+        "id": "745b1d64-a648-406e-b719-8e110d1468ca",
+        "name": "Sticky Note36"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequestTool",
+        "typeVersion": 4.3,
+        "position": [
+          6432,
+          544
+        ],
+        "id": "0d73367e-0182-4d06-87f0-4944f2270d5b",
+        "name": "dispara-email",
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "toolDescription": "Use esta tool apenas quando o consulta-dados confirmou que o morador NÃO existe no condomínio informado, e o usuário já confirmou os dados de cadastro.\n\nCampos:\n\n    Obrigatórios: condominio_id (UUID retornado pelo consulta-dados), nome, bloco, unidade.\n    Opcionais: relacao (apenas proprietario | inquilino | morador | responsavel), email, telefone, celular, cpf. Se o usuário não informar, omita o campo (não envie string vazia).\n\nRetorna { condomino_id, condominio_id, nome, bloco, unidade }. Guarde condomino_id para usar no cria-notificacao.\n\nNão use esta tool para atualizar um morador existente — ela só cria. Se houver erro de validação (ex.: e-mail inválido), peça ao usuário para corrigir o campo específico e tente de novo.",
+          "method": "POST",
+          "url": "https://monteiro-adv.lovable.app/api/public/criar-condomino",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-Callback-Secret",
+                "value": "Mia@2025"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "condominio_id",
+                "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters0_Value', `id do condomínio, consegue consultando a tool de consulta-dados`, 'string') }}"
+              },
+              {
+                "name": "nome",
+                "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters1_Value', `nome do condômino, obrigatório`, 'string') }}"
+              },
+              {
+                "name": "bloco",
+                "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters2_Value', `bloco do apartamento do condômino, campo obrigatório`, 'string') }}"
+              },
+              {
+                "name": "unidade",
+                "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters3_Value', `unidade do apartamento do condômino, campo obrigatório`, 'string') }}"
+              },
+              {
+                "name": "relacao",
+                "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters4_Value', ` (proprietario | inquilino | morador | responsavel ou null se não tiver essa informação)`, 'string') }}"
+              },
+              {
+                "name": "email",
+                "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters5_Value', `email do condômino, enviar como null se não tiver essa informação`, 'string') }}"
+              },
+              {
+                "name": "celular",
+                "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters6_Value', `celular do condômino. enviar como null se não tiver essa informação`, 'string') }}"
+              },
+              {
+                "name": "cpf",
+                "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters7_Value', `cpf do condômino. enviar como null se não tiver essa informação`, 'string') }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequestTool",
+        "typeVersion": 4.3,
+        "position": [
+          6592,
+          544
+        ],
+        "id": "f9ded651-fd0d-4def-afde-0f3f769f42fb",
+        "name": "cria-condomino"
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "={{ $('Seta Mensagem para o Agente').item.json.message }}",
+          "options": {
+            "systemMessage": "=Você é o assistente jurídico-condominial do escritório Monteiro Advocacia.\nAtende EXCLUSIVAMENTE usuários autorizados via WhatsApp no módulo Condominial.\n\nVocê tem duas funções:\n1. **Criar notificações de infração** de condomínio (fluxo guiado).\n2. **Responder consultas** sobre dados do condomínio (notificações, condôminos, infrações etc.).\n\nAo receber qualquer mensagem de abertura (\"oi\", \"olá\", \"bom dia\" etc.), responda SEMPRE:\n\n> \"Olá! Sou o assistente da Monteiro — módulo Condominial. 😊\n> Posso te ajudar com:\n> **1.** Criar uma notificação de infração\n> **2.** Consultar informações (notificações, condôminos, histórico de infrações etc.)\n>\n> O que você precisa?\"\n\n---\n\n# Regras gerais\n- Responda SEMPRE em português do Brasil, de forma curta, clara e cordial.\n- Nunca invente IDs, nomes, blocos, unidades, CPFs, e-mails ou telefones.\n- Nunca exponha UUIDs, nomes de tabelas, colunas ou detalhes técnicos ao usuário.\n- Fora do escopo condominial? Diga gentilmente: \"Só consigo ajudar com o módulo condominial por aqui.\"\n- Se algo der errado em uma tool, explique de forma simples e ofereça tentar de novo.\n- Nunca chame `cria-condomino` para um condômino que já foi cadastrado ou buscado\n  com sucesso nesta conversa. Se o `condomino_id` de uma pessoa já foi obtido\n  (seja por busca ou por cadastro), use-o diretamente — não recadastre a mesma pessoa.\n\n## Eficiência no fluxo\n- Extraia TODAS as informações que o usuário já forneceu na mensagem — nunca peça\n  o que já foi dito.\n- Execute buscas silenciosamente (sem avisar que está buscando).\n- Faça UMA ÚNICA confirmação no final, com resumo completo, antes de gravar.\n- Só interrompa o fluxo para perguntar algo que realmente esteja faltando ou ambíguo.\n- Se houver ambiguidade (ex: dois moradores com mesmo nome), aí sim pergunte.\n\n---\n\n# FUNÇÃO 1 — CRIAR NOTIFICAÇÃO DE INFRAÇÃO\n\n## Passo 1 — Identificar o CONDOMÍNIO\n- Se o usuário já mencionou o nome do condomínio, use-o diretamente.\n- Se não mencionou, pergunte.\n- Query obrigatória (sempre inclua `id`):\n  SELECT id, nome, endereco FROM condominios WHERE nome ILIKE '%<nome>%' LIMIT 10\n- Não encontrou → encerre: \"Esse condomínio ainda não está cadastrado. Peça a um\n  administrador para cadastrá-lo antes de continuar.\"\n- Mais de um resultado → liste e peça para o usuário escolher (única interrupção permitida aqui).\n- Um resultado → guarde o `id` como `condominio_id` e siga SEM perguntar confirmação\n  ainda — a confirmação será feita no resumo final do Passo 4.\n\n⚠️ Nunca avance sem ter o `condominio_id` guardado.\n⚠️ O `condominio_id` é o valor exato retornado pela tool — nunca reescreva ou adivinhe.\n\n## Passo 2 — Identificar o CONDÔMINO\n- Se o usuário já mencionou nome (e opcionalmente bloco/unidade), use-o diretamente.\n- Se não mencionou, pergunte apenas o nome primeiro.\n- Query obrigatória (sempre inclua `id`):\n  SELECT id, nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<condominio_id_exato>'\n  AND nome ILIKE '%<nome>%'\n- 1 resultado → guarde `id` como `condomino_id` e siga SEM perguntar confirmação ainda.\n- Mais de 1 resultado → liste (nome — bloco/unidade) e peça para escolher. Depois refine:\n  SELECT id, nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<condominio_id_exato>'\n  AND nome ILIKE '%<nome>%'\n  AND bloco = '<bloco>' AND unidade = '<unidade>'\n- 0 resultados → vá para o Passo 3.\n\n⚠️ Nunca filtre por bloco/unidade na primeira busca.\n⚠️ Nunca use subquery — use sempre o `condominio_id` já guardado literalmente.\n\n## Passo 3 — Cadastrar CONDÔMINO (somente se não existir)\n- Avise: \"Esse morador ainda não está cadastrado. Vou criar agora.\"\n- Obrigatórios: nome, bloco, unidade.\n- Opcionais (pergunte tudo de uma vez, aceite \"não tem\" / \"pular\"):\n  relação (proprietario | inquilino | morador | responsavel), e-mail, telefone, celular, CPF.\n- Mostre resumo → peça confirmação → chame `cria-condomino` com `condominio_id` + campos.\n- Guarde o `id` retornado como `condomino_id` → siga para o Passo 4.\n\n⚠️ APÓS O CADASTRO:\n  - Este condômino específico está cadastrado e o `condomino_id` está guardado.\n  - NÃO chame `cria-condomino` novamente para esta mesma pessoa.\n  - Siga DIRETAMENTE para o Passo 4.\n  - Para uma notificação de outro morador futuramente, o fluxo começa normalmente\n    do Passo 2.\n\n## Passo 4 — Dados da NOTIFICAÇÃO e CONFIRMAÇÃO FINAL\n- Se o usuário já informou data e/ou descrição da infração, use-os diretamente.\n- Pergunte apenas o que ainda estiver faltando:\n  - `data_infracao` (obrigatória — converta \"hoje\", \"ontem\", \"19/05/2026\" para YYYY-MM-DD).\n  - `infracao` (obrigatória — descrição livre).\n- Depois pergunte sobre foto:\n  > \"Deseja anexar uma foto da infração? Se sim, envie agora. Se não, é só dizer 'não'.\"\n  - Imagem recebida → guarde a URL de `<UrlImagem></UrlImagem>` como `foto_infracao_path`.\n    COMO OBTER A URL:\n      1. Verifique se o INPUT_ATUAL contém tags <UrlImagem> ou <UrlDoc>\n         → Se sim, extraia a URL de dentro dessas tags\n      \n      2. Se o INPUT_ATUAL NÃO contiver essas tags (ex: usuário respondeu \"sim\"):\n         → Busque no histórico da conversa a mensagem mais recente que contenha\n           <UrlImagem> e extraia a URL de lá \n      3. Passe essa URL como parâmetro \"foto_infracao_path\" ao chamar criar-notificacao\n\nQuando tiver TODOS os dados, mostre o resumo final e peça confirmação (única vez):\n> \"Confira o resumo:\n> • Condomínio: [nome]\n> • Morador(a): [nome] — Bloco [X], Unidade [Y]\n> • Data da infração: [data formatada DD/MM/YYYY]\n> • Infração: [descrição]\n> • Foto: [sim / não]\n> Posso confirmar e registrar?\"\n\nApós confirmação → chame `cria-notificacao`.\n\n## Passo 5 — Encerramento\n- Sucesso: \"Notificação criada com sucesso! O documento já foi gerado e enviado por aqui. ✅ Posso te ajudar com mais alguma coisa?\"\n- Falha: informe o erro de forma simples e pergunte se quer tentar de novo.\n\n---\n# FUNÇÃO 2 — CONSULTAS AO BANCO\n\nUse SEMPRE a tool `consulta-dados` com uma query SQL (somente SELECT).\nNunca exponha SQL, IDs ou campos técnicos ao usuário — apenas o resultado em linguagem natural.\n\nExemplos internos de uso (nunca mostre ao usuário):\n\n- Listar condomínios:\n  SELECT nome, endereco FROM condominios LIMIT 25\n\n- Buscar morador:\n  SELECT nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<id>' AND nome ILIKE '%Fulano%'\n\n- Notificações de um morador:\n  SELECT data_infracao, infracao FROM notificacoes\n  WHERE condomino_id = '<id>' ORDER BY data_infracao DESC\n\n- Quem tem mais notificações:\n  SELECT co.nome, COUNT(n.id) as total\n  FROM notificacoes n\n  JOIN condominos co ON co.id = n.condomino_id\n  WHERE n.condominio_id = '<id>'\n  GROUP BY co.nome ORDER BY total DESC LIMIT 5\n\nSe vier vazio: \"Não encontrei nenhum registro para essa consulta.\"\nAo final, ofereça: \"Posso te ajudar com mais alguma coisa?\"\n---\n\n# O que você NÃO deve fazer\n- Cadastrar, editar ou excluir condomínios.\n- Atualizar ou apagar notificações e condôminos já criados.\n- Responder perguntas fora do escopo condominial.",
+            "returnIntermediateSteps": true
+          }
+        },
+        "id": "e41c7b60-e381-4ffe-a33d-f21f3e587519",
+        "name": "Monteiro - Agente IA Condominial",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "position": [
+          6064,
+          272
+        ],
+        "typeVersion": 1.6,
+        "retryOnFail": true,
+        "alwaysOutputData": false,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+        "typeVersion": 1.4,
+        "position": [
+          5776,
+          96
+        ],
+        "id": "a1d36d22-40dd-4dfc-b33e-13b214a9c8f5",
+        "name": "When chat message received",
+        "webhookId": "f47f67c6-80ae-4d3a-a59c-656eb966fcd1"
+      },
+      {
+        "parameters": {
+          "description": "Use esta tool apenas no passo final, depois que o condomínio e o condômino já foram identificados (ou criados) e o usuário confirmou os dados da infração.\n\nCampos:\n\n    Obrigatórios: nome_condominio, nome_condomino_id (precisa pertencer ao mesmo condomínio), data_infracao (string no formato YYYY-MM-DD), infracao (descrição em texto).\n    Opcionais: foto_infracao_path (caminho retornado pelo upload da imagem no fluxo do n8n — só envie se o fluxo realmente entregou esse path; caso contrário omita).",
+          "workflowId": {
+            "__rl": true,
+            "value": "5ovAOsUiOu36EjOn",
+            "mode": "list",
+            "cachedResultUrl": "/workflow/5ovAOsUiOu36EjOn",
+            "cachedResultName": "Monteiro - 2.2 - Criar Notificação"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "nome_condominio": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome_condominio', ``, 'string') }}",
+              "nome_condomino": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome_condomino', ``, 'string') }}",
+              "infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('infracao', ``, 'string') }}",
+              "data_infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_infracao', ``, 'string') }}",
+              "foto_infracao_path": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('foto_infracao_path', `Se não tiver, pode enviar como null`, 'string') }}",
+              "botPhoneNumber": "={{ $('Variáveis do Fluxo').first().json.botPhoneNumber }}"
+            },
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "nome_condominio",
+                "displayName": "nome_condominio",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "nome_condomino",
+                "displayName": "nome_condomino",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "infracao",
+                "displayName": "infracao",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "foto_infracao_path",
+                "displayName": "foto_infracao_path",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "data_infracao",
+                "displayName": "data_infracao",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "botPhoneNumber",
+                "displayName": "botPhoneNumber",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+        "typeVersion": 2.2,
+        "position": [
+          6288,
+          544
+        ],
+        "id": "83b1a9f2-92a5-4694-b2fa-506f53e39718",
+        "name": "criar-notificacao"
+      },
+      {
+        "parameters": {
+          "descriptionType": "manual",
+          "toolDescription": "Use esta tool para consultar dados do banco. Passe uma query SQL válida \nno campo \"query\". Apenas SELECT é permitido — nunca INSERT, UPDATE ou DELETE.\n\nTabelas disponíveis:\n  - condominios  → colunas: id, nome, endereco, cnpj\n  - condominos   → colunas: id, condominio_id, nome, bloco, unidade, \n                             relacao, email, telefone, celular, cpf\n  - notificacoes → colunas: id, condominio_id, condomino_id, \n                             data_infracao, infracao, cabecalho_notificacao,\n                             regimento_artigo, regimento_clausula\n\nFormato:\n  { \"query\": \"SELECT ... FROM ... WHERE ...\" }\n\nNunca exponha os valores de id/UUID ao usuário — use-os só internamente.",
+          "operation": "executeQuery",
+          "query": "{{ $fromAI(\"query\", \"SQL query to execute\") }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgresTool",
+        "typeVersion": 2.6,
+        "position": [
+          6128,
+          544
+        ],
+        "id": "beb96d28-61a7-46b5-abe2-19d5c2253469",
+        "name": "consulta-dados",
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Calculator": {
+        "ai_tool": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Estrutura da Mensagem de Retorno": {
+        "main": [
+          [
+            {
+              "node": "Quebra Mensagens em várias Linhas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Seta o Tipo de Retorno JSON": {
+        "ai_outputParser": [
+          [
+            {
+              "node": "Ajusta o Parse do JSON",
+              "type": "ai_outputParser",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ajusta o Parse do JSON": {
+        "ai_outputParser": [
+          [
+            {
+              "node": "Estrutura da Mensagem de Retorno",
+              "type": "ai_outputParser",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Quebra Mensagens em várias Linhas": {
+        "main": [
+          [
+            {
+              "node": "Itera sobre cada mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Itera sobre cada mensagem": {
+        "main": [
+          [],
+          [
+            {
+              "node": "HTTP Request5",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Converte mp3 pra Base64": {
+        "main": [
+          [
+            {
+              "node": "Envia Audio para o WhatsApp",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Formata Mensagem para Áudio": {
+        "main": [
+          [
+            {
+              "node": "Seta Voz via ElevenLabs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Seta Voz via ElevenLabs": {
+        "main": [
+          [
+            {
+              "node": "Converte mp3 pra Base64",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Seta Personalidade do Assistente": {
+        "main": [
+          [
+            {
+              "node": "Se o retorno for menos de 300 caracteres gera voz",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Se o retorno for menos de 300 caracteres gera voz": {
+        "main": [
+          [
+            {
+              "node": "Formata Mensagem para Áudio",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Não gera audio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "LLM ChatGPT": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Seta Personalidade do Assistente",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se deve gerar audio": {
+        "main": [
+          [
+            {
+              "node": "Seta Personalidade do Assistente",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Não gera Voz",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Espera 2 segundos": {
+        "main": [
+          [
+            {
+              "node": "Itera sobre cada mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se deve humizar": {
+        "main": [
+          [
+            {
+              "node": "Estrutura da Mensagem de Retorno",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "HTTP Request6",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Identifica o Tipo de Mensagem": {
+        "main": [
+          [
+            {
+              "node": "Mensagem de Texto",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Mensagem de Audio",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Mensagem com Imagem",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Mensagem com Documento",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Mensagem de Erro  - Formato não suportado",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mensagem de Texto": {
+        "main": [
+          [
+            {
+              "node": "Adiciona Texto na Memoria",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mensagem de Audio": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mensagem com Imagem": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mensagem de Erro  - Formato não suportado": {
+        "main": [
+          [
+            {
+              "node": "Adiciona Erro na Memória",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Transcreve Audio com OpenAI": {
+        "main": [
+          [
+            {
+              "node": "Adiciona Audio Na Memória",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mensagem com Documento": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai Dados do PDF": {
+        "main": [
+          [
+            {
+              "node": "Adiciona Documento na Memória",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Adiciona Texto na Memoria": {
+        "main": [
+          [
+            {
+              "node": "Memória Temporária",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Traduz Imagem em Texto": {
+        "main": [
+          [
+            {
+              "node": "Adiciona Imagem na Memória",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Adiciona Audio Na Memória": {
+        "main": [
+          [
+            {
+              "node": "Memória Temporária",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Adiciona Imagem na Memória": {
+        "main": [
+          [
+            {
+              "node": "Memória Temporária",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Adiciona Documento na Memória": {
+        "main": [
+          [
+            {
+              "node": "Memória Temporária",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Adiciona Erro na Memória": {
+        "main": [
+          [
+            {
+              "node": "Memória Temporária",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Memória Temporária": {
+        "main": [
+          [
+            {
+              "node": "Espera Tempo Definido",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Espera Tempo Definido": {
+        "main": [
+          [
+            {
+              "node": "Busca mensagens da Memória",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca mensagens da Memória": {
+        "main": [
+          [
+            {
+              "node": "Verifica se houve troca de mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se houve troca de mensagem": {
+        "main": [
+          [
+            {
+              "node": "Se houve não faz nada e aguarda vir a nova mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Limpa a Memória Temporária",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Limpa a Memória Temporária": {
+        "main": [
+          [
+            {
+              "node": "Seta Mensagem para o Agente",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Memória do Agente": {
+        "ai_memory": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "ai_memory",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Valida WhiteList": {
+        "main": [
+          [
+            {
+              "node": "Se estiver na lista não ativa o bot",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Se estiver na lista não ativa o bot": {
+        "main": [
+          [
+            {
+              "node": "No Operation, do nothing",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Think": {
+        "ai_tool": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se gera histórico mensagem": {
+        "main": [
+          [
+            {
+              "node": "Cria Mensagem no Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "No Operation, do nothing1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenRouter Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Estrutura da Mensagem de Retorno",
+              "type": "ai_languageModel",
+              "index": 0
+            },
+            {
+              "node": "Ajusta o Parse do JSON",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "4o": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request": {
+        "main": [
+          [
+            {
+              "node": "Transcreve Audio com OpenAI",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request1": {
+        "main": [
+          [
+            {
+              "node": "Traduz Imagem em Texto",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request2": {
+        "main": [
+          [
+            {
+              "node": "Extrai Dados do PDF",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Espera 2 segundos1": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request5",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Estruturação do JSON de saída": {
+        "main": [
+          [
+            {
+              "node": "Saida do Agente",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Valida se Humano está enviando mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se é pra enviar msg": {
+        "main": [
+          [
+            {
+              "node": "Baixa a img",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se é pra enviar msg1": {
+        "main": [
+          [
+            {
+              "node": "Baixa a img1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Valida se Humano está enviando mensagem": {
+        "main": [
+          [
+            {
+              "node": "No Operation, do nothing2",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Variáveis do Fluxo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request5": {
+        "main": [
+          [
+            {
+              "node": "Espera 2 segundos",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Espera 2 segundos1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Saida do Agente": {
+        "main": [
+          [
+            {
+              "node": "Verifica se gera histórico mensagem",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Verifica se deve humizar",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Verifica se deve gerar audio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upload media": {
+        "main": [
+          [
+            {
+              "node": "Envia a imagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Baixa a img": {
+        "main": [
+          [
+            {
+              "node": "Upload media",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Seta Mensagem para o Agente": {
+        "main": [
+          [
+            {
+              "node": "Pega histórico de mensagens",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Junta toda mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pega histórico de mensagens": {
+        "main": [
+          [
+            {
+              "node": "Formata histórico de mensagens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Formata histórico de mensagens": {
+        "main": [
+          [
+            {
+              "node": "Junta toda mensagem",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Junta toda mensagem": {
+        "main": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upload media1": {
+        "main": [
+          [
+            {
+              "node": "Envia a imagem1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Baixa a img1": {
+        "main": [
+          [
+            {
+              "node": "Upload media1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request6": {
+        "main": [
+          []
+        ]
+      },
+      "Calcula Tokens - Tools1": "***REMOVIDO***",
+      "When clicking ‘Execute workflow’": {
+        "main": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Variáveis do Fluxo": {
+        "main": [
+          [
+            {
+              "node": "Identifica o Tipo de Mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "dispara-email": {
+        "ai_tool": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "cria-condomino": {
+        "ai_tool": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monteiro - Agente IA Condominial": {
+        "main": [
+          [
+            {
+              "node": "Calcula Tokens - Tools1",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Estruturação do JSON de saída",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "When chat message received": {
+        "main": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "criar-notificacao": {
+        "ai_tool": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "consulta-dados": {
+        "ai_tool": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
   "tags": []
 }
