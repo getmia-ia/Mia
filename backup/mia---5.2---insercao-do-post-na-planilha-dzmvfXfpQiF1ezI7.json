@@ -1,0 +1,603 @@
+{
+  "updatedAt": "2026-05-21T15:21:54.584Z",
+  "createdAt": "2026-05-21T13:25:53.016Z",
+  "id": "dzmvfXfpQiF1ezI7",
+  "name": "Mia - 5.2 - Inserção do post na planilha",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "8c81f320-7018-4a84-9067-0c0685b1f29b",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tipo }}",
+                    "rightValue": "=video",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "addf023b-209e-4b90-a9bd-c05f18470a91"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Vídeo"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "8ffa4b5e-1300-4318-9c3c-5653c8bbf393",
+                    "leftValue": "={{ $json.tipo }}",
+                    "rightValue": "carrossel",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Imagens"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        416,
+        0
+      ],
+      "id": "77640bb5-9949-4658-b100-6b6af1444846",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.query;\nconst parsed = JSON.parse(raw);\n\nconst fonte = parsed.fonte ?? null;\nconst horario = parsed.horario ?? null;\nconst dados_post = parsed.dados_post ?? {};\nconst dados_cliente = parsed.dados_cliente ?? {};\n\n// ─── Detectar tipo ───────────────────────────────────────────\nconst CAMPOS_VIDEO = [\"video\", \"video_caption\"];\nconst CAMPOS_CARROSSEL = [\"imagens\", \"slides\", \"cards\", \"images\"];\n\nconst temVideo = CAMPOS_VIDEO.some(c => dados_post[c] != null);\nconst temCarrossel = CAMPOS_CARROSSEL.some(c => dados_post[c] != null);\n\nlet tipo = \"desconhecido\";\nif (temVideo) tipo = \"video\";\nelse if (temCarrossel) tipo = \"carrossel\";\n\n// ─── Campos base do post (presentes em ambos os tipos) ───────\nconst CAMPOS_BASE_POST = [\"id\", \"client\", \"user\", \"user_number_phone\", \"created_at\", \"status\"];\n\nconst post_base = {};\nfor (const campo of CAMPOS_BASE_POST) {\n  post_base[campo] = dados_post[campo] ?? null;\n}\n\n// ─── Campos específicos por tipo ─────────────────────────────\nlet post_conteudo = {};\n\nif (tipo === \"video\") {\n  post_conteudo = {\n    video_url: dados_post.video ?? null,\n    caption: dados_post.video_caption ?? null,\n  };\n} else if (tipo === \"carrossel\") {\n  // Pega o campo de slides independente do nome que vier\n  const campoSlides = CAMPOS_CARROSSEL.find(c => dados_post[c] != null);\n  const slides = dados_post[campoSlides];\n\n  post_conteudo = {\n    slides: Array.isArray(slides)\n      ? slides.map((slide, index) => ({\n          numero: index + 1,\n          ...(typeof slide === \"string\" ? { url: slide } : slide),\n        }))\n      : slides,\n    total_slides: Array.isArray(slides) ? slides.length : null,\n    caption: dados_post.caption ?? dados_post.video_caption ?? null,\n  };\n}\n\n// ─── Campos extras (qualquer campo não mapeado acima) ─────────\nconst CAMPOS_CONHECIDOS = [\n  ...CAMPOS_BASE_POST,\n  ...CAMPOS_VIDEO,\n  ...CAMPOS_CARROSSEL,\n  \"caption\",\n];\n\nconst extras = {};\nfor (const campo of Object.keys(dados_post)) {\n  if (!CAMPOS_CONHECIDOS.includes(campo)) {\n    extras[campo] = dados_post[campo];\n  }\n}\n\n// ─── Dados do cliente ─────────────────────────────────────────\nconst cliente = {\n  nome: dados_cliente.cliente ?? null,\n  ramo: dados_cliente.ramo ?? null,\n  target_audience: dados_cliente.target_audience ?? null,\n  keywords: dados_cliente.keywords_context ?? null,\n  criterios_relevancia: dados_cliente.criterios_relevancia ?? null,\n};\n\n// ─── Campos extras do cliente (qualquer campo não mapeado) ────\nconst CAMPOS_CONHECIDOS_CLIENTE = [\"cliente\", \"ramo\", \"target_audience\", \"keywords_context\", \"criterios_relevancia\"];\n\nfor (const campo of Object.keys(dados_cliente)) {\n  if (!CAMPOS_CONHECIDOS_CLIENTE.includes(campo)) {\n    cliente[campo] = dados_cliente[campo];\n  }\n}\n\n// ─── Resultado final ──────────────────────────────────────────\nconst resultado = {\n  tipo,\n  fonte,\n  horario,\n  post: {\n    ...post_base,\n    ...post_conteudo,\n    ...(Object.keys(extras).length > 0 ? { extras } : {}),\n  },\n  cliente,\n};\n\nreturn [{ json: resultado }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "93831d1c-3e38-41ab-a68e-f053aec440e7",
+      "name": "Organiza dados para inserir na planilha"
+    },
+    {
+      "parameters": {
+        "content": "### Insere o vídeo e suas informações na planilha, também vai com o horário definido pelo usuário.",
+        "height": 320,
+        "width": 352,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        608,
+        -224
+      ],
+      "typeVersion": 1,
+      "id": "d17e6cb5-75be-4f3f-ab86-b7cfd0f7d530",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "16FcWxp2QO4Sr0xsNFrHCYbg7vZxJMdtgchLd2_miAQc",
+          "mode": "list",
+          "cachedResultName": "Controle Posts IA - Geral",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16FcWxp2QO4Sr0xsNFrHCYbg7vZxJMdtgchLd2_miAQc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 850978043,
+          "mode": "list",
+          "cachedResultName": "informações_posts",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16FcWxp2QO4Sr0xsNFrHCYbg7vZxJMdtgchLd2_miAQc/edit#gid=850978043"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fonte": "={{ $json.fonte }}",
+            "cliente": "={{ $json.post.client }}",
+            "data_criacao": "={{ DateTime.fromISO($json.post.created_at).setZone('America/Sao_Paulo').toFormat('dd/MM/yyyy HH:mm') }}",
+            "horario_post_blog": "-",
+            "horario_post_instagram": "={{ $json.horario }}",
+            "horario_post_linkedin": "-",
+            "horario_post_x": "-",
+            "horario_post_whatsapp": "-",
+            "id_post": "={{ $json.post.id }}",
+            "titulo": "-",
+            "briefing": "-",
+            "artigo_blog": "-",
+            "legenda_instagram": "={{ $json.post.caption }}",
+            "legenda_linkedin": "-",
+            "legenda_x": "-",
+            "legenda_whatsapp": "-",
+            "status_blog": "-",
+            "status_instagram": "={{ $json.post.status }}",
+            "status_linkedin": "-",
+            "status_x": "-",
+            "status_whatsapp": "-",
+            "nota_criterio": "-",
+            "nota_relevancia": "-",
+            "nota_aprovador": "-",
+            "imagem_blog_url": "-",
+            "imagem1_url": "={{ $json.post.video_url }}",
+            "imagem2_url": "-",
+            "imagem3_url": "-",
+            "imagem4_url": "-",
+            "imagem5_url": "-",
+            "imagem6_url": "-",
+            "justificativa_blog": "-",
+            "justificativa_instagram": "-",
+            "justificativa_linkedin": "-",
+            "justificativa_x": "-",
+            "justificativa_whatsapp": "-",
+            "origem": "-",
+            "template_whatsapp": "-"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "fonte",
+              "displayName": "fonte",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cliente",
+              "displayName": "cliente",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "data_criacao",
+              "displayName": "data_criacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "horario_post_blog",
+              "displayName": "horario_post_blog",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "horario_post_instagram",
+              "displayName": "horario_post_instagram",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "horario_post_linkedin",
+              "displayName": "horario_post_linkedin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "horario_post_x",
+              "displayName": "horario_post_x",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "horario_post_whatsapp",
+              "displayName": "horario_post_whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "id_post",
+              "displayName": "id_post",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "titulo",
+              "displayName": "titulo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "briefing",
+              "displayName": "briefing",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "artigo_blog",
+              "displayName": "artigo_blog",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "legenda_instagram",
+              "displayName": "legenda_instagram",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "legenda_linkedin",
+              "displayName": "legenda_linkedin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "legenda_x",
+              "displayName": "legenda_x",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "legenda_whatsapp",
+              "displayName": "legenda_whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status_blog",
+              "displayName": "status_blog",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status_instagram",
+              "displayName": "status_instagram",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status_linkedin",
+              "displayName": "status_linkedin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status_x",
+              "displayName": "status_x",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status_whatsapp",
+              "displayName": "status_whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "nota_criterio",
+              "displayName": "nota_criterio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "nota_relevancia",
+              "displayName": "nota_relevancia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "nota_aprovador",
+              "displayName": "nota_aprovador",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "imagem_blog_url",
+              "displayName": "imagem_blog_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "imagem1_url",
+              "displayName": "imagem1_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "imagem2_url",
+              "displayName": "imagem2_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "imagem3_url",
+              "displayName": "imagem3_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "imagem4_url",
+              "displayName": "imagem4_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "imagem5_url",
+              "displayName": "imagem5_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "imagem6_url",
+              "displayName": "imagem6_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "justificativa_blog",
+              "displayName": "justificativa_blog",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "justificativa_instagram",
+              "displayName": "justificativa_instagram",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "justificativa_linkedin",
+              "displayName": "justificativa_linkedin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "justificativa_x",
+              "displayName": "justificativa_x",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "justificativa_whatsapp",
+              "displayName": "justificativa_whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "origem",
+              "displayName": "origem",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "template_whatsapp",
+              "displayName": "template_whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        736,
+        -112
+      ],
+      "id": "8ebc0580-9032-4bfb-933e-fb23a4aea3f9",
+      "name": "Insere vídeo na planilha",
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Organiza dados para inserir na planilha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Organiza dados para inserir na planilha": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Insere vídeo na planilha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "62e28394-1003-46fa-ac3c-5d306f8462bd",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-05-21T13:25:53.016Z",
+      "createdAt": "2026-05-21T13:25:53.016Z",
+      "role": "workflow:owner",
+      "workflowId": "dzmvfXfpQiF1ezI7",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
