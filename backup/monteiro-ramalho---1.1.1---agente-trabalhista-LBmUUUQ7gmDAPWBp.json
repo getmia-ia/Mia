@@ -1,0 +1,432 @@
+{
+  "updatedAt": "2026-05-22T22:07:05.467Z",
+  "createdAt": "2026-05-22T20:22:50.666Z",
+  "id": "LBmUUUQ7gmDAPWBp",
+  "name": "Monteiro Ramalho - 1.1.1 - Agente Trabalhista",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        544,
+        288
+      ],
+      "id": "3627a3e8-5504-4a11-ab08-c7538a0a7642",
+      "name": "When chat message received",
+      "webhookId": "799e3eba-c993-44ba-a605-d0b8ed53c4dd"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1008,
+        384
+      ],
+      "id": "59e6e58d-1c88-4346-8aaf-15c0dff5af3b",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "=  \n{\n  \n  \n\"query\": \"{{ $json.chatInput }}\",\n  \n  \n\"nome\": \"Taysa\",\n  \n  \n\"telefone\": \"5534992150692\",\n  \n  \n\"userType\": \"gestor\"\n  \n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        288
+      ],
+      "id": "dc65d7a6-9a81-4b30-b5ec-095a0aff7dac",
+      "name": "preparar valores teste"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.telefone }}_mem_agent_Monteiro_SDR",
+        "sessionTTL": "=100000",
+        "contextWindowLength": 20
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryRedisChat",
+      "typeVersion": 1.4,
+      "position": [
+        1296,
+        608
+      ],
+      "id": "0c0e6a26-fc56-4b9e-990f-f7eabddb2e60",
+      "name": "Memory",
+      "notesInFlow": false,
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "query"
+            },
+            {
+              "name": "telefone"
+            },
+            {
+              "name": "nome"
+            },
+            {
+              "name": "dados_coletados"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        704,
+        464
+      ],
+      "id": "4aeeceb1-cf19-4f85-bf59-15a4645c7391",
+      "name": "exec prod"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "bms-historico_mensagens",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $json.telefone }}"
+            },
+            {
+              "keyName": "nome_app",
+              "condition": "eq",
+              "keyValue": "=BMS-GA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        480,
+        -1072
+      ],
+      "id": "fba185bc-8d58-4189-943a-5e124409d688",
+      "name": "Pega histórico de mensagens",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "1mIJ3XxYMjb55Xua",
+          "name": "BMS - Supabase"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Ordena as mensagens por data (mais recente → mais antiga)\nitems.sort((a, b) => new Date(b.json.created_at) - new Date(a.json.created_at));\n\n// 2. Pega apenas as últimas 50 mensagens caso o histórico seja muito longo\nconst itensRecentes = items.slice(-10);\n\nfunction formatarData(isoDate) {\n  const d = new Date(isoDate);\n  const dia = String(d.getDate()).padStart(2, '0');\n  const mes = String(d.getMonth() + 1).padStart(2, '0');\n  const ano = d.getFullYear();\n  return `${dia}/${mes}/${ano}`;\n}\n\nconst historico = [];\n\nfor (const item of itensRecentes) {\n  const row = item.json;\n  const dataFormatada = formatarData(row.created_at);\n\n  // Processa mensagem do Usuário\n  if (row.mensagem_usuario && row.mensagem_usuario.toString().trim() !== \"\") {\n    historico.push(`${dataFormatada} - Usuário: ${row.mensagem_usuario.toString().trim()}`);\n  }\n\n  // Processa mensagem do Agente\n  if (row.mensagem_agente && row.mensagem_agente.toString().trim() !== \"\") {\n    // Caso a mensagem do agente venha como array/objeto de outro fluxo, converte para string\n    const msgAgente = typeof row.mensagem_agente === 'string' \n      ? row.mensagem_agente \n      : JSON.stringify(row.mensagem_agente);\n      \n    historico.push(`${dataFormatada} - Agente: ${msgAgente.trim()}`);\n  }\n}\n\nreturn [\n  {\n    json: {\n      historico_conversa: historico.join(\"\\n\\n\")\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        -1072
+      ],
+      "id": "9f09196d-f8e4-439d-a370-dcc4eae402e2",
+      "name": "Formata histórico de mensagens",
+      "disabled": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = items[0].json;\n\nlet output = \"\";\n\nif (Array.isArray(data)) {\n  output = data[0].output;\n} else if (data.output) {\n  output = data.output;\n}\n\nreturn [\n  {\n    json: {\n      response: output\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -1056
+      ],
+      "id": "1d673c41-20ec-4da3-b1f5-a040e5c867ba",
+      "name": "Parse do output",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "content": "## Se precisar passar o histórico pro agente",
+        "height": 304,
+        "width": 560
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        368,
+        -1168
+      ],
+      "id": "a7a3aa77-b16c-4275-9c57-4f1860298f15",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Se precisar formatar o output",
+        "height": 304
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        976,
+        -1168
+      ],
+      "id": "5d7ec48c-1c03-4e6b-8de1-4afda94e9401",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## Sub-Agente: Triagem (Atendimento Inicial)\n\n**Identidade:** Mindy (BMS - Gestão de Afastados)\n**Arquitetura:** Multi-agentes (Acionado via Atendimento Inicial).\n**Função:** Atuar como roteador (triage). Lê o perfil do usuário, identifica a intenção e direciona para o especialista correto. Nunca resolve o problema diretamente.",
+        "height": 992,
+        "width": 1600,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        432,
+        -192
+      ],
+      "id": "6c36dbb7-7b06-42a7-832e-70fca0755e07",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "##  Inputs do Sub-fluxo\n\nDados obrigatórios repassados pelo fluxo principal:\n\n* query: Mensagem atual do usuário.\n* telefone: Número de contato.\n* nome: Nome do colaborador/gestor.\n* userType: FONTE DA VERDADE (\"funcionario\" ou \"gestor\"). O agente NUNCA pergunta o perfil ao usuário.",
+        "height": 816,
+        "width": 400,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        480,
+        -32
+      ],
+      "id": "4d4f35e9-f558-4729-8763-ce14871a508b",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "## Regras de Roteamento (Decisão Central)\n\nO agente decide com base no userType injetado pelo sistema:\n\n1. Saudação Genérica (\"Oi\", \"Bom dia\"):\n- Retorna a mensagem de acolhimento personalizada para Funcionário ou Gestor.\n-  NÃO emite comando de roteamento.\n\n2. Envio de Arquivo (Foto/PDF):\n-  Direciona IMEDIATAMENTE para Subir Atestado (independente do perfil).\n\n3. Demanda Específica:\n- Se funcionario:  Perguntas GA Funcionario.\n- Se gestor:  Perguntas GA Gestor (dados/analítico) OU Perguntas GA Funcionario (dúvidas operacionais).",
+        "height": 816,
+        "width": 1120,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        896,
+        -32
+      ],
+      "id": "6fc854e5-308d-4358-b614-c603c1e18585",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o",
+        "options": {
+          "temperature": 0.6
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        608
+      ],
+      "id": "8ddf8e98-4a4a-4e6a-9f78-2eb2970d6024",
+      "name": "Modelo LLM",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "### Padrão de Saída (Output OBRIGATÓRIO)\n\nQuando uma intenção é identificada, o agente encerra a interação e força o MCP Server a mudar de ferramenta usando ESTRITAMENTE o formato:\n\nSISTEMA INFO - Direcionando para [nome exato do fluxo]\n\n(Exceção: Mensagens de saudação retornam apenas texto comum de boas-vindas). \n\n Bloqueio Absoluto: Um funcionario NUNCA é roteado para os fluxos de gestor.",
+        "height": 288,
+        "width": 480
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1504,
+        480
+      ],
+      "id": "b82ce20a-762b-4800-aad4-0f2dea40aa64",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        1424,
+        608
+      ],
+      "id": "96d86980-ac05-44dc-8298-0da1a2e2a7e9",
+      "name": "calcular_rescisao",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Merge').first().json.query }}",
+        "options": {
+          "systemMessage": "=Você é o TRIAJUR, agente especializado em triagem jurídica trabalhista do escritório Monteiro Ramalho Advocacia.\nVocê recebe leads que já foram filtrados pelo Orquestrador.\n\nMISSÃO: \nSua função é realizar triagem rápida; identificar potencial jurídico; calcular rescisões; identificar irregularidades trabalhistas; e conduzir o cliente para fechamento.\n\nIDENTIDADE E REGRAS DE LINGUAGEM:\nVocê deve responder de forma rápida, direta, simples, convincente e humana, sem usar juridiquês excessivo.\n- Seu foco é velocidade, clareza, conversão e precisão prática.\n- Identifique o tipo do caso em até 3 mensagens.\n- Responda em menos de 2 minutos e conclua a triagem em até 5 minutos.\n\nREGRAS CRÍTICAS DE COMPORTAMENTO:\n1. Você NÃO deve inventar valores, não deve inventar direitos e não deve afirmar tese sem base mínima.\n2. Nunca mande blocos longos de perguntas; faça uma pergunta por vez, esperando a resposta do lead.\n3. Não gere respostas longas no WhatsApp.\n\n--- FLUXO DE EXECUÇÃO ---\n\nETAPA 1: QUALIFICAÇÃO ESPECÍFICA (Por tipo de caso)\nAdapte suas perguntas de acordo com o cenário do lead. A cada resposta relevante, acione a tool `atualizar_dados_caso`.\n\nCENÁRIO A - RESCISÃO SEM JUSTA CAUSA:\nVocê DEVE realizar as perguntas abaixo seguindo ESTRITAMENTE a ordem numérica (uma por vez). É PROIBIDO pular para a etapa de fechamento/conversão antes de finalizar todos os 8 itens desta lista:\n1. Qual o nome da empresa?\n2. Data de admissão e data da saída/demissão.\n3. Salário bruto e cargo/função.\n4. Aviso prévio: foi trabalhado, indenizado ou não cumprido?\n5. Recebeu algum valor? Se sim, quanto e quando?\n6. Jornada de trabalho: pergunte sobre o horário real, intervalo, se fazia horas extras e se as recebia corretamente.\n7. FGTS: era depositado? Recebeu multa de 40%?\n8. Agravantes: pergunte se ocorreu alguma destas situações: doença/afastamento, acidente de trabalho, assédio ou se era gestante.\n\nCENÁRIO B - PEDIDO DE DEMISSÃO:\nVocê DEVE realizar as perguntas abaixo seguindo ESTRITAMENTE a ordem numérica (uma por vez). É PROIBIDO pular para a etapa de fechamento/conversão antes de finalizar todos os itens:\n1. Qual o nome da empresa?\n2. Cumpriu o aviso prévio trabalhando até o último dia?\n3. Não cumpriu o aviso prévio e a empresa descontou do acerto?\n4. A empresa quitou tudo no prazo ou não pagou/pagou com atraso?\n\nCENÁRIO C - JUSTA CAUSA:\nVocê DEVE realizar as perguntas abaixo seguindo ESTRITAMENTE a ordem numérica (uma por vez). É PROIBIDO pular para a etapa de fechamento/conversão antes de finalizar todos os itens:\n1. Qual o nome da empresa?\n2. A empresa alegou falta grave, mas não houve prova?\n3. Houve apenas uma falta leve, sem advertências ou suspensões anteriores?\n4. A justa causa foi aplicada muito tempo depois do fato?\n5. A empresa não explicou claramente o motivo?\n\nCENÁRIO D - TRABALHO SEM CARTEIRA ASSINADA (VÍNCULO):\nVocê DEVE realizar as perguntas abaixo seguindo ESTRITAMENTE a ordem numérica (uma por vez). É PROIBIDO pular para a etapa de fechamento/conversão antes de finalizar todos os itens:\n1. Qual o nome da empresa?\n2. Data de início do trabalho e data de saída/demissão.\n3. Salário mensal combinado (valor bruto).\n4. Forma de desligamento: dispensa pelo empregador ou saída do empregado.\n5. Férias durante o período trabalhado (sim/não)?\n6. 13º salário: recebeu integral, proporcional ou não recebeu?\n7. Pagamentos por fora, comissões ou horas extras?\n\nETAPA 2: VALIDAÇÃO CONVERSACIONAL E CLASSIFICAÇÃO\nCom base nas respostas, identifique o potencial e classifique usando EXATAMENTE o padrão:\n- QUAL: tem potencial jurídico.\n- CALC OK: pronto para cálculo/fechamento. (Nota: Se o lead tiver 2 ou mais irregularidades, ele é um lead quente e deve ser elevado para CALC OK).\n- ACOMP: acompanhamento (lead morno).\n- DESQ: sem viabilidade.\n* Acione a tool `classificar_lead`.\n\nMOMENTO DE CONVERSÃO (Obrigatório antes de pedir documentos):\nATENÇÃO: Você SÓ TEM PERMISSÃO para enviar a mensagem de conversão APÓS ter concluído TODAS as perguntas do Cenário da Etapa 1. Nunca ofereça o cálculo no meio da entrevista.\n\nApós concluir todas as perguntas do cenário, se identificar direito sonegados ou 2 ou mais irregularidades (lead quente), use este modelo exato:\n\"Pelo que você me relatou, há fortes indícios de irregularidades trabalhistas e possibilidade real de valores a receber. Posso fazer o cálculo completo e já dar entrada no seu processo. Para isso, preciso dos seus documentos e já organizo tudo para você.\"\n\nETAPA 3: COLETA DE DOCUMENTOS\nSolicite os documentos padrão: CTPS (digital ou física), TRCT, Extrato FGTS, Contracheques e, se houver, atestados e conversas de WhatsApp.\n- Oriente: \"Você tem a Carteira de Trabalho Digital (CTPS Digital). Pode acessar pelo aplicativo Carteira de Trabalho Digital no seu celular e gerar o arquivo aqui, por favor?\".\n\nETAPA 4: CÁLCULO E PROPOSTA\nApós receber os documentos, acione a tool `calcular_rescisao`. O cálculo deve prever: saldo de salário, aviso prévio, férias vencidas e proporcionais + 1/3, 13º proporcional e FGTS com multa de 40%.\nApresente o resultado de forma simples:\n- \"Pelo seu período na empresa e salário informado, sua rescisão deve ficar aproximadamente entre R$ X e R$ Y líquidos, além do saque do FGTS + multa de 40% e possível seguro-desemprego.\"\nExplique o fechamento contratual:\n- \"Honorários: 30% sobre o êxito.\"\n- \"Só paga se ganhar.\"\n\nETAPA 5: HANDOFF E FECHAMENTO\nSe o cliente aceitar, explique os próximos passos:\n- \"O próximo passo é assinarmos a procuração, o contrato de honorários e o pedido de justiça gratuita.\"\n- Diga que o Dr. Lucas analisará o caso: \"Essas informações ajudam o Dr. Lucas a entender melhor o seu caso e calcular o que realmente é devido.\"\n- Acione a tool `handoff_advogado` e classifique como FECHADO (contrato assinado).\n\nDADOS DO LEAD:\nNome: {{ $('exec prod').item.json.nome }}\nTelefone: {{ $('exec prod').item.json.telefone }}\nDados já coletados no CRM: {{ $('exec prod').item.json.dados_coletados }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        1200,
+        384
+      ],
+      "id": "860134c9-7782-4e0d-995c-8228567f533f",
+      "name": "Agente Trabalhista"
+    }
+  ],
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "preparar valores teste",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Agente Trabalhista",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "preparar valores teste": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agente Trabalhista",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "exec prod": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Pega histórico de mensagens": {
+      "main": [
+        [
+          {
+            "node": "Formata histórico de mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formata histórico de mensagens": {
+      "main": [
+        []
+      ]
+    },
+    "Modelo LLM": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente Trabalhista",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "calcular_rescisao": {
+      "ai_tool": [
+        []
+      ]
+    },
+    "Agente Trabalhista": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "bfb7a0f1-49f8-473b-b168-c98664685771",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-05-22T20:22:50.666Z",
+      "createdAt": "2026-05-22T20:22:50.666Z",
+      "role": "workflow:owner",
+      "workflowId": "LBmUUUQ7gmDAPWBp",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
