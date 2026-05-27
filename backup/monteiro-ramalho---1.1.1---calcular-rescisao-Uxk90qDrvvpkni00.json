@@ -1,0 +1,235 @@
+{
+  "updatedAt": "2026-05-26T21:14:19.750Z",
+  "createdAt": "2026-05-26T18:36:28.955Z",
+  "id": "Uxk90qDrvvpkni00",
+  "name": "Monteiro Ramalho - 1.1.1 -Calcular Rescisão",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "tipo_desligamento"
+            },
+            {
+              "name": "data_admissao"
+            },
+            {
+              "name": "data_saida"
+            },
+            {
+              "name": "salario_bruto",
+              "type": "number"
+            },
+            {
+              "name": "aviso_previo"
+            },
+            {
+              "name": "valor_recebido",
+              "type": "number"
+            },
+            {
+              "name": "fgts_depositado",
+              "type": "boolean"
+            },
+            {
+              "name": "ferias_gozadas",
+              "type": "boolean"
+            },
+            {
+              "name": "atraso_pagamento",
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        -160
+      ],
+      "id": "d66dea22-0a02-4a83-8f8d-a1aa483604ba",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// TRIAJUR - CÁLCULO RESCISÓRIO MVP\n// ========================================\n\n// ========================================\n// 1. ENTRADA\n// ========================================\n\nconst inputBruto = $input.item.json;\n\nconst dados = inputBruto.body\n? inputBruto.body\n: inputBruto;\n\n// ========================================\n// 2. HELPERS\n// ========================================\n\nconst parseBool = (val) => {\nreturn val === true || val === \"true\";\n};\n\nconst round = (num) => {\nreturn Number(num.toFixed(2));\n};\n\n// ========================================\n// 3. EXTRAÇÃO DE DADOS\n// ========================================\n\nconst tipo_desligamento =\ndados.tipo_desligamento || \"sem_justa_causa\";\n\nconst data_admissao =\nnew Date(dados.data_admissao);\n\nconst data_saida =\nnew Date(dados.data_saida);\n\nconst salario_bruto =\nparseFloat(dados.salario_bruto) || 0;\n\nconst aviso_previo =\ndados.aviso_previo || \"nao_houve\";\n\nconst valor_recebido =\nparseFloat(dados.valor_recebido) || 0;\n\nconst atraso_pagamento =\nparseBool(dados.atraso_pagamento);\n\nconst fgts_depositado =\n!(dados.fgts_depositado === false ||\ndados.fgts_depositado === \"false\");\n\nconst ferias_vencidas =\nparseBool(dados.ferias_vencidas);\n\nconst horas_extras =\nparseBool(dados.horas_extras);\n\nconst doenca_ocupacional =\nparseBool(dados.doenca_ocupacional);\n\nconst assedio =\nparseBool(dados.assedio);\n\n// ========================================\n// 4. CÁLCULO DE TEMPO\n// ========================================\n\nconst diffMs =\ndata_saida - data_admissao;\n\nconst diffDias = Math.floor(\ndiffMs / (1000 * 60 * 60 * 24)\n);\n\nconst meses_totais =\nMath.floor(diffDias / 30.41);\n\nconst anos_completos =\nMath.floor(meses_totais / 12);\n\nconst meses_restantes =\nmeses_totais % 12;\n\nconst dia_saida =\ndata_saida.getDate();\n\n// ========================================\n// 5. SALDO DE SALÁRIO\n// ========================================\n\nconst saldo_salario =\n(salario_bruto / 30) * dia_saida;\n\n// ========================================\n// 6. AVISO PRÉVIO\n// ========================================\n\nlet dias_aviso = 0;\nlet valor_aviso = 0;\nlet projecao_aviso = false;\n\nif (tipo_desligamento === \"sem_justa_causa\") {\n\n    dias_aviso = Math.min(\n        30 + (anos_completos * 3),\n        90\n    );\n\n    if (\n        aviso_previo === \"indenizado\" ||\n        aviso_previo === \"nao_houve\"\n    ) {\n\n        valor_aviso =\n            (salario_bruto / 30) * dias_aviso;\n\n        projecao_aviso = true;\n    }\n\n} else if (\n    tipo_desligamento === \"pedido_demissao\" &&\n    aviso_previo === \"nao_cumpriu\"\n) {\n\n    valor_aviso = -salario_bruto;\n}\n\nconst meses_projecao =\nprojecao_aviso\n? Math.floor(dias_aviso / 30)\n: 0;\n\n// ========================================\n// 7. FÉRIAS\n// ========================================\n\n// Férias vencidas SOMENTE se confirmado\n\nlet valor_ferias_vencidas = 0;\n\nif (ferias_vencidas) {\n\n    valor_ferias_vencidas =\n        salario_bruto * 1.3333;\n}\n\n// Férias proporcionais\n\nlet ferias_proporcionais = 0;\n\nif (tipo_desligamento !== \"justa_causa\") {\n\n    let avos_ferias =\n        meses_restantes;\n\n    // Regra dos 15 dias\n\n    if (dia_saida >= 15) {\n        avos_ferias += 1;\n    }\n\n    avos_ferias += meses_projecao;\n\n    avos_ferias =\n        Math.min(avos_ferias, 12);\n\n    ferias_proporcionais =\n        ((salario_bruto / 12) * avos_ferias) * 1.3333;\n}\n\n// ========================================\n// 8. 13º PROPORCIONAL\n// ========================================\n\nlet decimo_terceiro = 0;\n\nif (tipo_desligamento !== \"justa_causa\") {\n\n    let avos_13 =\n        data_saida.getMonth();\n\n    // Regra dos 15 dias\n\n    if (dia_saida >= 15) {\n        avos_13 += 1;\n    }\n\n    avos_13 += meses_projecao;\n\n    avos_13 =\n        Math.min(avos_13, 12);\n\n    decimo_terceiro =\n        (salario_bruto / 12) * avos_13;\n}\n\n// ========================================\n// 9. FGTS + MULTA 40%\n// ========================================\n\nconst fgts_mensal =\nsalario_bruto * 0.08;\n\nconst fgts_saldo_estimado =\nfgts_mensal * meses_totais;\n\nconst multa_fgts =\ntipo_desligamento === \"sem_justa_causa\"\n? fgts_saldo_estimado * 0.40\n: 0;\n\n// ========================================\n// 10. MULTA 477\n// ========================================\n\nconst multa_477 =\natraso_pagamento\n? salario_bruto\n: 0;\n\n// ========================================\n// 11. TOTAL BASE\n// ========================================\n\nlet total_base =\nsaldo_salario +\nvalor_aviso +\nvalor_ferias_vencidas +\nferias_proporcionais +\ndecimo_terceiro +\nmulta_477 +\nmulta_fgts;\n\nif (total_base < 0) {\ntotal_base = 0;\n}\n\n// ========================================\n// 12. DESCONTO DO QUE JÁ RECEBEU\n// ========================================\n\nconst valor_restante =\nMath.max(\ntotal_base - valor_recebido,\n0\n);\n\n// ========================================\n// 13. FAIXA ESTIMADA\n// ========================================\n\nconst faixaMin =\ntotal_base * 0.90;\n\nconst faixaMax =\ntotal_base * 1.10;\n\n// ========================================\n// 14. POTENCIAIS ADICIONAIS\n// ========================================\n\nconst potenciais_adicionais = [];\n\nif (horas_extras) {\n\n    potenciais_adicionais.push(\n        \"Há indícios de horas extras e reflexos.\"\n    );\n}\n\nif (doenca_ocupacional) {\n\n    potenciais_adicionais.push(\n        \"Há indícios de doença ocupacional.\"\n    );\n}\n\nif (assedio) {\n\n    potenciais_adicionais.push(\n        \"Há indícios de assédio moral.\"\n    );\n}\n\nif (!fgts_depositado) {\n\n    potenciais_adicionais.push(\n        \"Há indícios de irregularidades no FGTS.\"\n    );\n}\n\n// ========================================\n// 15. TEXTO AO CLIENTE\n// ========================================\n\nlet frase_direitos = \"\";\n\nif (tipo_desligamento === \"sem_justa_causa\") {\n\n    frase_direitos =\n        \", além do saque do FGTS com multa de 40% e possível seguro-desemprego.\";\n} else if (\n    tipo_desligamento === \"pedido_demissao\"\n) {\n\n    frase_direitos =\n        \". No pedido de demissão normalmente não há saque do FGTS nem seguro-desemprego.\";\n} else {\n\n    frase_direitos = \".\";\n}\n\nlet texto_apresentacao =\n\"Pelo seu período na empresa e salário informado, sua rescisão pode ficar aproximadamente entre R$ \" +\nround(faixaMin) +\n\" e R$ \" +\nround(faixaMax) +\n\" líquidos\" +\nfrase_direitos;\n\n// Adiciona potenciais adicionais\n\nif (potenciais_adicionais.length > 0) {\n\n    texto_apresentacao +=\n        \"\\n\\nAlém disso:\\n✅ \" +\n        potenciais_adicionais.join(\"\\n✅ \");\n}\n\n// ========================================\n// 16. CLASSIFICAÇÃO\n// ========================================\n\nlet classificacao = \"QUAL\";\n\nif (\npotenciais_adicionais.length > 0 ||\nvalor_restante > salario_bruto\n) {\n\n    classificacao = \"CALC OK\";\n}\n\n// ========================================\n// 17. RETORNO\n// ========================================\n\nreturn {\n    mensagem_para_o_cliente: texto_apresentacao,\n    classificacao: classificacao,\n    resumo: {\n        saldo_salario: round(saldo_salario),\n        aviso_previo: round(valor_aviso),\n        ferias_vencidas: round(valor_ferias_vencidas),\n        ferias_proporcionais: round(ferias_proporcionais),\n        decimo_terceiro: round(decimo_terceiro),\n        multa_fgts: round(multa_fgts),\n        multa_477: round(multa_477),\n        total_estimado: round(total_base),\n        valor_ja_recebido: round(valor_recebido),\n        valor_restante_estimado: round(valor_restante),\n        faixa_estimativa: {\n            minimo: round(faixaMin),\n            maximo: round(faixaMax)\n        }\n    },\n    potenciais_adicionais: potenciais_adicionais\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "1aeef4a6-e523-48c9-9053-a893543f1908",
+      "name": "calcula o valor"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "b87052d2-9ed3-4ec2-81af-f09770b302ef",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        16,
+        0
+      ],
+      "id": "aa9cd842-a49e-40cd-9539-ad885ad4e050",
+      "name": "Webhook",
+      "webhookId": "b87052d2-9ed3-4ec2-81af-f09770b302ef"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        []
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "calcula o valor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "5706029e-5057-4f4f-9200-a3406bb0e4af",
+  "activeVersionId": "5706029e-5057-4f4f-9200-a3406bb0e4af",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-05-26T18:36:28.955Z",
+      "createdAt": "2026-05-26T18:36:28.955Z",
+      "role": "workflow:owner",
+      "workflowId": "Uxk90qDrvvpkni00",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-05-26T21:14:19.756Z",
+    "createdAt": "2026-05-26T21:14:19.756Z",
+    "versionId": "5706029e-5057-4f4f-9200-a3406bb0e4af",
+    "workflowId": "Uxk90qDrvvpkni00",
+    "nodes": [
+      {
+        "parameters": {
+          "workflowInputs": {
+            "values": [
+              {
+                "name": "tipo_desligamento"
+              },
+              {
+                "name": "data_admissao"
+              },
+              {
+                "name": "data_saida"
+              },
+              {
+                "name": "salario_bruto",
+                "type": "number"
+              },
+              {
+                "name": "aviso_previo"
+              },
+              {
+                "name": "valor_recebido",
+                "type": "number"
+              },
+              {
+                "name": "fgts_depositado",
+                "type": "boolean"
+              },
+              {
+                "name": "ferias_gozadas",
+                "type": "boolean"
+              },
+              {
+                "name": "atraso_pagamento",
+                "type": "boolean"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          0,
+          -160
+        ],
+        "id": "d66dea22-0a02-4a83-8f8d-a1aa483604ba",
+        "name": "When Executed by Another Workflow"
+      },
+      {
+        "parameters": {
+          "jsCode": "// ========================================\n// TRIAJUR - CÁLCULO RESCISÓRIO MVP\n// ========================================\n\n// ========================================\n// 1. ENTRADA\n// ========================================\n\nconst inputBruto = $input.item.json;\n\nconst dados = inputBruto.body\n? inputBruto.body\n: inputBruto;\n\n// ========================================\n// 2. HELPERS\n// ========================================\n\nconst parseBool = (val) => {\nreturn val === true || val === \"true\";\n};\n\nconst round = (num) => {\nreturn Number(num.toFixed(2));\n};\n\n// ========================================\n// 3. EXTRAÇÃO DE DADOS\n// ========================================\n\nconst tipo_desligamento =\ndados.tipo_desligamento || \"sem_justa_causa\";\n\nconst data_admissao =\nnew Date(dados.data_admissao);\n\nconst data_saida =\nnew Date(dados.data_saida);\n\nconst salario_bruto =\nparseFloat(dados.salario_bruto) || 0;\n\nconst aviso_previo =\ndados.aviso_previo || \"nao_houve\";\n\nconst valor_recebido =\nparseFloat(dados.valor_recebido) || 0;\n\nconst atraso_pagamento =\nparseBool(dados.atraso_pagamento);\n\nconst fgts_depositado =\n!(dados.fgts_depositado === false ||\ndados.fgts_depositado === \"false\");\n\nconst ferias_vencidas =\nparseBool(dados.ferias_vencidas);\n\nconst horas_extras =\nparseBool(dados.horas_extras);\n\nconst doenca_ocupacional =\nparseBool(dados.doenca_ocupacional);\n\nconst assedio =\nparseBool(dados.assedio);\n\n// ========================================\n// 4. CÁLCULO DE TEMPO\n// ========================================\n\nconst diffMs =\ndata_saida - data_admissao;\n\nconst diffDias = Math.floor(\ndiffMs / (1000 * 60 * 60 * 24)\n);\n\nconst meses_totais =\nMath.floor(diffDias / 30.41);\n\nconst anos_completos =\nMath.floor(meses_totais / 12);\n\nconst meses_restantes =\nmeses_totais % 12;\n\nconst dia_saida =\ndata_saida.getDate();\n\n// ========================================\n// 5. SALDO DE SALÁRIO\n// ========================================\n\nconst saldo_salario =\n(salario_bruto / 30) * dia_saida;\n\n// ========================================\n// 6. AVISO PRÉVIO\n// ========================================\n\nlet dias_aviso = 0;\nlet valor_aviso = 0;\nlet projecao_aviso = false;\n\nif (tipo_desligamento === \"sem_justa_causa\") {\n\n    dias_aviso = Math.min(\n        30 + (anos_completos * 3),\n        90\n    );\n\n    if (\n        aviso_previo === \"indenizado\" ||\n        aviso_previo === \"nao_houve\"\n    ) {\n\n        valor_aviso =\n            (salario_bruto / 30) * dias_aviso;\n\n        projecao_aviso = true;\n    }\n\n} else if (\n    tipo_desligamento === \"pedido_demissao\" &&\n    aviso_previo === \"nao_cumpriu\"\n) {\n\n    valor_aviso = -salario_bruto;\n}\n\nconst meses_projecao =\nprojecao_aviso\n? Math.floor(dias_aviso / 30)\n: 0;\n\n// ========================================\n// 7. FÉRIAS\n// ========================================\n\n// Férias vencidas SOMENTE se confirmado\n\nlet valor_ferias_vencidas = 0;\n\nif (ferias_vencidas) {\n\n    valor_ferias_vencidas =\n        salario_bruto * 1.3333;\n}\n\n// Férias proporcionais\n\nlet ferias_proporcionais = 0;\n\nif (tipo_desligamento !== \"justa_causa\") {\n\n    let avos_ferias =\n        meses_restantes;\n\n    // Regra dos 15 dias\n\n    if (dia_saida >= 15) {\n        avos_ferias += 1;\n    }\n\n    avos_ferias += meses_projecao;\n\n    avos_ferias =\n        Math.min(avos_ferias, 12);\n\n    ferias_proporcionais =\n        ((salario_bruto / 12) * avos_ferias) * 1.3333;\n}\n\n// ========================================\n// 8. 13º PROPORCIONAL\n// ========================================\n\nlet decimo_terceiro = 0;\n\nif (tipo_desligamento !== \"justa_causa\") {\n\n    let avos_13 =\n        data_saida.getMonth();\n\n    // Regra dos 15 dias\n\n    if (dia_saida >= 15) {\n        avos_13 += 1;\n    }\n\n    avos_13 += meses_projecao;\n\n    avos_13 =\n        Math.min(avos_13, 12);\n\n    decimo_terceiro =\n        (salario_bruto / 12) * avos_13;\n}\n\n// ========================================\n// 9. FGTS + MULTA 40%\n// ========================================\n\nconst fgts_mensal =\nsalario_bruto * 0.08;\n\nconst fgts_saldo_estimado =\nfgts_mensal * meses_totais;\n\nconst multa_fgts =\ntipo_desligamento === \"sem_justa_causa\"\n? fgts_saldo_estimado * 0.40\n: 0;\n\n// ========================================\n// 10. MULTA 477\n// ========================================\n\nconst multa_477 =\natraso_pagamento\n? salario_bruto\n: 0;\n\n// ========================================\n// 11. TOTAL BASE\n// ========================================\n\nlet total_base =\nsaldo_salario +\nvalor_aviso +\nvalor_ferias_vencidas +\nferias_proporcionais +\ndecimo_terceiro +\nmulta_477 +\nmulta_fgts;\n\nif (total_base < 0) {\ntotal_base = 0;\n}\n\n// ========================================\n// 12. DESCONTO DO QUE JÁ RECEBEU\n// ========================================\n\nconst valor_restante =\nMath.max(\ntotal_base - valor_recebido,\n0\n);\n\n// ========================================\n// 13. FAIXA ESTIMADA\n// ========================================\n\nconst faixaMin =\ntotal_base * 0.90;\n\nconst faixaMax =\ntotal_base * 1.10;\n\n// ========================================\n// 14. POTENCIAIS ADICIONAIS\n// ========================================\n\nconst potenciais_adicionais = [];\n\nif (horas_extras) {\n\n    potenciais_adicionais.push(\n        \"Há indícios de horas extras e reflexos.\"\n    );\n}\n\nif (doenca_ocupacional) {\n\n    potenciais_adicionais.push(\n        \"Há indícios de doença ocupacional.\"\n    );\n}\n\nif (assedio) {\n\n    potenciais_adicionais.push(\n        \"Há indícios de assédio moral.\"\n    );\n}\n\nif (!fgts_depositado) {\n\n    potenciais_adicionais.push(\n        \"Há indícios de irregularidades no FGTS.\"\n    );\n}\n\n// ========================================\n// 15. TEXTO AO CLIENTE\n// ========================================\n\nlet frase_direitos = \"\";\n\nif (tipo_desligamento === \"sem_justa_causa\") {\n\n    frase_direitos =\n        \", além do saque do FGTS com multa de 40% e possível seguro-desemprego.\";\n} else if (\n    tipo_desligamento === \"pedido_demissao\"\n) {\n\n    frase_direitos =\n        \". No pedido de demissão normalmente não há saque do FGTS nem seguro-desemprego.\";\n} else {\n\n    frase_direitos = \".\";\n}\n\nlet texto_apresentacao =\n\"Pelo seu período na empresa e salário informado, sua rescisão pode ficar aproximadamente entre R$ \" +\nround(faixaMin) +\n\" e R$ \" +\nround(faixaMax) +\n\" líquidos\" +\nfrase_direitos;\n\n// Adiciona potenciais adicionais\n\nif (potenciais_adicionais.length > 0) {\n\n    texto_apresentacao +=\n        \"\\n\\nAlém disso:\\n✅ \" +\n        potenciais_adicionais.join(\"\\n✅ \");\n}\n\n// ========================================\n// 16. CLASSIFICAÇÃO\n// ========================================\n\nlet classificacao = \"QUAL\";\n\nif (\npotenciais_adicionais.length > 0 ||\nvalor_restante > salario_bruto\n) {\n\n    classificacao = \"CALC OK\";\n}\n\n// ========================================\n// 17. RETORNO\n// ========================================\n\nreturn {\n    mensagem_para_o_cliente: texto_apresentacao,\n    classificacao: classificacao,\n    resumo: {\n        saldo_salario: round(saldo_salario),\n        aviso_previo: round(valor_aviso),\n        ferias_vencidas: round(valor_ferias_vencidas),\n        ferias_proporcionais: round(ferias_proporcionais),\n        decimo_terceiro: round(decimo_terceiro),\n        multa_fgts: round(multa_fgts),\n        multa_477: round(multa_477),\n        total_estimado: round(total_base),\n        valor_ja_recebido: round(valor_recebido),\n        valor_restante_estimado: round(valor_restante),\n        faixa_estimativa: {\n            minimo: round(faixaMin),\n            maximo: round(faixaMax)\n        }\n    },\n    potenciais_adicionais: potenciais_adicionais\n};"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          208,
+          0
+        ],
+        "id": "1aeef4a6-e523-48c9-9053-a893543f1908",
+        "name": "calcula o valor"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "b87052d2-9ed3-4ec2-81af-f09770b302ef",
+          "responseMode": "lastNode",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          16,
+          0
+        ],
+        "id": "aa9cd842-a49e-40cd-9539-ad885ad4e050",
+        "name": "Webhook",
+        "webhookId": "b87052d2-9ed3-4ec2-81af-f09770b302ef"
+      }
+    ],
+    "connections": {
+      "When Executed by Another Workflow": {
+        "main": [
+          []
+        ]
+      },
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "calcula o valor",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
