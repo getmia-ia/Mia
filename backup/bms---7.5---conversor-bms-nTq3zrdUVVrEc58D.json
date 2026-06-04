@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-02T16:50:43.189Z",
+  "updatedAt": "2026-06-03T21:32:05.368Z",
   "createdAt": "2026-01-27T18:25:31.059Z",
   "id": "nTq3zrdUVVrEc58D",
   "name": "BMS - 7.5 - Conversor BMS",
@@ -55,8 +55,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -1520,
-        32
+        -1792,
+        48
       ],
       "id": "dde88fc9-d26a-46be-b8af-deb0e03ab358",
       "name": "Webhook",
@@ -272,13 +272,13 @@
       "parameters": {
         "content": "## 01 - RECEBIMENTO E CONSISTÊNCIA\nPonto de entrada do fluxo. Recebe o id do atestado e a url_image via POST.\n       -> O nó Edit Fields normaliza os dados de entrada.\n       -> O nó Verifica input garante que os campos obrigatórios não estão vazios antes de prosseguir, retornando erro 400 caso falte informação.",
         "height": 656,
-        "width": 1616,
+        "width": 1856,
         "color": 4
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -1584,
+        -1824,
         -304
       ],
       "id": "e19f9322-30db-4b3f-8518-5e1f6639be27",
@@ -335,13 +335,13 @@
       "parameters": {
         "content": "## Tratamento de erros\nGarantem que a plataforma BMS não fique aguardando infinitamente em caso de falha.",
         "height": 256,
-        "width": 3136,
+        "width": 3376,
         "color": 3
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -1584,
+        -1824,
         368
       ],
       "id": "84bdda32-1839-40b6-8f25-ce8ba2bf90f5",
@@ -507,8 +507,15 @@
       "parameters": {
         "method": "POST",
         "url": "https://bmsrhcontainerproduction.azurewebsites.net/api/v2/medical-certificates-ai-analysis-webhook",
-        "authentication": "***REMOVIDO***",
-        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Converte token para base64').first().json.base64 }}"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ $json }}",
@@ -523,9 +530,6 @@
       "id": "e1627872-a4b0-4086-9c9b-b89ee8504964",
       "name": "Resposta da API para BMS",
       "retryOnFail": true,
-      "credentials": {
-        "httpBearerAuth": "***REMOVIDO***"
-      },
       "onError": "continueErrorOutput"
     },
     {
@@ -564,8 +568,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1312,
-        32
+        -1632,
+        48
       ],
       "id": "43fe07f4-ff4a-42d6-82c4-279471b4b751",
       "name": "Valida playload",
@@ -584,6 +588,40 @@
       "id": "bb061ad3-389c-4543-a345-3fc57f5c5683",
       "name": "Build AttestationAnalysisDTO",
       "retryOnFail": false,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    umi.id_user_medical_info,\n    e.id_employee,\n    e.company_id,\n    c.companyName,\n    c.legalName,\n    token_info.token AS company_token\nFROM user_medical_info umi\n\nINNER JOIN employee e\n    ON e.id_employee = umi.employeeIdEmployee\n   AND e.[delete] = 'N'\n\nINNER JOIN company c\n    ON c.id = e.company_id\n   AND c.[delete] = 'N'\n   AND c.active = 1\n\nOUTER APPLY (\n    SELECT TOP 1 ct.token\n    FROM company_token ct\n    WHERE ct.company_id = c.id\n      AND ct.active = 1\n    ORDER BY ct.update_datetime DESC\n) token_info\n\nWHERE umi.id_user_medical_info = {{ $json.data.user_medical_info_id }};"
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        -1408,
+        32
+      ],
+      "id": "29c02ad8-d14b-42a0-9e30-9b6417fbb1b3",
+      "name": "Buscar Informacoes",
+      "credentials": {
+        "microsoftSql": {
+          "id": "9oSJ0UtHdEKEhdnB",
+          "name": "BMS - Prod"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const token = $input.first().json.company_token;\n\nconst base64 = Buffer.from(token, 'hex').toString('base64');\n\nreturn [\n  {\n    json: {\n      token,\n      base64\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1232,
+        32
+      ],
+      "id": "e64704d9-387d-43e6-b5b9-43b80c399ef6",
+      "name": "Converte token para base64",
       "onError": "continueErrorOutput"
     }
   ],
@@ -791,7 +829,7 @@
       "main": [
         [
           {
-            "node": "Verifica input da API",
+            "node": "Buscar Informacoes",
             "type": "main",
             "index": 0
           }
@@ -822,7 +860,19 @@
           }
         ]
       ]
-    }
+    },
+    "Buscar Informacoes": {
+      "main": [
+        [
+          {
+            "node": "Converte token para base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converte token para base64": "***REMOVIDO***"
   },
   "settings": {
     "executionOrder": "v1",
@@ -835,8 +885,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "ddaaead1-9974-4b9d-8a51-a302f327d4cf",
-  "activeVersionId": "ddaaead1-9974-4b9d-8a51-a302f327d4cf",
+  "versionId": "8fcd2a5c-6d91-4cf8-8d12-bcb7ec8939b7",
+  "activeVersionId": "8fcd2a5c-6d91-4cf8-8d12-bcb7ec8939b7",
   "triggerCount": 1,
   "shared": [
     {
@@ -848,9 +898,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-06-02T16:50:43.191Z",
-    "createdAt": "2026-06-02T16:50:43.191Z",
-    "versionId": "ddaaead1-9974-4b9d-8a51-a302f327d4cf",
+    "updatedAt": "2026-06-03T21:32:05.370Z",
+    "createdAt": "2026-06-03T21:32:05.370Z",
+    "versionId": "8fcd2a5c-6d91-4cf8-8d12-bcb7ec8939b7",
     "workflowId": "nTq3zrdUVVrEc58D",
     "nodes": [
       {
@@ -902,8 +952,8 @@
         "type": "n8n-nodes-base.webhook",
         "typeVersion": 2.1,
         "position": [
-          -1520,
-          32
+          -1792,
+          48
         ],
         "id": "dde88fc9-d26a-46be-b8af-deb0e03ab358",
         "name": "Webhook",
@@ -1119,13 +1169,13 @@
         "parameters": {
           "content": "## 01 - RECEBIMENTO E CONSISTÊNCIA\nPonto de entrada do fluxo. Recebe o id do atestado e a url_image via POST.\n       -> O nó Edit Fields normaliza os dados de entrada.\n       -> O nó Verifica input garante que os campos obrigatórios não estão vazios antes de prosseguir, retornando erro 400 caso falte informação.",
           "height": 656,
-          "width": 1616,
+          "width": 1856,
           "color": 4
         },
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -1584,
+          -1824,
           -304
         ],
         "id": "e19f9322-30db-4b3f-8518-5e1f6639be27",
@@ -1182,13 +1232,13 @@
         "parameters": {
           "content": "## Tratamento de erros\nGarantem que a plataforma BMS não fique aguardando infinitamente em caso de falha.",
           "height": 256,
-          "width": 3136,
+          "width": 3376,
           "color": 3
         },
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -1584,
+          -1824,
           368
         ],
         "id": "84bdda32-1839-40b6-8f25-ce8ba2bf90f5",
@@ -1354,8 +1404,15 @@
         "parameters": {
           "method": "POST",
           "url": "https://bmsrhcontainerproduction.azurewebsites.net/api/v2/medical-certificates-ai-analysis-webhook",
-          "authentication": "***REMOVIDO***",
-          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('Converte token para base64').first().json.base64 }}"
+              }
+            ]
+          },
           "sendBody": true,
           "specifyBody": "json",
           "jsonBody": "={{ $json }}",
@@ -1370,9 +1427,6 @@
         "id": "e1627872-a4b0-4086-9c9b-b89ee8504964",
         "name": "Resposta da API para BMS",
         "retryOnFail": true,
-        "credentials": {
-          "httpBearerAuth": "***REMOVIDO***"
-        },
         "onError": "continueErrorOutput"
       },
       {
@@ -1411,8 +1465,8 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -1312,
-          32
+          -1632,
+          48
         ],
         "id": "43fe07f4-ff4a-42d6-82c4-279471b4b751",
         "name": "Valida playload",
@@ -1431,6 +1485,40 @@
         "id": "bb061ad3-389c-4543-a345-3fc57f5c5683",
         "name": "Build AttestationAnalysisDTO",
         "retryOnFail": false,
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT\n    umi.id_user_medical_info,\n    e.id_employee,\n    e.company_id,\n    c.companyName,\n    c.legalName,\n    token_info.token AS company_token\nFROM user_medical_info umi\n\nINNER JOIN employee e\n    ON e.id_employee = umi.employeeIdEmployee\n   AND e.[delete] = 'N'\n\nINNER JOIN company c\n    ON c.id = e.company_id\n   AND c.[delete] = 'N'\n   AND c.active = 1\n\nOUTER APPLY (\n    SELECT TOP 1 ct.token\n    FROM company_token ct\n    WHERE ct.company_id = c.id\n      AND ct.active = 1\n    ORDER BY ct.update_datetime DESC\n) token_info\n\nWHERE umi.id_user_medical_info = {{ $json.data.user_medical_info_id }};"
+        },
+        "type": "n8n-nodes-base.microsoftSql",
+        "typeVersion": 1.1,
+        "position": [
+          -1408,
+          32
+        ],
+        "id": "29c02ad8-d14b-42a0-9e30-9b6417fbb1b3",
+        "name": "Buscar Informacoes",
+        "credentials": {
+          "microsoftSql": {
+            "id": "9oSJ0UtHdEKEhdnB",
+            "name": "BMS - Prod"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const token = $input.first().json.company_token;\n\nconst base64 = Buffer.from(token, 'hex').toString('base64');\n\nreturn [\n  {\n    json: {\n      token,\n      base64\n    }\n  }\n];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -1232,
+          32
+        ],
+        "id": "e64704d9-387d-43e6-b5b9-43b80c399ef6",
+        "name": "Converte token para base64",
         "onError": "continueErrorOutput"
       }
     ],
@@ -1638,7 +1726,7 @@
         "main": [
           [
             {
-              "node": "Verifica input da API",
+              "node": "Buscar Informacoes",
               "type": "main",
               "index": 0
             }
@@ -1669,7 +1757,19 @@
             }
           ]
         ]
-      }
+      },
+      "Buscar Informacoes": {
+        "main": [
+          [
+            {
+              "node": "Converte token para base64",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Converte token para base64": "***REMOVIDO***"
     },
     "authors": "***REMOVIDO***",
     "name": null,
