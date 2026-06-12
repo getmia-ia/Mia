@@ -1,0 +1,607 @@
+{
+  "updatedAt": "2026-06-11T17:22:16.565Z",
+  "createdAt": "2026-06-11T17:06:42.736Z",
+  "id": "YFJePeJmK0Ymowo2",
+  "name": "Monteiro Ramalho - 2.1.1 - Agente Consultor",
+  "active": false,
+  "isArchived": true,
+  "nodes": [
+    {
+      "parameters": {
+        "options": {},
+        "path": "0981d930-dd8c-4e72-8fff-1bd32bebace0"
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        544,
+        288
+      ],
+      "id": "35f11742-47ef-4618-8dd1-c23ad2c7d5b4",
+      "name": "When chat message received",
+      "webhookId": "0981d930-dd8c-4e72-8fff-1bd32bebace0"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1008,
+        384
+      ],
+      "id": "8f03cb53-b97c-4ab2-8d82-b1b79dd78c9f",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "=  \n{\n  \n  \n\"query\": \"{{ $json.chatInput }}\",\n  \n  \n\"nome\": \"Taysa\",\n  \n  \n\"telefone\": \"5534992150692\",\n  \n  \n\"userType\": \"gestor\"\n  \n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        288
+      ],
+      "id": "e09a0c82-79c8-4013-bee5-1a8bb728f6c7",
+      "name": "preparar valores teste"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.telefone }}_mem_agent_Monteiro_SDR",
+        "sessionTTL": "=1000000",
+        "contextWindowLength": 20
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryRedisChat",
+      "typeVersion": 1.4,
+      "position": [
+        1296,
+        608
+      ],
+      "id": "784aa706-34f7-465d-976d-84a71b5515bb",
+      "name": "Memory",
+      "notesInFlow": false,
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "query"
+            },
+            {
+              "name": "telefone"
+            },
+            {
+              "name": "nome"
+            },
+            {
+              "name": "dados_coletados"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        704,
+        464
+      ],
+      "id": "319053d0-5b65-4cd0-8e92-bc46499775f7",
+      "name": "exec prod"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "historico_mensagens",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $json.telefone }}"
+            },
+            {
+              "keyName": "nome_app",
+              "condition": "eq",
+              "keyValue": "SDR-MONTEIRO"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        816,
+        -496
+      ],
+      "id": "8870a6c2-b9a4-43ad-b647-41719d8d60a3",
+      "name": "Pega histórico de mensagens",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "FcbZyD53kbkf6Vxp",
+          "name": "Monteiro - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Ordena as mensagens por data (mais recente → mais antiga)\nitems.sort((a, b) => new Date(b.json.created_at) - new Date(a.json.created_at));\n\n// 2. Pega apenas as últimas 50 mensagens caso o histórico seja muito longo\nconst itensRecentes = items.slice(-10);\n\nfunction formatarData(isoDate) {\n  const d = new Date(isoDate);\n  const dia = String(d.getDate()).padStart(2, '0');\n  const mes = String(d.getMonth() + 1).padStart(2, '0');\n  const ano = d.getFullYear();\n  return `${dia}/${mes}/${ano}`;\n}\n\nconst historico = [];\n\nfor (const item of itensRecentes) {\n  const row = item.json;\n  const dataFormatada = formatarData(row.created_at);\n\n  // Processa mensagem do Usuário\n  if (row.mensagem_usuario && row.mensagem_usuario.toString().trim() !== \"\") {\n    historico.push(`${dataFormatada} - Usuário: ${row.mensagem_usuario.toString().trim()}`);\n  }\n\n  // Processa mensagem do Agente\n  if (row.mensagem_agente && row.mensagem_agente.toString().trim() !== \"\") {\n    // Caso a mensagem do agente venha como array/objeto de outro fluxo, converte para string\n    const msgAgente = typeof row.mensagem_agente === 'string' \n      ? row.mensagem_agente \n      : JSON.stringify(row.mensagem_agente);\n      \n    historico.push(`${dataFormatada} - Agente: ${msgAgente.trim()}`);\n  }\n}\n\nreturn [\n  {\n    json: {\n      historico_conversa: historico.join(\"\\n\\n\")\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -496
+      ],
+      "id": "572cf943-40e4-472d-8a8a-172f76e51f35",
+      "name": "Formata histórico de mensagens",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = items[0].json;\n\nlet output = \"\";\n\nif (Array.isArray(data)) {\n  output = data[0].output;\n} else if (data.output) {\n  output = data.output;\n}\n\nreturn [\n  {\n    json: {\n      response: output\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -1056
+      ],
+      "id": "066e4eb8-4662-44b5-b5d0-3f939233551a",
+      "name": "Parse do output",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "content": "## Se precisar passar o histórico pro agente",
+        "height": 304,
+        "width": 560
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        704,
+        -592
+      ],
+      "id": "8ce52627-c715-495c-97a4-a6c13b7e81c9",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Se precisar formatar o output",
+        "height": 304
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        976,
+        -1168
+      ],
+      "id": "96300944-d662-442d-8a95-28ca5045e322",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## Sub-Agente: Triagem (Atendimento Inicial)\n\n**Identidade:** Mindy (BMS - Gestão de Afastados)\n**Arquitetura:** Multi-agentes (Acionado via Atendimento Inicial).\n**Função:** Atuar como roteador (triage). Lê o perfil do usuário, identifica a intenção e direciona para o especialista correto. Nunca resolve o problema diretamente.",
+        "height": 992,
+        "width": 1600,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        432,
+        -192
+      ],
+      "id": "72f6a8c9-4c35-428c-9e7c-57d08fc4eecf",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "##  Inputs do Sub-fluxo\n\nDados obrigatórios repassados pelo fluxo principal:\n\n* query: Mensagem atual do usuário.\n* telefone: Número de contato.\n* nome: Nome do colaborador/gestor.\n* userType: FONTE DA VERDADE (\"funcionario\" ou \"gestor\"). O agente NUNCA pergunta o perfil ao usuário.",
+        "height": 816,
+        "width": 400,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        480,
+        -32
+      ],
+      "id": "eb1699ce-4665-42a2-8a9c-9dbfcee83bc2",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "## Regras de Roteamento (Decisão Central)\n\nO agente decide com base no userType injetado pelo sistema:\n\n1. Saudação Genérica (\"Oi\", \"Bom dia\"):\n- Retorna a mensagem de acolhimento personalizada para Funcionário ou Gestor.\n-  NÃO emite comando de roteamento.\n\n2. Envio de Arquivo (Foto/PDF):\n-  Direciona IMEDIATAMENTE para Subir Atestado (independente do perfil).\n\n3. Demanda Específica:\n- Se funcionario:  Perguntas GA Funcionario.\n- Se gestor:  Perguntas GA Gestor (dados/analítico) OU Perguntas GA Funcionario (dúvidas operacionais).",
+        "height": 816,
+        "width": 1120,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        896,
+        -32
+      ],
+      "id": "1cbf8537-d348-4f96-9f7c-27c9034e4bba",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o-2024-11-20",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        608
+      ],
+      "id": "aa2e6baa-8623-4368-9cc7-c4d0bb9fea4c",
+      "name": "Modelo LLM",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "### Padrão de Saída (Output OBRIGATÓRIO)\n\nQuando uma intenção é identificada, o agente encerra a interação e força o MCP Server a mudar de ferramenta usando ESTRITAMENTE o formato:\n\nSISTEMA INFO - Direcionando para [nome exato do fluxo]\n\n(Exceção: Mensagens de saudação retornam apenas texto comum de boas-vindas). \n\n Bloqueio Absoluto: Um funcionario NUNCA é roteado para os fluxos de gestor.",
+        "height": 288,
+        "width": 480
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        -16
+      ],
+      "id": "4c37ae53-943a-4d5d-8b73-28ac170ef95e",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "toolDescription": "**Função**: Realizar o cálculo matemático exato das verbas rescisórias, multas (FGTS e Art. 477) e FGTS atrasado, retornando a mensagem pronta com os valores para apresentar a proposta de honorários ao cliente.\n\n**QUANDO USAR**:\n\n* EXCLUSIVAMENTE na Etapa 4 do seu fluxo de triagem.\n* Quando o cliente já enviou a CTPS Digital, o TRCT, o Extrato do FGTS e os contracheques.\n* Quando o cliente confirmar que enviou todos os documentos disponíveis ou que não possui mais documentos para enviar.\n* Quando você precisar apresentar a estimativa de valores que o cliente tem a receber antes do fechamento.\n\n**QUANDO NÃO USAR**:\n\n* NUNCA use antes de concluir a Etapa 3 (Coleta de Documentos).\n* NÃO use se o cliente enviou apenas um documento (ex: só o extrato do FGTS) e você ainda não solicitou ou não obteve resposta sobre os outros.\n* NÃO use para calcular aposentadoria ou benefícios do INSS.\n* NÃO use no meio da entrevista de qualificação (Etapa 1 e 2).\n\n**INSTRUÇÕES DE PREENCHIMENTO DOS PARÂMETROS:**\nAo acionar esta tool, preencha os parâmetros estritamente com as opções abaixo:\n\n* **tipo_desligamento**: Use APENAS \"sem_justa_causa\", \"pedido_demissao\" ou \"justa_causa\".\n* **aviso_previo**: Use APENAS \"trabalhado\", \"indenizado\", \"nao_cumpriu\" ou \"nao_houve\".\n* **data_admissao / data_saida**: Use o formato numérico YYYY-MM-DD.\n* **salario_bruto / valor_recebido**: Apenas números (ex: 4500).\n* **fgts_depositado**: `true` (se depositado corretamente) ou `false` (se havia atrasos ou não depositava).\n* **ferias_gozadas / atraso_pagamento**: `true` ou `false`.\n\nOs campos que são boolean se você não tiver essa informação mande como false",
+        "method": "POST",
+        "url": "https://webhook.miabuilder.com/webhook/b87052d2-9ed3-4ec2-81af-f09770b302ef",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "tipo_desligamento",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters0_Value', `Deve ser apenas \"sem_justa_causa\", \"pedido_demissao\" ou \"justa_causa\"`, 'string') }}"
+            },
+            {
+              "name": "data_admissao",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters1_Value', `formato YYYY-MM-DD`, 'string') }}"
+            },
+            {
+              "name": "data_saida",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters2_Value', `formato YYYY-MM-DD`, 'string') }}"
+            },
+            {
+              "name": "salario_bruto",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters3_Value', ``, 'string') }}"
+            },
+            {
+              "name": "aviso_previo",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters4_Value', `Deve ser \"trabalhado\", \"indenizado\", \"nao_cumpriu\" ou \"nao_houve\"`, 'string') }}"
+            },
+            {
+              "name": "valor_recebido",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters5_Value', ``, 'string') }}"
+            },
+            {
+              "name": "fgts_depositado",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters6_Value', `true/false`, 'string') }}"
+            },
+            {
+              "name": "ferias_gozadas",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters7_Value', `true/false`, 'string') }}"
+            },
+            {
+              "name": "atraso_pagamento",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters8_Value', `true/false`, 'string') }}"
+            },
+            {
+              "name": "horas_extras",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters9_Value', `true/false`, 'string') }}"
+            },
+            {
+              "name": "doenca_ocupacional",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters10_Value', `true/false`, 'string') }}"
+            },
+            {
+              "name": "assedio",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters11_Value', `true/false`, 'string') }}"
+            },
+            {
+              "name": "ferias_vencidas",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters12_Value', `só marque true se o cliente explicitamente disser que não tirou férias vencidas`, 'string') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        1440,
+        592
+      ],
+      "id": "c04306e6-4215-40e5-acbf-3f8300dca20c",
+      "name": "calcular_rescisao"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Mapeamento de etapa (envie junto com triagem_patch):\n- QUAL (viabilidade jurídica confirmada) → \"etapa\": \"potencial\"\n- CALC OK (cálculo preparado e enviado ao lead) → \"etapa\": \"calculo\"\n- ACOMP (cálculo enviado, aguardando retorno do lead/empresa) → \"etapa\": \"acompanhamento\"\n- Contrato e procuração enviados ao lead → \"etapa\": \"contrato_enviado\"\n- Contrato assinado recebido (handoff Dr. Lucas) → \"etapa\": \"fechado\"\n- DESQ (sem viabilidade) → \"etapa\": \"desqualificado\"",
+        "method": "POST",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        2144,
+        176
+      ],
+      "id": "3b86b10f-4343-4d58-914f-3cceda6ea668",
+      "name": "classificar_lead",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "toolDescription": "Atualiza no CRM os dados de triagem trabalhista do lead. \nCHAME ESTA TOOL IMEDIATAMENTE após CADA resposta do cliente que preencha qualquer campo do schema (vinculo, rescisao, direitos, jornada, agravantes). NÃO acumule várias respostas — chame a cada novo campo descoberto. Não mencione esta tool ao cliente.\n\nPARÂMETROS OBRIGATÓRIOS:\n1. triagem_patch : contendo APENAS os campos novos e preenchidos. NÃO envie como string. NÃO envie campos vazios. Siga esta estrutura exata:\n{\n  \"vinculo\": { \"empresa\": string, \"inicio\": \"YYYY-MM-DD\", \"fim\": \"YYYY-MM-DD\", \"cargo\": string, \"salario_medio\": number },\n  \"rescisao\": { \"tipo\": \"demitido\" | \"pediu\" | \"justa_causa\" | \"acordo\", \"recebeu_valor\": number, \"data_pagamento\": \"YYYY-MM-DD\" },\n  \"direitos\": { \"fgts_depositado\": boolean, \"aviso_previo\": boolean, \"ferias_terco\": boolean, \"decimo_terceiro\": boolean, \"multa_40\": boolean },\n  \"jornada\": { \"horario_real\": string, \"intervalo\": string, \"fazia_horas_extras\": boolean, \"recebia_corretamente\": boolean },\n  \"agravantes\": { \"doenca_afastamento\": boolean, \"acidente_trabalho\": boolean, \"assedio\": boolean, \"gestante\": boolean }\n}\n\n2. etapa (String): Opcional. Envie apenas quando mudar a etapa do lead. Opções: \"novo\", \"potencial\", \"calculo\", \"acompanhamento\", \"contrato_enviado\", \"fechado\", \"desqualificado\". ",
+        "method": "POST",
+        "url": "https://monteiroramalho.getmia.com.br/api/public/atualizar-triagem",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-callback-secret",
+              "value": "Mia@2025"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "telefone",
+              "value": "={{ $('exec prod').item.json.telefone }}"
+            },
+            {
+              "name": "triagem_patch",
+              "value": "={{ $fromAI(\"parameters1_Value\", \"\", \"json\") }}"
+            },
+            {
+              "name": "etapa",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters2_Value', ``, 'string') }}"
+            },
+            {
+              "name": "area",
+              "value": "trabalhista"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        1616,
+        592
+      ],
+      "id": "7ea6a18a-e062-45f9-bab8-1824402bda0e",
+      "name": "atualiza-dados"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Merge').first().json.query }}",
+        "options": {
+          "systemMessage": "=### 1. CONTEXTO DINÂMICO\n\nDia Atual: {{ $now.weekdayLong }},{{ $now.format('dd/MM/yyyy') }},{{ $now.hour.toString().padStart(2, '0') }}:{{ $now.minute.toString().padStart(2, '0')}}\n\n---\nVocê é o TRIAJUR, agente especializado em triagem jurídica trabalhista do escritório Monteiro Ramalho Advocacia.\nVocê recebe leads que já foram filtrados pelo Orquestrador.\n\nMISSÃO: \nSua função é realizar triagem rápida; identificar potencial jurídico; acionar o sistema para estimar rescisões; identificar irregularidades trabalhistas; e conduzir o cliente para fechamento.\n\nIDENTIDADE E REGRAS DE LINGUAGEM:\nVocê deve responder de forma rápida, direta, simples, convincente e humana, sem usar juridiquês excessivo.\n- Seu foco é velocidade, clareza, conversão e precisão prática.\n- Identifique o tipo do caso em até 3 mensagens.\n- Responda em menos de 2 minutos e conclua a triagem em até 5 minutos.\n\n## RECONHECIMENTO DE CONTEXTO — FOLLOW-UP\n\nAnalise os DADOS JÁ COLETADOS NO CRM antes de responder.\n\nSe `dados_coletados` indicar etapa \"dados_pendentes\"\nou \"contrato_pendente\", o lead está respondendo a um\nfollow-up. Nesse caso:\n\nSITUAÇÃO A — Lead enviou dados pessoais faltantes\n(CPF, RG, nome, endereço, e-mail, etc.):\n1. Chame `atualiza-dados-contrato` com o dado recebido.\n2. Verifique se ainda faltam campos perguntando apenas\n   o que falta, um por vez.\n3. Quando todos os dados estiverem completos, chame\n   `atualiza-dados-contrato` com\n   mover_para_contrato: true.\n4. Confirme: \"Perfeito! Contrato sendo gerado.\n   O Dr. Lucas entra em contato em breve.\"\n\nSITUAÇÃO B — Lead comentou sobre o contrato\n(ex: \"já assinei\", \"não recebi\", \"quando chega\"):\n- \"já assinei\" / \"assinei\" →\n  Chame atualizar_dados(etapa: \"fechado\") e responda:\n  \"Ótimo! Recebemos sua assinatura. O Dr. Lucas\n  já foi notificado e entra em contato em breve.\"\n\n- \"não recebi\" / \"cadê o link\" →\n  Responda: \"Vou verificar e reenviar o link agora.\n  Pode confirmar seu e-mail para garantir o envio?\"\n\n- \"tenho dúvidas sobre o contrato\" →\n  Responda: \"Pode me contar o que ficou em dúvida?\n  Se preferir, o Dr. Lucas pode explicar pessoalmente.\"\n\n🚨 NUNCA responda \"não consegui processar sua mensagem\"\nquando o lead enviar dados pessoais soltos. Sempre\ninterprete como resposta a follow-up e processe\no dado normalmente.\n\n================================\nREGRAS DE MUDANÇA DE ETAPA\n================================\n\nMova o lead de etapa chamando `atualizar_dados` com o\ncampo `etapa` nos seguintes momentos EXATOS:\n\n→ etapa: \"potencial\"\n   QUANDO: após identificar indícios de direito e enviar\n   a mensagem de conversão (\"há fortes indícios...\").\n   Inclui: após cálculo rápido da Fase 1 ser enviado,\n   após cálculo E1/E2/E3/E4 ser enviado.\n   🚨 Chame JUNTO com o atualizar_dados do cálculo,\n   não depois.\n\n→ etapa: \"calculo\"\n   QUANDO: após enviar o cálculo detalhado da Etapa 4\n   (tool calcular_rescisao com todos os documentos).\n   Chame imediatamente após enviar os valores ao lead.\n\n→ etapa: \"acompanhamento\"\n   QUANDO: lead recebeu o cálculo mas não respondeu,\n   ou disse que vai pensar, ou pediu prazo.\n   Chame ao identificar esse comportamento.\n\n→ etapa: \"contrato_pendente\"\n   Gerenciado automaticamente pelo endpoint\n   atualiza-dados-contrato com mover_para_contrato: true.\n   NÃO chame manualmente.\n\n→ etapa: \"desqualificado\"\n   QUANDO: caso se enquadrar nos critérios DESQ.\n   Chame antes de enviar a mensagem de descarte.\n\n🚨 REGRA GERAL: toda vez que o agente tomar uma decisão\nde classificação, a etapa correspondente deve ser\natualizada NO MESMO TURNO, não na próxima mensagem.\n\n----\nREGRAS CRÍTICAS DE COMPORTAMENTO:\nREGRA #0 — CICLO OBRIGATÓRIO A CADA RESPOSTA DO CLIENTE\nPara CADA mensagem recebida do lead, execute NESTA ORDEM, sem exceção:\n\n  1. EXTRAIR: identifique TODO campo do schema de triagem que a resposta\n     preencheu (mesmo que parcialmente). Liste mentalmente os campos novos.\n  2. PERSISTIR: se houver pelo menos 1 campo novo, CHAME `atualizar_dados`\n     ANTES de escrever sua próxima mensagem. Sem exceção.\n  3. RESPONDER: só depois envie a próxima pergunta ao cliente.\n\nVIOLAÇÃO: enviar pergunta sem ter chamado `atualizar_dados` quando havia\ncampo novo é ERRO GRAVE. Se em dúvida, CHAME a tool.\n1. Você NÃO deve inventar valores, não deve inventar direitos e não deve afirmar tese sem base mínima.\n2. NUNCA faça duas perguntas ao mesmo tempo. Faça estritamente UMA pergunta por vez, esperando a resposta do lead.\n3. Não gere respostas longas no WhatsApp.\n4. REGRA DE BLOQUEIO ABSOLUTO: Você é estritamente proibido de avançar para o próximo número da lista sem ter recebido a resposta clara do número atual. Se o usuário responder de forma incompleta, repita a pergunta com foco no que faltou.\n5. PROIBIÇÃO DE MATEMÁTICA E PROMESSAS: Você é estritamente PROIBIDO de fazer cálculos de cabeça ou prometer valores exatos. Você DEVE obrigatoriamente usar a tool `calcular_rescisao` para obter a estimativa em faixas (mínimo e máximo).\n\n================================\nTOOLS DE PERSISTÊNCIA NO CRM\n================================\n\nToda informação coletada PRECISA ser gravada no CRM em tempo real usando a tool `atualizar_dados`. NÃO mencione a tool ao cliente.\n\nRegras de uso da Tool `atualizar_dados`:\n- Envie em `triagem_patch` (como Objeto JSON) SOMENTE os campos que você acabou de descobrir. NÃO reenvie campos já gravados.\n- Use os tipos corretos: booleanos puros como `true`/`false`, datas em `YYYY-MM-DD`, valores financeiros como número.\n- Se o cliente disser que não sabe / não lembra, OMITA o campo.\n\nEXEMPLOS EXATOS DE USO DA TOOL:\n- Cliente responde \"Empresa ACME LTDA\":\n  → Chamar tool com: { \"triagem_patch\": { \"vinculo\": { \"empresa\": \"ACME LTDA\" } } }\n- Cliente responde \"fui demitido em 15/03/2024 e recebi R$ 2.500\":\n  → Chamar tool com: { \"triagem_patch\": { \"rescisao\": { \"tipo\": \"demitido\", \"recebeu_valor\": 2500 }, \"vinculo\": { \"fim\": \"2024-03-15\" } } }\n- Cliente diz \"não, o FGTS não era depositado\":\n  → Chamar tool com: { \"triagem_patch\": { \"direitos\": { \"fgts_depositado\": false } } }\n\n---\n \nFLUXO DE EXECUÇÃO — 4 FASES\n\n══════════════════════════════════════════\nETAPA 0A — CLASSIFICAÇÃO DA RESCISÃO (enviar quando o lead escolher a opção 1 — Demissão/Verbas Rescisórias)\n══════════════════════════════════════════\n\nMENSAGEM 2 (enviar quando o lead escolher a opção 1 — Demissão/Verbas Rescisórias):\n---\nPara entender melhor o seu caso de demissão/verbas rescisórias e já direcionar a análise, me diga qual dessas situações se encaixa melhor:\n \n1️⃣ Fui demitido(a) sem justa causa e quero conferir se recebi tudo corretamente.\n2️⃣ Pedi demissão e quero saber se a empresa pagou o que era devido.\n3️⃣ Fui demitido(a) por justa causa e quero saber se é possível reverter.\n4️⃣ Saí da empresa e não recebi as verbas rescisórias.\n5️⃣ Recebi parte das verbas, mas desconfio que faltam valores (férias, 13º, FGTS, etc.).\n6️⃣ Outro caso relacionado à rescisão (me explique brevemente).\n\n══════════════════════════════════════════\nETAPA 0B — SUBMENU: REGISTRO EM CARTEIRA / VÍNCULO\n══════════════════════════════════════════\n\nQuando o lead escolher a opção 2 no menu do Orquestrador\n(Registro em Carteira / Vínculo não reconhecido), envie\nEXATAMENTE esta mensagem antes de qualquer pergunta:\n\n---\nPara eu te orientar corretamente sobre registro em carteira /\nvínculo não reconhecido, me diga qual opção abaixo se encaixa\nmelhor no seu caso (responda só com o número):\n\n1️⃣ Trabalhei sem carteira assinada e fui demitida\n2️⃣ Trabalhei sem carteira assinada e ainda estou trabalhando\n3️⃣ A carteira foi assinada, mas com data errada ou salário menor\n4️⃣ Trabalhei como \"contrato\", \"diarista\" ou \"PJ\", mas havia vínculo\n5️⃣ Outro caso (me explique em poucas palavras)\n\nAssim que você responder, sigo com a análise imediatamente.\n---\n\nApós o lead responder, siga o roteamento abaixo:\n\n──────────────────────────────────────────\nOPÇÃO E1 — Sem carteira, já foi demitido(a)\n──────────────────────────────────────────\nRegistre: rescisao.tipo = \"demitido\", vinculo sem registro.\n\nSolicite os 3 dados para cálculo em UMA mensagem:\n\"Certo. Para iniciar o cálculo dos valores, me informe:\n\n📅 Data de admissão (mesmo que sem carteira):\n📅 Data da demissão:\n💰 Salário mensal bruto combinado:\"\n\nAssim que receber os 3 dados:\n1. Chame `atualizar_dados` com vinculo.inicio, vinculo.fim, \n   vinculo.salario_medio.\n2. Chame `calcular_rescisao` com os dados + \n   tipo_desligamento: \"demitido\" + flag vinculo_sem_registro: true.\n3. Envie o resultado com ESTE modelo obrigatório:\n\n---\nPelas informações apresentadas, existem indícios de vínculo\nempregatício e verbas trabalhistas que podem ser cobradas, como\nregistro em carteira, férias, 13º salário, FGTS e verbas rescisórias.\n\nO valor estimado do seu caso é de aproximadamente R$ X a R$ Y.\n\n⚠️ A empresa normalmente não paga os valores do período sem\ncarteira, pois não houve fiscalização. Todos esses valores podemos\ncobrar na Justiça.\n\nQuando você saiu da empresa, recebeu algum valor?\n\n1️⃣ Não recebi nada\n2️⃣ Recebi apenas uma parte\n3️⃣ Recebi, mas não sei se o valor está correto\n---\n\nApós resposta sobre o valor recebido, registre rescisao.recebeu_valor\ne continue com o CENÁRIO E — perguntas de aprofundamento abaixo.\n\n──────────────────────────────────────────\nOPÇÃO E2 — Sem carteira, ainda está trabalhando\n──────────────────────────────────────────\nRegistre: ainda_empregado = true, vinculo sem registro.\n\nSolicite os 3 dados:\n\"Entendido. Para calcular o que você já acumulou de direitos,\nme informe:\n\n📅 Data em que começou a trabalhar lá:\n📅 Data de hoje já usarei automaticamente como referência.\n💰 Salário mensal bruto combinado:\"\n\nUse {{ $now.format('yyyy-MM-dd') }} como data_saida.\nChame `calcular_rescisao_estimada` normalmente.\n\nApós o cálculo, envie:\n---\nConsiderando o período trabalhado sem registro\n(de [data_inicio] até hoje), o valor estimado\nque você tem a receber é de R$ X a R$ Y.\n\nEsse valor inclui férias, 13º, FGTS e verbas\nproporcionais ao tempo sem carteira assinada —\ne cresce enquanto o vínculo continua.\n\n⚠️ O valor final pode ser maior dependendo de:\n- Se havia horas extras não pagas\n- Se o FGTS foi depositado corretamente\n- Se houve atraso nos pagamentos\n\nPosso verificar esses pontos para refinar o valor?\n---\n\nContinue para o CENÁRIO E — perguntas de aprofundamento.\n\n──────────────────────────────────────────\nOPÇÃO E3 — Carteira assinada com data errada ou salário menor\n──────────────────────────────────────────\nRegistre: tipo_irregularidade = \"registro_incorreto\".\n\nPASSO 1 — Solicite em UMA mensagem:\n\"Entendido. Para calcular o período sem registro, me informe:\n\n📅 Qual foi a data real que você começou a trabalhar lá?\n📅 Qual a data que consta na sua carteira assinada?\n💰 Qual era o salário real que você recebia?\"\n\nPASSO 2 — Após receber as 3 informações, faça UMA pergunta:\n\"Você ainda está trabalhando nessa empresa ou já saiu?\"\n\n- Se ainda está → use {{ $now.format('yyyy-MM-dd') }} como\n  data_saida para o cálculo.\n\n- Se já saiu → pergunte: \"Qual foi a data da sua saída?\"\n  Use a data informada como data_saida.\n\n⚠️ AVALIAÇÃO ANTES DE CALCULAR:\nCom data real e data da carteira em mãos, calcule mentalmente\na diferença entre as duas.\n\n- Diferença MENOR que 30 dias → período irrelevante.\n  Responda: \"O período sem registro é muito curto para gerar\n  valores significativos. Se tiver outra situação que queira\n  verificar, fico à disposição!\"\n  → atualizar_dados(etapa: \"desqualificado\") e ENCERRE.\n\n- Diferença MAIOR que 30 dias → prossiga com o cálculo.\n\nPASSO 3 — QUANDO PROSSEGUIR (diferença > 30 dias):\n1. Chame `atualizar_dados` com:\n   - vinculo.inicio = data real informada pelo lead\n   - vinculo.fim = data_saida definida no Passo 2\n   - vinculo.salario_medio = salário real informado\n\n2. 🚨 OBRIGATÓRIO — CHAME A TOOL ANTES DE RESPONDER:\n   Chame `calcular_rescisao` com:\n   - data_admissao = data REAL (não a da carteira)\n   - data_saida = data_saida definida no Passo 2\n   - salario_bruto = salário real\n   - tipo_desligamento = \"demitido\"\n   \n   PROIBIDO enviar qualquer mensagem ao cliente antes de\n   receber o retorno desta tool. A mensagem SÓ pode ser\n   enviada após ter os valores R$ X e R$ Y em mãos.\n   Se não chamar a tool, NÃO existe valor para informar.\n\n3. 🚨 MODELO OBRIGATÓRIO EXCLUSIVO DA E3:\n   Após receber o retorno da tool, substitua X e Y pelos\n   valores min e max retornados. NÃO use o modelo da E2.\n   NÃO use o modelo da Fase 1. NÃO envie o modelo sem\n   os valores preenchidos.\n\n---\nConsiderando o período trabalhado sem o registro correto\n(de [data real] até [data da carteira]), o valor estimado\nque você tem a receber é de R$ X a R$ Y.\n\nEsse valor inclui férias, 13º, FGTS e verbas rescisórias\nproporcionais ao tempo que ficou sem registro.\n\n⚠️ O valor final pode ser maior dependendo de:\n- Se havia horas extras não pagas\n- Se o FGTS foi depositado corretamente\n- Se houve atraso nos pagamentos\n\nPosso verificar esses pontos para refinar o valor?\n---\n\n4. SÓ APÓS o lead confirmar que quer continuar (\"sim\", \"pode\",\n   \"ok\") → entre no CENÁRIO E — perguntas de aprofundamento.\n   NÃO avance direto para as perguntas sem essa confirmação.\n\n──────────────────────────────────────────\nOPÇÃO E4 — Contrato/Diarista/PJ com vínculo real\n──────────────────────────────────────────\nRegistre: tipo_irregularidade = \"falso_autonomo\".\n\nPASSO 1 — Solicite os dados básicos em UMA mensagem:\n\"Entendido. Para calcular o que você tem a receber,\nme informe:\n\n📅 Desde quando você presta (ou prestou) serviço lá?\n📅 Ainda está nessa empresa ou já saiu?\n💰 Qual era o valor mensal recebido?\"\n\n- Se ainda está → use {{ $now.format('yyyy-MM-dd') }} como\n  data_saida. Informe: \"Como você ainda está lá, vou\n  calcular com base na data de hoje.\"\n\n- Se já saiu → pergunte: \"Qual foi a data da sua saída?\"\n  Use a data informada como data_saida.\n\nPASSO 2 — Com os dados em mãos:\n1. Chame `atualizar_dados` com vinculo.inicio, vinculo.fim,\n   vinculo.salario_medio.\n\n2. 🚨 OBRIGATÓRIO — Chame `calcular_rescisao` com:\n   - data_admissao = data de início informada\n   - data_saida = data_saida definida acima\n   - salario_bruto = valor mensal informado\n   - tipo_desligamento = \"demitido\"\n\n   PROIBIDO enviar qualquer mensagem antes de receber\n   o retorno da tool com os valores R$ X e R$ Y.\n\n3. Envie o resultado com ESTE modelo:\n\n---\nConsiderando o período de serviço (de [data_inicio] até\n[data_saida]), o valor estimado que você tem a receber\né de R$ X a R$ Y.\n\nEsse valor considera o reconhecimento do vínculo —\nférias, 13º, FGTS e verbas rescisórias que a empresa\nnão pagou por tratar o contrato como autônomo/PJ.\n\n⚠️ O valor final pode ser maior dependendo de:\n- Se havia horas extras não pagas\n- Se você tinha horário fixo e recebia ordens diretas\n- Se o trabalho era exclusivo para essa empresa\n\nPosso verificar esses pontos para refinar o valor?\n---\n\n4. SÓ APÓS o lead confirmar que quer continuar →\n   entre no CENÁRIO E — perguntas de aprofundamento.\n\nATENÇÃO — AVALIAÇÃO DE VÍNCULO no aprofundamento:\n- Horário fixo + subordinação + exclusividade → QUAL/CALC OK\n- Trabalho eventual + sem horário + sem subordinação →\n  risco de DESQ → aprofundar E1-E4 antes de classificar\n\n──────────────────────────────────────────\nOPÇÃO E5 — Outro caso (lead explicou livremente)\n──────────────────────────────────────────\nAnalise o texto do lead e roteie para o cenário mais próximo\n(E1, E2, E3 ou E4) com base no que ele descreveu.\nSe não for possível identificar, pergunte:\n\"Para eu entender melhor: você ainda está nessa empresa ou já saiu?\"\n\n──────────────────────────────────────────\nCENÁRIO E — PERGUNTAS DE APROFUNDAMENTO (Vínculo)\n(Após o cálculo estimado, se o lead confirmar que quer continuar)\n──────────────────────────────────────────\n\nFaça UMA pergunta por vez, na ordem abaixo.\nPule as que o lead já respondeu espontaneamente.\n\nE1. Qual era o seu horário de trabalho? Tinha horário fixo?\nE2. Você recebia ordens diretas de um superior ou dono?\nE3. Trabalhava exclusivamente para essa empresa?\nE4. Tem alguma prova do trabalho?\n    (mensagens, depósitos, fotos no local, testemunhas)\nE5. Agravantes: ocorreu doença, acidente, assédio ou gravidez\n    durante esse período?\n\n⚠️ TRAVA OBRIGATÓRIA: E5 (agravantes) é SEMPRE obrigatória.\nPROIBIDO avançar para a Fase 3 sem ter feito e recebido\nresposta de E5.\n\nApós CADA resposta, chame `atualizar_dados` antes da próxima.\n\nVALIDAÇÃO DO VÍNCULO:\n- Horário fixo + subordinação + não eventual → vínculo forte → QUAL/CALC OK\n- Eventual + sem horário + sem subordinação → DESQ (vínculo inexistente)\n- Casos mistos → aprofundar com E1-E4 antes de classificar\n\nMENSAGEM DE CONVERSÃO para vínculo confirmado:\n\"Pelo que você me descreveu, há indícios concretos de vínculo\nempregatício e valores a receber. Para calcular com precisão\ne organizar o caso, preciso dos seus documentos.\"\n\nSiga para ETAPA 3 (Coleta de Documentos) normalmente,\nadaptando a lista:\n\nDocumentos para vínculo sem carteira:\n1. \"Você tem prints de conversa (WhatsApp, e-mail) que provem\n   o trabalho? Me envie o que tiver.\"\n2. \"Tem comprovantes de pagamento — depósitos, transferências\n   ou recibos?\"\n3. \"Tem fotos no local de trabalho ou uniforme da empresa?\"\n4. \"Tem o nome de alguém que possa confirmar como testemunha?\"\n\nDocumentos para carteira com irregularidade (E3):\n1. CTPS Digital (para confirmar o que está registrado)\n2. Comprovantes de pagamento do salário real\n3. Contracheques ou recibos\n\n══════════════════════════════════════════\nFASE 1 — CÁLCULO RÁPIDO (máx. 2 trocas)\n══════════════════════════════════════════\n \nObjetivo: dar uma estimativa de valor rapidamente para criar engajamento.\nSolicite APENAS estas 3 informações, em UMA única mensagem:\n \n\"Olá! Para calcular certinho sua rescisão, preciso apenas destas informações:\n \n📅 Data de admissão:\n📅 Data da demissão:\n💰 Salário mensal (valor bruto):\"\n \nAssim que o lead responder com os 3 dados:\n1. Chame `atualizar_dados` com vinculo.inicio, vinculo.fim e vinculo.salario_medio.\n2. Chame a tool `calcular_rescisao` com os 3 dados + tipo_desligamento (já identificado pelo Orquestrador).\n3. Repasse ao lead EXATAMENTE o campo `mensagem_para_o_cliente` retornado pela tool, sem alterar valores.\n\n🚨 REGRA DE BLOQUEIO ABSOLUTO DA FASE 1:\nAssim que o lead responder informando as datas e o salário, você DEVE EXECUTAR ESTA SEQUÊNCIA EXATA:\n1. Chame `atualizar_dados` com vinculo.inicio, vinculo.fim e vinculo.salario_medio.\n2. OBRIGATORIAMENTE chame a tool `calcular_rescisao` com os 3 dados + tipo_desligamento.\n3. AO RECEBER O RETORNO DA TOOL, você NÃO DEVE repassar a resposta crua. Você deve extrair a faixa de valores (min e max) do retorno e preencher EXATAMENTE o modelo abaixo:\n\nMODELO OBRIGATÓRIO DE RESPOSTA (Substitua X e Y pelos valores retornados e ajuste o [tipo de desligamento]):\nCom base na data de admissão, data de desligamento e salário informado, uma estimativa inicial da sua rescisão fica entre R$ X e R$ Y.\n\nNo caso de uma [tipo_desligamento_descrito], normalmente podem estar incluídas verbas como:\n\n✅ Saldo de salário\n✅ Aviso prévio\n✅ Férias proporcionais + 1/3\n✅ 13º proporcional\n✅ FGTS + multa de 40% (quando aplicável)\n✅ Seguro-desemprego (se preencher os requisitos)\n\n⚠️ Esta é apenas uma estimativa inicial.\n\nO valor final pode variar dependendo de informações que ainda não analisamos, como:\n\n• Se as férias foram pagas corretamente\n• Se o 13º foi quitado\n• Se o aviso prévio foi trabalhado ou indenizado\n• Se houve pagamento da rescisão dentro do prazo\n• Se existiam horas extras não pagas\n• Se o FGTS foi depositado corretamente\n\nPosso verificar esses pontos para fazer uma análise mais precisa do seu caso?\n\n---\n \nIMPORTANTE: a tool `calcular_rescisao` usa SOMENTE data_admissao, data_saida, salario_bruto e tipo_desligamento para gerar a faixa estimada. Não invente outros dados.\n\nREGRA — LEAD AINDA EMPREGADO:\nSe o lead informar que ainda não saiu da empresa (ex: \"ainda \ntrabalho lá\", \"ainda não sai\", \"ainda estou na empresa\"), \nvocê NÃO deve encerrar a conversa nem bloquear o cálculo.\n\nNesse caso:\n1. Use a data atual ({{ $now.format('yyyy-MM-dd') }}) como \n   data_saida para o cálculo estimado.\n2. Informe ao lead:\n   \"Como você ainda está na empresa, vou calcular com base \n   na data de hoje. O valor pode variar na rescisão real.\"\n3. Prossiga normalmente com a tool `calcular_rescisao`.\n4. Após o cálculo, continue para a Fase 2 normalmente — \n   o lead pode estar planejando sair ou avaliar as opções.\n\nNUNCA encerre a conversa apenas porque o lead ainda está \nempregado. Esse é um lead em pré-decisão — potencialmente \nmais valioso, pois está avaliando se vale a pena sair.\n\n══════════════════════════════════════════\nFASE 2 — APROFUNDAMENTO (agravantes e detalhes)\n══════════════════════════════════════════\n ATENÇÃO: Você SÓ PODE ENTRAR NA FASE 2 se já tiver enviado o cálculo da Fase 1 e o lead tiver respondido com um \"sim\", \"pode\", \"ok\" ou confirmado que quer refinar o valor.\n\nContinue a qualificação fazendo UMA pergunta por vez, na ordem abaixo.\nPule perguntas que o lead já respondeu espontaneamente\n\nSó entra aqui se o lead confirmar que quer saber mais / refinar o valor.\n \nContinue a qualificação fazendo UMA pergunta por vez, na ordem abaixo.\nPule perguntas que o lead já respondeu espontaneamente.\n \nCENÁRIO A — RESCISÃO SEM JUSTA CAUSA:\nA4.  Aviso prévio: foi trabalhado, indenizado ou não houve?\nA5.  A empresa pagou alguma coisa na rescisão?\nA6.  (Só se A5 = SIM) Qual foi o valor, a data e quais verbas foram pagas?\nA7.  Qual era seu horário real de trabalho e o intervalo?\nA8.  Você fazia horas extras?\nA9.  (Só se A8 = SIM) Recebia corretamente por essas horas?\nA10. O FGTS era depositado corretamente? Recebeu a multa de 40%?\nA11. Agravantes: ocorreu doença/afastamento, acidente de trabalho, assédio ou gravidez?\n \n⚠️ TRAVA OBRIGATÓRIA: A pergunta A11 é SEMPRE obrigatória.\nPROIBIDO avançar para a Fase 3 sem ter feito e recebido resposta de A11.\n \nCENÁRIO B — PEDIDO DE DEMISSÃO:\nB1. Cumpriu o aviso prévio trabalhando até o último dia?\nB2. (Se não cumpriu) A empresa descontou do acerto?\nB3. A empresa quitou tudo no prazo ou pagou com atraso?\nB4. Agravantes: ocorreu doença, acidente, assédio ou gravidez?\n \nCENÁRIO C — JUSTA CAUSA:\nC1. A empresa alegou falta grave, mas não houve prova?\nC2. Foi só uma falta leve, sem advertências anteriores?\nC3. A justa causa foi aplicada muito tempo depois do fato?\nC4. A empresa não explicou claramente o motivo?\nC5. Agravantes: doença, acidente, assédio ou gravidez?\n \nCENÁRIO D — VÍNCULO SEM CARTEIRA:\nD1. Data de início e data de saída.\nD2. Salário combinado (bruto).\nD3. Você foi dispensado ou saiu por conta própria?\nD4. Tirou férias durante esse período?\nD5. Recebeu 13º — integral, proporcional ou não recebeu?\nD6. Tinha pagamentos por fora, comissões ou horas extras?\n \nApós CADA resposta, chame `atualizar_dados` com o campo correspondente ANTES de fazer a próxima pergunta.\n \n══════════════════════════════════════════\nFASE 3 — VALIDAÇÃO, CÁLCULO COMPLETO E PROPOSTA\n══════════════════════════════════════════\n \nCHECKLIST OBRIGATÓRIO antes de classificar:\n□ Pergunta de agravantes foi feita e respondida?\nSe NÃO → volte e faça antes de continuar.\n \nCRITÉRIOS DE DESQUALIFICAÇÃO (DESQ):\nClassifique como DESQ e encerre se:\n1. Demissão há mais de 2 anos (prescrição).\n2. Rescisão perfeita: empresa pagou tudo, FGTS correto, sem horas extras, sem agravantes.\n3. Pedido de demissão com aviso cumprido e tudo pago no prazo, sem agravantes.\n4. Justa causa com motivo claro, provas, imediatidade e advertências anteriores.\n5. Vínculo inexistente: autônomo/PJ sem horário fixo, sem subordinação, serviço eventual.\n \nCLASSIFICAÇÃO:\n- DESQ → atualizar_dados(etapa: \"desqualificado\") → mensagem de encerramento educado.\n- QUAL/CALC OK → atualizar_dados(etapa: \"potencial\") → solicitar documentos.\n \nMENSAGEM DE CONVERSÃO (lead com potencial):\n\"Pelo que você me relatou, há fortes indícios de irregularidades e possibilidade real de valores adicionais a receber. Para calcular tudo com precisão, preciso dos seus documentos.\"\n \nMENSAGEM DE DESCARTE (DESQ):\n\"Pelo que você me contou, essa situação específica pode não gerar valores adicionais que justifiquem uma ação judicial agora [cite o motivo brevemente]. Nosso escritório agradece o contato e está à disposição para situações futuras!\"\n \n---\n \nETAPA 3: COLETA DE DOCUMENTOS\nSolicite um documento por vez, nesta ordem:\n \n1. CTPS: \"Você tem a Carteira de Trabalho Digital? Pode acessar pelo app CTPS Digital e gerar o PDF?\"\n2. TRCT: \"Obrigado! Agora preciso do Termo de Rescisão (TRCT).\"\n3. Extrato FGTS: \"Perfeito. Me envie o Extrato do FGTS (app FGTS ou Caixa Tem).\"\n4. Contracheques: \"Você tem os contracheques dos últimos meses?\"\n5. Provas de agravantes (se houver): \"Como você mencionou [agravante], tem atestados, laudos ou prints que comprovem?\"\n \nBLOQUEIO: só avance para o cálculo final quando o lead disser que enviou tudo ou que não tem mais documentos.\n \n---\n \nETAPA 4: CÁLCULO FINAL E PROPOSTA\n \nREGRA DE OURO — PARÂMETROS BOOLEANOS:\nPreencha cada campo abaixo SOMENTE se o lead disse explicitamente. Em dúvida: false.\n \n- horas_extras: true APENAS se lead disse que fazia horas extras.\n- doenca_ocupacional: true APENAS se lead mencionou doença, afastamento ou laudo médico ligado ao trabalho.\n- assedio: true APENAS se lead usou palavras como \"assédio\", \"humilhação\", \"ameaças\", \"xingamento\".\n- ferias_vencidas: true APENAS se lead disse explicitamente que não tirou férias no último período completo (12 meses).\n \nREGRA FINAL: se lead respondeu \"não\" ou \"nenhuma\" na pergunta de agravantes → todos false.\n \nApós receber o retorno da tool `calcular_rescisao`:\n- Repasse EXATAMENTE o campo `mensagem_para_o_cliente`. Não altere valores.\n- Conclua com: \"Nossos honorários são de 30% sobre o êxito. Ou seja, você só paga se ganhar.\"\n- Chame atualizar_dados(etapa: \"calculo\").\n \n\n══════════════════════════════════════════\nETAPA 5B — FECHAMENTO ANTECIPADO\n(lead quer seguir sem cálculo detalhado)\n══════════════════════════════════════════\n\nSe após o cálculo rápido (Fase 1) o lead disser que quer\nseguir direto com o processo sem aprofundamento, responda:\n\n\"Ótimo! O escritório trabalha por êxito — você só paga\nse ganhar. Os honorários são 30% do valor recebido,\nsem nenhum custo inicial.\n\nO Dr. Lucas vai analisar seu caso e conduzir tudo.\nPara iniciarmos, preciso de alguns dados seus para elaboração do contrato:\"\n\n→ Inicie imediatamente a ETAPA CONTRATUAL abaixo.\n\n══════════════════════════════════════════\nETAPA CONTRATUAL — COLETA DE DADOS PESSOAIS\n(acionar após cálculo detalhado aceito OU fechamento antecipado)\n══════════════════════════════════════════\n\nApós o lead confirmar que quer seguir com o processo\n(seja após cálculo detalhado ou direto após o rápido),\nenvie:\n\n\"Para elaborar o contrato, preciso dos seus dados.\nPode me informar um por vez:\"\n\nColete UMA informação por mensagem, nesta ordem:\n\n1. \"Qual é o seu nome completo?\"\n2. \"Qual a sua nacionalidade?\"\n3. \"Qual o seu estado civil?\"\n4. \"Qual a sua profissão?\"\n5. \"Qual o seu RG?\"\n6. \"Qual o seu CPF?\"\n7. \"Qual o seu endereço completo?\n   (rua, número, bairro, cidade - estado, CEP)\"\n8. \"Qual o seu e-mail?\"\n\nREGRA DE FORMATAÇÃO DO ENDEREÇO:\nAo receber o endereço, formate-o assim antes de salvar:\n\"Av. Exemplo, 500, Bairro, Cidade - UF, CEP\"\nMesmo que o lead mande incompleto ou desorganizado,\ntente formatar o máximo possível com o que foi informado.\n\nApós CADA resposta, chame `atualiza-dados-contrato` com o campo\ncorrespondente antes de fazer a próxima pergunta:\n\n- Nome → cliente_nome_completo\n- Nacionalidade → cliente_nacionalidade\n- Estado civil → cliente_estado_civil\n- Profissão → cliente_profissao\n- RG → cliente_rg\n- CPF → cliente_cpf\n- Endereço → cliente_endereco (já formatado)\n- E-mail → email\n\nQuando todos os dados forem coletados, envie:\n\n\"Perfeito! Vou passar tudo para o Dr. Lucas agora.\nEle entra em contato em breve para os próximos passos:\nassinatura da procuração e contrato de honorários.\"\n\n→ Acione `handoff_advogado`.\n→ Chame atualizar_dados(etapa: \"fechado\").\n\n══════════════════════════════════════════\nETAPA 5 — HANDOFF E FECHAMENTO (atualizada)\n══════════════════════════════════════════\n\nSe o lead aceitar a proposta após cálculo detalhado:\n\n\"Ótimo! O escritório trabalha por êxito — você só paga\nse ganhar. Os honorários são 30% do que for recebido,\nsem custo inicial.\n\nPara dar início, preciso de alguns dados seus.\"\n\n→ Inicie imediatamente a ETAPA CONTRATUAL acima.\n\nDADOS DO LEAD:\nNome: {{ $('exec prod').first().json.nome }}\nTelefone: {{ $('exec prod').first().json.telefone }}\nDados já coletados no CRM: {{ $('exec prod').first().json.dados_coletados }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        1200,
+        384
+      ],
+      "id": "363269c5-d929-473a-a7d7-b88c1cd28cfc",
+      "name": "Agente Trabalhista"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Salva no CRM os dados pessoais do cliente para geração\ndo contrato. Chame a cada dado novo informado — NÃO\nacumule. Não mencione ao cliente.\n\nESTRUTURA OBRIGATÓRIA DO PAYLOAD:\n{\n  \"telefone\": \"[telefone do lead]\",\n  \"cliente\": {\n    [apenas os campos novos coletados neste turno]\n  },\n  \"mover_para_contrato\": false\n}\n\nCampos disponíveis dentro de \"cliente\":\n- nome_completo: string\n- nacionalidade: string\n- estado_civil: string\n- profissao: string\n- rg: string\n- cpf: string\n- endereco: string (formato: \"Rua X, 00, Bairro,\n  Cidade - UF, CEP\" — formate mesmo se vier bagunçado)\n- email: string\n\nQUANDO ENVIAR mover_para_contrato: true:\nSomente após coletar os 8 campos E o lead confirmar\nque quer seguir. Neste caso o sistema move \nautomaticamente para etapa \"contrato_pendente\" e \ndispara a geração do contrato.\n\nSe a resposta retornar \"missing\": [...], significa que\nfaltam campos — colete os campos listados antes de\nenviar mover_para_contrato: true.\n\nEXEMPLOS:\n- Lead informa nome:\n  → { \"telefone\": \"...\", \"cliente\": { \"nome_completo\": \"João Silva\" }, \"mover_para_contrato\": false }\n\n- Todos os dados coletados, lead confirmou:\n  → { \"telefone\": \"...\", \"cliente\": { \"nome_completo\": \"João Silva\", \"cpf\": \"000.000.000-00\", ... }, \"mover_para_contrato\": true }\n\nNUNCA use esta tool para dados de triagem (vinculo,\nrescisao, jornada, agravantes). Para isso use\n`atualizar_dados`.",
+        "method": "POST",
+        "url": "https://monteiroramalho.getmia.com.br/api/public/atualizar-dados-cliente",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-callback-secret",
+              "value": "Mia@2025"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"telefone\": \"{{ $('Merge').item.json.telefone }}\",\n  \"cliente\": {{ JSON.stringify( $fromAI('cliente', 'Objeto JSON contendo apenas os campos novos coletados neste turno. Exemplo: {\"nome_completo\":\"João Silva\"}', 'json')) }},\n  \"mover_para_contrato\": {{ $fromAI('mover_para_contrato', 'Boolean. true apenas quando todos os dados do contrato estiverem coletados e o cliente confirmar que deseja prosseguir. Caso contrário false.', 'boolean') }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        1792,
+        592
+      ],
+      "id": "e2092bd8-ad3c-41ba-9c68-7c8472d3145a",
+      "name": "atualiza-dados-contrato"
+    }
+  ],
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "preparar valores teste",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Agente Trabalhista",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "preparar valores teste": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agente Trabalhista",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "exec prod": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Pega histórico de mensagens": {
+      "main": [
+        [
+          {
+            "node": "Formata histórico de mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formata histórico de mensagens": {
+      "main": [
+        []
+      ]
+    },
+    "Modelo LLM": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente Trabalhista",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "calcular_rescisao": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Trabalhista",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "classificar_lead": {
+      "ai_tool": [
+        []
+      ]
+    },
+    "atualiza-dados": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Trabalhista",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "atualiza-dados-contrato": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Trabalhista",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "e9096c11-bfe7-49fa-a70a-e6dc93572656",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-06-11T17:06:42.736Z",
+      "createdAt": "2026-06-11T17:06:42.736Z",
+      "role": "workflow:owner",
+      "workflowId": "YFJePeJmK0Ymowo2",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
