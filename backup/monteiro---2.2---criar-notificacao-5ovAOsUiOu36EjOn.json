@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-11T18:39:53.006Z",
+  "updatedAt": "2026-06-15T21:47:19.730Z",
   "createdAt": "2026-05-18T20:37:31.672Z",
   "id": "5ovAOsUiOu36EjOn",
   "name": "Monteiro - 2.2 - Criar Notificação",
@@ -749,7 +749,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Detecta origem dos dados\nconst input = $input.first().json;\n\nconst veioDoWebhook = !!input.body;\n\nfunction formatarData(data) {\n\n  if (!data) return '';\n\n  const limpa = data.split('T')[0];\n\n  const [ano, mes, dia] = limpa.split('-');\n\n  return `${dia}/${mes}/${ano}`;\n}\n\n// =========================\n// Formata endereço ReceitaWS\n// =========================\nfunction montarEnderecoReceita(receita) {\n\n  if (!receita) return '';\n\n  const logradouro = receita.logradouro || '';\n  const numero = receita.numero || '';\n  const complemento = receita.complemento\n    ? ' - ' + receita.complemento\n    : '';\n\n  const bairro = receita.bairro || '';\n  const municipio = receita.municipio || '';\n\n  const uf = (receita.uf || '').toUpperCase();\n\n  const cep = (receita.cep || '')\n    .replace(/\\D/g, '')\n    .replace(/(\\d{5})(\\d{3})/, '$1-$2');\n\n  const titleCase = (str) =>\n    str\n      .toLowerCase()\n      .replace(/\\b[a-zà-ú]/gi, (c) => c.toUpperCase());\n\n  return `${titleCase(logradouro)}, ${numero}${complemento}, ${titleCase(bairro)}, ${titleCase(municipio)}, ${uf}, ${cep}`;\n}\n\n// =========================\n// Busca endereço via ReceitaWS\n// =========================\nasync function buscarEnderecoPorCNPJ(cnpj) {\n\n  try {\n\n    const cnpjLimpo = cnpj.replace(/\\D/g, '');\n\n    const response = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://www.receitaws.com.br/v1/cnpj/${cnpjLimpo}`,\n      json: true\n    });\n\n    return montarEnderecoReceita(response);\n\n  } catch (e) {\n\n    return '';\n  }\n}\n\n// =========================\n// Busca cidade/UF via CNPJ\n// =========================\nasync function buscarCidadePorCNPJ(cnpj) {\n\n  try {\n\n    const cnpjLimpo = cnpj.replace(/\\D/g, '');\n\n    const response = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://www.receitaws.com.br/v1/cnpj/${cnpjLimpo}`,\n      json: true\n    });\n\n    const municipio = response.municipio || '';\n    const uf = (response.uf || '').toUpperCase();\n\n    if (!municipio || !uf) {\n      return '';\n    }\n\n    return `${municipio}/${uf}`;\n\n  } catch (e) {\n\n    return '';\n  }\n}\n\nfunction gerarDataSubmissao() {\n\n  const meses = [\n    'Janeiro',\n    'Fevereiro',\n    'Março',\n    'Abril',\n    'Maio',\n    'Junho',\n    'Julho',\n    'Agosto',\n    'Setembro',\n    'Outubro',\n    'Novembro',\n    'Dezembro'\n  ];\n\n  const hoje = new Date();\n\n  const dia = hoje.getDate();\n  const mes = meses[hoje.getMonth()];\n  const ano = hoje.getFullYear();\n\n  return `${dia} de ${mes} de ${ano}`;\n}\n\nfunction obterPrazo(tipo, dias) {\n\n  switch (tipo) {\n\n    case 'sem_prazo':\n      return '';\n\n    case 'imediato':\n      return 'Imediato';\n\n    case 'dias':\n      return dias ? String(dias) : '';\n\n    default:\n      return '';\n  }\n}\n\nconst dataSubmissao = gerarDataSubmissao();\n\nlet output = {};\n\nif (veioDoWebhook) {\n\n  // =========================\n  // WEBHOOK / PLATAFORMA\n  // =========================\n\n  const body = input.body;\n\n  const placeholders = body.placeholders || {};\n\n  const prazo = obterPrazo(\n    placeholders.prazo_tipo,\n    placeholders.prazo_dias\n  );\n  \n  let endereco = placeholders.endereco_condominio || '';\n\n  let cidade = '';\n  \n  // Busca via CNPJ se endereço vazio\n  if (!endereco && placeholders.numero_cnpj) {\n\n    endereco = await buscarEnderecoPorCNPJ.call(\n      this,\n      placeholders.numero_cnpj\n    );\n  }\n  if (placeholders.numero_cnpj) {\n\n    cidade = await buscarCidadePorCNPJ.call(\n      this,\n      placeholders.numero_cnpj\n    );\n  }\n\n  output = {\n\n    origem: 'Plataforma',\n\n    cidade: cidade,\n\n    data_submissao: dataSubmissao,\n\n    prazo: prazo,\n\n    id_condomino: body.condomino.id || '',\n\n    numero_bloco: placeholders.numero_bloco || '',\n\n    numero_unidade: placeholders.numero_unidade || '',\n\n    data_infracao: formatarData(placeholders.data_infracao),\n\n    foto_infracao: placeholders.foto_infracao || '',\n\n    foto_infracao_2: placeholders.foto_infracao_2 || '',\n\n    id_condominio: body.condominio.id || '',\n\n    nome_condominio: placeholders.nome_condominio || '',\n\n    numero_cnpj: placeholders.numero_cnpj || '',\n\n    nome_sindico: placeholders.nome_sindico\n      ? `${placeholders.nome_sindico} - síndico`\n      : '',\n\n    assinatura_sindico:\n      placeholders.assinatura || null,\n\n    logo_condominio: placeholders.logo_condominio || '',\n\n    endereco_condominio: endereco,\n\n    infracao: placeholders.infracao || '',\n\n    template_corpo:\n      body.template_corpo ||\n      '1SGUBZEgYR3wGZkzjYpxCv-QU0t52-AN1vD3YscB5g-Y'\n  };\n\n} else {\n\n  // =========================\n  // N8N / OUTRO WORKFLOW\n  // =========================\n\n  let endereco = input.condominio_endereco || '';\n\n  const prazo = obterPrazo(\n    input.prazo_tipo,\n    input.prazo_dias\n  );\n\n  let cidade = '';\n  \n  // Busca via CNPJ se endereço vazio\n  if (!endereco && input.condominio_cnpj) {\n    endereco = await buscarEnderecoPorCNPJ.call(\n      this,\n      input.condominio_cnpj\n    );\n  }\n\n  if (input.condominio_cnpj) {\n    cidade = await buscarCidadePorCNPJ.call(\n      this,\n      input.condominio_cnpj\n    );\n  }\n\n  output = {\n\n    origem: 'N8N',\n\n    cidade: cidade,\n\n    data_submissao: dataSubmissao,\n\n    prazo: prazo,\n\n    id_condomino: input.condomino_id || '',\n\n    numero_bloco: input.condomino_bloco || '',\n\n    numero_unidade: input.condomino_unidade || '',\n\n    data_infracao: formatarData(input.data_infracao),\n\n    foto_infracao: input.foto_infracao_path || '',\n\n    foto_infracao_2: input.foto_infracao_path_2 || '',\n\n    id_condominio: input.condominio_id || '',\n\n    nome_condominio: input.condominio_nome || '',\n\n    numero_cnpj: input.condominio_cnpj || '',\n\n    nome_sindico: input.condominio_sindico_nome\n      ? `${input.condominio_sindico_nome} - síndico`\n      : '',\n\n    assinatura_sindico:\n      input.condominio_sindico_assinatura || null,\n\n    logo_condominio: input.condominio_logo_url || '',\n\n    endereco_condominio: endereco,\n\n    infracao: input.infracao || '',\n\n    template_corpo:\n      '1SGUBZEgYR3wGZkzjYpxCv-QU0t52-AN1vD3YscB5g-Y'\n  };\n}\n\nreturn [\n  {\n    json: output\n  }\n];"
+        "jsCode": "// Detecta origem dos dados\nconst input = $input.first().json;\n\nconst veioDoWebhook = !!input.body;\n\nfunction formatarData(data) {\n\n  if (!data) return '';\n\n  const limpa = data.split('T')[0];\n\n  const [ano, mes, dia] = limpa.split('-');\n\n  return `${dia}/${mes}/${ano}`;\n}\n\n// =========================\n// Formata endereço ReceitaWS\n// =========================\nfunction montarEnderecoReceita(receita) {\n\n  if (!receita) return '';\n\n  const logradouro = receita.logradouro || '';\n  const numero = receita.numero || '';\n  const complemento = receita.complemento\n    ? ' - ' + receita.complemento\n    : '';\n\n  const bairro = receita.bairro || '';\n  const municipio = receita.municipio || '';\n\n  const uf = (receita.uf || '').toUpperCase();\n\n  const cep = (receita.cep || '')\n    .replace(/\\D/g, '')\n    .replace(/(\\d{5})(\\d{3})/, '$1-$2');\n\n  const titleCase = (str) =>\n    str\n      .toLowerCase()\n      .replace(/\\b[a-zà-ú]/gi, (c) => c.toUpperCase());\n\n  return `${titleCase(logradouro)}, ${numero}${complemento}, ${titleCase(bairro)}, ${titleCase(municipio)}, ${uf}, ${cep}`;\n}\n\n// =========================\n// Busca endereço via ReceitaWS\n// =========================\nasync function buscarEnderecoPorCNPJ(cnpj) {\n\n  try {\n\n    const cnpjLimpo = cnpj.replace(/\\D/g, '');\n\n    const response = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://www.receitaws.com.br/v1/cnpj/${cnpjLimpo}`,\n      json: true\n    });\n\n    return montarEnderecoReceita(response);\n\n  } catch (e) {\n\n    return '';\n  }\n}\n\n// =========================\n// Busca cidade/UF via CNPJ\n// =========================\nasync function buscarCidadePorCNPJ(cnpj) {\n\n  try {\n\n    const cnpjLimpo = cnpj.replace(/\\D/g, '');\n\n    const response = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://www.receitaws.com.br/v1/cnpj/${cnpjLimpo}`,\n      json: true\n    });\n\n    const municipio = response.municipio || '';\n    const uf = (response.uf || '').toUpperCase();\n\n    if (!municipio || !uf) {\n      return '';\n    }\n\n    return `${municipio}/${uf}`;\n\n  } catch (e) {\n\n    return '';\n  }\n}\n\nfunction gerarDataSubmissao() {\n\n  const meses = [\n    'Janeiro',\n    'Fevereiro',\n    'Março',\n    'Abril',\n    'Maio',\n    'Junho',\n    'Julho',\n    'Agosto',\n    'Setembro',\n    'Outubro',\n    'Novembro',\n    'Dezembro'\n  ];\n\n  const hoje = new Date();\n\n  const dia = hoje.getDate();\n  const mes = meses[hoje.getMonth()];\n  const ano = hoje.getFullYear();\n\n  return `${dia} de ${mes} de ${ano}`;\n}\n\nfunction obterPrazo(tipo, dias) {\n\n  switch (tipo) {\n\n    case 'sem_prazo':\n      return '';\n\n    case 'imediato':\n      return 'Imediato';\n\n    case 'dias':\n      return dias ? String(dias) : '';\n\n    default:\n      return '';\n  }\n}\n\nconst dataSubmissao = gerarDataSubmissao();\n\nlet output = {};\n\nif (veioDoWebhook) {\n\n  // =========================\n  // WEBHOOK / PLATAFORMA\n  // =========================\n\n  const body = input.body;\n\n  const placeholders = body.placeholders || {};\n\n  const prazo = obterPrazo(\n    placeholders.prazo_tipo,\n    placeholders.prazo_dias\n  );\n  \n  let endereco = placeholders.endereco_condominio || '';\n\n  let cidade = '';\n  \n  // Busca via CNPJ se endereço vazio\n  if (!endereco && placeholders.numero_cnpj) {\n\n    endereco = await buscarEnderecoPorCNPJ.call(\n      this,\n      placeholders.numero_cnpj\n    );\n  }\n  if (placeholders.numero_cnpj) {\n\n    cidade = await buscarCidadePorCNPJ.call(\n      this,\n      placeholders.numero_cnpj\n    );\n  }\n\n  output = {\n\n    origem: 'Plataforma',\n\n    cidade: cidade,\n\n    data_submissao: dataSubmissao,\n\n    prazo: prazo,\n\n    id_condomino: body.condomino.id || '',\n\n    numero_bloco: placeholders.numero_bloco || '',\n\n    numero_unidade: placeholders.numero_unidade || '',\n\n    data_infracao: formatarData(placeholders.data_infracao),\n\n    foto_infracao: placeholders.foto_infracao || '',\n\n    foto_infracao_2: placeholders.foto_infracao_2 || '',\n\n    id_condominio: body.condominio.id || '',\n\n    nome_condominio: placeholders.nome_condominio || '',\n\n    numero_cnpj: placeholders.numero_cnpj || '',\n\n    nome_sindico: placeholders.nome_sindico\n      ? `${placeholders.nome_sindico} - síndico`\n      : '',\n\n    assinatura_sindico:\n      placeholders.assinatura || null,\n\n    logo_condominio: placeholders.logo_condominio || '',\n\n    endereco_condominio: endereco,\n\n    infracao: placeholders.infracao || '',\n\n    template_corpo:\n      body.template_corpo ||\n      '1SGUBZEgYR3wGZkzjYpxCv-QU0t52-AN1vD3YscB5g-Y'\n  };\n\n} else {\n\n  // =========================\n  // N8N / OUTRO WORKFLOW\n  // =========================\n\n  const dadosCadastro = input;\n  const dadosNotificacao = $('Trata os dados').first().json;\n\n  let endereco = dadosCadastro.condominio_endereco || '';\n\n  const prazo = obterPrazo(\n    dadosNotificacao.prazo_tipo,\n    dadosNotificacao.prazo_dias\n  );\n\n  let cidade = '';\n\n  // Busca via CNPJ se endereço vazio\n  if (!endereco && dadosCadastro.condominio_cnpj) {\n    endereco = await buscarEnderecoPorCNPJ.call(\n      this,\n      dadosCadastro.condominio_cnpj\n    );\n  }\n\n  if (dadosCadastro.condominio_cnpj) {\n    cidade = await buscarCidadePorCNPJ.call(\n      this,\n      dadosCadastro.condominio_cnpj\n    );\n  }\n\n  output = {\n\n    origem: 'N8N',\n\n    cidade: cidade,\n\n    data_submissao: dataSubmissao,\n\n    prazo: prazo,\n\n    id_condomino:\n      dadosCadastro.condomino_id || '',\n\n    numero_bloco:\n      dadosNotificacao.bloco || '',\n\n    numero_unidade:\n      dadosNotificacao.unidade || '',\n\n    data_infracao: formatarData(\n      dadosNotificacao.data_infracao\n    ),\n\n    foto_infracao:\n      dadosNotificacao.foto_infracao_path || '',\n\n    foto_infracao_2:\n      dadosNotificacao.foto_infracao_path_2 || '',\n\n    id_condominio:\n      dadosCadastro.condominio_id || '',\n\n    nome_condominio:\n      dadosCadastro.condominio_nome || '',\n\n    numero_cnpj:\n      dadosCadastro.condominio_cnpj || '',\n\n    nome_sindico:\n      dadosCadastro.condominio_sindico_nome\n        ? `${dadosCadastro.condominio_sindico_nome} - síndico`\n        : '',\n\n    assinatura_sindico:\n      dadosCadastro.condominio_sindico_assinatura || null,\n\n    logo_condominio:\n      dadosCadastro.condominio_logo_url || '',\n\n    endereco_condominio:\n      endereco,\n\n    infracao:\n      dadosNotificacao.infracao || '',\n\n    template_corpo:\n      '1SGUBZEgYR3wGZkzjYpxCv-QU0t52-AN1vD3YscB5g-Y'\n  };\n}\n\nreturn [\n  {\n    json: output\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -824,29 +824,6 @@
       ],
       "id": "9be54767-9d5c-4db0-bf99-3bd948d15695",
       "name": "Origem"
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT\n  -- Condomínio\n  c.id              AS condominio_id,\n  c.nome            AS condominio_nome,\n  c.cnpj            AS condominio_cnpj,\n  c.endereco        AS condominio_endereco,\n  c.logo_url        AS condominio_logo_url,\n  c.sindico_nome    AS condominio_sindico_nome,\n  c.sindico_email   AS condominio_sindico_email,\n  c.sindico_telefone AS condominio_sindico_telefone,\n  c.sindico_assinatura_url AS condominio_sindico_assinatura,\n\n  -- Condômino\n  cm.id        AS condomino_id,\n  cm.nome      AS condomino_nome,\n  cm.bloco     AS condomino_bloco,\n  cm.unidade   AS condomino_unidade,\n  cm.relacao   AS condomino_relacao,\n  cm.email     AS condomino_email,\n  cm.telefone  AS condomino_telefone,\n  cm.celular   AS condomino_celular,\n  cm.cpf       AS condomino_cpf,\n\n  -- Eco do input (útil pro fluxo seguinte)\n  $3::text AS infracao,\n  $4::text AS foto_infracao_path,\n  $5::date AS data_infracao\nFROM public.condominios c\nJOIN public.condominos  cm ON cm.condominio_id = c.id\nWHERE unaccent(lower(c.nome))  = unaccent(lower($1))\n  AND unaccent(lower(cm.nome)) = unaccent(lower($2))\n;\n",
-        "options": {
-          "queryReplacement": "={{\n[\n  $json.nome_condominio,\n  $json.nome_condomino,\n  $json.infracao,\n  $json.foto_infracao_path,\n  $json.data_infracao\n]\n}}"
-        }
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
-      "position": [
-        -1632,
-        112
-      ],
-      "id": "96daaa2b-8ee6-4f47-b786-d7934d297f77",
-      "name": "Capta os dados necessarios",
-      "credentials": {
-        "postgres": {
-          "id": "Hr0gqOEXHC8efR0Q",
-          "name": "Monteiro - Postgres"
-        }
-      }
     },
     {
       "parameters": {
@@ -1006,53 +983,6 @@
     },
     {
       "parameters": {
-        "workflowInputs": {
-          "values": [
-            {
-              "name": "nome_condominio"
-            },
-            {
-              "name": "nome_condomino"
-            },
-            {
-              "name": "infracao"
-            },
-            {
-              "name": "foto_infracao_path",
-              "type": "any"
-            },
-            {
-              "name": "data_infracao"
-            },
-            {
-              "name": "botPhoneNumber"
-            },
-            {
-              "name": "foto_infracao_path_2",
-              "type": "any"
-            },
-            {
-              "name": "prazo_tipo",
-              "type": "any"
-            },
-            {
-              "name": "prazo_dias",
-              "type": "any"
-            }
-          ]
-        }
-      },
-      "type": "n8n-nodes-base.executeWorkflowTrigger",
-      "typeVersion": 1.1,
-      "position": [
-        -1824,
-        112
-      ],
-      "id": "8798b3ff-e1e6-4e97-914b-2513bb5b56ab",
-      "name": "When Executed by Another Workflow"
-    },
-    {
-      "parameters": {
         "promptType": "define",
         "text": "=descrição da infração:  {{ $('Valida dados necessarios').first().json.infracao }}",
         "hasOutputParser": true,
@@ -1167,11 +1097,11 @@
       "parameters": {
         "operation": "send",
         "phoneNumberId": "1150042498190368",
-        "recipientPhoneNumber": "={{ $('When Executed by Another Workflow').first().json.botPhoneNumber }}",
+        "recipientPhoneNumber": "={{ $('Trata os dados').first().json.botPhoneNumber }}",
         "messageType": "document",
         "mediaPath": "useMediaId",
         "mediaId": "={{ $json.id }}",
-        "mediaFilename": "=Notificação_{{ $('Organiza os dados').item.json.nome_condominio }}_",
+        "mediaFilename": "=NOTIFICACAO_{{ $('Organiza os dados').first().json.nome_condominio.replace(/\\s+/g, '') }}_{{ $('Organiza os dados').first().json.numero_bloco }}_{{ $('Organiza os dados').first().json.numero_unidade }}",
         "additionalFields": {}
       },
       "type": "n8n-nodes-base.whatsApp",
@@ -1587,6 +1517,79 @@
       ],
       "id": "b260e1e3-e208-4b6c-8b78-712e81208a0c",
       "name": "Verifica modelo da openRouter1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  -- Condomínio\n  c.id              AS condominio_id,\n  c.nome            AS condominio_nome,\n  c.cnpj            AS condominio_cnpj,\n  c.endereco        AS condominio_endereco,\n  c.logo_url        AS condominio_logo_url,\n  c.sindico_nome    AS condominio_sindico_nome,\n  c.sindico_email   AS condominio_sindico_email,\n  c.sindico_telefone AS condominio_sindico_telefone,\n  c.sindico_assinatura_url AS condominio_sindico_assinatura,\n\n  -- Condômino\n  cm.id        AS condomino_id,\n  cm.nome      AS condomino_nome,\n  cm.bloco     AS condomino_bloco,\n  cm.unidade   AS condomino_unidade,\n  cm.relacao   AS condomino_relacao,\n  cm.email     AS condomino_email,\n  cm.telefone  AS condomino_telefone,\n  cm.celular   AS condomino_celular,\n  cm.cpf       AS condomino_cpf\n\nFROM public.condominios c\nJOIN public.condominos cm\n  ON cm.condominio_id = c.id\n\nWHERE c.id = $1\n  AND TRIM(cm.bloco) = TRIM($2)\n  AND TRIM(cm.unidade) = TRIM($3);",
+        "options": {
+          "queryReplacement": "={{\n[\n  $json.condominio_id,\n  $json.bloco,\n$json.unidade\n]\n}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1632,
+        144
+      ],
+      "id": "d3152271-f5a1-48b9-bdbf-e1d8a33fc89d",
+      "name": "Capta os dados necessarios",
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2016,
+        160
+      ],
+      "id": "f8905de0-3cf6-4ef8-8973-2fdc60e6b594",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  let data = item.json.query;\n\n  // Converte string JSON para objeto\n  if (typeof data === 'string') {\n    try {\n      data = JSON.parse(data);\n    } catch (error) {\n      throw new Error(\n        `Campo query contém JSON inválido: ${error.message}`\n      );\n    }\n  }\n\n  // =====================\n  // Campos obrigatórios\n  // =====================\n\n  const camposObrigatorios = [\n    'condominio_id',\n    'bloco',\n    'unidade',\n    'data_infracao',\n    'infracao',\n    'botPhoneNumber'\n  ];\n\n  for (const campo of camposObrigatorios) {\n    if (\n      data[campo] === undefined ||\n      data[campo] === null ||\n      String(data[campo]).trim() === ''\n    ) {\n      throw new Error(\n        `Campo obrigatório \"${campo}\" não informado.`\n      );\n    }\n  }\n\n  // =====================\n  // Formato da data\n  // =====================\n\n  const dataRegex = /^\\d{4}-\\d{2}-\\d{2}$/;\n\n  if (!dataRegex.test(data.data_infracao)) {\n    throw new Error(\n      'data_infracao deve estar no formato YYYY-MM-DD.'\n    );\n  }\n\n  // =====================\n  // Prazo\n  // =====================\n\n  const tiposPrazoPermitidos = [\n    'imediato',\n    'dias',\n    'sem_prazo'\n  ];\n\n  if (\n    data.prazo_tipo &&\n    !tiposPrazoPermitidos.includes(data.prazo_tipo)\n  ) {\n    throw new Error(\n      'prazo_tipo deve ser \"imediato\", \"dias\" ou \"sem_prazo\".'\n    );\n  }\n\n  if (\n    data.prazo_tipo === 'dias' &&\n    (\n      data.prazo_dias === undefined ||\n      data.prazo_dias === null ||\n      data.prazo_dias === ''\n    )\n  ) {\n    throw new Error(\n      'prazo_dias é obrigatório quando prazo_tipo = \"dias\".'\n    );\n  }\n\n  return {\n    json: data\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1824,
+        160
+      ],
+      "id": "41ad72cc-2f6f-49de-a22d-ff5a1ecd1289",
+      "name": "Trata os dados",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1ef478fc-69bc-4ee8-872e-572e14fe8c76",
+              "name": "erro",
+              "value": "={{ $json.error }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1824,
+        384
+      ],
+      "id": "4107125e-4db4-475f-afa4-1799a68b49f4",
+      "name": "Informa o erro"
     }
   ],
   "connections": {
@@ -1917,17 +1920,6 @@
         ]
       ]
     },
-    "Capta os dados necessarios": {
-      "main": [
-        [
-          {
-            "node": "Valida dados necessarios",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Cria notificação no sistema": {
       "main": [
         [
@@ -1944,17 +1936,6 @@
         [
           {
             "node": "Verifica modelo da openRouter",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "When Executed by Another Workflow": {
-      "main": [
-        [
-          {
-            "node": "Capta os dados necessarios",
             "type": "main",
             "index": 0
           }
@@ -2224,6 +2205,46 @@
           }
         ]
       ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Trata os dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trata os dados": {
+      "main": [
+        [
+          {
+            "node": "Capta os dados necessarios",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Informa o erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capta os dados necessarios": {
+      "main": [
+        [
+          {
+            "node": "Valida dados necessarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -2238,8 +2259,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "85bd798d-2c62-4d18-9866-c706d62891eb",
-  "activeVersionId": "85bd798d-2c62-4d18-9866-c706d62891eb",
+  "versionId": "61e57b83-7874-4cb3-a832-cbef181185c3",
+  "activeVersionId": "61e57b83-7874-4cb3-a832-cbef181185c3",
   "triggerCount": 1,
   "shared": [
     {
@@ -2251,9 +2272,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-06-11T18:39:53.009Z",
-    "createdAt": "2026-06-11T18:39:53.009Z",
-    "versionId": "85bd798d-2c62-4d18-9866-c706d62891eb",
+    "updatedAt": "2026-06-15T21:47:19.732Z",
+    "createdAt": "2026-06-15T21:47:19.732Z",
+    "versionId": "61e57b83-7874-4cb3-a832-cbef181185c3",
     "workflowId": "5ovAOsUiOu36EjOn",
     "nodes": [
       {
@@ -2999,7 +3020,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Detecta origem dos dados\nconst input = $input.first().json;\n\nconst veioDoWebhook = !!input.body;\n\nfunction formatarData(data) {\n\n  if (!data) return '';\n\n  const limpa = data.split('T')[0];\n\n  const [ano, mes, dia] = limpa.split('-');\n\n  return `${dia}/${mes}/${ano}`;\n}\n\n// =========================\n// Formata endereço ReceitaWS\n// =========================\nfunction montarEnderecoReceita(receita) {\n\n  if (!receita) return '';\n\n  const logradouro = receita.logradouro || '';\n  const numero = receita.numero || '';\n  const complemento = receita.complemento\n    ? ' - ' + receita.complemento\n    : '';\n\n  const bairro = receita.bairro || '';\n  const municipio = receita.municipio || '';\n\n  const uf = (receita.uf || '').toUpperCase();\n\n  const cep = (receita.cep || '')\n    .replace(/\\D/g, '')\n    .replace(/(\\d{5})(\\d{3})/, '$1-$2');\n\n  const titleCase = (str) =>\n    str\n      .toLowerCase()\n      .replace(/\\b[a-zà-ú]/gi, (c) => c.toUpperCase());\n\n  return `${titleCase(logradouro)}, ${numero}${complemento}, ${titleCase(bairro)}, ${titleCase(municipio)}, ${uf}, ${cep}`;\n}\n\n// =========================\n// Busca endereço via ReceitaWS\n// =========================\nasync function buscarEnderecoPorCNPJ(cnpj) {\n\n  try {\n\n    const cnpjLimpo = cnpj.replace(/\\D/g, '');\n\n    const response = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://www.receitaws.com.br/v1/cnpj/${cnpjLimpo}`,\n      json: true\n    });\n\n    return montarEnderecoReceita(response);\n\n  } catch (e) {\n\n    return '';\n  }\n}\n\n// =========================\n// Busca cidade/UF via CNPJ\n// =========================\nasync function buscarCidadePorCNPJ(cnpj) {\n\n  try {\n\n    const cnpjLimpo = cnpj.replace(/\\D/g, '');\n\n    const response = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://www.receitaws.com.br/v1/cnpj/${cnpjLimpo}`,\n      json: true\n    });\n\n    const municipio = response.municipio || '';\n    const uf = (response.uf || '').toUpperCase();\n\n    if (!municipio || !uf) {\n      return '';\n    }\n\n    return `${municipio}/${uf}`;\n\n  } catch (e) {\n\n    return '';\n  }\n}\n\nfunction gerarDataSubmissao() {\n\n  const meses = [\n    'Janeiro',\n    'Fevereiro',\n    'Março',\n    'Abril',\n    'Maio',\n    'Junho',\n    'Julho',\n    'Agosto',\n    'Setembro',\n    'Outubro',\n    'Novembro',\n    'Dezembro'\n  ];\n\n  const hoje = new Date();\n\n  const dia = hoje.getDate();\n  const mes = meses[hoje.getMonth()];\n  const ano = hoje.getFullYear();\n\n  return `${dia} de ${mes} de ${ano}`;\n}\n\nfunction obterPrazo(tipo, dias) {\n\n  switch (tipo) {\n\n    case 'sem_prazo':\n      return '';\n\n    case 'imediato':\n      return 'Imediato';\n\n    case 'dias':\n      return dias ? String(dias) : '';\n\n    default:\n      return '';\n  }\n}\n\nconst dataSubmissao = gerarDataSubmissao();\n\nlet output = {};\n\nif (veioDoWebhook) {\n\n  // =========================\n  // WEBHOOK / PLATAFORMA\n  // =========================\n\n  const body = input.body;\n\n  const placeholders = body.placeholders || {};\n\n  const prazo = obterPrazo(\n    placeholders.prazo_tipo,\n    placeholders.prazo_dias\n  );\n  \n  let endereco = placeholders.endereco_condominio || '';\n\n  let cidade = '';\n  \n  // Busca via CNPJ se endereço vazio\n  if (!endereco && placeholders.numero_cnpj) {\n\n    endereco = await buscarEnderecoPorCNPJ.call(\n      this,\n      placeholders.numero_cnpj\n    );\n  }\n  if (placeholders.numero_cnpj) {\n\n    cidade = await buscarCidadePorCNPJ.call(\n      this,\n      placeholders.numero_cnpj\n    );\n  }\n\n  output = {\n\n    origem: 'Plataforma',\n\n    cidade: cidade,\n\n    data_submissao: dataSubmissao,\n\n    prazo: prazo,\n\n    id_condomino: body.condomino.id || '',\n\n    numero_bloco: placeholders.numero_bloco || '',\n\n    numero_unidade: placeholders.numero_unidade || '',\n\n    data_infracao: formatarData(placeholders.data_infracao),\n\n    foto_infracao: placeholders.foto_infracao || '',\n\n    foto_infracao_2: placeholders.foto_infracao_2 || '',\n\n    id_condominio: body.condominio.id || '',\n\n    nome_condominio: placeholders.nome_condominio || '',\n\n    numero_cnpj: placeholders.numero_cnpj || '',\n\n    nome_sindico: placeholders.nome_sindico\n      ? `${placeholders.nome_sindico} - síndico`\n      : '',\n\n    assinatura_sindico:\n      placeholders.assinatura || null,\n\n    logo_condominio: placeholders.logo_condominio || '',\n\n    endereco_condominio: endereco,\n\n    infracao: placeholders.infracao || '',\n\n    template_corpo:\n      body.template_corpo ||\n      '1SGUBZEgYR3wGZkzjYpxCv-QU0t52-AN1vD3YscB5g-Y'\n  };\n\n} else {\n\n  // =========================\n  // N8N / OUTRO WORKFLOW\n  // =========================\n\n  let endereco = input.condominio_endereco || '';\n\n  const prazo = obterPrazo(\n    input.prazo_tipo,\n    input.prazo_dias\n  );\n\n  let cidade = '';\n  \n  // Busca via CNPJ se endereço vazio\n  if (!endereco && input.condominio_cnpj) {\n    endereco = await buscarEnderecoPorCNPJ.call(\n      this,\n      input.condominio_cnpj\n    );\n  }\n\n  if (input.condominio_cnpj) {\n    cidade = await buscarCidadePorCNPJ.call(\n      this,\n      input.condominio_cnpj\n    );\n  }\n\n  output = {\n\n    origem: 'N8N',\n\n    cidade: cidade,\n\n    data_submissao: dataSubmissao,\n\n    prazo: prazo,\n\n    id_condomino: input.condomino_id || '',\n\n    numero_bloco: input.condomino_bloco || '',\n\n    numero_unidade: input.condomino_unidade || '',\n\n    data_infracao: formatarData(input.data_infracao),\n\n    foto_infracao: input.foto_infracao_path || '',\n\n    foto_infracao_2: input.foto_infracao_path_2 || '',\n\n    id_condominio: input.condominio_id || '',\n\n    nome_condominio: input.condominio_nome || '',\n\n    numero_cnpj: input.condominio_cnpj || '',\n\n    nome_sindico: input.condominio_sindico_nome\n      ? `${input.condominio_sindico_nome} - síndico`\n      : '',\n\n    assinatura_sindico:\n      input.condominio_sindico_assinatura || null,\n\n    logo_condominio: input.condominio_logo_url || '',\n\n    endereco_condominio: endereco,\n\n    infracao: input.infracao || '',\n\n    template_corpo:\n      '1SGUBZEgYR3wGZkzjYpxCv-QU0t52-AN1vD3YscB5g-Y'\n  };\n}\n\nreturn [\n  {\n    json: output\n  }\n];"
+          "jsCode": "// Detecta origem dos dados\nconst input = $input.first().json;\n\nconst veioDoWebhook = !!input.body;\n\nfunction formatarData(data) {\n\n  if (!data) return '';\n\n  const limpa = data.split('T')[0];\n\n  const [ano, mes, dia] = limpa.split('-');\n\n  return `${dia}/${mes}/${ano}`;\n}\n\n// =========================\n// Formata endereço ReceitaWS\n// =========================\nfunction montarEnderecoReceita(receita) {\n\n  if (!receita) return '';\n\n  const logradouro = receita.logradouro || '';\n  const numero = receita.numero || '';\n  const complemento = receita.complemento\n    ? ' - ' + receita.complemento\n    : '';\n\n  const bairro = receita.bairro || '';\n  const municipio = receita.municipio || '';\n\n  const uf = (receita.uf || '').toUpperCase();\n\n  const cep = (receita.cep || '')\n    .replace(/\\D/g, '')\n    .replace(/(\\d{5})(\\d{3})/, '$1-$2');\n\n  const titleCase = (str) =>\n    str\n      .toLowerCase()\n      .replace(/\\b[a-zà-ú]/gi, (c) => c.toUpperCase());\n\n  return `${titleCase(logradouro)}, ${numero}${complemento}, ${titleCase(bairro)}, ${titleCase(municipio)}, ${uf}, ${cep}`;\n}\n\n// =========================\n// Busca endereço via ReceitaWS\n// =========================\nasync function buscarEnderecoPorCNPJ(cnpj) {\n\n  try {\n\n    const cnpjLimpo = cnpj.replace(/\\D/g, '');\n\n    const response = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://www.receitaws.com.br/v1/cnpj/${cnpjLimpo}`,\n      json: true\n    });\n\n    return montarEnderecoReceita(response);\n\n  } catch (e) {\n\n    return '';\n  }\n}\n\n// =========================\n// Busca cidade/UF via CNPJ\n// =========================\nasync function buscarCidadePorCNPJ(cnpj) {\n\n  try {\n\n    const cnpjLimpo = cnpj.replace(/\\D/g, '');\n\n    const response = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://www.receitaws.com.br/v1/cnpj/${cnpjLimpo}`,\n      json: true\n    });\n\n    const municipio = response.municipio || '';\n    const uf = (response.uf || '').toUpperCase();\n\n    if (!municipio || !uf) {\n      return '';\n    }\n\n    return `${municipio}/${uf}`;\n\n  } catch (e) {\n\n    return '';\n  }\n}\n\nfunction gerarDataSubmissao() {\n\n  const meses = [\n    'Janeiro',\n    'Fevereiro',\n    'Março',\n    'Abril',\n    'Maio',\n    'Junho',\n    'Julho',\n    'Agosto',\n    'Setembro',\n    'Outubro',\n    'Novembro',\n    'Dezembro'\n  ];\n\n  const hoje = new Date();\n\n  const dia = hoje.getDate();\n  const mes = meses[hoje.getMonth()];\n  const ano = hoje.getFullYear();\n\n  return `${dia} de ${mes} de ${ano}`;\n}\n\nfunction obterPrazo(tipo, dias) {\n\n  switch (tipo) {\n\n    case 'sem_prazo':\n      return '';\n\n    case 'imediato':\n      return 'Imediato';\n\n    case 'dias':\n      return dias ? String(dias) : '';\n\n    default:\n      return '';\n  }\n}\n\nconst dataSubmissao = gerarDataSubmissao();\n\nlet output = {};\n\nif (veioDoWebhook) {\n\n  // =========================\n  // WEBHOOK / PLATAFORMA\n  // =========================\n\n  const body = input.body;\n\n  const placeholders = body.placeholders || {};\n\n  const prazo = obterPrazo(\n    placeholders.prazo_tipo,\n    placeholders.prazo_dias\n  );\n  \n  let endereco = placeholders.endereco_condominio || '';\n\n  let cidade = '';\n  \n  // Busca via CNPJ se endereço vazio\n  if (!endereco && placeholders.numero_cnpj) {\n\n    endereco = await buscarEnderecoPorCNPJ.call(\n      this,\n      placeholders.numero_cnpj\n    );\n  }\n  if (placeholders.numero_cnpj) {\n\n    cidade = await buscarCidadePorCNPJ.call(\n      this,\n      placeholders.numero_cnpj\n    );\n  }\n\n  output = {\n\n    origem: 'Plataforma',\n\n    cidade: cidade,\n\n    data_submissao: dataSubmissao,\n\n    prazo: prazo,\n\n    id_condomino: body.condomino.id || '',\n\n    numero_bloco: placeholders.numero_bloco || '',\n\n    numero_unidade: placeholders.numero_unidade || '',\n\n    data_infracao: formatarData(placeholders.data_infracao),\n\n    foto_infracao: placeholders.foto_infracao || '',\n\n    foto_infracao_2: placeholders.foto_infracao_2 || '',\n\n    id_condominio: body.condominio.id || '',\n\n    nome_condominio: placeholders.nome_condominio || '',\n\n    numero_cnpj: placeholders.numero_cnpj || '',\n\n    nome_sindico: placeholders.nome_sindico\n      ? `${placeholders.nome_sindico} - síndico`\n      : '',\n\n    assinatura_sindico:\n      placeholders.assinatura || null,\n\n    logo_condominio: placeholders.logo_condominio || '',\n\n    endereco_condominio: endereco,\n\n    infracao: placeholders.infracao || '',\n\n    template_corpo:\n      body.template_corpo ||\n      '1SGUBZEgYR3wGZkzjYpxCv-QU0t52-AN1vD3YscB5g-Y'\n  };\n\n} else {\n\n  // =========================\n  // N8N / OUTRO WORKFLOW\n  // =========================\n\n  const dadosCadastro = input;\n  const dadosNotificacao = $('Trata os dados').first().json;\n\n  let endereco = dadosCadastro.condominio_endereco || '';\n\n  const prazo = obterPrazo(\n    dadosNotificacao.prazo_tipo,\n    dadosNotificacao.prazo_dias\n  );\n\n  let cidade = '';\n\n  // Busca via CNPJ se endereço vazio\n  if (!endereco && dadosCadastro.condominio_cnpj) {\n    endereco = await buscarEnderecoPorCNPJ.call(\n      this,\n      dadosCadastro.condominio_cnpj\n    );\n  }\n\n  if (dadosCadastro.condominio_cnpj) {\n    cidade = await buscarCidadePorCNPJ.call(\n      this,\n      dadosCadastro.condominio_cnpj\n    );\n  }\n\n  output = {\n\n    origem: 'N8N',\n\n    cidade: cidade,\n\n    data_submissao: dataSubmissao,\n\n    prazo: prazo,\n\n    id_condomino:\n      dadosCadastro.condomino_id || '',\n\n    numero_bloco:\n      dadosNotificacao.bloco || '',\n\n    numero_unidade:\n      dadosNotificacao.unidade || '',\n\n    data_infracao: formatarData(\n      dadosNotificacao.data_infracao\n    ),\n\n    foto_infracao:\n      dadosNotificacao.foto_infracao_path || '',\n\n    foto_infracao_2:\n      dadosNotificacao.foto_infracao_path_2 || '',\n\n    id_condominio:\n      dadosCadastro.condominio_id || '',\n\n    nome_condominio:\n      dadosCadastro.condominio_nome || '',\n\n    numero_cnpj:\n      dadosCadastro.condominio_cnpj || '',\n\n    nome_sindico:\n      dadosCadastro.condominio_sindico_nome\n        ? `${dadosCadastro.condominio_sindico_nome} - síndico`\n        : '',\n\n    assinatura_sindico:\n      dadosCadastro.condominio_sindico_assinatura || null,\n\n    logo_condominio:\n      dadosCadastro.condominio_logo_url || '',\n\n    endereco_condominio:\n      endereco,\n\n    infracao:\n      dadosNotificacao.infracao || '',\n\n    template_corpo:\n      '1SGUBZEgYR3wGZkzjYpxCv-QU0t52-AN1vD3YscB5g-Y'\n  };\n}\n\nreturn [\n  {\n    json: output\n  }\n];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -3074,29 +3095,6 @@
         ],
         "id": "9be54767-9d5c-4db0-bf99-3bd948d15695",
         "name": "Origem"
-      },
-      {
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "SELECT\n  -- Condomínio\n  c.id              AS condominio_id,\n  c.nome            AS condominio_nome,\n  c.cnpj            AS condominio_cnpj,\n  c.endereco        AS condominio_endereco,\n  c.logo_url        AS condominio_logo_url,\n  c.sindico_nome    AS condominio_sindico_nome,\n  c.sindico_email   AS condominio_sindico_email,\n  c.sindico_telefone AS condominio_sindico_telefone,\n  c.sindico_assinatura_url AS condominio_sindico_assinatura,\n\n  -- Condômino\n  cm.id        AS condomino_id,\n  cm.nome      AS condomino_nome,\n  cm.bloco     AS condomino_bloco,\n  cm.unidade   AS condomino_unidade,\n  cm.relacao   AS condomino_relacao,\n  cm.email     AS condomino_email,\n  cm.telefone  AS condomino_telefone,\n  cm.celular   AS condomino_celular,\n  cm.cpf       AS condomino_cpf,\n\n  -- Eco do input (útil pro fluxo seguinte)\n  $3::text AS infracao,\n  $4::text AS foto_infracao_path,\n  $5::date AS data_infracao\nFROM public.condominios c\nJOIN public.condominos  cm ON cm.condominio_id = c.id\nWHERE unaccent(lower(c.nome))  = unaccent(lower($1))\n  AND unaccent(lower(cm.nome)) = unaccent(lower($2))\n;\n",
-          "options": {
-            "queryReplacement": "={{\n[\n  $json.nome_condominio,\n  $json.nome_condomino,\n  $json.infracao,\n  $json.foto_infracao_path,\n  $json.data_infracao\n]\n}}"
-          }
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.6,
-        "position": [
-          -1632,
-          112
-        ],
-        "id": "96daaa2b-8ee6-4f47-b786-d7934d297f77",
-        "name": "Capta os dados necessarios",
-        "credentials": {
-          "postgres": {
-            "id": "Hr0gqOEXHC8efR0Q",
-            "name": "Monteiro - Postgres"
-          }
-        }
       },
       {
         "parameters": {
@@ -3256,53 +3254,6 @@
       },
       {
         "parameters": {
-          "workflowInputs": {
-            "values": [
-              {
-                "name": "nome_condominio"
-              },
-              {
-                "name": "nome_condomino"
-              },
-              {
-                "name": "infracao"
-              },
-              {
-                "name": "foto_infracao_path",
-                "type": "any"
-              },
-              {
-                "name": "data_infracao"
-              },
-              {
-                "name": "botPhoneNumber"
-              },
-              {
-                "name": "foto_infracao_path_2",
-                "type": "any"
-              },
-              {
-                "name": "prazo_tipo",
-                "type": "any"
-              },
-              {
-                "name": "prazo_dias",
-                "type": "any"
-              }
-            ]
-          }
-        },
-        "type": "n8n-nodes-base.executeWorkflowTrigger",
-        "typeVersion": 1.1,
-        "position": [
-          -1824,
-          112
-        ],
-        "id": "8798b3ff-e1e6-4e97-914b-2513bb5b56ab",
-        "name": "When Executed by Another Workflow"
-      },
-      {
-        "parameters": {
           "promptType": "define",
           "text": "=descrição da infração:  {{ $('Valida dados necessarios').first().json.infracao }}",
           "hasOutputParser": true,
@@ -3417,11 +3368,11 @@
         "parameters": {
           "operation": "send",
           "phoneNumberId": "1150042498190368",
-          "recipientPhoneNumber": "={{ $('When Executed by Another Workflow').first().json.botPhoneNumber }}",
+          "recipientPhoneNumber": "={{ $('Trata os dados').first().json.botPhoneNumber }}",
           "messageType": "document",
           "mediaPath": "useMediaId",
           "mediaId": "={{ $json.id }}",
-          "mediaFilename": "=Notificação_{{ $('Organiza os dados').item.json.nome_condominio }}_",
+          "mediaFilename": "=NOTIFICACAO_{{ $('Organiza os dados').first().json.nome_condominio.replace(/\\s+/g, '') }}_{{ $('Organiza os dados').first().json.numero_bloco }}_{{ $('Organiza os dados').first().json.numero_unidade }}",
           "additionalFields": {}
         },
         "type": "n8n-nodes-base.whatsApp",
@@ -3837,6 +3788,79 @@
         ],
         "id": "b260e1e3-e208-4b6c-8b78-712e81208a0c",
         "name": "Verifica modelo da openRouter1"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT\n  -- Condomínio\n  c.id              AS condominio_id,\n  c.nome            AS condominio_nome,\n  c.cnpj            AS condominio_cnpj,\n  c.endereco        AS condominio_endereco,\n  c.logo_url        AS condominio_logo_url,\n  c.sindico_nome    AS condominio_sindico_nome,\n  c.sindico_email   AS condominio_sindico_email,\n  c.sindico_telefone AS condominio_sindico_telefone,\n  c.sindico_assinatura_url AS condominio_sindico_assinatura,\n\n  -- Condômino\n  cm.id        AS condomino_id,\n  cm.nome      AS condomino_nome,\n  cm.bloco     AS condomino_bloco,\n  cm.unidade   AS condomino_unidade,\n  cm.relacao   AS condomino_relacao,\n  cm.email     AS condomino_email,\n  cm.telefone  AS condomino_telefone,\n  cm.celular   AS condomino_celular,\n  cm.cpf       AS condomino_cpf\n\nFROM public.condominios c\nJOIN public.condominos cm\n  ON cm.condominio_id = c.id\n\nWHERE c.id = $1\n  AND TRIM(cm.bloco) = TRIM($2)\n  AND TRIM(cm.unidade) = TRIM($3);",
+          "options": {
+            "queryReplacement": "={{\n[\n  $json.condominio_id,\n  $json.bloco,\n$json.unidade\n]\n}}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -1632,
+          144
+        ],
+        "id": "d3152271-f5a1-48b9-bdbf-e1d8a33fc89d",
+        "name": "Capta os dados necessarios",
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "inputSource": "passthrough"
+        },
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -2016,
+          160
+        ],
+        "id": "f8905de0-3cf6-4ef8-8973-2fdc60e6b594",
+        "name": "When Executed by Another Workflow"
+      },
+      {
+        "parameters": {
+          "jsCode": "return items.map(item => {\n  let data = item.json.query;\n\n  // Converte string JSON para objeto\n  if (typeof data === 'string') {\n    try {\n      data = JSON.parse(data);\n    } catch (error) {\n      throw new Error(\n        `Campo query contém JSON inválido: ${error.message}`\n      );\n    }\n  }\n\n  // =====================\n  // Campos obrigatórios\n  // =====================\n\n  const camposObrigatorios = [\n    'condominio_id',\n    'bloco',\n    'unidade',\n    'data_infracao',\n    'infracao',\n    'botPhoneNumber'\n  ];\n\n  for (const campo of camposObrigatorios) {\n    if (\n      data[campo] === undefined ||\n      data[campo] === null ||\n      String(data[campo]).trim() === ''\n    ) {\n      throw new Error(\n        `Campo obrigatório \"${campo}\" não informado.`\n      );\n    }\n  }\n\n  // =====================\n  // Formato da data\n  // =====================\n\n  const dataRegex = /^\\d{4}-\\d{2}-\\d{2}$/;\n\n  if (!dataRegex.test(data.data_infracao)) {\n    throw new Error(\n      'data_infracao deve estar no formato YYYY-MM-DD.'\n    );\n  }\n\n  // =====================\n  // Prazo\n  // =====================\n\n  const tiposPrazoPermitidos = [\n    'imediato',\n    'dias',\n    'sem_prazo'\n  ];\n\n  if (\n    data.prazo_tipo &&\n    !tiposPrazoPermitidos.includes(data.prazo_tipo)\n  ) {\n    throw new Error(\n      'prazo_tipo deve ser \"imediato\", \"dias\" ou \"sem_prazo\".'\n    );\n  }\n\n  if (\n    data.prazo_tipo === 'dias' &&\n    (\n      data.prazo_dias === undefined ||\n      data.prazo_dias === null ||\n      data.prazo_dias === ''\n    )\n  ) {\n    throw new Error(\n      'prazo_dias é obrigatório quando prazo_tipo = \"dias\".'\n    );\n  }\n\n  return {\n    json: data\n  };\n});"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -1824,
+          160
+        ],
+        "id": "41ad72cc-2f6f-49de-a22d-ff5a1ecd1289",
+        "name": "Trata os dados",
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "1ef478fc-69bc-4ee8-872e-572e14fe8c76",
+                "name": "erro",
+                "value": "={{ $json.error }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -1824,
+          384
+        ],
+        "id": "4107125e-4db4-475f-afa4-1799a68b49f4",
+        "name": "Informa o erro"
       }
     ],
     "connections": {
@@ -4167,17 +4191,6 @@
           ]
         ]
       },
-      "Capta os dados necessarios": {
-        "main": [
-          [
-            {
-              "node": "Valida dados necessarios",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "Cria notificação no sistema": {
         "main": [
           [
@@ -4194,17 +4207,6 @@
           [
             {
               "node": "Verifica modelo da openRouter",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "When Executed by Another Workflow": {
-        "main": [
-          [
-            {
-              "node": "Capta os dados necessarios",
               "type": "main",
               "index": 0
             }
@@ -4469,6 +4471,46 @@
           [
             {
               "node": "Gera o texto da infracao",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "When Executed by Another Workflow": {
+        "main": [
+          [
+            {
+              "node": "Trata os dados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Trata os dados": {
+        "main": [
+          [
+            {
+              "node": "Capta os dados necessarios",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Informa o erro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Capta os dados necessarios": {
+        "main": [
+          [
+            {
+              "node": "Valida dados necessarios",
               "type": "main",
               "index": 0
             }
