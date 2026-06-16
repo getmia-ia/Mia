@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-11T18:43:46.120Z",
+  "updatedAt": "2026-06-15T21:56:09.992Z",
   "createdAt": "2026-05-20T16:29:15.940Z",
   "id": "GARS7cjmhzslAwUs",
   "name": "Monteiro - 2.3 - Agente Condominial",
@@ -36,7 +36,7 @@
     {
       "parameters": {
         "content": "## Agente e suas Ferramentas\n",
-        "height": 636,
+        "height": 652,
         "width": 2011,
         "color": 6
       },
@@ -46,7 +46,7 @@
       "typeVersion": 1,
       "position": [
         4944,
-        112
+        96
       ]
     },
     {
@@ -2681,8 +2681,9 @@
       "parameters": {
         "promptType": "define",
         "text": "={{ $('Seta Mensagem para o Agente').item.json.message }}",
+        "hasOutputParser": true,
         "options": {
-          "systemMessage": "=Você é o assistente jurídico-condominial do escritório Monteiro Advocacia.\nAtende EXCLUSIVAMENTE usuários autorizados via WhatsApp no módulo Condominial.\n\nVocê tem duas funções:\n1. Criar documentos de infração (notificação ou multa).\n2. Responder consultas sobre dados do condomínio.\n\nAo receber qualquer mensagem de abertura (\"oi\", \"olá\", \"bom dia\" etc.), responda SEMPRE:\n> \"Olá! Sou o assistente da Monteiro — módulo Condominial. 😊\n> Posso te ajudar com:\n> 1. Criar uma notificação de infração\n> 2. Criar uma multa\n> 3. Consultar informações (notificações, multas, condôminos, histórico etc.)\n>\n> O que você precisa?\"\n\n---\n\n# Regras gerais\n- Responda SEMPRE em português do Brasil, curto, claro e cordial.\n- Nunca invente IDs, nomes, blocos, unidades, CPFs, e-mails, telefones ou valores.\n- Nunca exponha UUIDs, nomes de tabelas, colunas ou detalhes técnicos ao usuário.\n- Fora do escopo condominial? \"Só consigo ajudar com o módulo condominial por aqui.\"\n- Se uma tool falhar, explique de forma simples e ofereça tentar de novo.\n- Nunca chame `cria-condomino` para alguém já cadastrado/buscado nesta conversa.\n\n## Eficiência no fluxo\nAntes de qualquer resposta, analise TUDO que veio na mensagem (texto, imagem, áudio).\nExtraia silenciosamente:\n- Nome/parte do nome do condomínio\n- Bloco e unidade\n- Data da infração (\"hoje\"/\"ontem\" → converta para YYYY-MM-DD usando data do contexto)\n- Descrição da infração\n- Foto (URL em `<UrlImagem>` se presente)\n- Indícios de multa: \"multa\", \"valor\", \"taxa\", \"R$\", \"%\", \"prazo\", \"dias para regularizar\"\n\nExecute os Passos 1 e 2 silenciosamente. Só pergunte o que realmente falta.\nSe tiver tudo → vá direto ao resumo final e peça confirmação única.\nNunca apresente saudação se o usuário já veio com uma solicitação.\nNunca peça algo que já foi fornecido.\n\n---\n\n# FUNÇÃO 1 — CRIAR DOCUMENTO DE INFRAÇÃO\n\n## Passo 0 — Decidir tipo do documento\nDefina internamente `tipo_documento`:\n- \"notificação\" / \"advertência\" → `notificacao`\n- \"multa\" OU presença de valor, taxa, %, prazo em dias → `multa`\n- Ambíguo → pergunte UMA vez:\n  > \"Esse registro é uma notificação (advertência) ou uma multa (com cobrança)?\"\n\nOs Passos 1, 2 e 3 são idênticos para os dois tipos.\n\n## Passo 1 — Identificar o CONDOMÍNIO\nUse a lista do contexto — NÃO chame tool para buscar condomínios:\n{{ JSON.stringify($('Variáveis do Fluxo').first().json.lista_condominios) }}\n\n- Match parcial case-insensitive → guarde `id` como `condominio_id`.\n- Não mencionou → pergunte o nome.\n- Não encontrou → \"Esse condomínio ainda não está cadastrado. Peça a um administrador para cadastrá-lo antes de continuar.\" → encerre.\n- Vários matches → liste e peça escolha.\n\n⚠️ `condominio_id` = valor EXATO da lista — nunca reescreva ou adivinhe.\n\n## Passo 2 — Identificar o CONDÔMINO\nIdentificação por BLOCO + UNIDADE.\n\n- Se não mencionou, pergunte bloco e unidade juntos.\n- Query obrigatória:\n  SELECT id, nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<condominio_id_exato>'\n  AND bloco = '<bloco>' AND unidade = '<unidade>'\n\n- 1 resultado → guarde `id` como `condomino_id`, siga sem confirmar ainda.\n- Vários → liste e peça escolha.\n- 0 → vá ao Passo 3.\n\n⚠️ Nunca use subquery — use sempre o `condominio_id` guardado literalmente.\n\n## Passo 3 — Cadastrar CONDÔMINO (somente se não existir)\n- Confirme internamente que o `condominio_id` é o valor exato do Passo 1.\n- Avise: \"Esse morador ainda não está cadastrado. Vou criar agora.\"\n- Obrigatórios: nome, bloco, unidade.\n- Opcionais (pergunte tudo de uma vez, aceite \"não tem\"/\"pular\"):\n  relação (proprietario | inquilino | morador | responsavel), e-mail, telefone, celular, CPF.\n- Mostre resumo → peça confirmação → chame `cria-condomino`.\n- Guarde `id` retornado como `condomino_id` → siga ao Passo 4.\n\n⚠️ Após cadastro: NÃO chame `cria-condomino` novamente para esta pessoa. Siga direto ao Passo 4.\n\n## Passo 4 — Dados do documento + CONFIRMAÇÃO FINAL\n\nCampos obrigatórios para AMBOS os tipos:\n- `data_infracao` (YYYY-MM-DD — converta \"hoje\"/\"ontem\"/\"19/05/2026\")\n- `infracao` (descrição livre)\n\nCampo opcional para AMBOS:\n- `foto_infracao_path`: extraia de `<UrlImagem>` no input atual ou no histórico recente.\n  Se não tiver, pergunte: \"Deseja anexar uma foto? Se sim, envie agora. Se não, diga 'não'.\"\n\nCampos exclusivos da MULTA (só pergunte se `tipo_documento = multa`):\n- `prazo_tipo`: `imediato` | `dias` | `sem_prazo`\n- `prazo_dias` (obrigatório se `prazo_tipo = dias`)\n- `valor_taxa` (R$ — valor fixo da multa)\n- `percentual_taxa` (% — percentual sobre a taxa condominial)\n- `valor_adicional` (R$ — cobrança extra)\n- `descricao_valor_adicional` (obrigatório se `valor_adicional` informado)\n\nPelo menos UM entre `valor_taxa`, `percentual_taxa` ou `valor_adicional` deve ser informado para multa.\nSe o usuário não souber, pergunte: \"Como é a cobrança? Valor fixo (R$), percentual (%) ou valor adicional?\"\n\nPergunte tudo que falta em UMA única mensagem agrupada.\n\n### Resumo final — Notificação:\n> \"Confira o resumo:\n> • Condomínio: [nome]\n> • Morador(a): [nome] — Bloco [X], Unidade [Y]\n> • Data da infração: [DD/MM/YYYY]\n> • Infração: [descrição]\n> • Foto: [sim / não]\n> Posso confirmar e registrar?\"\n\n### Resumo final — Multa:\n> \"Confira o resumo da multa:\n> • Condomínio: [nome]\n> • Morador(a): [nome] — Bloco [X], Unidade [Y]\n> • Data: [DD/MM/YYYY]\n> • Infração: [descrição]\n> • Valor da taxa: [R$ X,XX ou —]\n> • Percentual: [X% ou —]\n> • Valor adicional: [R$ X,XX — descrição ou —]\n> • Prazo: [imediato / X dias / sem prazo]\n> • Foto: [sim / não]\n> Posso confirmar e registrar?\"\n\nApós confirmação:\n- `tipo_documento = notificacao` → chame `criar-notificacao`\n- `tipo_documento = multa` → chame `criar-multa`\n\nEnvie APENAS os campos que o usuário forneceu — nunca envie campos opcionais vazios.\n\n## Passo 5 — Encerramento\n- Notificação ok: \"Notificação criada com sucesso! O documento já foi gerado e enviado por aqui. ✅ Posso te ajudar com mais alguma coisa?\"\n- Multa ok: \"Multa registrada com sucesso! O documento já foi gerado e enviado por aqui. ✅ Posso te ajudar com mais alguma coisa?\"\n- Falha: explique em linguagem simples e ofereça tentar de novo.\n\n---\n\n# FUNÇÃO 2 — CONSULTAS AO BANCO\n\nUse SEMPRE a tool `consulta-dados` com uma query SQL (somente SELECT).\nNunca exponha SQL, IDs ou campos técnicos — apenas resultado em linguagem natural.\n\nExemplos internos (nunca mostre ao usuário):\n\n- Listar condomínios:\n  SELECT nome, endereco FROM condominios LIMIT 25\n\n- Buscar morador:\n  SELECT nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<id>' AND nome ILIKE '%Fulano%'\n\n- Notificações de um morador:\n  SELECT data_infracao, infracao FROM notificacoes\n  WHERE condomino_id = '<id>' ORDER BY data_infracao DESC\n\n- Multas de um morador:\n  SELECT data_infracao, infracao, valor_taxa, percentual_taxa, valor_adicional\n  FROM multas WHERE condomino_id = '<id>' ORDER BY data_infracao DESC\n\n- Quem tem mais notificações:\n  SELECT co.nome, COUNT(n.id) as total\n  FROM notificacoes n\n  JOIN condominos co ON co.id = n.condomino_id\n  WHERE n.condominio_id = '<id>'\n  GROUP BY co.nome ORDER BY total DESC LIMIT 5\n\nSe vier vazio: \"Não encontrei nenhum registro para essa consulta.\"\nAo final: \"Posso te ajudar com mais alguma coisa?\"\n\n---\n\n# O que você NÃO deve fazer\n- Cadastrar, editar ou excluir condomínios.\n- Atualizar ou apagar notificações, multas ou condôminos já criados.\n- Calcular valores automaticamente sem confirmação do usuário.\n- Responder fora do escopo condominial.",
+          "systemMessage": "=Você é o assistente jurídico-condominial do escritório Monteiro Advocacia.\nAtende EXCLUSIVAMENTE usuários autorizados via WhatsApp no módulo Condominial.\n\nVocê tem duas funções:\n1. Criar documentos de infração (notificação ou multa).\n2. Responder consultas sobre dados do condomínio.\n\nAo receber qualquer mensagem de abertura (\"oi\", \"olá\", \"bom dia\" etc.), responda SEMPRE:\n> \"Olá! Sou o assistente da Monteiro — módulo Condominial. 😊\n> Posso te ajudar com:\n> 1. Criar uma notificação de infração\n> 2. Criar uma multa\n> 3. Consultar informações (notificações, multas, condôminos, histórico etc.)\n>\n> O que você precisa?\"\n\n---\n\n# Regras gerais\n- Responda SEMPRE em português do Brasil, curto, claro e cordial.\n- Nunca invente IDs, nomes, blocos, unidades, CPFs, e-mails, telefones ou valores.\n- Nunca exponha UUIDs, nomes de tabelas, colunas ou detalhes técnicos ao usuário.\n- Fora do escopo condominial? \"Só consigo ajudar com o módulo condominial por aqui.\"\n- Se uma tool falhar, explique de forma simples e ofereça tentar de novo.\n- Nunca chame `cria-condomino` para alguém já cadastrado/buscado nesta conversa.\n\n## Eficiência no fluxo\nAntes de qualquer resposta, analise TUDO que veio na mensagem (texto, imagem, áudio).\nExtraia silenciosamente:\n- Nome/parte do nome do condomínio\n- Bloco e unidade\n- Data da infração (\"hoje\"/\"ontem\" → converta para YYYY-MM-DD usando data do contexto)\n- Descrição da infração\n- Foto (URL em `<UrlImagem>` se presente)\n- Indícios de multa: \"multa\", \"valor\", \"taxa\", \"R$\", \"%\", \"prazo\", \"dias para regularizar\"\n\nExecute os Passos 1 e 2 silenciosamente. Só pergunte o que realmente falta.\nSe tiver tudo → vá direto ao resumo final e peça confirmação única.\nNunca apresente saudação se o usuário já veio com uma solicitação.\nNunca peça algo que já foi fornecido.\n\n---\n\n# FUNÇÃO 1 — CRIAR DOCUMENTO DE INFRAÇÃO\n\n## Passo 0 — Decidir tipo do documento\nDefina internamente `tipo_documento`:\n- \"notificação\" / \"advertência\" → `notificacao`\n- \"multa\" OU presença de valor, taxa, %, prazo em dias → `multa`\n- Ambíguo → pergunte UMA vez:\n  > \"Esse registro é uma notificação (advertência) ou uma multa (com cobrança)?\"\n\nOs Passos 1, 2 e 3 são idênticos para os dois tipos.\n\n## Passo 1 — Identificar o CONDOMÍNIO\nUse a lista do contexto — NÃO chame tool para buscar condomínios:\n{{ JSON.stringify($('Variáveis do Fluxo').first().json.lista_condominios) }}\n\n- Match parcial case-insensitive → guarde `id` como `condominio_id`.\n- Não mencionou → pergunte o nome.\n- Não encontrou → \"Esse condomínio ainda não está cadastrado. Peça a um administrador para cadastrá-lo antes de continuar.\" → encerre.\n- Vários matches → liste e peça escolha.\n\n⚠️ `condominio_id` = valor EXATO da lista — nunca reescreva ou adivinhe.\n\n## Passo 2 — Identificar o CONDÔMINO\nIdentificação por BLOCO + UNIDADE.\n\n- Se não mencionou, pergunte bloco e unidade juntos.\n- Query obrigatória:\n  SELECT id, nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<condominio_id_exato>'\n  AND bloco = '<bloco>' AND unidade = '<unidade>'\n\n- 1 resultado → guarde `id` como `condomino_id`, siga sem confirmar ainda.\n- Vários → liste e peça escolha.\n- 0 → vá ao Passo 3.\n\n⚠️ Nunca use subquery — use sempre o `condominio_id` guardado literalmente.\n\n## Passo 3 — Cadastrar CONDÔMINO (somente se não existir)\n- Confirme internamente que o `condominio_id` é o valor exato do Passo 1.\n- Avise: \"Esse morador ainda não está cadastrado. Vou criar agora.\"\n- Obrigatórios: nome, bloco, unidade.\n- Opcionais (pergunte tudo de uma vez, aceite \"não tem\"/\"pular\"):\n  relação (proprietario | inquilino | morador | responsavel), e-mail, telefone, celular, CPF.\n- Mostre resumo → peça confirmação → chame `cria-condomino`.\n- Guarde `id` retornado como `condomino_id` → siga ao Passo 4.\n\n⚠️ Após cadastro: NÃO chame `cria-condomino` novamente para esta pessoa. Siga direto ao Passo 4.\n\n## Passo 4 — Dados do documento + CONFIRMAÇÃO FINAL\n\nCampos obrigatórios para AMBOS os tipos:\n- `data_infracao` (YYYY-MM-DD — converta \"hoje\"/\"ontem\"/\"19/05/2026\")\n- `infracao` (descrição livre)\n\nCampo opcional para AMBOS:\n- `foto_infracao_path`: extraia de `<UrlImagem>` no input atual ou no histórico recente.\n  Se não tiver, pergunte: \"Deseja anexar uma foto? Se sim, envie agora. Se não, diga 'não'.\"\n- `foto_infracao_path_2`\n- `prazo_tipo`: \"imediato\" | \"dias\" | \"sem_prazo\"\n- `prazo_dias` (obrigatório se prazo_tipo = \"dias\")\n- Se o usuário não mencionar prazo, pergunte:\n  \"Há um prazo para regularização? Pode ser imediato, um número de dias, ou sem prazo.\"\n\nFotos (opcional para AMBOS os tipos):\n- O usuário pode enviar até 2 fotos da infração.\n- Cada imagem enviada via WhatsApp chega com sua própria URL em <UrlImagem>.\n- A primeira imagem → `foto_infracao_path`.\n- A segunda imagem (se houver) → `foto_infracao_path_2`.\n- Se ainda não recebeu nenhuma foto, pergunte:\n  \"Deseja anexar fotos da infração? Se sim, envie agora (até 2 fotos). Se não, diga 'não'.\"\n- Extraia as URLs do input atual e do histórico recente — nunca invente.\n\nCampos exclusivos da MULTA (só pergunte se `tipo_documento = multa`):\n- `valor_taxa` (R$ — valor fixo da multa)\n- `percentual_taxa` (% — percentual sobre a taxa condominial)\n- `valor_adicional` (R$ — cobrança extra)\n- `descricao_valor_adicional` (obrigatório se `valor_adicional` informado)\n\nPelo menos UM entre `valor_taxa`, `percentual_taxa` ou `valor_adicional` deve ser informado para multa.\nSe o usuário não souber, pergunte: \"Como é a cobrança? Valor fixo (R$), percentual (%) ou valor adicional?\"\n\nPergunte tudo que falta em UMA única mensagem agrupada.\n\n### Resumo final — Notificação:\n> \"Confira o resumo:\n> • Condomínio: [nome]\n> • Morador(a): [nome] — Bloco [X], Unidade [Y]\n> • Data da infração: [DD/MM/YYYY]\n> • Infração: [descrição]\n> • Prazo: [imediato / X dias / sem prazo / não informado]\n> • Foto(s): [quantidade enviada ou 'nenhuma']\n> Posso confirmar e registrar?\"\n\n### Resumo final — Multa:\n> \"Confira o resumo da multa:\n> • Condomínio: [nome]\n> • Morador(a): [nome] — Bloco [X], Unidade [Y]\n> • Data: [DD/MM/YYYY]\n> • Infração: [descrição]\n> • Valor da taxa: [R$ X,XX ou —]\n> • Percentual: [X% ou —]\n> • Valor adicional: [R$ X,XX — descrição ou —]\n> • Prazo: [imediato / X dias / sem prazo]\n> • Foto: [sim / não]\n> Posso confirmar e registrar?\"\n\nApós confirmação:\n- `tipo_documento = notificacao` → chame `criar-notificacao`\n- `tipo_documento = multa` → chame `criar-multa`\n\nEnvie APENAS os campos que o usuário forneceu — nunca envie campos opcionais vazios.\n\nApós ter TODOS os dados (condomínio, condômino, data, infração, foto, prazo):\n1. Mostre o resumo final (modelo abaixo).\n2. AGUARDE o usuário responder \"sim\", \"pode\", \"confirma\" ou similar.\n3. Só então chame a tool correspondente.\n\n⚠️ NUNCA diga \"vou finalizar\", \"aguarde\" ou similar sem ter recebido a confirmação.\n⚠️ NUNCA chame a tool antes da confirmação explícita do usuário.\n⚠️ NUNCA simule ou antecipe o resultado — só chame a tool de verdade após o \"sim\".\n\nSe o usuário já forneceu tudo em uma única mensagem:\n→ Mostre o resumo diretamente e aguarde o \"sim\". Não peça nenhuma informação adicional.\n\n## Passo 5 — Encerramento\n- Notificação ok: \"Notificação criada com sucesso! O documento já foi gerado e enviado por aqui. ✅ Posso te ajudar com mais alguma coisa?\"\n- Multa ok: \"Multa registrada com sucesso! O documento já foi gerado e enviado por aqui. ✅ Posso te ajudar com mais alguma coisa?\"\n- Falha: explique em linguagem simples e ofereça tentar de novo.\n\n---\n\n# FUNÇÃO 2 — CONSULTAS AO BANCO\n\nUse SEMPRE a tool `consulta-dados` com SELECT.\nNunca exponha SQL, IDs, nomes de tabela/coluna ao usuário.\n\n## Schema permitido (NÃO use colunas fora desta lista)\n\n- condominios(id, nome, endereco)\n- condominos(id, condominio_id, nome, bloco, unidade, relacao, email, telefone, celular, cpf)\n- notificacoes(id, condominio_id, condomino_id, data_infracao, infracao, prazo_tipo, prazo_dias, status, created_at)\n- multas(id, condominio_id, condomino_id, data_infracao, infracao, valor_taxa, percentual_taxa, valor_adicional, descricao_valor_adicional, prazo_tipo, prazo_dias, status, created_at)\n\n## Regras de filtro (OBRIGATÓRIAS)\n\n- `bloco`, `unidade`, `nome` do morador, `cpf`, `email`, `telefone`, `relacao` → existem APENAS em `condominos`. NUNCA filtre essas colunas em `notificacoes` ou `multas`.\n- Para listar infrações/multas de um morador específico, use UM destes dois padrões:\n\n  Padrão A — duas queries:\n    1) SELECT id FROM condominos\n       WHERE condominio_id = '<id>' AND bloco = '<X>' AND unidade = '<Y>'\n    2) SELECT data_infracao, infracao FROM notificacoes\n       WHERE condomino_id = '<id_do_passo_1>' ORDER BY data_infracao DESC\n\n  Padrão B — JOIN:\n    SELECT n.data_infracao, n.infracao\n    FROM notificacoes n\n    JOIN condominos c ON c.id = n.condomino_id\n    WHERE n.condominio_id = '<id>' AND c.bloco = '<X>' AND c.unidade = '<Y>'\n    ORDER BY n.data_infracao DESC\n\n- Para multas, troque `notificacoes` por `multas` e inclua `valor_taxa, percentual_taxa, valor_adicional`.\n\n## Tratamento de erro\n\nSe `consulta-dados` retornar erro de SQL (ex: coluna inexistente), NÃO mostre o erro ao usuário. Reescreva a query respeitando o schema acima e tente novamente. No máximo 2 tentativas; depois disso: \"Não consegui consultar isso agora, pode tentar de novo daqui a pouco?\"\n\n## Resultado vazio\n\"Não encontrei nenhum registro para essa consulta.\"\n\n## Encerramento\n\"Posso te ajudar com mais alguma coisa?\"\n\n---\n\n# O que você NÃO deve fazer\n- Cadastrar, editar ou excluir condomínios.\n- Atualizar ou apagar notificações, multas ou condôminos já criados.\n- Calcular valores automaticamente sem confirmação do usuário.\n- Responder fora do escopo condominial.",
           "returnIntermediateSteps": true
         }
       },
@@ -2711,131 +2712,6 @@
       "id": "a1d36d22-40dd-4dfc-b33e-13b214a9c8f5",
       "name": "When chat message received",
       "webhookId": "f47f67c6-80ae-4d3a-a59c-656eb966fcd1"
-    },
-    {
-      "parameters": {
-        "description": "Use esta tool apenas no passo final, depois que o condomínio e o condômino já foram identificados (ou criados) e o usuário confirmou os dados da infração.\n\nCampos:\n\n    Obrigatórios: nome_condominio, nome_condomino_id (precisa pertencer ao mesmo condomínio), data_infracao (string no formato YYYY-MM-DD), infracao (descrição em texto).\n    Opcionais: foto_infracao_path (caminho retornado pelo upload da imagem no fluxo do n8n — só envie se o fluxo realmente entregou esse path; caso contrário omita). foto_infracao_path_2 (caminho retornado pelo upload da imagem no fluxo do n8n — só envie se o fluxo realmente entregou esse path; caso contrário omita). Para quando tem mais de uma imagem da infração.",
-        "workflowId": {
-          "__rl": true,
-          "value": "5ovAOsUiOu36EjOn",
-          "mode": "list",
-          "cachedResultUrl": "/workflow/5ovAOsUiOu36EjOn",
-          "cachedResultName": "Monteiro - 2.2 - Criar Notificação"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "nome_condominio": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome_condominio', ``, 'string') }}",
-            "nome_condomino": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome_condomino', ``, 'string') }}",
-            "infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('infracao', ``, 'string') }}",
-            "data_infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_infracao', ``, 'string') }}",
-            "foto_infracao_path": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('foto_infracao_path', `Se não tiver, pode enviar como null`, 'string') }}",
-            "botPhoneNumber": "={{ $('Variáveis do Fluxo').first().json.botPhoneNumber }}",
-            "foto_infracao_path_2": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('foto_infracao_path_2', `Se não tiver, pode enviar como null`, 'string') }}",
-            "prazo_tipo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('prazo_tipo', ``, 'string') }}",
-            "prazo_dias": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('prazo_dias', ``, 'string') }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "nome_condominio",
-              "displayName": "nome_condominio",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "nome_condomino",
-              "displayName": "nome_condomino",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "infracao",
-              "displayName": "infracao",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "foto_infracao_path",
-              "displayName": "foto_infracao_path",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "data_infracao",
-              "displayName": "data_infracao",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "botPhoneNumber",
-              "displayName": "botPhoneNumber",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
-            },
-            {
-              "id": "foto_infracao_path_2",
-              "displayName": "foto_infracao_path_2",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "prazo_tipo",
-              "displayName": "prazo_tipo",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "prazo_dias",
-              "displayName": "prazo_dias",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        6560,
-        528
-      ],
-      "id": "83b1a9f2-92a5-4694-b2fa-506f53e39718",
-      "name": "criar-notificacao"
     },
     {
       "parameters": {
@@ -2883,7 +2759,7 @@
     },
     {
       "parameters": {
-        "description": "Use esta tool apenas no passo final, depois que o condomínio e o condômino já \nforam identificados (ou criados) e o usuário confirmou os dados da multa.\n\nCampos:\n  Obrigatórios:\n    - condominio_id: valor EXATO guardado do Passo 1 — nunca reescreva ou adivinhe.\n    - condomino_id: valor EXATO retornado pela busca ou cadastro do condômino.\n    - data_infracao: string no formato YYYY-MM-DD.\n    - infracao: descrição em texto livre.\n    - pelo menos UM entre: valor_taxa, percentual_taxa ou valor_adicional.\n\n  Opcionais:\n    - valor_taxa (number): valor fixo da multa em R$.\n    - percentual_taxa (number): percentual aplicado sobre a taxa condominial (ex: 10 = 10%).\n    - valor_adicional (number): cobrança extra além da taxa principal.\n    - descricao_valor_adicional (string): obrigatório se valor_adicional for informado.\n    - prazo_tipo (string): \"imediato\" | \"dias\" | \"sem_prazo\".\n    - prazo_dias (number): obrigatório se prazo_tipo = \"dias\".\n    - foto_infracao_path (string): URL da foto — só envie se realmente disponível.\n\nRegras:\n  - Envie APENAS os campos que o usuário forneceu — nunca envie campos opcionais vazios ou nulos.\n  - Não use esta tool para atualizar uma multa existente — ela só cria.\n  - Se houver erro de validação (ex: valor inválido), peça ao usuário corrigir o campo específico e tente de novo.\n\nRetorna { multa_id, condominio_id, condomino_id }. \nGuarde multa_id internamente — não exiba ao usuário.",
+        "description": "=Use esta tool apenas no passo final, depois que o condomínio e o condômino já \nforam identificados (ou criados) e o usuário confirmou os dados da multa.\n\nCampos:\n  Obrigatórios:\n    - condominio_id: valor EXATO guardado do Passo 1 — nunca reescreva ou adivinhe.\n    - bloco\n    - unidade\n    - data_infracao: string no formato YYYY-MM-DD.\n    - infracao: descrição em texto livre.\n    - pelo menos UM entre: valor_taxa, percentual_taxa ou valor_adicional.\n    - botPhoneNumber: {{ $('Identifica o Tipo de Mensagem').item.json.botPhoneNumber }}\n\n  Opcionais:\n    - valor_taxa (number): valor fixo da multa em R$.\n    - percentual_taxa (number): percentual sobre a taxa condominial (ex: 10 = 10%).\n    - valor_adicional (number): cobrança extra além da taxa principal.\n    - descricao_valor_adicional (string): obrigatório se valor_adicional for informado.\n    - prazo_tipo (string): \"imediato\" | \"dias\" | \"sem_prazo\".\n    - prazo_dias (number): obrigatório se prazo_tipo = \"dias\".\n    - foto_infracao_path (string): URL da primeira foto da infração.\n    - foto_infracao_path_2 (string): URL da segunda foto da infração, se o usuário\n      enviou uma segunda imagem. Cada imagem enviada tem sua própria URL em\n      <UrlImagem> — a primeira vai para foto_infracao_path, a segunda para foto_infracao_path_2.\n\nRegras:\n  - Envie APENAS os campos que o usuário forneceu — nunca envie campos opcionais vazios ou nulos.\n  - Não use esta tool para atualizar uma multa existente — ela só cria.\n  - Se houver erro de validação, peça ao usuário corrigir o campo específico e tente de novo.\n\nRetorna { multa_id, condominio_id, condomino_id }.\nGuarde multa_id internamente — não exiba ao usuário. ",
         "workflowId": {
           "__rl": true,
           "value": "jOEnVRQSbAeI1G16",
@@ -2893,133 +2769,9 @@
         },
         "workflowInputs": {
           "mappingMode": "defineBelow",
-          "value": {
-            "nome_condominio": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome_condominio', ``, 'string') }}",
-            "nome_condomino": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome_condomino', ``, 'string') }}",
-            "infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('infracao', ``, 'string') }}",
-            "foto_infracao_path": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('foto_infracao_path', ``, 'string') }}",
-            "data_infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_infracao', ``, 'string') }}",
-            "foto_infracao_path_2": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('foto_infracao_path_2', `Se não tiver, pode enviar como null`, 'string') }}",
-            "prazo_tipo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('prazo_tipo', ``, 'string') }}",
-            "prazo_dias": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('prazo_dias', ``, 'string') }}",
-            "percentual_taxa": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('percentual_taxa', ``, 'string') }}",
-            "valor_adicional": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('valor_adicional', ``, 'string') }}",
-            "valor_taxa": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('valor_taxa', ``, 'string') }}",
-            "descricao_valor_adicional": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('descricao_valor_adicional', ``, 'string') }}",
-            "botPhoneNumber": "={{ $('Variáveis do Fluxo').first().json.botPhoneNumber }}"
-          },
+          "value": {},
           "matchingColumns": [],
-          "schema": [
-            {
-              "id": "nome_condominio",
-              "displayName": "nome_condominio",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string"
-            },
-            {
-              "id": "nome_condomino",
-              "displayName": "nome_condomino",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string"
-            },
-            {
-              "id": "infracao",
-              "displayName": "infracao",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string"
-            },
-            {
-              "id": "foto_infracao_path",
-              "displayName": "foto_infracao_path",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "data_infracao",
-              "displayName": "data_infracao",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string"
-            },
-            {
-              "id": "botPhoneNumber",
-              "displayName": "botPhoneNumber",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true,
-              "type": "string"
-            },
-            {
-              "id": "foto_infracao_path_2",
-              "displayName": "foto_infracao_path_2",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "prazo_tipo",
-              "displayName": "prazo_tipo",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "prazo_dias",
-              "displayName": "prazo_dias",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "percentual_taxa",
-              "displayName": "percentual_taxa",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "valor_adicional",
-              "displayName": "valor_adicional",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "valor_taxa",
-              "displayName": "valor_taxa",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "descricao_valor_adicional",
-              "displayName": "descricao_valor_adicional",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "canBeUsedToMatch": true
-            }
-          ],
+          "schema": [],
           "attemptToConvertTypes": false,
           "convertFieldsToString": false
         }
@@ -3032,6 +2784,48 @@
       ],
       "id": "84231f43-8b36-4e59-8105-b2fe9d339393",
       "name": "criar-multa"
+    },
+    {
+      "parameters": {
+        "description": "Use esta tool apenas no passo final, depois que o condomínio e o condômino já \nforam identificados (ou criados) e o usuário confirmou os dados da notificação.\n\nCampos:\n  Obrigatórios:\n    - condominio_id: valor EXATO guardado do Passo 1 — nunca reescreva ou adivinhe.\n    - bloco\n   - unidade\n    - data_infracao: string no formato YYYY-MM-DD.\n    - infracao: descrição em texto livre.\n   - botPhoneNumber: {{ $('Identifica o Tipo de Mensagem').item.json.botPhoneNumber }}\n\n  Opcionais:\n    - prazo_tipo (string): \"imediato\" | \"dias\" | \"sem_prazo\".\n    - prazo_dias (number): obrigatório se prazo_tipo = \"dias\".\n    - foto_infracao_path (string): URL da primeira foto da infração.\n    - foto_infracao_path_2 (string): URL da segunda foto da infração, se o usuário\n      enviou uma segunda imagem. Cada imagem enviada tem sua própria URL em\n      <UrlImagem> — a primeira vai para foto_infracao_path, a segunda para foto_infracao_path_2.\n\nRegras:\n  - Envie APENAS os campos que o usuário forneceu — nunca envie campos opcionais vazios ou nulos.\n  - Não use esta tool para atualizar uma notificação existente — ela só cria.\n  - Se houver erro de validação, peça ao usuário corrigir o campo específico e tente de novo.\n\nRetorna { notificacao_id, condominio_id, condomino_id }.\nGuarde notificacao_id internamente — não exiba ao usuário.",
+        "workflowId": {
+          "__rl": true,
+          "value": "5ovAOsUiOu36EjOn",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/5ovAOsUiOu36EjOn",
+          "cachedResultName": "Monteiro - 2.2 - Criar Notificação"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        6560,
+        528
+      ],
+      "id": "83b1a9f2-92a5-4694-b2fa-506f53e39718",
+      "name": "criar-notificacao"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "\n  {\n    \"resposta\": \"Opa, parece que algo deu errado e não consegui processar a sua mensagem. Poderia me explicar melhor?\"\n  }\n",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        6144,
+        80
+      ],
+      "id": "87cc03b6-12bc-49b3-b114-62f29b521395",
+      "name": "Structured Output Parser"
     }
   ],
   "connections": {
@@ -3551,6 +3345,11 @@
             "node": "Monteiro - Agente IA Condominial",
             "type": "ai_languageModel",
             "index": 0
+          },
+          {
+            "node": "Structured Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
           }
         ]
       ]
@@ -3859,17 +3658,6 @@
         ]
       ]
     },
-    "criar-notificacao": {
-      "ai_tool": [
-        [
-          {
-            "node": "Monteiro - Agente IA Condominial",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "consulta-dados": {
       "ai_tool": [
         [
@@ -3902,6 +3690,28 @@
           }
         ]
       ]
+    },
+    "criar-notificacao": {
+      "ai_tool": [
+        [
+          {
+            "node": "Monteiro - Agente IA Condominial",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Monteiro - Agente IA Condominial",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -3915,8 +3725,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "05343ca1-0845-488e-8e84-9dd0aa469835",
-  "activeVersionId": "05343ca1-0845-488e-8e84-9dd0aa469835",
+  "versionId": "286de043-5237-49b5-a0e4-f425ae80af1b",
+  "activeVersionId": "286de043-5237-49b5-a0e4-f425ae80af1b",
   "triggerCount": 2,
   "shared": [
     {
@@ -3928,9 +3738,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-06-11T18:43:46.123Z",
-    "createdAt": "2026-06-11T18:43:46.123Z",
-    "versionId": "05343ca1-0845-488e-8e84-9dd0aa469835",
+    "updatedAt": "2026-06-15T21:56:09.994Z",
+    "createdAt": "2026-06-15T21:56:09.994Z",
+    "versionId": "286de043-5237-49b5-a0e4-f425ae80af1b",
     "workflowId": "GARS7cjmhzslAwUs",
     "nodes": [
       {
@@ -3963,7 +3773,7 @@
       {
         "parameters": {
           "content": "## Agente e suas Ferramentas\n",
-          "height": 636,
+          "height": 652,
           "width": 2011,
           "color": 6
         },
@@ -3973,7 +3783,7 @@
         "typeVersion": 1,
         "position": [
           4944,
-          112
+          96
         ]
       },
       {
@@ -6608,8 +6418,9 @@
         "parameters": {
           "promptType": "define",
           "text": "={{ $('Seta Mensagem para o Agente').item.json.message }}",
+          "hasOutputParser": true,
           "options": {
-            "systemMessage": "=Você é o assistente jurídico-condominial do escritório Monteiro Advocacia.\nAtende EXCLUSIVAMENTE usuários autorizados via WhatsApp no módulo Condominial.\n\nVocê tem duas funções:\n1. Criar documentos de infração (notificação ou multa).\n2. Responder consultas sobre dados do condomínio.\n\nAo receber qualquer mensagem de abertura (\"oi\", \"olá\", \"bom dia\" etc.), responda SEMPRE:\n> \"Olá! Sou o assistente da Monteiro — módulo Condominial. 😊\n> Posso te ajudar com:\n> 1. Criar uma notificação de infração\n> 2. Criar uma multa\n> 3. Consultar informações (notificações, multas, condôminos, histórico etc.)\n>\n> O que você precisa?\"\n\n---\n\n# Regras gerais\n- Responda SEMPRE em português do Brasil, curto, claro e cordial.\n- Nunca invente IDs, nomes, blocos, unidades, CPFs, e-mails, telefones ou valores.\n- Nunca exponha UUIDs, nomes de tabelas, colunas ou detalhes técnicos ao usuário.\n- Fora do escopo condominial? \"Só consigo ajudar com o módulo condominial por aqui.\"\n- Se uma tool falhar, explique de forma simples e ofereça tentar de novo.\n- Nunca chame `cria-condomino` para alguém já cadastrado/buscado nesta conversa.\n\n## Eficiência no fluxo\nAntes de qualquer resposta, analise TUDO que veio na mensagem (texto, imagem, áudio).\nExtraia silenciosamente:\n- Nome/parte do nome do condomínio\n- Bloco e unidade\n- Data da infração (\"hoje\"/\"ontem\" → converta para YYYY-MM-DD usando data do contexto)\n- Descrição da infração\n- Foto (URL em `<UrlImagem>` se presente)\n- Indícios de multa: \"multa\", \"valor\", \"taxa\", \"R$\", \"%\", \"prazo\", \"dias para regularizar\"\n\nExecute os Passos 1 e 2 silenciosamente. Só pergunte o que realmente falta.\nSe tiver tudo → vá direto ao resumo final e peça confirmação única.\nNunca apresente saudação se o usuário já veio com uma solicitação.\nNunca peça algo que já foi fornecido.\n\n---\n\n# FUNÇÃO 1 — CRIAR DOCUMENTO DE INFRAÇÃO\n\n## Passo 0 — Decidir tipo do documento\nDefina internamente `tipo_documento`:\n- \"notificação\" / \"advertência\" → `notificacao`\n- \"multa\" OU presença de valor, taxa, %, prazo em dias → `multa`\n- Ambíguo → pergunte UMA vez:\n  > \"Esse registro é uma notificação (advertência) ou uma multa (com cobrança)?\"\n\nOs Passos 1, 2 e 3 são idênticos para os dois tipos.\n\n## Passo 1 — Identificar o CONDOMÍNIO\nUse a lista do contexto — NÃO chame tool para buscar condomínios:\n{{ JSON.stringify($('Variáveis do Fluxo').first().json.lista_condominios) }}\n\n- Match parcial case-insensitive → guarde `id` como `condominio_id`.\n- Não mencionou → pergunte o nome.\n- Não encontrou → \"Esse condomínio ainda não está cadastrado. Peça a um administrador para cadastrá-lo antes de continuar.\" → encerre.\n- Vários matches → liste e peça escolha.\n\n⚠️ `condominio_id` = valor EXATO da lista — nunca reescreva ou adivinhe.\n\n## Passo 2 — Identificar o CONDÔMINO\nIdentificação por BLOCO + UNIDADE.\n\n- Se não mencionou, pergunte bloco e unidade juntos.\n- Query obrigatória:\n  SELECT id, nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<condominio_id_exato>'\n  AND bloco = '<bloco>' AND unidade = '<unidade>'\n\n- 1 resultado → guarde `id` como `condomino_id`, siga sem confirmar ainda.\n- Vários → liste e peça escolha.\n- 0 → vá ao Passo 3.\n\n⚠️ Nunca use subquery — use sempre o `condominio_id` guardado literalmente.\n\n## Passo 3 — Cadastrar CONDÔMINO (somente se não existir)\n- Confirme internamente que o `condominio_id` é o valor exato do Passo 1.\n- Avise: \"Esse morador ainda não está cadastrado. Vou criar agora.\"\n- Obrigatórios: nome, bloco, unidade.\n- Opcionais (pergunte tudo de uma vez, aceite \"não tem\"/\"pular\"):\n  relação (proprietario | inquilino | morador | responsavel), e-mail, telefone, celular, CPF.\n- Mostre resumo → peça confirmação → chame `cria-condomino`.\n- Guarde `id` retornado como `condomino_id` → siga ao Passo 4.\n\n⚠️ Após cadastro: NÃO chame `cria-condomino` novamente para esta pessoa. Siga direto ao Passo 4.\n\n## Passo 4 — Dados do documento + CONFIRMAÇÃO FINAL\n\nCampos obrigatórios para AMBOS os tipos:\n- `data_infracao` (YYYY-MM-DD — converta \"hoje\"/\"ontem\"/\"19/05/2026\")\n- `infracao` (descrição livre)\n\nCampo opcional para AMBOS:\n- `foto_infracao_path`: extraia de `<UrlImagem>` no input atual ou no histórico recente.\n  Se não tiver, pergunte: \"Deseja anexar uma foto? Se sim, envie agora. Se não, diga 'não'.\"\n\nCampos exclusivos da MULTA (só pergunte se `tipo_documento = multa`):\n- `prazo_tipo`: `imediato` | `dias` | `sem_prazo`\n- `prazo_dias` (obrigatório se `prazo_tipo = dias`)\n- `valor_taxa` (R$ — valor fixo da multa)\n- `percentual_taxa` (% — percentual sobre a taxa condominial)\n- `valor_adicional` (R$ — cobrança extra)\n- `descricao_valor_adicional` (obrigatório se `valor_adicional` informado)\n\nPelo menos UM entre `valor_taxa`, `percentual_taxa` ou `valor_adicional` deve ser informado para multa.\nSe o usuário não souber, pergunte: \"Como é a cobrança? Valor fixo (R$), percentual (%) ou valor adicional?\"\n\nPergunte tudo que falta em UMA única mensagem agrupada.\n\n### Resumo final — Notificação:\n> \"Confira o resumo:\n> • Condomínio: [nome]\n> • Morador(a): [nome] — Bloco [X], Unidade [Y]\n> • Data da infração: [DD/MM/YYYY]\n> • Infração: [descrição]\n> • Foto: [sim / não]\n> Posso confirmar e registrar?\"\n\n### Resumo final — Multa:\n> \"Confira o resumo da multa:\n> • Condomínio: [nome]\n> • Morador(a): [nome] — Bloco [X], Unidade [Y]\n> • Data: [DD/MM/YYYY]\n> • Infração: [descrição]\n> • Valor da taxa: [R$ X,XX ou —]\n> • Percentual: [X% ou —]\n> • Valor adicional: [R$ X,XX — descrição ou —]\n> • Prazo: [imediato / X dias / sem prazo]\n> • Foto: [sim / não]\n> Posso confirmar e registrar?\"\n\nApós confirmação:\n- `tipo_documento = notificacao` → chame `criar-notificacao`\n- `tipo_documento = multa` → chame `criar-multa`\n\nEnvie APENAS os campos que o usuário forneceu — nunca envie campos opcionais vazios.\n\n## Passo 5 — Encerramento\n- Notificação ok: \"Notificação criada com sucesso! O documento já foi gerado e enviado por aqui. ✅ Posso te ajudar com mais alguma coisa?\"\n- Multa ok: \"Multa registrada com sucesso! O documento já foi gerado e enviado por aqui. ✅ Posso te ajudar com mais alguma coisa?\"\n- Falha: explique em linguagem simples e ofereça tentar de novo.\n\n---\n\n# FUNÇÃO 2 — CONSULTAS AO BANCO\n\nUse SEMPRE a tool `consulta-dados` com uma query SQL (somente SELECT).\nNunca exponha SQL, IDs ou campos técnicos — apenas resultado em linguagem natural.\n\nExemplos internos (nunca mostre ao usuário):\n\n- Listar condomínios:\n  SELECT nome, endereco FROM condominios LIMIT 25\n\n- Buscar morador:\n  SELECT nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<id>' AND nome ILIKE '%Fulano%'\n\n- Notificações de um morador:\n  SELECT data_infracao, infracao FROM notificacoes\n  WHERE condomino_id = '<id>' ORDER BY data_infracao DESC\n\n- Multas de um morador:\n  SELECT data_infracao, infracao, valor_taxa, percentual_taxa, valor_adicional\n  FROM multas WHERE condomino_id = '<id>' ORDER BY data_infracao DESC\n\n- Quem tem mais notificações:\n  SELECT co.nome, COUNT(n.id) as total\n  FROM notificacoes n\n  JOIN condominos co ON co.id = n.condomino_id\n  WHERE n.condominio_id = '<id>'\n  GROUP BY co.nome ORDER BY total DESC LIMIT 5\n\nSe vier vazio: \"Não encontrei nenhum registro para essa consulta.\"\nAo final: \"Posso te ajudar com mais alguma coisa?\"\n\n---\n\n# O que você NÃO deve fazer\n- Cadastrar, editar ou excluir condomínios.\n- Atualizar ou apagar notificações, multas ou condôminos já criados.\n- Calcular valores automaticamente sem confirmação do usuário.\n- Responder fora do escopo condominial.",
+            "systemMessage": "=Você é o assistente jurídico-condominial do escritório Monteiro Advocacia.\nAtende EXCLUSIVAMENTE usuários autorizados via WhatsApp no módulo Condominial.\n\nVocê tem duas funções:\n1. Criar documentos de infração (notificação ou multa).\n2. Responder consultas sobre dados do condomínio.\n\nAo receber qualquer mensagem de abertura (\"oi\", \"olá\", \"bom dia\" etc.), responda SEMPRE:\n> \"Olá! Sou o assistente da Monteiro — módulo Condominial. 😊\n> Posso te ajudar com:\n> 1. Criar uma notificação de infração\n> 2. Criar uma multa\n> 3. Consultar informações (notificações, multas, condôminos, histórico etc.)\n>\n> O que você precisa?\"\n\n---\n\n# Regras gerais\n- Responda SEMPRE em português do Brasil, curto, claro e cordial.\n- Nunca invente IDs, nomes, blocos, unidades, CPFs, e-mails, telefones ou valores.\n- Nunca exponha UUIDs, nomes de tabelas, colunas ou detalhes técnicos ao usuário.\n- Fora do escopo condominial? \"Só consigo ajudar com o módulo condominial por aqui.\"\n- Se uma tool falhar, explique de forma simples e ofereça tentar de novo.\n- Nunca chame `cria-condomino` para alguém já cadastrado/buscado nesta conversa.\n\n## Eficiência no fluxo\nAntes de qualquer resposta, analise TUDO que veio na mensagem (texto, imagem, áudio).\nExtraia silenciosamente:\n- Nome/parte do nome do condomínio\n- Bloco e unidade\n- Data da infração (\"hoje\"/\"ontem\" → converta para YYYY-MM-DD usando data do contexto)\n- Descrição da infração\n- Foto (URL em `<UrlImagem>` se presente)\n- Indícios de multa: \"multa\", \"valor\", \"taxa\", \"R$\", \"%\", \"prazo\", \"dias para regularizar\"\n\nExecute os Passos 1 e 2 silenciosamente. Só pergunte o que realmente falta.\nSe tiver tudo → vá direto ao resumo final e peça confirmação única.\nNunca apresente saudação se o usuário já veio com uma solicitação.\nNunca peça algo que já foi fornecido.\n\n---\n\n# FUNÇÃO 1 — CRIAR DOCUMENTO DE INFRAÇÃO\n\n## Passo 0 — Decidir tipo do documento\nDefina internamente `tipo_documento`:\n- \"notificação\" / \"advertência\" → `notificacao`\n- \"multa\" OU presença de valor, taxa, %, prazo em dias → `multa`\n- Ambíguo → pergunte UMA vez:\n  > \"Esse registro é uma notificação (advertência) ou uma multa (com cobrança)?\"\n\nOs Passos 1, 2 e 3 são idênticos para os dois tipos.\n\n## Passo 1 — Identificar o CONDOMÍNIO\nUse a lista do contexto — NÃO chame tool para buscar condomínios:\n{{ JSON.stringify($('Variáveis do Fluxo').first().json.lista_condominios) }}\n\n- Match parcial case-insensitive → guarde `id` como `condominio_id`.\n- Não mencionou → pergunte o nome.\n- Não encontrou → \"Esse condomínio ainda não está cadastrado. Peça a um administrador para cadastrá-lo antes de continuar.\" → encerre.\n- Vários matches → liste e peça escolha.\n\n⚠️ `condominio_id` = valor EXATO da lista — nunca reescreva ou adivinhe.\n\n## Passo 2 — Identificar o CONDÔMINO\nIdentificação por BLOCO + UNIDADE.\n\n- Se não mencionou, pergunte bloco e unidade juntos.\n- Query obrigatória:\n  SELECT id, nome, bloco, unidade FROM condominos\n  WHERE condominio_id = '<condominio_id_exato>'\n  AND bloco = '<bloco>' AND unidade = '<unidade>'\n\n- 1 resultado → guarde `id` como `condomino_id`, siga sem confirmar ainda.\n- Vários → liste e peça escolha.\n- 0 → vá ao Passo 3.\n\n⚠️ Nunca use subquery — use sempre o `condominio_id` guardado literalmente.\n\n## Passo 3 — Cadastrar CONDÔMINO (somente se não existir)\n- Confirme internamente que o `condominio_id` é o valor exato do Passo 1.\n- Avise: \"Esse morador ainda não está cadastrado. Vou criar agora.\"\n- Obrigatórios: nome, bloco, unidade.\n- Opcionais (pergunte tudo de uma vez, aceite \"não tem\"/\"pular\"):\n  relação (proprietario | inquilino | morador | responsavel), e-mail, telefone, celular, CPF.\n- Mostre resumo → peça confirmação → chame `cria-condomino`.\n- Guarde `id` retornado como `condomino_id` → siga ao Passo 4.\n\n⚠️ Após cadastro: NÃO chame `cria-condomino` novamente para esta pessoa. Siga direto ao Passo 4.\n\n## Passo 4 — Dados do documento + CONFIRMAÇÃO FINAL\n\nCampos obrigatórios para AMBOS os tipos:\n- `data_infracao` (YYYY-MM-DD — converta \"hoje\"/\"ontem\"/\"19/05/2026\")\n- `infracao` (descrição livre)\n\nCampo opcional para AMBOS:\n- `foto_infracao_path`: extraia de `<UrlImagem>` no input atual ou no histórico recente.\n  Se não tiver, pergunte: \"Deseja anexar uma foto? Se sim, envie agora. Se não, diga 'não'.\"\n- `foto_infracao_path_2`\n- `prazo_tipo`: \"imediato\" | \"dias\" | \"sem_prazo\"\n- `prazo_dias` (obrigatório se prazo_tipo = \"dias\")\n- Se o usuário não mencionar prazo, pergunte:\n  \"Há um prazo para regularização? Pode ser imediato, um número de dias, ou sem prazo.\"\n\nFotos (opcional para AMBOS os tipos):\n- O usuário pode enviar até 2 fotos da infração.\n- Cada imagem enviada via WhatsApp chega com sua própria URL em <UrlImagem>.\n- A primeira imagem → `foto_infracao_path`.\n- A segunda imagem (se houver) → `foto_infracao_path_2`.\n- Se ainda não recebeu nenhuma foto, pergunte:\n  \"Deseja anexar fotos da infração? Se sim, envie agora (até 2 fotos). Se não, diga 'não'.\"\n- Extraia as URLs do input atual e do histórico recente — nunca invente.\n\nCampos exclusivos da MULTA (só pergunte se `tipo_documento = multa`):\n- `valor_taxa` (R$ — valor fixo da multa)\n- `percentual_taxa` (% — percentual sobre a taxa condominial)\n- `valor_adicional` (R$ — cobrança extra)\n- `descricao_valor_adicional` (obrigatório se `valor_adicional` informado)\n\nPelo menos UM entre `valor_taxa`, `percentual_taxa` ou `valor_adicional` deve ser informado para multa.\nSe o usuário não souber, pergunte: \"Como é a cobrança? Valor fixo (R$), percentual (%) ou valor adicional?\"\n\nPergunte tudo que falta em UMA única mensagem agrupada.\n\n### Resumo final — Notificação:\n> \"Confira o resumo:\n> • Condomínio: [nome]\n> • Morador(a): [nome] — Bloco [X], Unidade [Y]\n> • Data da infração: [DD/MM/YYYY]\n> • Infração: [descrição]\n> • Prazo: [imediato / X dias / sem prazo / não informado]\n> • Foto(s): [quantidade enviada ou 'nenhuma']\n> Posso confirmar e registrar?\"\n\n### Resumo final — Multa:\n> \"Confira o resumo da multa:\n> • Condomínio: [nome]\n> • Morador(a): [nome] — Bloco [X], Unidade [Y]\n> • Data: [DD/MM/YYYY]\n> • Infração: [descrição]\n> • Valor da taxa: [R$ X,XX ou —]\n> • Percentual: [X% ou —]\n> • Valor adicional: [R$ X,XX — descrição ou —]\n> • Prazo: [imediato / X dias / sem prazo]\n> • Foto: [sim / não]\n> Posso confirmar e registrar?\"\n\nApós confirmação:\n- `tipo_documento = notificacao` → chame `criar-notificacao`\n- `tipo_documento = multa` → chame `criar-multa`\n\nEnvie APENAS os campos que o usuário forneceu — nunca envie campos opcionais vazios.\n\nApós ter TODOS os dados (condomínio, condômino, data, infração, foto, prazo):\n1. Mostre o resumo final (modelo abaixo).\n2. AGUARDE o usuário responder \"sim\", \"pode\", \"confirma\" ou similar.\n3. Só então chame a tool correspondente.\n\n⚠️ NUNCA diga \"vou finalizar\", \"aguarde\" ou similar sem ter recebido a confirmação.\n⚠️ NUNCA chame a tool antes da confirmação explícita do usuário.\n⚠️ NUNCA simule ou antecipe o resultado — só chame a tool de verdade após o \"sim\".\n\nSe o usuário já forneceu tudo em uma única mensagem:\n→ Mostre o resumo diretamente e aguarde o \"sim\". Não peça nenhuma informação adicional.\n\n## Passo 5 — Encerramento\n- Notificação ok: \"Notificação criada com sucesso! O documento já foi gerado e enviado por aqui. ✅ Posso te ajudar com mais alguma coisa?\"\n- Multa ok: \"Multa registrada com sucesso! O documento já foi gerado e enviado por aqui. ✅ Posso te ajudar com mais alguma coisa?\"\n- Falha: explique em linguagem simples e ofereça tentar de novo.\n\n---\n\n# FUNÇÃO 2 — CONSULTAS AO BANCO\n\nUse SEMPRE a tool `consulta-dados` com SELECT.\nNunca exponha SQL, IDs, nomes de tabela/coluna ao usuário.\n\n## Schema permitido (NÃO use colunas fora desta lista)\n\n- condominios(id, nome, endereco)\n- condominos(id, condominio_id, nome, bloco, unidade, relacao, email, telefone, celular, cpf)\n- notificacoes(id, condominio_id, condomino_id, data_infracao, infracao, prazo_tipo, prazo_dias, status, created_at)\n- multas(id, condominio_id, condomino_id, data_infracao, infracao, valor_taxa, percentual_taxa, valor_adicional, descricao_valor_adicional, prazo_tipo, prazo_dias, status, created_at)\n\n## Regras de filtro (OBRIGATÓRIAS)\n\n- `bloco`, `unidade`, `nome` do morador, `cpf`, `email`, `telefone`, `relacao` → existem APENAS em `condominos`. NUNCA filtre essas colunas em `notificacoes` ou `multas`.\n- Para listar infrações/multas de um morador específico, use UM destes dois padrões:\n\n  Padrão A — duas queries:\n    1) SELECT id FROM condominos\n       WHERE condominio_id = '<id>' AND bloco = '<X>' AND unidade = '<Y>'\n    2) SELECT data_infracao, infracao FROM notificacoes\n       WHERE condomino_id = '<id_do_passo_1>' ORDER BY data_infracao DESC\n\n  Padrão B — JOIN:\n    SELECT n.data_infracao, n.infracao\n    FROM notificacoes n\n    JOIN condominos c ON c.id = n.condomino_id\n    WHERE n.condominio_id = '<id>' AND c.bloco = '<X>' AND c.unidade = '<Y>'\n    ORDER BY n.data_infracao DESC\n\n- Para multas, troque `notificacoes` por `multas` e inclua `valor_taxa, percentual_taxa, valor_adicional`.\n\n## Tratamento de erro\n\nSe `consulta-dados` retornar erro de SQL (ex: coluna inexistente), NÃO mostre o erro ao usuário. Reescreva a query respeitando o schema acima e tente novamente. No máximo 2 tentativas; depois disso: \"Não consegui consultar isso agora, pode tentar de novo daqui a pouco?\"\n\n## Resultado vazio\n\"Não encontrei nenhum registro para essa consulta.\"\n\n## Encerramento\n\"Posso te ajudar com mais alguma coisa?\"\n\n---\n\n# O que você NÃO deve fazer\n- Cadastrar, editar ou excluir condomínios.\n- Atualizar ou apagar notificações, multas ou condôminos já criados.\n- Calcular valores automaticamente sem confirmação do usuário.\n- Responder fora do escopo condominial.",
             "returnIntermediateSteps": true
           }
         },
@@ -6638,131 +6449,6 @@
         "id": "a1d36d22-40dd-4dfc-b33e-13b214a9c8f5",
         "name": "When chat message received",
         "webhookId": "f47f67c6-80ae-4d3a-a59c-656eb966fcd1"
-      },
-      {
-        "parameters": {
-          "description": "Use esta tool apenas no passo final, depois que o condomínio e o condômino já foram identificados (ou criados) e o usuário confirmou os dados da infração.\n\nCampos:\n\n    Obrigatórios: nome_condominio, nome_condomino_id (precisa pertencer ao mesmo condomínio), data_infracao (string no formato YYYY-MM-DD), infracao (descrição em texto).\n    Opcionais: foto_infracao_path (caminho retornado pelo upload da imagem no fluxo do n8n — só envie se o fluxo realmente entregou esse path; caso contrário omita). foto_infracao_path_2 (caminho retornado pelo upload da imagem no fluxo do n8n — só envie se o fluxo realmente entregou esse path; caso contrário omita). Para quando tem mais de uma imagem da infração.",
-          "workflowId": {
-            "__rl": true,
-            "value": "5ovAOsUiOu36EjOn",
-            "mode": "list",
-            "cachedResultUrl": "/workflow/5ovAOsUiOu36EjOn",
-            "cachedResultName": "Monteiro - 2.2 - Criar Notificação"
-          },
-          "workflowInputs": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "nome_condominio": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome_condominio', ``, 'string') }}",
-              "nome_condomino": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome_condomino', ``, 'string') }}",
-              "infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('infracao', ``, 'string') }}",
-              "data_infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_infracao', ``, 'string') }}",
-              "foto_infracao_path": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('foto_infracao_path', `Se não tiver, pode enviar como null`, 'string') }}",
-              "botPhoneNumber": "={{ $('Variáveis do Fluxo').first().json.botPhoneNumber }}",
-              "foto_infracao_path_2": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('foto_infracao_path_2', `Se não tiver, pode enviar como null`, 'string') }}",
-              "prazo_tipo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('prazo_tipo', ``, 'string') }}",
-              "prazo_dias": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('prazo_dias', ``, 'string') }}"
-            },
-            "matchingColumns": [],
-            "schema": [
-              {
-                "id": "nome_condominio",
-                "displayName": "nome_condominio",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "type": "string",
-                "removed": false
-              },
-              {
-                "id": "nome_condomino",
-                "displayName": "nome_condomino",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "type": "string",
-                "removed": false
-              },
-              {
-                "id": "infracao",
-                "displayName": "infracao",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "type": "string",
-                "removed": false
-              },
-              {
-                "id": "foto_infracao_path",
-                "displayName": "foto_infracao_path",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "data_infracao",
-                "displayName": "data_infracao",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "type": "string",
-                "removed": false
-              },
-              {
-                "id": "botPhoneNumber",
-                "displayName": "botPhoneNumber",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "type": "string",
-                "removed": false
-              },
-              {
-                "id": "foto_infracao_path_2",
-                "displayName": "foto_infracao_path_2",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "prazo_tipo",
-                "displayName": "prazo_tipo",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "prazo_dias",
-                "displayName": "prazo_dias",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "removed": false
-              }
-            ],
-            "attemptToConvertTypes": false,
-            "convertFieldsToString": false
-          }
-        },
-        "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-        "typeVersion": 2.2,
-        "position": [
-          6560,
-          528
-        ],
-        "id": "83b1a9f2-92a5-4694-b2fa-506f53e39718",
-        "name": "criar-notificacao"
       },
       {
         "parameters": {
@@ -6810,7 +6496,7 @@
       },
       {
         "parameters": {
-          "description": "Use esta tool apenas no passo final, depois que o condomínio e o condômino já \nforam identificados (ou criados) e o usuário confirmou os dados da multa.\n\nCampos:\n  Obrigatórios:\n    - condominio_id: valor EXATO guardado do Passo 1 — nunca reescreva ou adivinhe.\n    - condomino_id: valor EXATO retornado pela busca ou cadastro do condômino.\n    - data_infracao: string no formato YYYY-MM-DD.\n    - infracao: descrição em texto livre.\n    - pelo menos UM entre: valor_taxa, percentual_taxa ou valor_adicional.\n\n  Opcionais:\n    - valor_taxa (number): valor fixo da multa em R$.\n    - percentual_taxa (number): percentual aplicado sobre a taxa condominial (ex: 10 = 10%).\n    - valor_adicional (number): cobrança extra além da taxa principal.\n    - descricao_valor_adicional (string): obrigatório se valor_adicional for informado.\n    - prazo_tipo (string): \"imediato\" | \"dias\" | \"sem_prazo\".\n    - prazo_dias (number): obrigatório se prazo_tipo = \"dias\".\n    - foto_infracao_path (string): URL da foto — só envie se realmente disponível.\n\nRegras:\n  - Envie APENAS os campos que o usuário forneceu — nunca envie campos opcionais vazios ou nulos.\n  - Não use esta tool para atualizar uma multa existente — ela só cria.\n  - Se houver erro de validação (ex: valor inválido), peça ao usuário corrigir o campo específico e tente de novo.\n\nRetorna { multa_id, condominio_id, condomino_id }. \nGuarde multa_id internamente — não exiba ao usuário.",
+          "description": "=Use esta tool apenas no passo final, depois que o condomínio e o condômino já \nforam identificados (ou criados) e o usuário confirmou os dados da multa.\n\nCampos:\n  Obrigatórios:\n    - condominio_id: valor EXATO guardado do Passo 1 — nunca reescreva ou adivinhe.\n    - bloco\n    - unidade\n    - data_infracao: string no formato YYYY-MM-DD.\n    - infracao: descrição em texto livre.\n    - pelo menos UM entre: valor_taxa, percentual_taxa ou valor_adicional.\n    - botPhoneNumber: {{ $('Identifica o Tipo de Mensagem').item.json.botPhoneNumber }}\n\n  Opcionais:\n    - valor_taxa (number): valor fixo da multa em R$.\n    - percentual_taxa (number): percentual sobre a taxa condominial (ex: 10 = 10%).\n    - valor_adicional (number): cobrança extra além da taxa principal.\n    - descricao_valor_adicional (string): obrigatório se valor_adicional for informado.\n    - prazo_tipo (string): \"imediato\" | \"dias\" | \"sem_prazo\".\n    - prazo_dias (number): obrigatório se prazo_tipo = \"dias\".\n    - foto_infracao_path (string): URL da primeira foto da infração.\n    - foto_infracao_path_2 (string): URL da segunda foto da infração, se o usuário\n      enviou uma segunda imagem. Cada imagem enviada tem sua própria URL em\n      <UrlImagem> — a primeira vai para foto_infracao_path, a segunda para foto_infracao_path_2.\n\nRegras:\n  - Envie APENAS os campos que o usuário forneceu — nunca envie campos opcionais vazios ou nulos.\n  - Não use esta tool para atualizar uma multa existente — ela só cria.\n  - Se houver erro de validação, peça ao usuário corrigir o campo específico e tente de novo.\n\nRetorna { multa_id, condominio_id, condomino_id }.\nGuarde multa_id internamente — não exiba ao usuário. ",
           "workflowId": {
             "__rl": true,
             "value": "jOEnVRQSbAeI1G16",
@@ -6820,133 +6506,9 @@
           },
           "workflowInputs": {
             "mappingMode": "defineBelow",
-            "value": {
-              "nome_condominio": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome_condominio', ``, 'string') }}",
-              "nome_condomino": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome_condomino', ``, 'string') }}",
-              "infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('infracao', ``, 'string') }}",
-              "foto_infracao_path": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('foto_infracao_path', ``, 'string') }}",
-              "data_infracao": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_infracao', ``, 'string') }}",
-              "foto_infracao_path_2": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('foto_infracao_path_2', `Se não tiver, pode enviar como null`, 'string') }}",
-              "prazo_tipo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('prazo_tipo', ``, 'string') }}",
-              "prazo_dias": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('prazo_dias', ``, 'string') }}",
-              "percentual_taxa": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('percentual_taxa', ``, 'string') }}",
-              "valor_adicional": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('valor_adicional', ``, 'string') }}",
-              "valor_taxa": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('valor_taxa', ``, 'string') }}",
-              "descricao_valor_adicional": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('descricao_valor_adicional', ``, 'string') }}",
-              "botPhoneNumber": "={{ $('Variáveis do Fluxo').first().json.botPhoneNumber }}"
-            },
+            "value": {},
             "matchingColumns": [],
-            "schema": [
-              {
-                "id": "nome_condominio",
-                "displayName": "nome_condominio",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "type": "string"
-              },
-              {
-                "id": "nome_condomino",
-                "displayName": "nome_condomino",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "type": "string"
-              },
-              {
-                "id": "infracao",
-                "displayName": "infracao",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "type": "string"
-              },
-              {
-                "id": "foto_infracao_path",
-                "displayName": "foto_infracao_path",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "data_infracao",
-                "displayName": "data_infracao",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "type": "string"
-              },
-              {
-                "id": "botPhoneNumber",
-                "displayName": "botPhoneNumber",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true,
-                "type": "string"
-              },
-              {
-                "id": "foto_infracao_path_2",
-                "displayName": "foto_infracao_path_2",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "prazo_tipo",
-                "displayName": "prazo_tipo",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "prazo_dias",
-                "displayName": "prazo_dias",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "percentual_taxa",
-                "displayName": "percentual_taxa",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "valor_adicional",
-                "displayName": "valor_adicional",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "valor_taxa",
-                "displayName": "valor_taxa",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "descricao_valor_adicional",
-                "displayName": "descricao_valor_adicional",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "canBeUsedToMatch": true
-              }
-            ],
+            "schema": [],
             "attemptToConvertTypes": false,
             "convertFieldsToString": false
           }
@@ -6959,6 +6521,48 @@
         ],
         "id": "84231f43-8b36-4e59-8105-b2fe9d339393",
         "name": "criar-multa"
+      },
+      {
+        "parameters": {
+          "description": "Use esta tool apenas no passo final, depois que o condomínio e o condômino já \nforam identificados (ou criados) e o usuário confirmou os dados da notificação.\n\nCampos:\n  Obrigatórios:\n    - condominio_id: valor EXATO guardado do Passo 1 — nunca reescreva ou adivinhe.\n    - bloco\n   - unidade\n    - data_infracao: string no formato YYYY-MM-DD.\n    - infracao: descrição em texto livre.\n   - botPhoneNumber: {{ $('Identifica o Tipo de Mensagem').item.json.botPhoneNumber }}\n\n  Opcionais:\n    - prazo_tipo (string): \"imediato\" | \"dias\" | \"sem_prazo\".\n    - prazo_dias (number): obrigatório se prazo_tipo = \"dias\".\n    - foto_infracao_path (string): URL da primeira foto da infração.\n    - foto_infracao_path_2 (string): URL da segunda foto da infração, se o usuário\n      enviou uma segunda imagem. Cada imagem enviada tem sua própria URL em\n      <UrlImagem> — a primeira vai para foto_infracao_path, a segunda para foto_infracao_path_2.\n\nRegras:\n  - Envie APENAS os campos que o usuário forneceu — nunca envie campos opcionais vazios ou nulos.\n  - Não use esta tool para atualizar uma notificação existente — ela só cria.\n  - Se houver erro de validação, peça ao usuário corrigir o campo específico e tente de novo.\n\nRetorna { notificacao_id, condominio_id, condomino_id }.\nGuarde notificacao_id internamente — não exiba ao usuário.",
+          "workflowId": {
+            "__rl": true,
+            "value": "5ovAOsUiOu36EjOn",
+            "mode": "list",
+            "cachedResultUrl": "/workflow/5ovAOsUiOu36EjOn",
+            "cachedResultName": "Monteiro - 2.2 - Criar Notificação"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+        "typeVersion": 2.2,
+        "position": [
+          6560,
+          528
+        ],
+        "id": "83b1a9f2-92a5-4694-b2fa-506f53e39718",
+        "name": "criar-notificacao"
+      },
+      {
+        "parameters": {
+          "jsonSchemaExample": "\n  {\n    \"resposta\": \"Opa, parece que algo deu errado e não consegui processar a sua mensagem. Poderia me explicar melhor?\"\n  }\n",
+          "autoFix": true
+        },
+        "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+        "typeVersion": 1.3,
+        "position": [
+          6144,
+          80
+        ],
+        "id": "87cc03b6-12bc-49b3-b114-62f29b521395",
+        "name": "Structured Output Parser"
       }
     ],
     "connections": {
@@ -7478,6 +7082,11 @@
               "node": "Monteiro - Agente IA Condominial",
               "type": "ai_languageModel",
               "index": 0
+            },
+            {
+              "node": "Structured Output Parser",
+              "type": "ai_languageModel",
+              "index": 0
             }
           ]
         ]
@@ -7786,17 +7395,6 @@
           ]
         ]
       },
-      "criar-notificacao": {
-        "ai_tool": [
-          [
-            {
-              "node": "Monteiro - Agente IA Condominial",
-              "type": "ai_tool",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "consulta-dados": {
         "ai_tool": [
           [
@@ -7825,6 +7423,28 @@
             {
               "node": "Monteiro - Agente IA Condominial",
               "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "criar-notificacao": {
+        "ai_tool": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Structured Output Parser": {
+        "ai_outputParser": [
+          [
+            {
+              "node": "Monteiro - Agente IA Condominial",
+              "type": "ai_outputParser",
               "index": 0
             }
           ]
