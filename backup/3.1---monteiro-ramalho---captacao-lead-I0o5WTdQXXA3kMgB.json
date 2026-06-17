@@ -1,0 +1,360 @@
+{
+  "updatedAt": "2026-06-16T21:26:21.431Z",
+  "createdAt": "2026-06-16T17:19:05.152Z",
+  "id": "I0o5WTdQXXA3kMgB",
+  "name": "3.1 - Monteiro Ramalho - Captação Lead",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        0
+      ],
+      "id": "de3d49e9-4984-4592-b956-99cc55ad700a",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "enrichFromSearch"
+      },
+      "type": "@lusha-org/n8n-nodes-lusha.lusha",
+      "typeVersion": 1,
+      "position": [
+        1264,
+        -272
+      ],
+      "id": "9976f106-b76b-4169-a044-42033e1ff392",
+      "name": "Enrich contacts from search results",
+      "credentials": {
+        "lushaApi": {
+          "id": "Nhnk5eFP9r8lrNKv",
+          "name": "Monteiro - Lusha"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const leadsBanco = $items('Busca os leads do banco');\n\nconst normLinkedin = (url) =>\n  url ? url.trim().toLowerCase().replace(/\\/$/, '') : '';\n\nconst linkedinExistentes = new Set(\n  leadsBanco\n    .map(item => normLinkedin(item.json.linkedin_url))\n    .filter(Boolean)\n);\n\nconst results = $items('Prospecting Contacts')[0].json.results || [];\n\nconst seen = new Set();\n\nreturn results\n  .map(lead => {\n    const linkedin = normLinkedin(lead.socialLinks?.linkedin);\n    if (!linkedin) return null;\n    if (linkedinExistentes.has(linkedin)) return null;\n    if (seen.has(linkedin)) return null; // dedup dentro do próprio batch\n    seen.add(linkedin);\n\n    const nome = [lead.firstName, lead.lastName]\n      .filter(Boolean)\n      .join(' ')\n      .trim();\n    if (!nome) return null;\n\n    return {\n      json: {\n        nome,\n        cargo: lead.jobTitle?.title ?? null,\n        linkedin_url: lead.socialLinks?.linkedin ?? null,\n        empresa_nome: lead.company?.name ?? null,\n        empresa_site: lead.company?.domain ?? null,\n        empresa_setor: lead.jobTitle?.departments?.[0] ?? null,\n        dados_enriquecimento: lead,\n        origem: 'lusha_n8n',\n        lusha_contact_id: lead.id ?? null\n      },\n    };\n  })\n  .filter(Boolean);"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        -16
+      ],
+      "id": "d6ac7df6-f58e-4112-85eb-c99e4a49e6c2",
+      "name": "Verifica duplicatas",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "ec3c9d82-6434-4618-8b51-a7ab45d9442d",
+              "leftValue": "={{ $json.results }}",
+              "rightValue": "",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        0
+      ],
+      "id": "ea381749-2c46-4bdb-a2df-176933194415",
+      "name": "Verifica se teve resultado"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT linkedin_url\nFROM leads_tributario",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        704,
+        -16
+      ],
+      "id": "57fa96ff-1060-41a2-b727-b7b2f176fa23",
+      "name": "Busca os leads do banco",
+      "executeOnce": false,
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Fazer um tratamento para quando n vier resultados (Mudar os parametros de busca)",
+        "width": 544
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        288,
+        240
+      ],
+      "id": "0cba9348-a698-4997-832b-fba45f925c60",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "lusha_search_configs",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "active",
+              "keyValue": "={{ true }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "df4807f9-c4c0-499b-beb4-da21b05c6b09",
+      "name": "Busca a config ativa do lusha",
+      "credentials": {
+        "supabaseApi": {
+          "id": "FcbZyD53kbkf6Vxp",
+          "name": "Monteiro - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.lusha.com/v3/contacts/prospecting",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "api_key",
+              "value": "6db964c3-6128-4986-8b6c-4b358638c637"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"pagination\": {\n    \"page\": {{ $json.page }},\n    \"size\": {{ $json.page_size }}\n  },\n  \"filters\": {\n    \"contacts\": {\n      \"include\": {\n        \"departments\": {{ JSON.stringify($json.departments) }},\n        \"jobTitles\": {{ JSON.stringify($json.job_titles) }},\n        \"seniorityIds\": {{ JSON.stringify($json.seniorities) }},\n        \"locations\": [\n            {\n              \"country\": \"Brazil\"\n            }\n        ]\n      }\n    }\n  },\n  \"options\": {\n    \"maxContactsPerCompany\": 2\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        0
+      ],
+      "id": "27721fad-410c-4809-bbb0-9e1c4ffed02c",
+      "name": "Prospecting Contacts"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "lusha_search_configs",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Busca a config ativa do lusha').item.json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "page",
+              "fieldValue": "={{ $('Busca a config ativa do lusha').first().json.page + 1}}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        -16
+      ],
+      "id": "18bfa6eb-c470-4514-8c7f-83a5814499ec",
+      "name": "Atualiza a paginação",
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "FcbZyD53kbkf6Vxp",
+          "name": "Monteiro - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "leads_tributario",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        -16
+      ],
+      "id": "65d0c721-75e9-4fec-8918-af2765f4ce94",
+      "name": "Insere lead no banco",
+      "credentials": {
+        "supabaseApi": {
+          "id": "FcbZyD53kbkf6Vxp",
+          "name": "Monteiro - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Mudar para puxar só quem tem phone \n\"existingDataPoints\": [\n          \"phone\"\n        ]",
+        "height": 384
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        144,
+        -176
+      ],
+      "id": "99a8f1fc-7df7-48f9-89b8-a86b4b6a6cae",
+      "name": "Sticky Note1"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Busca a config ativa do lusha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se teve resultado": {
+      "main": [
+        [
+          {
+            "node": "Busca os leads do banco",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica duplicatas": {
+      "main": [
+        [
+          {
+            "node": "Insere lead no banco",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca os leads do banco": {
+      "main": [
+        [
+          {
+            "node": "Verifica duplicatas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca a config ativa do lusha": {
+      "main": [
+        [
+          {
+            "node": "Prospecting Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prospecting Contacts": {
+      "main": [
+        [
+          {
+            "node": "Verifica se teve resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insere lead no banco": {
+      "main": [
+        [
+          {
+            "node": "Atualiza a paginação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "3948fa82-2e03-4bae-8740-42101836b4a8",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-06-16T17:19:05.152Z",
+      "createdAt": "2026-06-16T17:19:05.152Z",
+      "role": "workflow:owner",
+      "workflowId": "I0o5WTdQXXA3kMgB",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
