@@ -1,0 +1,348 @@
+{
+  "updatedAt": "2026-07-02T18:09:56.183Z",
+  "createdAt": "2026-07-02T17:45:57.350Z",
+  "id": "7zbtTdEikgtW7rR7",
+  "name": "Finamob - 6.06 - SDR Finamob - Snapshot Diário",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 4
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        224,
+        64
+      ],
+      "id": "c24468ca-5bd9-4e80-b535-8c1ef7feda88",
+      "name": "Schedule Diário 04h"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select h.telefone,\n       sum(length(coalesce(h.mensagem_usuario,'') || coalesce(h.mensagem_agente,''))) as chars_atual\nfrom \"finamob-historico_mensagens\" h\nwhere h.created_at > now() - interval '30 days'\n  and h.message_type = 'text'\ngroup by h.telefone\nhaving sum(length(coalesce(h.mensagem_usuario,'') || coalesce(h.mensagem_agente,'')))\n     - coalesce((select last_chars from mailing_snapshot s where s.telefone = h.telefone), 0) > 500;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        64
+      ],
+      "id": "ed2d5eef-d6a2-450c-acb5-d8ca4c26d32b",
+      "name": "Seleciona Candidatos",
+      "notesInFlow": true,
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      },
+      "notes": "Retorna só leads com >500 chars novos desde o último snapshot. SELECIONAR CREDENCIAL postgres."
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        672,
+        48
+      ],
+      "id": "2683f43e-4e08-4275-af8d-b942f70ee63f",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=select mensagem_usuario, mensagem_agente\nfrom \"finamob-historico_mensagens\"\nwhere telefone = '{{ $json.telefone }}'\n  and message_type = 'text'\norder by created_at asc;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        896,
+        -80
+      ],
+      "id": "343fabae-a363-4bfd-89f8-9eb7e9629f9c",
+      "name": "Histórico do Lead",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      },
+      "notes": "SELECIONAR CREDENCIAL postgres."
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all();\nlet hist = '';\nfor (const r of rows) {\n  const u = (r.json.mensagem_usuario || '').trim();\n  const a = (r.json.mensagem_agente || '').trim();\n  if (u) hist += 'Lead: ' + u + '\\n';\n  if (a) hist += 'SDR: ' + a + '\\n';\n}\nreturn { json: { historico: hist, telefone: $('Loop Over Items').item.json.telefone } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -80
+      ],
+      "id": "a18115d5-33b0-485a-a8cb-1e4f9a35d23b",
+      "name": "Formata Histórico"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.historico }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Analise a conversa abaixo entre Lead e SDR. Retorne JSON seguindo exatamente o schema do output parser:\n- resumo_historico: resumo curto da conversa em poucas palavras.\n- temperatura_lead: UMA de [Sem histórico, Perdido, Muito quente, Quente, Morno, Frio].\n- principal_barreira: UMA de [Sem interesse, Sem barreira clara, Falta de prioridade, Insegurança pessoal, Credibilidade, Tempo, Preço].\n\nNão invente. Use exclusivamente as opções listadas (valores exatos, com acentos e maiúsculas iguais)."
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        1344,
+        -80
+      ],
+      "id": "57d54a89-0a28-47d0-86bf-0801e786198f",
+      "name": "Classifica Lead"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o-mini",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        96
+      ],
+      "id": "1ea4dfc6-a70c-4409-a719-47e3d1e98ba6",
+      "name": "OpenRouter Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      },
+      "notes": "SELECIONAR CREDENCIAL openRouterApi."
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"resumo_historico\": { \"type\": \"string\" },\n    \"temperatura_lead\": { \"type\": \"string\" },\n    \"principal_barreira\": { \"type\": \"string\" }\n  },\n  \"required\": [\"resumo_historico\", \"temperatura_lead\", \"principal_barreira\"]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        1520,
+        96
+      ],
+      "id": "58d21df0-4763-4398-b0ad-dd44bdb9650c",
+      "name": "Parser 3 Campos"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://finamob.com.br/api/update_mailing_api.php",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "COLE_AQUI_O_TOKEN_DO_NO_ATUALIZA_ULTIMO_CONTATO_DO_6.02"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ phone: $('Loop Over Items').item.json.telefone, resumo_historico: $json.output.resumo_historico, temperatura_lead: $json.output.temperatura_lead, principal_barreira: $json.output.principal_barreira }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1696,
+        -80
+      ],
+      "id": "9568222e-ffa0-4510-b672-9c5f08098bfc",
+      "name": "Atualiza Mailing",
+      "onError": "continueRegularOutput",
+      "notes": "phone = 13 dígitos SEM +. Trocar Authorization pelo token real. Se o output vier em $json e não $json.output, ajustar o jsonBody."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=insert into mailing_snapshot (telefone, last_chars, updated_at)\nvalues ('{{ $('Loop Over Items').item.json.telefone }}', {{ $('Loop Over Items').item.json.chars_atual }}, now())\non conflict (telefone) do update set last_chars = excluded.last_chars, updated_at = now();",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1920,
+        48
+      ],
+      "id": "598015a2-7cb6-4476-8493-bfa7af2a93fa",
+      "name": "Upsert Baseline",
+      "credentials": {
+        "postgres": {
+          "id": "htyT6TWxXxRh5mZQ",
+          "name": "Postgres N8N workflow"
+        }
+      },
+      "notes": "SELECIONAR CREDENCIAL postgres."
+    }
+  ],
+  "connections": {
+    "Schedule Diário 04h": {
+      "main": [
+        [
+          {
+            "node": "Seleciona Candidatos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seleciona Candidatos": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Histórico do Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Histórico do Lead": {
+      "main": [
+        [
+          {
+            "node": "Formata Histórico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formata Histórico": {
+      "main": [
+        [
+          {
+            "node": "Classifica Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Classifica Lead",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parser 3 Campos": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Classifica Lead",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classifica Lead": {
+      "main": [
+        [
+          {
+            "node": "Atualiza Mailing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza Mailing": {
+      "main": [
+        [
+          {
+            "node": "Upsert Baseline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Baseline": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "30eb8635-95aa-4e29-8344-c9edc7d7ffac",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-07-02T17:45:57.350Z",
+      "createdAt": "2026-07-02T17:45:57.350Z",
+      "role": "workflow:owner",
+      "workflowId": "7zbtTdEikgtW7rR7",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
