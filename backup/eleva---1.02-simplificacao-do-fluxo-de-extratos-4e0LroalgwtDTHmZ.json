@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-03T14:13:39.288Z",
+  "updatedAt": "2026-07-08T18:47:52.670Z",
   "createdAt": "2026-05-18T22:19:03.285Z",
   "id": "4e0LroalgwtDTHmZ",
   "name": "Eleva - 1.02 Simplificação do Fluxo de Extratos",
@@ -60,7 +60,7 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        688,
+        720,
         3632
       ],
       "id": "bd0c062b-8a03-4523-9607-865122769be1",
@@ -121,7 +121,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        896,
+        928,
         3632
       ],
       "id": "6df0292d-c67c-4adf-b547-c959d78a4c4a",
@@ -202,7 +202,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.4,
       "position": [
-        2896,
+        2928,
         3936
       ],
       "id": "030c20e3-3142-4642-bf07-1de5a07c4c23",
@@ -368,7 +368,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2688,
+        2720,
         3936
       ],
       "id": "b0f1a8cf-e5e8-4684-adc6-9c0626298dad",
@@ -543,7 +543,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        480,
+        512,
         3632
       ],
       "id": "34bdcbc6-312c-409b-8b79-78fd4e24b338",
@@ -836,7 +836,7 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        3488,
+        3536,
         3632
       ],
       "id": "abba1755-55c2-481a-82e6-afa3a516db1b",
@@ -944,7 +944,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        3024,
+        3056,
         3664
       ],
       "id": "6ee5477f-fc65-4427-bfd8-00335a0329d6",
@@ -957,7 +957,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3776,
+        3808,
         3632
       ],
       "id": "fb0b435e-41c2-417a-9755-8dd67ef9eb70",
@@ -982,7 +982,7 @@
             {
               "id": "c490fb83-bd63-4f68-b3f4-b9107b037dd0",
               "name": "Banco do Brasil",
-              "value": "=/**\n * EXTRATOR + NORMALIZADOR - BANCO DO BRASIL (ADAPTADO AO PDF REAL)\n * Formato: Extrato de Conta Corrente BB via PDF Text\n *\n * CORREÇÃO: o extrator de PDF pode entregar \"valor\" e \"data\" em linhas\n * separadas (ex.: \"50,00 (+)\" numa linha e \"01/06/2026\" na linha seguinte),\n * em vez de já vir tudo junto (\"50,00 (+) 01/06/2026 ...\"). O agrupamento\n * antigo detectava início de lançamento só pela DATA, o que fazia o valor\n * do lançamento seguinte \"vazar\" para dentro do bloco do lançamento atual\n * -> resultado: valor/data corretos, mas descrição do lançamento anterior.\n *\n * Agora o agrupamento é ancorado no par VALOR+DATA (que é o marcador real\n * de início de um novo lançamento nesse extrato), com um pré-passo que\n * junta \"valor sozinho\" + \"data sozinha\" quando vierem quebradas em duas\n * linhas.\n */\n\n// ========================================\n// 1. DADOS DA CONTA\n// ========================================\nlet accountId = \"\";\nlet bankName = \"Banco do Brasil\";\n\ntry {\n  const webhook = $('Recebe link do Supabase Storage').first().json;\n  const webData = webhook.body || webhook;\n  accountId = webData.accountId || \"\";\n  bankName  = webData.bankName  || \"Banco do Brasil\";\n} catch (e) {\n  bankName = \"Banco do Brasil\";\n}\n\n// ========================================\n// 2. LINHAS IGNORAR\n// ========================================\nconst LINHAS_IGNORAR = [\n  \"Extrato de Conta Corrente\",\n  \"Cliente \",\n  \"Agência:\",\n  \"Lançamentos\",\n  \"Dia Lote\",\n  \"SAC:\",\n  \"Ouvidoria:\",\n  \"Saldo Anterior\",\n  \"Saldo do dia\",\n  \"S A L D O\",\n  \"Informações Adicionais\",\n  \"Tarifa\",\n  \"Limite\"\n];\n\nconst deveIgnorar = (linha) => LINHAS_IGNORAR.some(p => linha.includes(p));\n\n// ========================================\n// 3. REGEX DE ESTRUTURA\n// ========================================\n\n// Uma linha que é SÓ o valor + sinal, ex: \"50,00 (+)\" ou \"1.943,31 (+)\"\nconst REGEX_VALOR_SOZINHO = /^[\\d.,]+\\s*\\(?[+\\-CDcd]\\)?$/;\n\n// Uma linha que é SÓ a data, ex: \"01/06/2026\" (às vezes com espaço no fim)\nconst REGEX_DATA_SOZINHA = /^\\d{2}\\/\\d{2}\\/\\d{4}\\s*$/;\n\n// Início real de um lançamento: \"<valor> (<sinal>) <data> ...\"\n// Aceita tanto quando já vem tudo na mesma linha, quanto após o merge do pré-passo.\nconst REGEX_INICIO_BLOCO = /^[\\d.,]+\\s*\\(?[+\\-CDcd]\\)?\\s+\\d{2}\\/\\d{2}\\/\\d{4}/;\n\n// Extração final: valor, sinal e data no INÍCIO da linha; o resto é descrição.\nconst REGEX_LANCAMENTO = /^([\\d.,]+)\\s*\\(?([+\\-CDcd])\\)?\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s*(.*)$/;\n\n// ========================================\n// 4. PARSE PRINCIPAL\n// ========================================\nconst listaBruta = [];\n\nfor (const item of inputData) {\n  if (item.json && Array.isArray(item.json.output)) {\n    listaBruta.push(...item.json.output);\n    continue;\n  }\n\n  const textoBruto = item.markdown || item.extractedText || item.text || (item.json ? item.json.markdown : \"\") || \"\";\n  if (!textoBruto) continue;\n\n  const linhasRaw = textoBruto.split('\\n').map(l => l.trim()).filter(Boolean);\n\n  // --- PRÉ-PASSO: junta \"valor sozinho\" + \"data sozinha\" quando vierem quebradas ---\n  const linhasMescladas = [];\n  for (let i = 0; i < linhasRaw.length; i++) {\n    const atual = linhasRaw[i];\n    const proxima = linhasRaw[i + 1];\n    if (REGEX_VALOR_SOZINHO.test(atual) && proxima && REGEX_DATA_SOZINHA.test(proxima)) {\n      linhasMescladas.push(`${atual} ${proxima.trim()}`);\n      i++; // já consumiu a linha da data\n    } else {\n      linhasMescladas.push(atual);\n    }\n  }\n\n  // --- AGRUPAMENTO: cada novo \"valor+data\" no início de linha abre um novo bloco ---\n  const linhas = [];\n  let linhaConstruida = \"\";\n\n  for (const l of linhasMescladas) {\n    if (REGEX_INICIO_BLOCO.test(l.replace(/[\"|]/g, ''))) {\n      if (linhaConstruida) linhas.push(linhaConstruida.replace(/[\"|]/g, '').replace(/\\s+/g, ' ').trim());\n      linhaConstruida = l;\n    } else if (linhaConstruida) {\n      linhaConstruida += \" \" + l;\n    }\n  }\n  if (linhaConstruida) linhas.push(linhaConstruida.replace(/[\"|]/g, '').replace(/\\s+/g, ' ').trim());\n\n  // --- PROCESSAMENTO DE CADA BLOCO JÁ MONTADO ---\n  for (const linhaAtual of linhas) {\n    if (deveIgnorar(linhaAtual)) continue;\n\n    const match = linhaAtual.match(REGEX_LANCAMENTO);\n    if (!match) continue;\n\n    let valorTexto = match[1];\n    const sinalBruto = match[2];\n    const dataPt = match[3];\n    let historico = match[4] || \"\";\n\n    const sinal = (sinalBruto.toUpperCase() === 'D' || sinalBruto === '-') ? '-' : '+';\n\n    // Corrige separador decimal se vier no padrão americano (685.00 -> 685,00)\n    if (valorTexto.includes('.') && !valorTexto.includes(',')) {\n      let partes = valorTexto.split('.');\n      let cents = partes.pop();\n      valorTexto = partes.join('') + ',' + cents;\n    }\n\n    const [dia, mes, ano] = dataPt.split('/');\n    const dataVigente = `${ano}-${mes}-${dia}`;\n    const valorNum = parseFloat(valorTexto.replace(/\\./g, '').replace(',', '.')) || 0;\n\n    // Remove \"lote documento\" do início da descrição (ex: \"14397 10638176844841\")\n    historico = historico\n      .replace(/^\\d{3,6}\\s+\\d{4,20}\\s+/, '')\n      .replace(/^\\d{3,6}\\s+/, '')\n      .replace(/^-/, '')\n      .trim();\n\n    // Remove eventual resíduo de saldo acumulado no fim\n    historico = historico.replace(/\\s*[\\d,.]+\\s*[+\\-CDcd]\\s*$/, '').trim();\n\n    if (historico && !/saldo/i.test(historico) && !deveIgnorar(historico)) {\n      listaBruta.push({\n        d: dataVigente,\n        t: historico,\n        v: valorNum,\n        s: sinal,\n        c: \"outros-gv\"\n      });\n    }\n  }\n}\n\n// ========================================\n// 5. NORMALIZAÇÃO FINAL (INTACTO)\n// ========================================\nconst anoAtual = new Date().getFullYear();\n\nconst final = listaBruta.map((item, index) => {\n  const desc = String(item.t || \"\").toUpperCase().replace(/\\s+/g, ' ').trim();\n\n  let valorFinal = parseFloat(item.v) || 0;\n  valorFinal = item.s === \"-\" ? -Math.abs(valorFinal) : Math.abs(valorFinal);\n\n  const tipo = valorFinal < 0 ? \"despesa\" : \"receita\";\n  const dataF = item.d ? item.d + \"T12:00:00\" : `${anoAtual}-01-01T12:00:00`;\n  const idLimpo = `${desc.replace(/[^A-Z0-9]/g, '')}-${dataF.split('T')[0]}-${Math.abs(valorFinal)}-${index}`;\n\n  return {\n    json: {\n      account_id: accountId,\n      Conta: bankName,\n      Data_lancamento: dataF,\n      Data_pagamento:  dataF,\n      Descricao: desc,\n      Valor:      valorFinal,\n      Tipo:        tipo,\n      Categoria:  item.c || \"outros-gv\",\n      id_conciliacao: idLimpo,\n    }\n  };\n});\n\nreturn final;",
+              "value": "=/**\n * EXTRATOR + NORMALIZADOR - BANCO DO BRASIL (ROBUSTO, MULTI-FORMATO)\n *\n * Suporta dois layouts de extrato do BB:\n *\n * FORMATO 1 (valor + C/D):\n *   DATA\n *   ... histórico ... 1.234,56 D\n *\n * FORMATO 2 (valor + sinal entre parênteses):\n *   DATA\n *   Lote Documento Histórico Valor (+)\n *   Ex: 14024 1347611 Redecard-Função Débito 2.481,33 (+)\n */\n\n// ========================================\n// 1. DADOS DA CONTA\n// ========================================\nlet accountId = \"\";\nlet bankName = \"Banco do Brasil\";\n\ntry {\n  const webhook = $('Recebe link do Supabase Storage').first().json;\n  const webData = webhook.body || webhook;\n  accountId = webData.accountId || \"\";\n  bankName  = webData.bankName  || \"Banco do Brasil\";\n} catch (e) {\n  bankName = \"Banco do Brasil\";\n}\n\n// ========================================\n// 2. LINHAS A IGNORAR (ruído de cabeçalho/rodapé)\n// ========================================\nconst RUIDO = [\n  /^Data\\s+Movim\\.?/i,\n  /^Dep\\.?\\s*Origem/i,\n  /^Hist[oó]rico/i,\n  /^Documento\\b/i,\n  /^Ag[êe]ncia:/i,\n  /^Conta:/i,\n  /^Cliente:?\\s/i,\n  /^SISBB/i,\n  /^SAC:/i,\n  /^Ouvidoria:/i,\n  /Defici[êe]ncia/i,\n  /Fale com a gente/i,\n  /^Informa[cç][oõ]es adicionais/i,\n  /O SEU CARTAO/i,\n  /BB,\\s*Sou Eu/i,\n  /exclusivos de seguranca/i,\n  /^\\d{5}\\.\\s*O contato/i,\n  /^Saldo Anterior/i,\n  /^Saldo do dia/i,\n  /S\\s*A\\s*L\\s*D\\s*O/i,\n  /^Extrato de Conta Corrente/i,\n  /^Lan[cç]amentos\\s*$/i,\n  /^Dia\\s+Lote\\s+Documento\\s+Hist[oó]rico\\s+Valor/i,\n];\n\nfunction ehRuido(linha) {\n  return RUIDO.some(r => r.test(linha));\n}\n\n// ========================================\n// 3. REGEX DE ESTRUTURA\n// ========================================\n\n// Data isolada no início da linha (pode ter texto depois, ex: layout antigo)\nconst RE_DATA = /^(\\d{2}\\/\\d{2}\\/\\d{4})\\b\\s*(.*)$/;\n\n// FORMATO 1: valor + C/D\nfunction novoRegexValorCD() {\n  return /(\\d{1,3}(?:\\.\\d{3})*,\\d{2})\\s*([CD])\\b/g;\n}\n\n// FORMATO 2: valor + (sinal)\nfunction novoRegexValorSinal() {\n  return /(\\d{1,3}(?:\\.\\d{3})*,\\d{2})\\s*\\(([+\\-])\\)/g;\n}\n\n// Remove \"Lote\" e \"Documento\" (dois números no início da descrição) do Formato 2\nfunction limparLoteDocumento(desc) {\n  return desc.replace(/^\\s*\\d{3,6}\\s+\\d{5,20}\\s+/, '');\n}\n\n// Limpeza geral de números de documento longos soltos (Formato 1 legado)\nfunction limparDocumentosGenericos(desc) {\n  return desc\n    .replace(/\\b\\d{1,3}(?:\\.\\d{3}){2,}\\b/g, ' ')\n    .replace(/\\b\\d{2,3}\\.\\d{3}(?:\\.\\d{3})*\\b/g, ' ')\n    .replace(/\\b\\d{6,}\\b/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\n// ========================================\n// 4. PARSE PRINCIPAL\n// ========================================\nconst inputData = $input.all();\nconst listaBruta = [];\n\nfor (const item of inputData) {\n\n  if (item.json && Array.isArray(item.json.output)) {\n    listaBruta.push(...item.json.output);\n    continue;\n  }\n\n  const textoBruto =\n    item.json.markdown ||\n    item.json.extractedText ||\n    item.json.text ||\n    \"\";\n\n  if (!textoBruto) continue;\n\n  const linhas = textoBruto\n    .split('\\n')\n    .map(l => l.trim())\n    .filter(Boolean);\n\n  let dataVigente = null;\n  let buffer = [];\n\n  // Fecha um lançamento a partir da linha que contém o valor final\n  const fecharTransacao = (linhaComValor) => {\n\n    if (!dataVigente) { buffer = []; return; }\n\n    // --- Tenta primeiro o FORMATO 1 (valor + C/D) ---\n    let reCD = novoRegexValorCD();\n    let matchesCD = [...linhaComValor.matchAll(reCD)];\n\n    if (matchesCD.length > 0) {\n      const valorTxt = matchesCD[0][1];\n      const sinal = matchesCD[0][2];\n      const antesDoValor = linhaComValor.slice(0, matchesCD[0].index);\n\n      let descricaoBruta = [...buffer, antesDoValor].join(' ');\n      descricaoBruta = limparDocumentosGenericos(descricaoBruta);\n\n      if (descricaoBruta) {\n        const valorNum = parseFloat(valorTxt.replace(/\\./g, '').replace(',', '.')) || 0;\n        if (valorNum > 0) {\n          listaBruta.push({\n            d: dataVigente,\n            t: descricaoBruta,\n            v: valorNum,\n            s: sinal === 'D' ? '-' : '+',\n            c: \"outros-gv\",\n          });\n        }\n      }\n      buffer = [];\n      return;\n    }\n\n    // --- Fallback: FORMATO 2 (valor + sinal entre parênteses) ---\n    let reSinal = novoRegexValorSinal();\n    let matchesSinal = [...linhaComValor.matchAll(reSinal)];\n\n    if (matchesSinal.length > 0) {\n      const valorTxt = matchesSinal[0][1];\n      const sinal = matchesSinal[0][2];\n      const antesDoValor = linhaComValor.slice(0, matchesSinal[0].index);\n\n      let descricaoBruta = [...buffer, antesDoValor].join(' ').trim();\n      descricaoBruta = limparLoteDocumento(descricaoBruta);\n      descricaoBruta = descricaoBruta.replace(/\\s+/g, ' ').trim();\n\n      if (descricaoBruta) {\n        const valorNum = parseFloat(valorTxt.replace(/\\./g, '').replace(',', '.')) || 0;\n        if (valorNum > 0) {\n          listaBruta.push({\n            d: dataVigente,\n            t: descricaoBruta,\n            v: valorNum,\n            s: sinal === '-' ? '-' : '+',\n            c: \"outros-gv\",\n          });\n        }\n      }\n      buffer = [];\n      return;\n    }\n\n    // Nenhum formato bateu: não é uma linha de fechamento válida\n    buffer.push(linhaComValor);\n  };\n\n  for (const linhaOriginal of linhas) {\n\n    if (ehRuido(linhaOriginal)) continue;\n\n    const matchData = linhaOriginal.match(RE_DATA);\n\n    if (matchData) {\n      dataVigente = matchData[1];\n      buffer = [];\n\n      const resto = matchData[2].trim();\n      if (resto) {\n        // Testa se o resto da linha já fecha uma transação\n        const temCD = novoRegexValorCD().test(resto);\n        const temSinal = novoRegexValorSinal().test(resto);\n        if (temCD || temSinal) {\n          fecharTransacao(resto);\n        } else {\n          buffer.push(resto);\n        }\n      }\n      continue;\n    }\n\n    const temCD = novoRegexValorCD().test(linhaOriginal);\n    const temSinal = novoRegexValorSinal().test(linhaOriginal);\n\n    if (temCD || temSinal) {\n      fecharTransacao(linhaOriginal);\n    } else {\n      buffer.push(linhaOriginal);\n    }\n  }\n}\n\n// ========================================\n// 5. NORMALIZAÇÃO FINAL\n// ========================================\nconst anoAtual = new Date().getFullYear();\n\nconst categoriasNeutras = [\n  \"reembolsos\",\n  \"estorno\",\n  \"pagamento-fatura-cartao\",\n  \"transferencia-mesma-titularidade\",\n  \"despesas-reembolsaveis\",\n  \"reserva-emergencia\",\n  \"projetos-vida\",\n  \"independencia-financeira\",\n];\n\nconst final = listaBruta.map((item, index) => {\n\n  const desc = String(item.t || \"\")\n    .toUpperCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  let valorFinal = parseFloat(item.v) || 0;\n  valorFinal = item.s === \"-\" ? -Math.abs(valorFinal) : Math.abs(valorFinal);\n\n  const tipo =\n    valorFinal < 0\n      ? \"despesa\"\n      : categoriasNeutras.includes(item.c || \"\")\n        ? \"neutro\"\n        : \"receita\";\n\n  const partes = (item.d || \"\").split('/');\n  const dataF = partes.length === 3\n    ? `${partes[2]}-${partes[1].padStart(2, '0')}-${partes[0].padStart(2, '0')}T12:00:00`\n    : `${anoAtual}-01-01T12:00:00`;\n\n  const idLimpo = `${desc.replace(/[^A-Z0-9]/g, '')}-${dataF.split('T')[0]}-${Math.abs(valorFinal)}-${index}`;\n\n  return {\n    json: {\n      account_id: accountId,\n      Conta: bankName,\n\n      Data_lancamento: dataF,\n      Data_pagamento: dataF,\n\n      Descricao: desc,\n\n      Valor: valorFinal,\n\n      Tipo: tipo,\n\n      Categoria: item.c || \"outros-gv\",\n\n      id_conciliacao: idLimpo,\n    }\n  };\n});\n\nreturn final;",
               "type": "string"
             }
           ]
@@ -992,7 +992,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        3280,
+        3312,
         3632
       ],
       "id": "a0573a1a-1ca5-400b-92e0-3bbac2cecf5e",
@@ -1047,7 +1047,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1392,
+        1424,
         3968
       ],
       "id": "c538a774-68fc-47c8-aba4-e52be6f85717",
@@ -1094,7 +1094,7 @@
       "type": "n8n-nodes-base.extractFromFile",
       "typeVersion": 1,
       "position": [
-        1728,
+        1760,
         3968
       ],
       "id": "948a9874-02ca-4597-bd01-2ebe39dcf432",
@@ -1129,7 +1129,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        1984,
+        2016,
         3952
       ],
       "id": "b7170da5-ec92-465a-b02a-68aa1cd20948",
@@ -1460,7 +1460,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.4,
       "position": [
-        1152,
+        1184,
         3616
       ],
       "id": "a5bd2399-bbe5-47cd-a713-2fe94dfc3d4e",
@@ -1632,7 +1632,7 @@
     },
     {
       "parameters": {
-        "jsCode": "/**\n * NORMALIZADOR UNIVERSAL (PEGA TUDO O QUE CHEGAR)\n */\n// 1. DADOS DA CONTA\nlet accountId = \"\";\nlet bankName = \"\";\ntry {\n  const webhook = $('Recebe link do Supabase Storage').first().json;\n  const webData = webhook.body || webhook;\n  accountId = webData.accountId || \"\";\n  bankName = webData.bankName || \"Banco\";\n} catch (e) { bankName = \"Banco\"; }\n// 2. CAPTURA DE DADOS (ABERTURA DE ENVELOPE)\nlet listaBruta = [];\nconst incomingData = $input.all();\nfor (const item of incomingData) {\n  const data = item.json;\n\n  // Tenta encontrar a lista de transações em qualquer lugar\n  let alvo = data.output !== undefined ? data.output : data;\n\n  // NOVO: se vier como string (sem Output Parser, o chainLlm devolve texto puro\n  // em $json.text ou dentro do próprio campo output), faz o parse manual aqui.\n  if (typeof alvo === 'string') {\n    let raw = alvo.trim().replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n    try { alvo = JSON.parse(raw); } catch (e) {\n      throw new Error(`Falha ao fazer parse do JSON: ${e.message}\\nTrecho: ${raw.slice(0, 300)}`);\n    }\n  } else if (alvo === data && typeof data.text === 'string') {\n    let raw = data.text.trim().replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n    try { alvo = JSON.parse(raw); } catch (e) {\n      throw new Error(`Falha ao fazer parse do JSON: ${e.message}\\nTrecho: ${raw.slice(0, 300)}`);\n    }\n  }\n\n  if (Array.isArray(alvo)) {\n    listaBruta = listaBruta.concat(alvo);\n  } else if (typeof alvo === 'object' && (alvo.t || alvo.d)) {\n    listaBruta.push(alvo);\n  }\n}\n// 3. MAPEAMENTO\nconst anoAtual = new Date().getFullYear();\nconst final = listaBruta.map((item, index) => {\n  const desc = (item.t || \"\").toString().toUpperCase().trim();\n  let v = item.v !== undefined ? item.v : 0;\n  \n  if (typeof v === 'string') v = v.replace(/[R$\\s]/ig, '').replace(',', '.');\n  let valorFinal = parseFloat(v) || 0;\n  \n  if (item.s === \"-\" || item.s === \"despesa\") valorFinal = -Math.abs(valorFinal);\n  else valorFinal = Math.abs(valorFinal);\n  let dataF = item.d || \"\";\n  if (dataF.includes('/')) {\n    let p = dataF.split('/');\n    dataF = `${p[2] || anoAtual}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}T12:00:00`;\n  }\n  return {\n    json: {\n      account_id: accountId,\n      Conta: bankName,\n      Data_lancamento: dataF,\n      Data_pagamento: dataF,\n      Descricao: desc,\n      Valor: valorFinal,\n      Tipo: valorFinal < 0 ? \"despesa\" : ([\"reembolsos\", \"estorno\",\"pagamento-fatura-cartao\", \"transferencia-mesma-titularidade\", \"despesas-reembolsaveis\", \"reserva-emergencia\", \"projetos-vida\", \"independencia-financeira\"].includes(item.c) ? \"neutro\" : \"receita\"),\n      Categoria: item.c || \"outros-gv\",\n      id_conciliacao: `${desc}-${valorFinal}-${index}`\n    }\n  };\n});\nreturn final;"
+        "jsCode": "/**\n * NORMALIZADOR UNIVERSAL (PEGA TUDO O QUE CHEGAR)\n * - Isola falhas de parse por lote: um lote quebrado não derruba os demais.\n */\n\nfunction sanitizarJson(raw) {\n  let out = '';\n  let dentroDeString = false;\n  let escapando = false;\n\n  for (let i = 0; i < raw.length; i++) {\n    const ch = raw[i];\n    if (dentroDeString) {\n      if (escapando) { out += ch; escapando = false; continue; }\n      if (ch === '\\\\') { out += ch; escapando = true; continue; }\n      if (ch === '\"') { out += ch; dentroDeString = false; continue; }\n      if (ch === '\\n') { out += '\\\\n'; continue; }\n      if (ch === '\\r') { continue; }\n      if (ch === '\\t') { out += '\\\\t'; continue; }\n      out += ch;\n    } else {\n      if (ch === '\"') { dentroDeString = true; }\n      out += ch;\n    }\n  }\n  return out;\n}\n\nfunction repararArrayTruncado(raw) {\n  let depth = 0;\n  let inString = false;\n  let escape = false;\n  let lastCompleteObjectEnd = -1;\n\n  for (let i = 0; i < raw.length; i++) {\n    const ch = raw[i];\n    if (inString) {\n      if (escape) { escape = false; continue; }\n      if (ch === '\\\\') { escape = true; continue; }\n      if (ch === '\"') { inString = false; }\n      continue;\n    }\n    if (ch === '\"') { inString = true; continue; }\n    if (ch === '{') { depth++; continue; }\n    if (ch === '}') {\n      depth--;\n      if (depth === 0) { lastCompleteObjectEnd = i; }\n      continue;\n    }\n  }\n\n  if (lastCompleteObjectEnd === -1) return null;\n  return raw.slice(0, lastCompleteObjectEnd + 1) + '\\n]';\n}\n\nfunction parseComRepair(raw) {\n  try {\n    return { ok: true, data: JSON.parse(raw) };\n  } catch (e1) {\n    try {\n      return { ok: true, data: JSON.parse(sanitizarJson(raw)) };\n    } catch (e2) {\n      try {\n        const reparado = repararArrayTruncado(sanitizarJson(raw));\n        if (!reparado) throw new Error('Não foi possível localizar nenhum objeto completo.');\n        return { ok: true, data: JSON.parse(reparado), parcial: true };\n      } catch (e3) {\n        return {\n          ok: false,\n          erro: `${e3.message}`,\n          trecho: raw.slice(0, 500)\n        };\n      }\n    }\n  }\n}\n\n// 1. DADOS DA CONTA\nlet accountId = \"\";\nlet bankName = \"\";\ntry {\n  const webhook = $('Recebe link do Supabase Storage').first().json;\n  const webData = webhook.body || webhook;\n  accountId = webData.accountId || \"\";\n  bankName = webData.bankName || \"Banco\";\n} catch (e) { bankName = \"Banco\"; }\n\n// 2. CAPTURA DE DADOS (ABERTURA DE ENVELOPE) - COM ISOLAMENTO DE FALHAS\nlet listaBruta = [];\nconst lotesComFalha = [];\nconst incomingData = $input.all();\n\nfor (let idx = 0; idx < incomingData.length; idx++) {\n  const item = incomingData[idx];\n  const data = item.json;\n  let alvo = data.output !== undefined ? data.output : data;\n\n  try {\n    if (typeof alvo === 'string') {\n      let raw = alvo.trim().replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n      const resultado = parseComRepair(raw);\n      if (!resultado.ok) {\n        lotesComFalha.push({ lote: idx, erro: resultado.erro, trecho: resultado.trecho });\n        continue; // pula esse lote, NÃO derruba os demais\n      }\n      alvo = resultado.data;\n    } else if (alvo === data && typeof data.text === 'string') {\n      let raw = data.text.trim().replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n      const resultado = parseComRepair(raw);\n      if (!resultado.ok) {\n        lotesComFalha.push({ lote: idx, erro: resultado.erro, trecho: resultado.trecho });\n        continue;\n      }\n      alvo = resultado.data;\n    }\n\n    if (Array.isArray(alvo)) {\n      listaBruta = listaBruta.concat(alvo);\n    } else if (typeof alvo === 'object' && (alvo.t || alvo.d)) {\n      listaBruta.push(alvo);\n    }\n  } catch (erroInesperado) {\n    lotesComFalha.push({ lote: idx, erro: erroInesperado.message, trecho: '' });\n    continue;\n  }\n}\n\n// 3. MAPEAMENTO\nconst anoAtual = new Date().getFullYear();\nconst final = listaBruta.map((item, index) => {\n  const desc = (item.t || \"\").toString().toUpperCase().trim();\n  let v = item.v !== undefined ? item.v : 0;\n\n  if (typeof v === 'string') v = v.replace(/[R$\\s]/ig, '').replace(',', '.');\n  let valorFinal = parseFloat(v) || 0;\n\n  if (item.s === \"-\" || item.s === \"despesa\") valorFinal = -Math.abs(valorFinal);\n  else valorFinal = Math.abs(valorFinal);\n\n  let dataF = item.d || \"\";\n  if (dataF.includes('/')) {\n    let p = dataF.split('/');\n    dataF = `${p[2] || anoAtual}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}T12:00:00`;\n  }\n\n  return {\n    json: {\n      account_id: accountId,\n      Conta: bankName,\n      Data_lancamento: dataF,\n      Data_pagamento: dataF,\n      Descricao: desc,\n      Valor: valorFinal,\n      Tipo: valorFinal < 0 ? \"despesa\" : ([\"reembolsos\", \"estorno\",\"pagamento-fatura-cartao\", \"transferencia-mesma-titularidade\", \"despesas-reembolsaveis\", \"reserva-emergencia\", \"projetos-vida\", \"independencia-financeira\"].includes(item.c) ? \"neutro\" : \"receita\"),\n      Categoria: item.c || \"outros-gv\",\n      id_conciliacao: `${desc}-${valorFinal}-${index}`\n    }\n  };\n});\n\n// 4. Se houve lotes com falha, adiciona um item de aviso ao final\n// (não interrompe o fluxo, só sinaliza para você investigar)\nif (lotesComFalha.length > 0) {\n  final.push({\n    json: {\n      _erro_processamento: true,\n      _lotes_com_falha: lotesComFalha.length,\n      _detalhes: lotesComFalha,\n      account_id: accountId,\n      Conta: bankName\n    }\n  });\n}\n\nreturn final;"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -2266,8 +2266,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "10341104-4cc8-4f08-b523-b3e1ae9411bf",
-  "activeVersionId": "10341104-4cc8-4f08-b523-b3e1ae9411bf",
+  "versionId": "3e733228-08e1-4241-8b5e-b6cccb221375",
+  "activeVersionId": "3e733228-08e1-4241-8b5e-b6cccb221375",
   "triggerCount": 1,
   "shared": [
     {
@@ -2279,9 +2279,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-07-03T14:13:39.290Z",
-    "createdAt": "2026-07-03T14:13:39.290Z",
-    "versionId": "10341104-4cc8-4f08-b523-b3e1ae9411bf",
+    "updatedAt": "2026-07-08T18:47:52.673Z",
+    "createdAt": "2026-07-08T18:47:52.673Z",
+    "versionId": "3e733228-08e1-4241-8b5e-b6cccb221375",
     "workflowId": "4e0LroalgwtDTHmZ",
     "nodes": [
       {
@@ -2338,7 +2338,7 @@
         "type": "n8n-nodes-base.supabase",
         "typeVersion": 1,
         "position": [
-          688,
+          720,
           3632
         ],
         "id": "bd0c062b-8a03-4523-9607-865122769be1",
@@ -2399,7 +2399,7 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          896,
+          928,
           3632
         ],
         "id": "6df0292d-c67c-4adf-b547-c959d78a4c4a",
@@ -2480,7 +2480,7 @@
         "type": "n8n-nodes-base.switch",
         "typeVersion": 3.4,
         "position": [
-          2896,
+          2928,
           3936
         ],
         "id": "030c20e3-3142-4642-bf07-1de5a07c4c23",
@@ -2646,7 +2646,7 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          2688,
+          2720,
           3936
         ],
         "id": "b0f1a8cf-e5e8-4684-adc6-9c0626298dad",
@@ -2821,7 +2821,7 @@
         "type": "n8n-nodes-base.webhook",
         "typeVersion": 2.1,
         "position": [
-          480,
+          512,
           3632
         ],
         "id": "34bdcbc6-312c-409b-8b79-78fd4e24b338",
@@ -3114,7 +3114,7 @@
         "type": "n8n-nodes-base.supabase",
         "typeVersion": 1,
         "position": [
-          3488,
+          3536,
           3632
         ],
         "id": "abba1755-55c2-481a-82e6-afa3a516db1b",
@@ -3222,7 +3222,7 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.3,
         "position": [
-          3024,
+          3056,
           3664
         ],
         "id": "6ee5477f-fc65-4427-bfd8-00335a0329d6",
@@ -3235,7 +3235,7 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          3776,
+          3808,
           3632
         ],
         "id": "fb0b435e-41c2-417a-9755-8dd67ef9eb70",
@@ -3260,7 +3260,7 @@
               {
                 "id": "c490fb83-bd63-4f68-b3f4-b9107b037dd0",
                 "name": "Banco do Brasil",
-                "value": "=/**\n * EXTRATOR + NORMALIZADOR - BANCO DO BRASIL (ADAPTADO AO PDF REAL)\n * Formato: Extrato de Conta Corrente BB via PDF Text\n *\n * CORREÇÃO: o extrator de PDF pode entregar \"valor\" e \"data\" em linhas\n * separadas (ex.: \"50,00 (+)\" numa linha e \"01/06/2026\" na linha seguinte),\n * em vez de já vir tudo junto (\"50,00 (+) 01/06/2026 ...\"). O agrupamento\n * antigo detectava início de lançamento só pela DATA, o que fazia o valor\n * do lançamento seguinte \"vazar\" para dentro do bloco do lançamento atual\n * -> resultado: valor/data corretos, mas descrição do lançamento anterior.\n *\n * Agora o agrupamento é ancorado no par VALOR+DATA (que é o marcador real\n * de início de um novo lançamento nesse extrato), com um pré-passo que\n * junta \"valor sozinho\" + \"data sozinha\" quando vierem quebradas em duas\n * linhas.\n */\n\n// ========================================\n// 1. DADOS DA CONTA\n// ========================================\nlet accountId = \"\";\nlet bankName = \"Banco do Brasil\";\n\ntry {\n  const webhook = $('Recebe link do Supabase Storage').first().json;\n  const webData = webhook.body || webhook;\n  accountId = webData.accountId || \"\";\n  bankName  = webData.bankName  || \"Banco do Brasil\";\n} catch (e) {\n  bankName = \"Banco do Brasil\";\n}\n\n// ========================================\n// 2. LINHAS IGNORAR\n// ========================================\nconst LINHAS_IGNORAR = [\n  \"Extrato de Conta Corrente\",\n  \"Cliente \",\n  \"Agência:\",\n  \"Lançamentos\",\n  \"Dia Lote\",\n  \"SAC:\",\n  \"Ouvidoria:\",\n  \"Saldo Anterior\",\n  \"Saldo do dia\",\n  \"S A L D O\",\n  \"Informações Adicionais\",\n  \"Tarifa\",\n  \"Limite\"\n];\n\nconst deveIgnorar = (linha) => LINHAS_IGNORAR.some(p => linha.includes(p));\n\n// ========================================\n// 3. REGEX DE ESTRUTURA\n// ========================================\n\n// Uma linha que é SÓ o valor + sinal, ex: \"50,00 (+)\" ou \"1.943,31 (+)\"\nconst REGEX_VALOR_SOZINHO = /^[\\d.,]+\\s*\\(?[+\\-CDcd]\\)?$/;\n\n// Uma linha que é SÓ a data, ex: \"01/06/2026\" (às vezes com espaço no fim)\nconst REGEX_DATA_SOZINHA = /^\\d{2}\\/\\d{2}\\/\\d{4}\\s*$/;\n\n// Início real de um lançamento: \"<valor> (<sinal>) <data> ...\"\n// Aceita tanto quando já vem tudo na mesma linha, quanto após o merge do pré-passo.\nconst REGEX_INICIO_BLOCO = /^[\\d.,]+\\s*\\(?[+\\-CDcd]\\)?\\s+\\d{2}\\/\\d{2}\\/\\d{4}/;\n\n// Extração final: valor, sinal e data no INÍCIO da linha; o resto é descrição.\nconst REGEX_LANCAMENTO = /^([\\d.,]+)\\s*\\(?([+\\-CDcd])\\)?\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s*(.*)$/;\n\n// ========================================\n// 4. PARSE PRINCIPAL\n// ========================================\nconst listaBruta = [];\n\nfor (const item of inputData) {\n  if (item.json && Array.isArray(item.json.output)) {\n    listaBruta.push(...item.json.output);\n    continue;\n  }\n\n  const textoBruto = item.markdown || item.extractedText || item.text || (item.json ? item.json.markdown : \"\") || \"\";\n  if (!textoBruto) continue;\n\n  const linhasRaw = textoBruto.split('\\n').map(l => l.trim()).filter(Boolean);\n\n  // --- PRÉ-PASSO: junta \"valor sozinho\" + \"data sozinha\" quando vierem quebradas ---\n  const linhasMescladas = [];\n  for (let i = 0; i < linhasRaw.length; i++) {\n    const atual = linhasRaw[i];\n    const proxima = linhasRaw[i + 1];\n    if (REGEX_VALOR_SOZINHO.test(atual) && proxima && REGEX_DATA_SOZINHA.test(proxima)) {\n      linhasMescladas.push(`${atual} ${proxima.trim()}`);\n      i++; // já consumiu a linha da data\n    } else {\n      linhasMescladas.push(atual);\n    }\n  }\n\n  // --- AGRUPAMENTO: cada novo \"valor+data\" no início de linha abre um novo bloco ---\n  const linhas = [];\n  let linhaConstruida = \"\";\n\n  for (const l of linhasMescladas) {\n    if (REGEX_INICIO_BLOCO.test(l.replace(/[\"|]/g, ''))) {\n      if (linhaConstruida) linhas.push(linhaConstruida.replace(/[\"|]/g, '').replace(/\\s+/g, ' ').trim());\n      linhaConstruida = l;\n    } else if (linhaConstruida) {\n      linhaConstruida += \" \" + l;\n    }\n  }\n  if (linhaConstruida) linhas.push(linhaConstruida.replace(/[\"|]/g, '').replace(/\\s+/g, ' ').trim());\n\n  // --- PROCESSAMENTO DE CADA BLOCO JÁ MONTADO ---\n  for (const linhaAtual of linhas) {\n    if (deveIgnorar(linhaAtual)) continue;\n\n    const match = linhaAtual.match(REGEX_LANCAMENTO);\n    if (!match) continue;\n\n    let valorTexto = match[1];\n    const sinalBruto = match[2];\n    const dataPt = match[3];\n    let historico = match[4] || \"\";\n\n    const sinal = (sinalBruto.toUpperCase() === 'D' || sinalBruto === '-') ? '-' : '+';\n\n    // Corrige separador decimal se vier no padrão americano (685.00 -> 685,00)\n    if (valorTexto.includes('.') && !valorTexto.includes(',')) {\n      let partes = valorTexto.split('.');\n      let cents = partes.pop();\n      valorTexto = partes.join('') + ',' + cents;\n    }\n\n    const [dia, mes, ano] = dataPt.split('/');\n    const dataVigente = `${ano}-${mes}-${dia}`;\n    const valorNum = parseFloat(valorTexto.replace(/\\./g, '').replace(',', '.')) || 0;\n\n    // Remove \"lote documento\" do início da descrição (ex: \"14397 10638176844841\")\n    historico = historico\n      .replace(/^\\d{3,6}\\s+\\d{4,20}\\s+/, '')\n      .replace(/^\\d{3,6}\\s+/, '')\n      .replace(/^-/, '')\n      .trim();\n\n    // Remove eventual resíduo de saldo acumulado no fim\n    historico = historico.replace(/\\s*[\\d,.]+\\s*[+\\-CDcd]\\s*$/, '').trim();\n\n    if (historico && !/saldo/i.test(historico) && !deveIgnorar(historico)) {\n      listaBruta.push({\n        d: dataVigente,\n        t: historico,\n        v: valorNum,\n        s: sinal,\n        c: \"outros-gv\"\n      });\n    }\n  }\n}\n\n// ========================================\n// 5. NORMALIZAÇÃO FINAL (INTACTO)\n// ========================================\nconst anoAtual = new Date().getFullYear();\n\nconst final = listaBruta.map((item, index) => {\n  const desc = String(item.t || \"\").toUpperCase().replace(/\\s+/g, ' ').trim();\n\n  let valorFinal = parseFloat(item.v) || 0;\n  valorFinal = item.s === \"-\" ? -Math.abs(valorFinal) : Math.abs(valorFinal);\n\n  const tipo = valorFinal < 0 ? \"despesa\" : \"receita\";\n  const dataF = item.d ? item.d + \"T12:00:00\" : `${anoAtual}-01-01T12:00:00`;\n  const idLimpo = `${desc.replace(/[^A-Z0-9]/g, '')}-${dataF.split('T')[0]}-${Math.abs(valorFinal)}-${index}`;\n\n  return {\n    json: {\n      account_id: accountId,\n      Conta: bankName,\n      Data_lancamento: dataF,\n      Data_pagamento:  dataF,\n      Descricao: desc,\n      Valor:      valorFinal,\n      Tipo:        tipo,\n      Categoria:  item.c || \"outros-gv\",\n      id_conciliacao: idLimpo,\n    }\n  };\n});\n\nreturn final;",
+                "value": "=/**\n * EXTRATOR + NORMALIZADOR - BANCO DO BRASIL (ROBUSTO, MULTI-FORMATO)\n *\n * Suporta dois layouts de extrato do BB:\n *\n * FORMATO 1 (valor + C/D):\n *   DATA\n *   ... histórico ... 1.234,56 D\n *\n * FORMATO 2 (valor + sinal entre parênteses):\n *   DATA\n *   Lote Documento Histórico Valor (+)\n *   Ex: 14024 1347611 Redecard-Função Débito 2.481,33 (+)\n */\n\n// ========================================\n// 1. DADOS DA CONTA\n// ========================================\nlet accountId = \"\";\nlet bankName = \"Banco do Brasil\";\n\ntry {\n  const webhook = $('Recebe link do Supabase Storage').first().json;\n  const webData = webhook.body || webhook;\n  accountId = webData.accountId || \"\";\n  bankName  = webData.bankName  || \"Banco do Brasil\";\n} catch (e) {\n  bankName = \"Banco do Brasil\";\n}\n\n// ========================================\n// 2. LINHAS A IGNORAR (ruído de cabeçalho/rodapé)\n// ========================================\nconst RUIDO = [\n  /^Data\\s+Movim\\.?/i,\n  /^Dep\\.?\\s*Origem/i,\n  /^Hist[oó]rico/i,\n  /^Documento\\b/i,\n  /^Ag[êe]ncia:/i,\n  /^Conta:/i,\n  /^Cliente:?\\s/i,\n  /^SISBB/i,\n  /^SAC:/i,\n  /^Ouvidoria:/i,\n  /Defici[êe]ncia/i,\n  /Fale com a gente/i,\n  /^Informa[cç][oõ]es adicionais/i,\n  /O SEU CARTAO/i,\n  /BB,\\s*Sou Eu/i,\n  /exclusivos de seguranca/i,\n  /^\\d{5}\\.\\s*O contato/i,\n  /^Saldo Anterior/i,\n  /^Saldo do dia/i,\n  /S\\s*A\\s*L\\s*D\\s*O/i,\n  /^Extrato de Conta Corrente/i,\n  /^Lan[cç]amentos\\s*$/i,\n  /^Dia\\s+Lote\\s+Documento\\s+Hist[oó]rico\\s+Valor/i,\n];\n\nfunction ehRuido(linha) {\n  return RUIDO.some(r => r.test(linha));\n}\n\n// ========================================\n// 3. REGEX DE ESTRUTURA\n// ========================================\n\n// Data isolada no início da linha (pode ter texto depois, ex: layout antigo)\nconst RE_DATA = /^(\\d{2}\\/\\d{2}\\/\\d{4})\\b\\s*(.*)$/;\n\n// FORMATO 1: valor + C/D\nfunction novoRegexValorCD() {\n  return /(\\d{1,3}(?:\\.\\d{3})*,\\d{2})\\s*([CD])\\b/g;\n}\n\n// FORMATO 2: valor + (sinal)\nfunction novoRegexValorSinal() {\n  return /(\\d{1,3}(?:\\.\\d{3})*,\\d{2})\\s*\\(([+\\-])\\)/g;\n}\n\n// Remove \"Lote\" e \"Documento\" (dois números no início da descrição) do Formato 2\nfunction limparLoteDocumento(desc) {\n  return desc.replace(/^\\s*\\d{3,6}\\s+\\d{5,20}\\s+/, '');\n}\n\n// Limpeza geral de números de documento longos soltos (Formato 1 legado)\nfunction limparDocumentosGenericos(desc) {\n  return desc\n    .replace(/\\b\\d{1,3}(?:\\.\\d{3}){2,}\\b/g, ' ')\n    .replace(/\\b\\d{2,3}\\.\\d{3}(?:\\.\\d{3})*\\b/g, ' ')\n    .replace(/\\b\\d{6,}\\b/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\n// ========================================\n// 4. PARSE PRINCIPAL\n// ========================================\nconst inputData = $input.all();\nconst listaBruta = [];\n\nfor (const item of inputData) {\n\n  if (item.json && Array.isArray(item.json.output)) {\n    listaBruta.push(...item.json.output);\n    continue;\n  }\n\n  const textoBruto =\n    item.json.markdown ||\n    item.json.extractedText ||\n    item.json.text ||\n    \"\";\n\n  if (!textoBruto) continue;\n\n  const linhas = textoBruto\n    .split('\\n')\n    .map(l => l.trim())\n    .filter(Boolean);\n\n  let dataVigente = null;\n  let buffer = [];\n\n  // Fecha um lançamento a partir da linha que contém o valor final\n  const fecharTransacao = (linhaComValor) => {\n\n    if (!dataVigente) { buffer = []; return; }\n\n    // --- Tenta primeiro o FORMATO 1 (valor + C/D) ---\n    let reCD = novoRegexValorCD();\n    let matchesCD = [...linhaComValor.matchAll(reCD)];\n\n    if (matchesCD.length > 0) {\n      const valorTxt = matchesCD[0][1];\n      const sinal = matchesCD[0][2];\n      const antesDoValor = linhaComValor.slice(0, matchesCD[0].index);\n\n      let descricaoBruta = [...buffer, antesDoValor].join(' ');\n      descricaoBruta = limparDocumentosGenericos(descricaoBruta);\n\n      if (descricaoBruta) {\n        const valorNum = parseFloat(valorTxt.replace(/\\./g, '').replace(',', '.')) || 0;\n        if (valorNum > 0) {\n          listaBruta.push({\n            d: dataVigente,\n            t: descricaoBruta,\n            v: valorNum,\n            s: sinal === 'D' ? '-' : '+',\n            c: \"outros-gv\",\n          });\n        }\n      }\n      buffer = [];\n      return;\n    }\n\n    // --- Fallback: FORMATO 2 (valor + sinal entre parênteses) ---\n    let reSinal = novoRegexValorSinal();\n    let matchesSinal = [...linhaComValor.matchAll(reSinal)];\n\n    if (matchesSinal.length > 0) {\n      const valorTxt = matchesSinal[0][1];\n      const sinal = matchesSinal[0][2];\n      const antesDoValor = linhaComValor.slice(0, matchesSinal[0].index);\n\n      let descricaoBruta = [...buffer, antesDoValor].join(' ').trim();\n      descricaoBruta = limparLoteDocumento(descricaoBruta);\n      descricaoBruta = descricaoBruta.replace(/\\s+/g, ' ').trim();\n\n      if (descricaoBruta) {\n        const valorNum = parseFloat(valorTxt.replace(/\\./g, '').replace(',', '.')) || 0;\n        if (valorNum > 0) {\n          listaBruta.push({\n            d: dataVigente,\n            t: descricaoBruta,\n            v: valorNum,\n            s: sinal === '-' ? '-' : '+',\n            c: \"outros-gv\",\n          });\n        }\n      }\n      buffer = [];\n      return;\n    }\n\n    // Nenhum formato bateu: não é uma linha de fechamento válida\n    buffer.push(linhaComValor);\n  };\n\n  for (const linhaOriginal of linhas) {\n\n    if (ehRuido(linhaOriginal)) continue;\n\n    const matchData = linhaOriginal.match(RE_DATA);\n\n    if (matchData) {\n      dataVigente = matchData[1];\n      buffer = [];\n\n      const resto = matchData[2].trim();\n      if (resto) {\n        // Testa se o resto da linha já fecha uma transação\n        const temCD = novoRegexValorCD().test(resto);\n        const temSinal = novoRegexValorSinal().test(resto);\n        if (temCD || temSinal) {\n          fecharTransacao(resto);\n        } else {\n          buffer.push(resto);\n        }\n      }\n      continue;\n    }\n\n    const temCD = novoRegexValorCD().test(linhaOriginal);\n    const temSinal = novoRegexValorSinal().test(linhaOriginal);\n\n    if (temCD || temSinal) {\n      fecharTransacao(linhaOriginal);\n    } else {\n      buffer.push(linhaOriginal);\n    }\n  }\n}\n\n// ========================================\n// 5. NORMALIZAÇÃO FINAL\n// ========================================\nconst anoAtual = new Date().getFullYear();\n\nconst categoriasNeutras = [\n  \"reembolsos\",\n  \"estorno\",\n  \"pagamento-fatura-cartao\",\n  \"transferencia-mesma-titularidade\",\n  \"despesas-reembolsaveis\",\n  \"reserva-emergencia\",\n  \"projetos-vida\",\n  \"independencia-financeira\",\n];\n\nconst final = listaBruta.map((item, index) => {\n\n  const desc = String(item.t || \"\")\n    .toUpperCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  let valorFinal = parseFloat(item.v) || 0;\n  valorFinal = item.s === \"-\" ? -Math.abs(valorFinal) : Math.abs(valorFinal);\n\n  const tipo =\n    valorFinal < 0\n      ? \"despesa\"\n      : categoriasNeutras.includes(item.c || \"\")\n        ? \"neutro\"\n        : \"receita\";\n\n  const partes = (item.d || \"\").split('/');\n  const dataF = partes.length === 3\n    ? `${partes[2]}-${partes[1].padStart(2, '0')}-${partes[0].padStart(2, '0')}T12:00:00`\n    : `${anoAtual}-01-01T12:00:00`;\n\n  const idLimpo = `${desc.replace(/[^A-Z0-9]/g, '')}-${dataF.split('T')[0]}-${Math.abs(valorFinal)}-${index}`;\n\n  return {\n    json: {\n      account_id: accountId,\n      Conta: bankName,\n\n      Data_lancamento: dataF,\n      Data_pagamento: dataF,\n\n      Descricao: desc,\n\n      Valor: valorFinal,\n\n      Tipo: tipo,\n\n      Categoria: item.c || \"outros-gv\",\n\n      id_conciliacao: idLimpo,\n    }\n  };\n});\n\nreturn final;",
                 "type": "string"
               }
             ]
@@ -3270,7 +3270,7 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          3280,
+          3312,
           3632
         ],
         "id": "a0573a1a-1ca5-400b-92e0-3bbac2cecf5e",
@@ -3325,7 +3325,7 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1392,
+          1424,
           3968
         ],
         "id": "c538a774-68fc-47c8-aba4-e52be6f85717",
@@ -3372,7 +3372,7 @@
         "type": "n8n-nodes-base.extractFromFile",
         "typeVersion": 1,
         "position": [
-          1728,
+          1760,
           3968
         ],
         "id": "948a9874-02ca-4597-bd01-2ebe39dcf432",
@@ -3407,7 +3407,7 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.3,
         "position": [
-          1984,
+          2016,
           3952
         ],
         "id": "b7170da5-ec92-465a-b02a-68aa1cd20948",
@@ -3738,7 +3738,7 @@
         "type": "n8n-nodes-base.switch",
         "typeVersion": 3.4,
         "position": [
-          1152,
+          1184,
           3616
         ],
         "id": "a5bd2399-bbe5-47cd-a713-2fe94dfc3d4e",
@@ -3910,7 +3910,7 @@
       },
       {
         "parameters": {
-          "jsCode": "/**\n * NORMALIZADOR UNIVERSAL (PEGA TUDO O QUE CHEGAR)\n */\n// 1. DADOS DA CONTA\nlet accountId = \"\";\nlet bankName = \"\";\ntry {\n  const webhook = $('Recebe link do Supabase Storage').first().json;\n  const webData = webhook.body || webhook;\n  accountId = webData.accountId || \"\";\n  bankName = webData.bankName || \"Banco\";\n} catch (e) { bankName = \"Banco\"; }\n// 2. CAPTURA DE DADOS (ABERTURA DE ENVELOPE)\nlet listaBruta = [];\nconst incomingData = $input.all();\nfor (const item of incomingData) {\n  const data = item.json;\n\n  // Tenta encontrar a lista de transações em qualquer lugar\n  let alvo = data.output !== undefined ? data.output : data;\n\n  // NOVO: se vier como string (sem Output Parser, o chainLlm devolve texto puro\n  // em $json.text ou dentro do próprio campo output), faz o parse manual aqui.\n  if (typeof alvo === 'string') {\n    let raw = alvo.trim().replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n    try { alvo = JSON.parse(raw); } catch (e) {\n      throw new Error(`Falha ao fazer parse do JSON: ${e.message}\\nTrecho: ${raw.slice(0, 300)}`);\n    }\n  } else if (alvo === data && typeof data.text === 'string') {\n    let raw = data.text.trim().replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n    try { alvo = JSON.parse(raw); } catch (e) {\n      throw new Error(`Falha ao fazer parse do JSON: ${e.message}\\nTrecho: ${raw.slice(0, 300)}`);\n    }\n  }\n\n  if (Array.isArray(alvo)) {\n    listaBruta = listaBruta.concat(alvo);\n  } else if (typeof alvo === 'object' && (alvo.t || alvo.d)) {\n    listaBruta.push(alvo);\n  }\n}\n// 3. MAPEAMENTO\nconst anoAtual = new Date().getFullYear();\nconst final = listaBruta.map((item, index) => {\n  const desc = (item.t || \"\").toString().toUpperCase().trim();\n  let v = item.v !== undefined ? item.v : 0;\n  \n  if (typeof v === 'string') v = v.replace(/[R$\\s]/ig, '').replace(',', '.');\n  let valorFinal = parseFloat(v) || 0;\n  \n  if (item.s === \"-\" || item.s === \"despesa\") valorFinal = -Math.abs(valorFinal);\n  else valorFinal = Math.abs(valorFinal);\n  let dataF = item.d || \"\";\n  if (dataF.includes('/')) {\n    let p = dataF.split('/');\n    dataF = `${p[2] || anoAtual}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}T12:00:00`;\n  }\n  return {\n    json: {\n      account_id: accountId,\n      Conta: bankName,\n      Data_lancamento: dataF,\n      Data_pagamento: dataF,\n      Descricao: desc,\n      Valor: valorFinal,\n      Tipo: valorFinal < 0 ? \"despesa\" : ([\"reembolsos\", \"estorno\",\"pagamento-fatura-cartao\", \"transferencia-mesma-titularidade\", \"despesas-reembolsaveis\", \"reserva-emergencia\", \"projetos-vida\", \"independencia-financeira\"].includes(item.c) ? \"neutro\" : \"receita\"),\n      Categoria: item.c || \"outros-gv\",\n      id_conciliacao: `${desc}-${valorFinal}-${index}`\n    }\n  };\n});\nreturn final;"
+          "jsCode": "/**\n * NORMALIZADOR UNIVERSAL (PEGA TUDO O QUE CHEGAR)\n * - Isola falhas de parse por lote: um lote quebrado não derruba os demais.\n */\n\nfunction sanitizarJson(raw) {\n  let out = '';\n  let dentroDeString = false;\n  let escapando = false;\n\n  for (let i = 0; i < raw.length; i++) {\n    const ch = raw[i];\n    if (dentroDeString) {\n      if (escapando) { out += ch; escapando = false; continue; }\n      if (ch === '\\\\') { out += ch; escapando = true; continue; }\n      if (ch === '\"') { out += ch; dentroDeString = false; continue; }\n      if (ch === '\\n') { out += '\\\\n'; continue; }\n      if (ch === '\\r') { continue; }\n      if (ch === '\\t') { out += '\\\\t'; continue; }\n      out += ch;\n    } else {\n      if (ch === '\"') { dentroDeString = true; }\n      out += ch;\n    }\n  }\n  return out;\n}\n\nfunction repararArrayTruncado(raw) {\n  let depth = 0;\n  let inString = false;\n  let escape = false;\n  let lastCompleteObjectEnd = -1;\n\n  for (let i = 0; i < raw.length; i++) {\n    const ch = raw[i];\n    if (inString) {\n      if (escape) { escape = false; continue; }\n      if (ch === '\\\\') { escape = true; continue; }\n      if (ch === '\"') { inString = false; }\n      continue;\n    }\n    if (ch === '\"') { inString = true; continue; }\n    if (ch === '{') { depth++; continue; }\n    if (ch === '}') {\n      depth--;\n      if (depth === 0) { lastCompleteObjectEnd = i; }\n      continue;\n    }\n  }\n\n  if (lastCompleteObjectEnd === -1) return null;\n  return raw.slice(0, lastCompleteObjectEnd + 1) + '\\n]';\n}\n\nfunction parseComRepair(raw) {\n  try {\n    return { ok: true, data: JSON.parse(raw) };\n  } catch (e1) {\n    try {\n      return { ok: true, data: JSON.parse(sanitizarJson(raw)) };\n    } catch (e2) {\n      try {\n        const reparado = repararArrayTruncado(sanitizarJson(raw));\n        if (!reparado) throw new Error('Não foi possível localizar nenhum objeto completo.');\n        return { ok: true, data: JSON.parse(reparado), parcial: true };\n      } catch (e3) {\n        return {\n          ok: false,\n          erro: `${e3.message}`,\n          trecho: raw.slice(0, 500)\n        };\n      }\n    }\n  }\n}\n\n// 1. DADOS DA CONTA\nlet accountId = \"\";\nlet bankName = \"\";\ntry {\n  const webhook = $('Recebe link do Supabase Storage').first().json;\n  const webData = webhook.body || webhook;\n  accountId = webData.accountId || \"\";\n  bankName = webData.bankName || \"Banco\";\n} catch (e) { bankName = \"Banco\"; }\n\n// 2. CAPTURA DE DADOS (ABERTURA DE ENVELOPE) - COM ISOLAMENTO DE FALHAS\nlet listaBruta = [];\nconst lotesComFalha = [];\nconst incomingData = $input.all();\n\nfor (let idx = 0; idx < incomingData.length; idx++) {\n  const item = incomingData[idx];\n  const data = item.json;\n  let alvo = data.output !== undefined ? data.output : data;\n\n  try {\n    if (typeof alvo === 'string') {\n      let raw = alvo.trim().replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n      const resultado = parseComRepair(raw);\n      if (!resultado.ok) {\n        lotesComFalha.push({ lote: idx, erro: resultado.erro, trecho: resultado.trecho });\n        continue; // pula esse lote, NÃO derruba os demais\n      }\n      alvo = resultado.data;\n    } else if (alvo === data && typeof data.text === 'string') {\n      let raw = data.text.trim().replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n      const resultado = parseComRepair(raw);\n      if (!resultado.ok) {\n        lotesComFalha.push({ lote: idx, erro: resultado.erro, trecho: resultado.trecho });\n        continue;\n      }\n      alvo = resultado.data;\n    }\n\n    if (Array.isArray(alvo)) {\n      listaBruta = listaBruta.concat(alvo);\n    } else if (typeof alvo === 'object' && (alvo.t || alvo.d)) {\n      listaBruta.push(alvo);\n    }\n  } catch (erroInesperado) {\n    lotesComFalha.push({ lote: idx, erro: erroInesperado.message, trecho: '' });\n    continue;\n  }\n}\n\n// 3. MAPEAMENTO\nconst anoAtual = new Date().getFullYear();\nconst final = listaBruta.map((item, index) => {\n  const desc = (item.t || \"\").toString().toUpperCase().trim();\n  let v = item.v !== undefined ? item.v : 0;\n\n  if (typeof v === 'string') v = v.replace(/[R$\\s]/ig, '').replace(',', '.');\n  let valorFinal = parseFloat(v) || 0;\n\n  if (item.s === \"-\" || item.s === \"despesa\") valorFinal = -Math.abs(valorFinal);\n  else valorFinal = Math.abs(valorFinal);\n\n  let dataF = item.d || \"\";\n  if (dataF.includes('/')) {\n    let p = dataF.split('/');\n    dataF = `${p[2] || anoAtual}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}T12:00:00`;\n  }\n\n  return {\n    json: {\n      account_id: accountId,\n      Conta: bankName,\n      Data_lancamento: dataF,\n      Data_pagamento: dataF,\n      Descricao: desc,\n      Valor: valorFinal,\n      Tipo: valorFinal < 0 ? \"despesa\" : ([\"reembolsos\", \"estorno\",\"pagamento-fatura-cartao\", \"transferencia-mesma-titularidade\", \"despesas-reembolsaveis\", \"reserva-emergencia\", \"projetos-vida\", \"independencia-financeira\"].includes(item.c) ? \"neutro\" : \"receita\"),\n      Categoria: item.c || \"outros-gv\",\n      id_conciliacao: `${desc}-${valorFinal}-${index}`\n    }\n  };\n});\n\n// 4. Se houve lotes com falha, adiciona um item de aviso ao final\n// (não interrompe o fluxo, só sinaliza para você investigar)\nif (lotesComFalha.length > 0) {\n  final.push({\n    json: {\n      _erro_processamento: true,\n      _lotes_com_falha: lotesComFalha.length,\n      _detalhes: lotesComFalha,\n      account_id: accountId,\n      Conta: bankName\n    }\n  });\n}\n\nreturn final;"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
