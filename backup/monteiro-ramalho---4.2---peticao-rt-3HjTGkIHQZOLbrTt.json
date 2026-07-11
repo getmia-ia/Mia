@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-09T17:03:54.971Z",
+  "updatedAt": "2026-07-10T18:28:02.238Z",
   "createdAt": "2026-07-08T13:03:21.420Z",
   "id": "3HjTGkIHQZOLbrTt",
   "name": "Monteiro Ramalho - 4.2 - Petição RT",
@@ -8,41 +8,12 @@
   "nodes": [
     {
       "parameters": {
-        "operation": "getAll",
-        "tableId": "leads_crm",
-        "matchType": "allFilters",
-        "filters": {
-          "conditions": [
-            {
-              "keyName": "id",
-              "condition": "eq"
-            }
-          ]
-        }
-      },
-      "type": "n8n-nodes-base.supabase",
-      "typeVersion": 1,
-      "position": [
-        -80,
-        -32
-      ],
-      "id": "bc19766b-b341-4497-8dfe-e925b157fb5e",
-      "name": "Coleta as infos do cliente",
-      "credentials": {
-        "supabaseApi": {
-          "id": "FcbZyD53kbkf6Vxp",
-          "name": "Monteiro - Supabase"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\n\nreturn $input.all();"
+        "jsCode": "const item = items[0].json;\n\nconst dados = item.triagem || {};\nconst vinculo = dados.vinculo || {};\nconst rescisao = dados.rescisao || {};\nconst documentos = item.documentos_recebidos || [];\n\n// ---------- 1. Bloqueios (mínimo pro motor de cálculo rodar) ----------\n\nconst bloqueios = [];\n\nif (!vinculo.inicio) {\n  bloqueios.push(\"Data de admissão (vinculo.inicio)\");\n}\n\nif (vinculo.salario_medio === undefined || vinculo.salario_medio === null || vinculo.salario_medio === \"\") {\n  bloqueios.push(\"Salário médio (vinculo.salario_medio)\");\n}\n\nif (!rescisao.tipo) {\n  bloqueios.push(\"Tipo de rescisão (rescisao.tipo)\");\n} else if (rescisao.tipo !== \"ainda_trabalhando\" && !vinculo.fim) {\n  bloqueios.push(\"Data de saída (vinculo.fim) — obrigatória quando o vínculo já terminou\");\n}\n\nconst podeGerar = bloqueios.length === 0;\n\n// ---------- 2. Extração de dados da empresa (a partir da CTPS) ----------\n// Best-effort via regex — a CTPS Digital tem formato padronizado pelo\n// governo, então isso tende a ser estável, mas SEMPRE precisa de\n// confirmação humana antes do protocolo (não confie 100% às ciegas).\n\nconst ctps = documentos.find(d => d.tipo_documento === \"ctps\");\nconst empresa = { razao_social: null, cnpj: null, endereco: null, admissao_ctps: null, salario_ctps: null };\n\nif (ctps && ctps.texto_extraido) {\n  const texto = ctps.texto_extraido;\n\n  const matchEstabelecimento = texto.match(/Estabelecimento\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\n  if (matchEstabelecimento) empresa.razao_social = matchEstabelecimento[1].trim();\n\n  const matchCnpj = texto.match(/\\*\\*CNPJ:\\s*([\\d.\\/-]+)\\*\\*/);\n  if (matchCnpj) empresa.cnpj = matchCnpj[1].trim();\n\n  // linha em negrito imediatamente após o CNPJ costuma ser o endereço\n  const matchEndereco = texto.match(/\\*\\*CNPJ:\\s*[\\d.\\/-]+\\*\\*\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\n  if (matchEndereco) empresa.endereco = matchEndereco[1].trim();\n\n  const matchAdmissao = texto.match(/(\\d{2}\\/\\d{2}\\/\\d{4})\\s*-\\s*(Aberto|Fechado)/);\n  if (matchAdmissao) empresa.admissao_ctps = matchAdmissao[1];\n\n  const matchSalario = texto.match(/Salário contratual\\s*\\n+\\s*\\*\\*R\\$\\s*([\\d.,]+)/);\n  if (matchSalario) empresa.salario_ctps = matchSalario[1];\n}\n\n// ---------- 3. Divergências entre triagem e documento ----------\n// Não bloqueia a geração — mas precisa ficar visível, porque o motor\n// de cálculo vai usar os dados da triagem, e alguém (Dr. Lucas) tem\n// que confirmar se isso está certo antes do protocolo.\n\nconst divergencias = [];\n\nfunction paraISO(dataBR) {\n  if (!dataBR) return null;\n  const [d, m, y] = dataBR.split(\"/\");\n  return `${y}-${m}-${d}`;\n}\n\nif (empresa.admissao_ctps) {\n  const admissaoCtpsISO = paraISO(empresa.admissao_ctps);\n  if (vinculo.inicio && admissaoCtpsISO && vinculo.inicio !== admissaoCtpsISO) {\n    divergencias.push(\n      `Data de admissão informada pela cliente (${vinculo.inicio}) diverge da CTPS (${admissaoCtpsISO})`\n    );\n  }\n}\n\nif (empresa.salario_ctps) {\n  const salarioCtpsNum = parseFloat(empresa.salario_ctps.replace(\".\", \"\").replace(\",\", \".\"));\n  if (vinculo.salario_medio && Math.abs(vinculo.salario_medio - salarioCtpsNum) > 0.01) {\n    divergencias.push(\n      `Salário informado pela cliente (R$ ${vinculo.salario_medio}) diverge do salário contratual na CTPS (R$ ${salarioCtpsNum})`\n    );\n  }\n}\n\n// ---------- 4. Pendências já conhecidas pela entrevista ----------\n\nconst pendenciasConhecidas = Array.isArray(dados.pendencias_peticao)\n  ? dados.pendencias_peticao\n  : [];\n\nreturn [{\n  json: {\n    id: item.id,\n    nome: item.cliente_nome_completo || item.nome,\n    telefone: item.telefone,\n    triagem: dados,\n    documentos_recebidos: documentos,\n    empresa,\n    pode_gerar: podeGerar,\n    bloqueios,\n    divergencias,\n    pendencias_conhecidas: pendenciasConhecidas,\n  },\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        128,
+        -192,
         -32
       ],
       "id": "de8ac1f5-3f79-4250-86c7-e16d0cf7fd3b",
@@ -60,12 +31,12 @@
           "conditions": [
             {
               "id": "f23b1e1f-fef4-4293-8701-0f7ca01d5d21",
-              "leftValue": "",
-              "rightValue": "",
+              "leftValue": "={{ $json.pode_gerar }}",
+              "rightValue": false,
               "operator": {
-                "type": "string",
-                "operation": "equals",
-                "name": "filter.operator.equals"
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
               }
             }
           ],
@@ -76,7 +47,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        336,
+        0,
         -32
       ],
       "id": "a390be15-3cdc-4c0c-ac03-5a947bf451d2",
@@ -98,7 +69,8 @@
         "fieldsUi": {
           "fieldValues": [
             {
-              "fieldId": "etapa"
+              "fieldId": "etapa",
+              "fieldValue": "entrevista"
             }
           ]
         }
@@ -106,7 +78,7 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        336,
+        0,
         176
       ],
       "id": "fcbbb2a6-fee8-4ac9-be16-4946b4fc66e3",
@@ -120,7 +92,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\n\nreturn $input.all();"
+        "jsCode": "const classificacao = items[0].json.output || {};\nconst item = $('Valida se tem os dados necessários para a petição').first().json;\n\nconst HONORARIOS_PCT = 0.15;\nconst ALIQUOTA_FGTS = 0.08;\nconst MULTA_FGTS_PCT = 0.40;\nconst PLUS_ACUMULO_FUNCAO_PCT = 0.20;\n\nconst dados = item.triagem || {};\nconst vinculo = dados.vinculo || {};\nconst rescisao = dados.rescisao || {};\nconst direitos = dados.direitos || {};\nconst empresa = item.empresa || {};\nconst tesesAtivas = classificacao.teses_ativas || [];\n\nconst alertas = [];\n\nfunction formatBRL(valor) {\n  if (typeof valor !== \"number\" || !Number.isFinite(valor)) return \"R$ 0,00 (⚠️ valor inválido)\";\n  return valor.toLocaleString(\"pt-BR\", { style: \"currency\", currency: \"BRL\" });\n}\n\nfunction parseDataISO(str) {\n  if (!str) return null;\n  const [y, m, d] = str.split(\"-\").map(Number);\n  const data = new Date(y, m - 1, d);\n  return isNaN(data.getTime()) ? null : data;\n}\n\nfunction parseDataBR(str) {\n  if (!str) return null;\n  const [d, m, y] = str.split(\"/\").map(Number);\n  const data = new Date(y, m - 1, d);\n  return isNaN(data.getTime()) ? null : data;\n}\n\nfunction diferencaEmMeses(inicio, fim) {\n  if (!inicio || !fim) return 0;\n  return (fim.getFullYear() - inicio.getFullYear()) * 12\n    + (fim.getMonth() - inicio.getMonth())\n    + (fim.getDate() >= inicio.getDate() ? 0 : -1);\n}\n\n// 🆕 versão fracionada (dias reais / 30) — usada onde a diferença de\n// dias importa de verdade pro valor final (ex: FGTS de período parcial)\nfunction mesesFracionados(inicio, fim) {\n  if (!inicio || !fim) return 0;\n  const diffDias = (fim - inicio) / (1000 * 60 * 60 * 24);\n  return diffDias / 30;\n}\n\nfunction diferencaEmAnosCompletos(inicio, fim) {\n  return Math.floor(diferencaEmMeses(inicio, fim) / 12);\n}\n\n// 🆕 CORRIGIDO — compara dias decorridos desde o \"aniversário\" do\n// período (dia de inicioPeriodo), não o dia absoluto do calendário\nfunction mesesProporcionais(inicioPeriodo, dataFim) {\n  let meses = (dataFim.getFullYear() - inicioPeriodo.getFullYear()) * 12\n    + (dataFim.getMonth() - inicioPeriodo.getMonth());\n  let diasExtras = dataFim.getDate() - inicioPeriodo.getDate();\n  if (diasExtras < 0) {\n    meses -= 1;\n    diasExtras += 30;\n  }\n  if (diasExtras >= 15) meses += 1;\n  return Math.max(0, Math.min(meses, 12));\n}\n\nfunction temTese(id) {\n  return tesesAtivas.some(t => t.id === id);\n}\n\nfunction pegaTese(id) {\n  return tesesAtivas.find(t => t.id === id) || null;\n}\n\n// ---------- Motor de reflexo (CORRIGIDO) ----------\n// bloco.valor agora é sempre o TOTAL acumulado no período. O reflexo\n// deriva a taxa mensal de volta (valor ÷ meses) antes de aplicar a\n// fração do ano — nunca multiplica o total de novo pelo tempo.\nfunction aplicarReflexos(bloco) {\n  const linhas = [{ verba: bloco.nome, valor: bloco.valor }];\n\n  if (bloco.gera_reflexo && bloco.natureza === \"recorrente\" && bloco.meses_para_reflexo > 0) {\n    const valorMensal = bloco.valor / bloco.meses_para_reflexo;\n    const fracao = bloco.meses_para_reflexo / 12;\n    linhas.push({ verba: `Reflexo de \"${bloco.nome}\" em 13º salário`, valor: valorMensal * fracao });\n    linhas.push({ verba: `Reflexo de \"${bloco.nome}\" em férias + 1/3`, valor: valorMensal * fracao * (4 / 3) });\n  }\n\n  if (bloco.gera_fgts) {\n    const baseFgts = linhas.reduce((s, l) => s + l.valor, 0);\n    linhas.push({ verba: `FGTS sobre \"${bloco.nome}\" e reflexos`, valor: baseFgts * ALIQUOTA_FGTS, _fgts: true });\n  }\n\n  return linhas;\n}\n\n// ---------- Datas de referência ----------\n\nconst dataAdmissao = parseDataISO(vinculo.inicio);\nlet dataSaida;\n\nif (vinculo.fim) {\n  dataSaida = parseDataISO(vinculo.fim);\n  if (rescisao.tipo === \"ainda_trabalhando\") {\n    alertas.push(\n      `rescisao.tipo diz \"ainda_trabalhando\", mas vinculo.fim (${vinculo.fim}) está preenchido. ` +\n      `Usando vinculo.fim como data de saída — CONFIRMAR qual está correto.`\n    );\n  }\n} else if (rescisao.tipo === \"ainda_trabalhando\") {\n  dataSaida = new Date();\n} else {\n  alertas.push(\"Não há vinculo.fim nem indicação de vínculo em curso — data de saída indeterminada.\");\n  dataSaida = null;\n}\n\nconst salario = vinculo.salario_medio;\nconst mesesTrabalhados = (dataSaida && dataAdmissao) ? diferencaEmMeses(dataAdmissao, dataSaida) : null;\nconst anosCompletos = (dataSaida && dataAdmissao) ? diferencaEmAnosCompletos(dataAdmissao, dataSaida) : null;\nconst diasNoUltimoMes = dataSaida ? dataSaida.getDate() : null;\n\nif (!salario) alertas.push(\"Salário médio ausente — nenhuma verba foi calculada.\");\nif (vinculo.inicio && !dataAdmissao) alertas.push(`Data de admissão inválida: \"${vinculo.inicio}\" — verificar formato.`);\n\nconst ctx = { dados, vinculo, rescisao, direitos, empresa, salario, dataAdmissao, dataSaida, mesesTrabalhados, anosCompletos, diasNoUltimoMes, alertas, tesesAtivas };\n\n// ---------- Catálogo de blocos ----------\n\nconst CATALOGO_BLOCOS = [\n\n  {\n    id: \"saldo_salario\",\n    condicao: c => !!(c.salario && c.dataSaida),\n    calcular: c => ({\n      nome: \"Saldo de salário\",\n      valor: (c.salario / 30) * c.diasNoUltimoMes,\n      natureza: \"unica\", gera_fgts: false, gera_reflexo: false,\n    }),\n  },\n\n  {\n    id: \"aviso_previo\",\n    condicao: c => !!(c.salario && c.dataSaida && c.anosCompletos !== null) && ![\"pediu\", \"justa_causa\"].includes(c.rescisao.tipo || \"sem_justa_causa\"),\n    calcular: c => {\n      if (!c.rescisao.tipo) c.alertas.push('Tipo de rescisão não confirmado — aviso prévio assumindo \"sem justa causa\". CONFIRMAR.');\n      const dias = Math.min(30 + (3 * c.anosCompletos), 90);\n      return {\n        nome: `Aviso prévio indenizado (${dias} dias)`,\n        valor: (c.salario / 30) * dias,\n        natureza: \"unica\", gera_fgts: true, gera_reflexo: false,\n      };\n    },\n  },\n\n  {\n    id: \"decimo_terceiro_proporcional\",\n    condicao: c => !!(c.salario && c.dataSaida && c.dataAdmissao),\n    calcular: c => {\n      const inicioAno = new Date(c.dataSaida.getFullYear(), 0, 1);\n      const inicioPeriodo = c.dataAdmissao > inicioAno ? c.dataAdmissao : inicioAno;\n      const meses = mesesProporcionais(inicioPeriodo, c.dataSaida);\n      return {\n        nome: `13º salário proporcional (${meses}/12)`,\n        valor: (c.salario / 12) * meses,\n        natureza: \"unica\", gera_fgts: true, gera_reflexo: false,\n      };\n    },\n  },\n\n  {\n    id: \"ferias_proporcionais\",\n    condicao: c => !!(c.salario && c.dataSaida && c.dataAdmissao && c.anosCompletos !== null),\n    calcular: c => {\n      const inicioPeriodoAquisitivo = new Date(c.dataAdmissao);\n      inicioPeriodoAquisitivo.setFullYear(c.dataAdmissao.getFullYear() + c.anosCompletos);\n      const meses = mesesProporcionais(inicioPeriodoAquisitivo, c.dataSaida);\n      const base = (c.salario / 12) * meses;\n      return {\n        nome: `Férias proporcionais + 1/3 (${meses}/12)`,\n        valor: base + (base / 3),\n        natureza: \"unica\", gera_fgts: false, gera_reflexo: false,\n      };\n    },\n  },\n\n  {\n    id: \"ferias_vencidas\",\n    condicao: c => (c.direitos.ferias_terco === true || c.dados.ferias_terco === true) && !!c.salario,\n    calcular: c => {\n      c.alertas.push('Férias vencidas calculadas para 1 período — CONFIRMAR quantos períodos completos não foram gozados.');\n      return {\n        nome: \"Férias vencidas (1 período) + 1/3\",\n        valor: c.salario + (c.salario / 3),\n        natureza: \"unica\", gera_fgts: false, gera_reflexo: false,\n      };\n    },\n  },\n\n  {\n    id: \"multa_477\",\n    condicao: c => !!(c.dataSaida && c.salario) && ![\"pediu\", \"justa_causa\", \"acordo\"].includes(c.rescisao.tipo || \"\"),\n    calcular: c => ({\n      nome: \"Multa do art. 477 da CLT\",\n      valor: c.salario,\n      natureza: \"unica\", gera_fgts: false, gera_reflexo: false,\n    }),\n  },\n\n  {\n    id: \"seguro_desemprego\",\n    condicao: c => !!(c.dataSaida && c.salario && c.mesesTrabalhados) && ![\"pediu\", \"justa_causa\", \"acordo\"].includes(c.rescisao.tipo || \"\") && c.mesesTrabalhados >= 6,\n    calcular: c => {\n      c.alertas.push(\"Seguro-desemprego calculado sem aplicar o teto legal do benefício — ajustar manualmente se o salário exceder a faixa.\");\n      return {\n        nome: \"Indenização substitutiva do seguro-desemprego (4 parcelas)\",\n        valor: c.salario * 4,\n        natureza: \"unica\", gera_fgts: false, gera_reflexo: false,\n      };\n    },\n  },\n\n  {\n    id: \"diferenca_salarial_ctps\",\n    condicao: c => {\n      const ctpsNum = c.empresa.salario_ctps ? parseFloat(String(c.empresa.salario_ctps).replace(\".\", \"\").replace(\",\", \".\")) : null;\n      return !!(ctpsNum && !isNaN(ctpsNum) && c.salario && c.salario > ctpsNum && c.mesesTrabalhados);\n    },\n    calcular: c => {\n      const ctpsNum = parseFloat(String(c.empresa.salario_ctps).replace(\".\", \"\").replace(\",\", \".\"));\n      const diferencaMensal = c.salario - ctpsNum;\n      c.alertas.push(`Diferença salarial detectada entre o valor reclamado e o registrado na CTPS (R$ ${diferencaMensal.toFixed(2)}/mês) — CONFIRMAR se é diferença legítima ou erro de informação.`);\n      return {\n        nome: `Diferenças salariais não quitadas (R$ ${diferencaMensal.toFixed(2)}/mês × ${c.mesesTrabalhados} meses)`,\n        valor: diferencaMensal * c.mesesTrabalhados,\n        natureza: \"recorrente\", meses_para_reflexo: c.mesesTrabalhados,\n        gera_fgts: true, gera_reflexo: true,\n      };\n    },\n  },\n\n  // 🆕 CORRIGIDO — meses fracionados (não trunca dias), e SEM passar\n  // pelo motor de reflexo genérico (FGTS não gera \"reflexo em 13º/férias\"\n  // — isso não existe; o que existe é FGTS sobre o 13º daquele período,\n  // calculado como uma linha própria).\n  {\n    id: \"vinculo_sem_registro\",\n    condicao: c => temTese(\"vinculo_sem_registro\") && !!c.empresa.admissao_ctps && !!c.dataAdmissao,\n    calcularLinhas: c => {\n      const dataRegistro = parseDataBR(c.empresa.admissao_ctps);\n      if (!dataRegistro) {\n        c.alertas.push(`Tese \"vínculo sem registro\" identificada, mas a data da CTPS (\"${c.empresa.admissao_ctps}\") não pôde ser interpretada — CONFIRMAR manualmente.`);\n        return [];\n      }\n\n      const mesesSemRegistro = mesesFracionados(c.dataAdmissao, dataRegistro);\n      if (mesesSemRegistro <= 0) {\n        c.alertas.push('Tese \"vínculo sem registro\" identificada, mas a diferença de datas calculada não é positiva — CONFIRMAR manualmente as datas.');\n        return [];\n      }\n\n      c.alertas.push(`Vínculo sem registro: considerando o período de ${c.vinculo.inicio} até ${dataRegistro.toISOString().slice(0,10)} (≈${mesesSemRegistro.toFixed(1)} meses) — CONFIRMAR com a cliente antes de protocolar.`);\n\n      const fgtsSalario = c.salario * ALIQUOTA_FGTS * mesesSemRegistro;\n      // proporção do período sem registro dentro de um ano (13º daquele período)\n      const decimoDoPeriodo = (c.salario / 12) * Math.min(mesesSemRegistro, 12);\n      const fgtsSobre13 = decimoDoPeriodo * ALIQUOTA_FGTS;\n\n      return [\n        { verba: `FGTS do período sem registro (≈${mesesSemRegistro.toFixed(1)} meses)`, valor: fgtsSalario },\n        { verba: `FGTS sobre o 13º proporcional incidente no período sem registro`, valor: fgtsSobre13 },\n      ];\n    },\n  },\n\n  {\n    id: \"acumulo_funcao\",\n    condicao: c => temTese(\"acumulo_funcao\") && !!(c.salario && c.mesesTrabalhados),\n    calcular: c => {\n      const tese = pegaTese(\"acumulo_funcao\");\n      c.alertas.push(`Acúmulo de função identificado (${(tese.parametros?.atividades_identificadas || []).join(\", \")}) — percentual de 20% aplicado por convenção do escritório. CONFIRMAR percentual com o Dr. Lucas.`);\n      return {\n        nome: \"Plus salarial por acúmulo de função (20%)\",\n        valor: c.salario * PLUS_ACUMULO_FUNCAO_PCT * c.mesesTrabalhados,\n        natureza: \"recorrente\", meses_para_reflexo: c.mesesTrabalhados,\n        gera_fgts: true, gera_reflexo: true,\n      };\n    },\n  },\n\n  {\n    id: \"dano_moral\",\n    condicao: c => temTese(\"dano_moral\"),\n    calcular: c => {\n      const tese = pegaTese(\"dano_moral\");\n      c.alertas.push(`Dano moral identificado pelo classificador (fundamento: \"${tese.parametros?.fundamento || \"não especificado\"}\") — valor NÃO calculado. Dr. Lucas precisa arbitrar manualmente antes de gerar a petição.`);\n      return null;\n    },\n  },\n\n];\n\n// ---------- Aplica o catálogo ----------\n\nlet verbas = [];\n\nif (salario && dataSaida && dataAdmissao) {\n  for (const bloco of CATALOGO_BLOCOS) {\n    if (bloco.condicao(ctx)) {\n      // 🆕 suporte a blocos que devolvem linhas prontas (sem motor de reflexo)\n      if (bloco.calcularLinhas) {\n        const linhas = bloco.calcularLinhas(ctx).filter(l => Number.isFinite(l.valor));\n        verbas = verbas.concat(linhas);\n        continue;\n      }\n      const resultado = bloco.calcular(ctx);\n      if (resultado && Number.isFinite(resultado.valor)) {\n        verbas = verbas.concat(aplicarReflexos(resultado));\n      } else if (resultado) {\n        alertas.push(`Bloco \"${resultado.nome}\" gerou valor inválido e foi descartado — verificar dados de entrada.`);\n      }\n    }\n  }\n\n  const totalFgts = verbas.filter(v => v._fgts).reduce((s, v) => s + v.valor, 0);\n  if (totalFgts > 0) {\n    verbas.push({ verba: \"Multa de 40% do FGTS\", valor: totalFgts * MULTA_FGTS_PCT });\n  }\n}\n\nconst idsComBloco = new Set(CATALOGO_BLOCOS.map(b => b.id));\nconst tesesNaoCobertas = tesesAtivas.filter(t => !idsComBloco.has(t.id));\n\nif (tesesNaoCobertas.length) {\n  alertas.push(`Teses identificadas pelo classificador mas SEM bloco de cálculo ainda: ${tesesNaoCobertas.map(t => t.id).join(\", \")}. Calcular manualmente antes de finalizar.`);\n}\n\nconst valorTotalVerbas = verbas.reduce((s, v) => s + v.valor, 0);\nconst valorHonorarios = valorTotalVerbas * HONORARIOS_PCT;\nconst valorGeralEstimado = valorTotalVerbas + valorHonorarios;\n\nconst liquidacaoTexto = verbas.map(v => `- ${v.verba}: ${formatBRL(v.valor)}`).join(\"\\n\");\n\nreturn [{\n  json: {\n    ...item,\n    teses_ativas: tesesAtivas,\n    verbas,\n    valor_total_verbas: valorTotalVerbas,\n    valor_honorarios: valorHonorarios,\n    valor_geral_estimado: valorGeralEstimado,\n    liquidacao_provisoria_texto: liquidacaoTexto,\n    alertas_calculo: alertas,\n  },\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -177,10 +149,10 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "={{ $json.chatInput }}",
+        "text": "=Redija a seção \"DOS FATOS\" com base nos dados abaixo.\n\nDADOS DA TRIAGEM:\n{{ JSON.stringify($('Calculo de Liquidação Provisória e Honorários').item.json.triagem, null, 2) }}\n\nDADOS DA EMPRESA:\n{{ JSON.stringify($('Calculo de Liquidação Provisória e Honorários').item.json.empresa, null, 2) }}\n\nDOCUMENTOS RECEBIDOS:\n{{ $('Calculo de Liquidação Provisória e Honorários').item.json.documentos_recebidos.map(d => `--- ${d.tipo_documento} ---\\n${d.texto_extraido}`).join(\"\\n\\n\") }}\n\nTESES ATIVAS (já decididas — narre exatamente estas, nenhuma outra):\n{{ JSON.stringify($('Calculo de Liquidação Provisória e Honorários').item.json.teses_ativas, null, 2) }}\n\nVERBAS CALCULADAS (referência factual, se precisar citar valor como fato — não recalcule):\n{{ JSON.stringify($('Calculo de Liquidação Provisória e Honorários').item.json.verbas, null, 2) }}\n\nDIVERGÊNCIAS DETECTADAS ENTRE RELATO E DOCUMENTOS:\n{{ JSON.stringify($('Calculo de Liquidação Provisória e Honorários').item.json.divergencias, null, 2) }}\n\nALERTAS DO MOTOR DE CÁLCULO (contexto interno, não vai para o texto da petição):\n{{ JSON.stringify($('Calculo de Liquidação Provisória e Honorários').item.json.alertas_calculo, null, 2) }}",
         "hasOutputParser": true,
         "options": {
-          "systemMessage": "=# PAPEL E CONTEXTO\nVocê é um assistente jurídico sênior, especializado em Direito do Trabalho, \ncom a função exclusiva de redigir a seção \"DOS FATOS\" de reclamações \ntrabalhistas para uso por advogados experientes. Você não é o autor final \nda peça: seu texto será revisado, ajustado e assinado por um advogado. \nSeu papel é entregar o melhor rascunho possível, tecnicamente sólido, \npara minimizar o retrabalho do profissional.\n\n# ENTRADA\nVocê receberá informações sobre o caso em formato livre (texto corrido, \ntópicos, trechos de petição, relato do advogado, etc.), contendo dados \ncomo: partes envolvidas, vínculo empregatício, jornada, verbas em \ndiscussão, e eventuais fatos adicionais relevantes. Extraia dessas \ninformações apenas o que estiver explicitamente fornecido — não presuma, \nnão infira, não complete lacunas com suposição.\n\n# ETAPA 1 — LEITURA, VALIDAÇÃO E MAPEAMENTO DE TESE\n1. Leia todas as informações fornecidas e organize mentalmente a linha \n   do tempo do vínculo (admissão → fatos do curso contratual → rescisão \n   → fatos posteriores, se houver).\n2. Para CADA verba/direito em discussão identificado no material, \n   determine internamente qual é a tese jurídica provável por trás dele, \n   porque isso define QUAIS fatos são indispensáveis. Exemplos de \n   mapeamento tese → fatos indispensáveis:\n   \n   - Horas extras → jornada contratual x jornada efetiva; habitualidade; \n     ausência ou fraude no controle de ponto; se há norma coletiva \n     alterando regime\n   - Equiparação salarial → mesma função, mesmo empregador, mesma \n     localidade, diferença de tempo de serviço ≤ 4 anos, ausência de \n     quadro de carreira\n   - Acúmulo/desvio de função → função contratada x função efetivamente \n     exercida; habitualidade; ausência de contraprestação correspondente\n   - Rescisão indireta → falta grave do empregador (atraso de salário \n     reiterado, assédio, ausência de recolhimento de FGTS, etc.) e nexo \n     com a saída do empregado\n   - Dano moral → conduta do empregador, natureza (exposição, ofensa, \n     assédio), repetição/habitualidade, impacto narrado (sem exagero \n     retórico — narrar o fato, não o sofrimento em tom literário)\n   - Acidente de trabalho/doença ocupacional → função e condições de \n     trabalho, nexo causal alegado, CAT emitida ou não, afastamento\n   - Verbas rescisórias não pagas → data e tipo de rescisão, verbas \n     devidas conforme a modalidade, ausência de quitação\n   \n   Use este conhecimento-padrão como guia mínimo para saber o que buscar \n   no material fornecido.\n3. Verifique inconsistências internas nas informações (nomes, datas \n   conflitantes). Se houver, sinalize em \"Pontos de Atenção\".\n4. Para cada verba identificada no passo 2, verifique se o material \n   contém TODOS os fatos indispensáveis mapeados. Se faltar algum fato \n   indispensável para sustentar a tese, isso é uma LACUNA CRÍTICA — \n   sinalize com destaque em \"Pontos de Atenção\", pois pode enfraquecer \n   o pedido correspondente.\n\n# ETAPA 2 — REDAÇÃO DA NARRATIVA FÁTICA\nEstrutura:\n- Bloco 1: Do vínculo empregatício (admissão, função, salário, jornada \n  contratual)\n- Bloco 2: Dos fatos do curso contratual (um subgrupo de parágrafos por \n  verba/tese, na ordem de relevância/cronologia)\n- Bloco 3: Da rescisão (data, modalidade, verbas não quitadas)\n- Bloco 4: Fatos posteriores à rescisão, se houver (ex.: não baixa na \n  CTPS, não pagamento de guias)\n\nRegras de redação:\n- Parágrafos numerados sequenciais ao longo de toda a seção (não reinicia \n  numeração por bloco)\n- Terceira pessoa, tom formal, sóbrio, sem adjetivação\n- Sem conclusão jurídica ou citação de artigo de lei na narrativa fática \n  (isso é do \"Do Direito\") — EXCEÇÃO: pode citar norma coletiva ou \n  cláusula contratual como fato objetivo, quando isso for o próprio fato \n  narrado (ex.: \"o Acordo Coletivo 2023/2024, cláusula 12, prevê jornada \n  de 44 horas semanais\")\n- Ancore fatos em evidência sempre que ela for mencionada no material \n  fornecido\n- Ao narrar cada verba/tese, inclua TODOS os elementos fáticos \n  indispensáveis mapeados na Etapa 1 que estiverem disponíveis — não \n  narre de forma genérica quando houver dado preciso disponível \n  (ex.: prefira \"prestava em média 3 horas extras diárias, de segunda \n  a sexta\" a \"prestava horas extras com frequência\", se o dado exato \n  estiver disponível)\n- Fatos alegados sem comprovação documental direta são normais em \n  petição inicial — narre normalmente como fato afirmado pela parte, \n  que é o padrão de uma inicial, salvo se o próprio material indicar \n  que a informação é incerta\n- Evite redundância entre parágrafos; não repita o mesmo fato em blocos \n  diferentes\n\n# ETAPA 3 — AUTOVERIFICAÇÃO (reporte o resultado, não só faça internamente)\n- [ ] Todo fato narrado corresponde a algo explicitamente fornecido\n- [ ] Toda verba/tese identificada tem fatos suficientes narrados (aponte \n      as que ficaram com lacuna crítica)\n- [ ] Nomes e grafias consistentes ao longo do texto\n- [ ] Nenhuma conclusão jurídica, pedido ou valor da causa foi incluído\n- [ ] Inconsistências internas foram sinalizadas\n- [ ] Linguagem sóbria, sem adjetivação/retórica\n\n# FORMATO DE SAÍDA\n## TEXTO PARA A PETIÇÃO — DOS FATOS\n[narrativa numerada]\n\n## MAPEAMENTO TESE → FATOS (uso interno do advogado)\n[para cada verba/tese identificada, liste os fatos indispensáveis e \nse estão completos ou com lacuna]\n\n## PONTOS DE ATENÇÃO\n[lacunas críticas, inconsistências, sugestões de complementação]\n\n# tools\nvoce SEMPRE usa a tool SABERES.\n\n# LIMITES\n- Fatos vêm exclusivamente do material fornecido na conversa\n- Não gera pedidos, fundamentação jurídica ou valor da causa\n- Não presume, não infere além do fornecido\n- Entrega é sempre rascunho para revisão do advogado"
+          "systemMessage": "=# PAPEL E CONTEXTO\nVocê é um assistente jurídico sênior, especializado em Direito do Trabalho, \ncom a função exclusiva de redigir a seção \"DOS FATOS\" de reclamações \ntrabalhistas para uso por advogados experientes do escritório Monteiro \nRamalho Advocacia. Você não é o autor final da peça: seu texto será \nrevisado, ajustado e assinado por um advogado. Seu papel é entregar o \nmelhor rascunho possível, tecnicamente sólido, para minimizar o retrabalho \ndo profissional.\n\n# REGRA CRÍTICA — AS TESES JÁ FORAM DECIDIDAS, NÃO REDECIDA-AS\nVocê recebe `teses_ativas`, já identificadas por uma etapa anterior do \nsistema, com `justificativa` (o fato que sustenta cada tese) e `parametros` \n(dados extraídos relacionados). Sua função é NARRAR os fatos de cada tese \njá decidida — você NÃO decide quais teses o caso tem, NÃO adiciona tese \nque não esteja em `teses_ativas`, e NÃO omite nenhuma que esteja lá.\n\nIsso é diferente da versão anterior deste prompt, que pedia para você \nmesmo mapear teses a partir do material bruto — esse mapeamento agora é \nfeito por outra etapa do sistema. Se você notar uma tese em potencial que \nnão está em `teses_ativas`, NÃO a narre — apenas sinalize em \"Pontos de \nAtenção\" para o advogado avaliar manualmente.\n\n# ENTRADA\nVocê recebe um objeto estruturado com:\n- `triagem`: dados do vínculo, jornada, rescisão, relatados pelo cliente\n- `empresa`: dados do empregador extraídos de documentos (CTPS/FGTS)\n- `documentos_recebidos`: texto extraído de cada documento anexado\n- `teses_ativas`: lista de teses já identificadas, cada uma com \n  `justificativa` e `parametros`\n- `verbas`: as verbas já calculadas deterministicamente (você usa os \n  VALORES em R$ apenas se precisar mencionar algo como fato objetivo — \n  ex: \"recebeu apenas a gratificação de R$200,00\" — nunca para justificar \n  ou calcular nada; cálculo não é seu papel)\n- `divergencias`: diferenças detectadas entre o relato do cliente e os \n  documentos (ex: data de admissão informada × data registrada em CTPS)\n- `alertas_calculo`: avisos técnicos do motor de cálculo (uso interno, \n  não vai para o texto da petição, mas pode indicar algo que merece \n  nota em \"Pontos de Atenção\")\n\nExtraia fatos exclusivamente do que está explicitamente presente nesses \ncampos. Não presuma, não infira, não complete lacunas com suposição.\n\n# ETAPA 1 — LEITURA E ORGANIZAÇÃO DA LINHA DO TEMPO\nOrganize mentalmente a linha do tempo do vínculo (admissão → fatos do \ncurso contratual → rescisão → fatos posteriores, se houver), cruzando \n`triagem` com `empresa` e `documentos_recebidos`.\n\n## TRATAMENTO DE DIVERGÊNCIAS\nSe `divergencias` não estiver vazio, NÃO ignore e NÃO escolha \nsilenciosamente qual versão é a correta. Narre com base no relato do \ncliente (`triagem`) — é a partir dele que a ação é proposta — mas quando \na divergência É o próprio fundamento de uma tese (ex: a diferença entre \na data relatada e a data da CTPS é exatamente o que sustenta \n`vinculo_sem_registro`), narre isso explicitamente como o fato central \ndaquele parágrafo. Sempre liste a divergência em \"Pontos de Atenção\" \nmesmo quando ela sustenta uma tese, para o advogado confirmar antes do \nprotocolo.\n\n## GUIA DE FATOS INDISPENSÁVEIS POR TESE\nPara cada tese em `teses_ativas`, use o `id` para saber quais fatos são \nindispensáveis narrar (busque isso no material fornecido; se não \nencontrar, sinalize lacuna crítica em \"Pontos de Atenção\" — não invente):\n\n- `vinculo_sem_registro` → data real de início (relatada), data de \n  registro formal (documento), atividades exercidas durante o período \n  sem registro\n- `acumulo_funcao` → função contratada, atividades adicionais habituais \n  (liste as de `parametros.atividades_identificadas`), ausência de \n  contraprestação\n- `substituicao_funcao` → cargo substituído, quantas vezes, valor pago \n  como gratificação (se houver), remuneração do substituído (se relatada)\n- `estabilidade` → tipo de estabilidade, data de início do período protegido\n- `dano_moral` → conduta do empregador narrada nos outros fatos (não \n  precisa de fato novo — normalmente decorre da soma dos demais); \n  narre com sobriedade, sem tom literário de sofrimento\n- `horas_extras` → jornada contratual x jornada efetivamente relatada, \n  habitualidade, controle de ponto\n- `intervalo_suprimido` → intervalo previsto x intervalo efetivamente \n  usufruído\n- `periculosidade`/`insalubridade` → atividade de risco relatada\n- `ferias_vencidas` → período aquisitivo não gozado\n- `diferenca_salarial_ctps` → salário relatado x salário registrado, \n  período de incidência\n\n# ETAPA 2 — REDAÇÃO DA NARRATIVA FÁTICA\nEstrutura, em texto único, numeração sequencial contínua (não reinicia \npor bloco):\n- Bloco 1: Do vínculo empregatício (admissão, função, salário, jornada \n  contratual)\n- Bloco 2: Um subgrupo de parágrafos por tese em `teses_ativas`, na \n  ordem em que aparecem na lista\n- Bloco 3: Da rescisão (data, modalidade, verbas não quitadas)\n- Bloco 4: Fatos posteriores à rescisão, se houver\n\nRegras de redação:\n- Terceira pessoa, tom formal, sóbrio, sem adjetivação\n- Sem conclusão jurídica ou citação de artigo de lei na narrativa fática \n  — EXCEÇÃO: norma/cláusula contratual como fato objetivo, quando isso \n  for o próprio fato narrado\n- Prefira o dado preciso disponível ao genérico (ex: \"prestava em média \n  3 horas extras diárias, de segunda a sexta\" em vez de \"prestava horas \n  extras com frequência\", quando o dado exato existir)\n- Fatos alegados sem comprovação documental direta são normais numa \n  inicial — narre como fato afirmado pela parte\n- Evite redundância entre parágrafos\n\n# ETAPA 3 — AUTOVERIFICAÇÃO (reporte o resultado)\n- [ ] Toda tese em `teses_ativas` tem parágrafo(s) correspondente(s) — \n      nenhuma foi esquecida\n- [ ] Nenhuma tese fora de `teses_ativas` foi narrada\n- [ ] Todo fato narrado corresponde a algo explicitamente presente na entrada\n- [ ] Divergências foram tratadas conforme a regra acima, não ignoradas\n- [ ] Nomes e grafias consistentes ao longo do texto\n- [ ] Nenhuma conclusão jurídica, pedido ou valor da causa foi incluído\n- [ ] Linguagem sóbria, sem adjetivação/retórica\n\n# FERRAMENTA SABERES\nUse a tool SABERES para consultar o estilo e os padrões de redação já \nusados pelo escritório em petições anteriores — não para buscar \nfundamentação jurídica (isso é etapa de outro agente) nem para copiar \ntrechos prontos de teses que não estão em `teses_ativas` neste caso.\n\n# FORMATO DE SAÍDA (JSON estruturado — obrigatório)\n{\n  \"fatos_texto\": \"<narrativa completa, numerada, blocos 1 a 4>\",\n  \"teses_narradas\": [\n    {\n      \"tese_id\": \"<id igual ao de teses_ativas>\",\n      \"resumo_fato\": \"<1-2 frases resumindo o fato central desta tese, para as próximas etapas usarem como referência>\"\n    }\n  ],\n  \"pontos_atencao\": [\n    \"<lacunas críticas, divergências, inconsistências>\"\n  ]\n}\n\n# LIMITES\n- Fatos vêm exclusivamente da entrada estruturada\n- Não gera pedidos, fundamentação jurídica ou valor da causa\n- Não decide quais teses aplicam — apenas narra as já decididas\n- Não presume, não infere além do fornecido\n- Entrega é sempre rascunho para revisão do advogado"
         }
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
@@ -473,8 +445,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -304,
-        -32
+        -1296,
+        -448
       ],
       "id": "167667fd-3ba1-49d4-9e32-f128b65c94fc",
       "name": "Webhook",
@@ -624,8 +596,8 @@
       "type": "@n8n/n8n-nodes-langchain.chatTrigger",
       "typeVersion": 1.4,
       "position": [
-        608,
-        -208
+        688,
+        -304
       ],
       "id": "3137ac7b-1e49-4114-aaa2-0f0ffd79c34c",
       "name": "When chat message received",
@@ -669,20 +641,137 @@
           "name": "OpenRouter account"
         }
       }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d6d91a20-4360-4211-a13f-b99c007128c2",
+              "name": "id_lead",
+              "value": "f299287f-ac06-4f73-ace4-8a72f629d76d",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -624,
+        -32
+      ],
+      "id": "4da69f37-92f6-4f11-a84f-6e85019f8abf",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -832,
+        -32
+      ],
+      "id": "a66f4305-1aaa-42a8-89e8-1398ec4cf1b1",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  l.id,\n  l.nome,\n  l.telefone,\n  l.cliente_nome_completo,\n  l.triagem,\n  COALESCE(\n    (\n      SELECT json_agg(\n        json_build_object(\n          'tipo_documento', d.tipo_documento,\n          'texto_extraido', d.texto_extraido\n        )\n      )\n      FROM lead_documentos d\n      WHERE d.lead_id = l.id AND d.tipo_documento IS NOT NULL\n    ),\n    '[]'::json\n  ) AS documentos_recebidos\nFROM leads_crm l\nWHERE l.id = $1;",
+        "options": {
+          "queryReplacement": "={{ $json.id_lead }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -400,
+        -32
+      ],
+      "id": "9a5ce1b5-2fa2-4e78-9c68-47e0d86ac1f0",
+      "name": "Identifica os dados pendentes",
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4.1",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        224,
+        160
+      ],
+      "id": "68d3f36d-799c-40dd-8d29-2acfa68bc8d6",
+      "name": "OpenRouter Chat Model5",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"teses_ativas\": [\n    {\n      \"id\": \"acumulo_funcao\",\n      \"justificativa\": \"O relato indica que, além da função de vendedora, a cliente também atuava no caixa, fazia pagamentos e depósitos bancários e participava da limpeza da loja.\",\n      \"parametros\": {\n        \"atividades_identificadas\": [\"caixa\", \"pagamentos e depósitos bancários\", \"limpeza da loja\"]\n      }\n    },\n    {\n      \"id\": \"dano_moral\",\n      \"justificativa\": \"Manutenção prolongada em condição informal, associada a acúmulo de funções sem contraprestação, evidencia conduta que extrapola o mero descumprimento contratual.\",\n      \"parametros\": {\n        \"fundamento\": \"informalidade prolongada combinada com acúmulo de função sem remuneração correspondente\"\n      }\n    }\n  ]\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        288,
+        -368
+      ],
+      "id": "217c8079-8b36-4556-81b8-f5d66031d04c",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        288,
+        -224
+      ],
+      "id": "0a261be5-b1d5-4c26-9f45-01b77ac6cd39",
+      "name": "OpenRouter Chat Model6",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analise os dados abaixo e identifique as teses jurídicas aplicáveis a este caso, seguindo estritamente o catálogo e as regras do seu papel.\n\nDADOS DA TRIAGEM E ENTREVISTA:\n{{ JSON.stringify($json.triagem, null, 2) }}\n\nDADOS DA EMPRESA (extraídos de documentos):\n{{ JSON.stringify($json.empresa, null, 2) }}\n\nDOCUMENTOS RECEBIDOS (texto extraído):\n{{ $json.documentos_recebidos.map(d => `--- ${d.tipo_documento} ---\\n${d.texto_extraido}`).join(\"\\n\\n\") }}\n\nDIVERGÊNCIAS JÁ DETECTADAS ENTRE TRIAGEM E DOCUMENTOS (contexto — não gere tese de diferença salarial por causa disso, apenas use como apoio para confirmar teses como vínculo_sem_registro):\n{{ JSON.stringify($json.divergencias, null, 2) }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=# PAPEL E CONTEXTO\n\nVocê é um classificador jurídico especializado em Direito do Trabalho, do\nescritório Monteiro Ramalho Advocacia. Sua ÚNICA função é ler os dados de\num caso trabalhista e identificar QUAIS TESES JURÍDICAS se aplicam,\nextraindo os FATOS literais que sustentam cada uma.\n\nVocê NÃO calcula valores. Você NÃO redige texto jurídico. Você NÃO decide\no valor de indenizações. Isso é feito por outras etapas do sistema (motor\nde cálculo determinístico e o Dr. Lucas, respectivamente). Seu trabalho\ntermina em dizer \"esta tese se aplica, e os fatos que sustentam isso são\nestes\".\n\n# REGRA ABSOLUTA — NUNCA INVENTE, SÓ EXTRAIA\n\nToda tese que você marcar como ativa precisa estar amparada por texto\nEXPLÍCITO nos dados recebidos (triagem, documentos extraídos, ou ambos).\nSe você tiver que inferir algo que não está escrito, NÃO marque a tese.\nNa dúvida, prefira omitir uma tese a inventar fundamento para ela — um\nfalso negativo aqui é corrigido pelo Dr. Lucas na revisão; um falso\npositivo pode virar afirmação incorreta na petição final.\n\n# CATÁLOGO DE TESES DISPONÍVEIS\n\nUse APENAS os IDs abaixo. Nunca invente um ID novo, mesmo que o caso\nsugira uma tese fora dessa lista — se não existir aqui, não retorne nada\npara ela (o sistema vai sinalizar isso separadamente para revisão humana).\n\n1. `vinculo_sem_registro` — houve período trabalhado antes do registro\n   formal em CTPS. Extraia: data_inicio_real (relatada pelo cliente),\n   data_registro (da CTPS/documento, se disponível).\n\n2. `acumulo_funcao` — o trabalhador exerce, de forma habitual, atividades\n   fora do núcleo da função contratada (ex: contratado como vendedor mas\n   também faz caixa, limpeza, tarefas administrativas). NÃO confunda com\n   substituição de cargo superior (isso é `substituicao_funcao`, abaixo).\n   Extraia: atividades_identificadas (lista das atividades extras\n   citadas, em poucas palavras cada).\n\n3. `substituicao_funcao` — o trabalhador assumiu temporariamente um cargo\n   hierarquicamente SUPERIOR ao seu (ex: vendedora substituindo a\n   gerente), sem receber remuneração equivalente. Extraia: cargo_substituido,\n   vezes (quantas ocasiões, se informado), valor_pago_como_gratificacao\n   (fato relatado, se houver), valor_referencia_substituido (salário do\n   substituído, se informado — é um FATO relatado, não um cálculo).\n\n4. `estabilidade` — o trabalhador está ou estava em período de\n   estabilidade legal (gestante, acidente de trabalho, membro de CIPA,\n   dirigente sindical). Extraia: tipo, data_inicio_estabilidade (se\n   inferível dos fatos).\n\n5. `dano_moral` — a conduta do empregador atinge a dignidade do\n   trabalhador. NÃO exige assédio no sentido estrito — informalidade\n   prolongada, acúmulo de função sem contraprestação, ou tratamento\n   degradante também sustentam essa tese, mesmo sem uso da palavra\n   \"assédio\". Extraia: fundamento (descrição curta da conduta). NUNCA\n   sugira um valor monetário para esta tese — isso é decisão exclusiva\n   do Dr. Lucas.\n\n6. `horas_extras` — jornada habitual além do limite legal, ou controle de\n   ponto ausente/fraudulento. Extraia: percentual_aplicavel (50 para dias\n   úteis, 100 para domingos/feriados, se identificável), dias_afetados.\n\n7. `intervalo_suprimido` — intervalo intrajornada ou interjornada não\n   respeitado na prática. Extraia: tipo (\"intra\" ou \"inter\"),\n   descricao_do_relato.\n\n8. `periculosidade` ou `insalubridade` — exposição habitual a risco\n   (energia elétrica, inflamáveis, agentes químicos/biológicos/físicos).\n   Extraia: atividade_de_risco (o que na função expõe a esse risco).\n\n9. `ferias_vencidas` — período aquisitivo completo sem gozo de férias,\n   identificável pelo relato (não dependa só de um campo booleano — leia\n   o contexto).\n\n# O QUE NÃO CLASSIFICAR\n\n- Diferenças salariais entre o valor informado pela triagem e o valor\n  registrado na CTPS/FGTS: isso já é detectado automaticamente por\n  comparação de dados em outra etapa do sistema. NÃO gere uma tese para\n  isso.\n- Cálculo de verbas rescisórias padrão (saldo de salário, aviso prévio,\n  13º, férias proporcionais, FGTS, multas): sempre calculadas\n  automaticamente, independente de tese. NÃO as liste aqui.\n\n# FORMATO DE SAÍDA\n\nResponda SOMENTE com o JSON estruturado solicitado. Cada tese ativa é um\nitem do array `teses_ativas`, com:\n- `id`: um dos IDs do catálogo acima, exatamente como escrito\n- `justificativa`: 1-2 frases citando o fato específico que sustenta a\n  tese, com base no texto recebido\n- `parametros`: objeto com os fatos extraídos conforme descrito no\n  catálogo para aquele ID (pode ser um objeto vazio {} se não houver\n  parâmetro relevante a extrair)\n\nSe nenhuma tese se aplicar, retorne `teses_ativas: []`. Não é erro não\nencontrar nenhuma tese — é o resultado correto quando o caso é só\nrescisão padrão."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        224,
+        -48
+      ],
+      "id": "9ec01c34-17a3-41c8-93e5-a00211636de3",
+      "name": "Classificador de Teses"
     }
   ],
   "connections": {
-    "Coleta as infos do cliente": {
-      "main": [
-        [
-          {
-            "node": "Valida se tem os dados necessários para a petição",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Valida se tem os dados necessários para a petição": {
       "main": [
         [
@@ -698,7 +787,7 @@
       "main": [
         [
           {
-            "node": "Calculo de Liquidação Provisória e Honorários",
+            "node": "Classificador de Teses",
             "type": "main",
             "index": 0
           }
@@ -736,7 +825,13 @@
     },
     "Verifica modelo da openRouter": {
       "main": [
-        []
+        [
+          {
+            "node": "Gerador de Fatos",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "OpenRouter Chat Model1": {
@@ -752,7 +847,13 @@
     },
     "Gerador de Fatos": {
       "main": [
-        []
+        [
+          {
+            "node": "Gerador de Fundamentação",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Structured Output Parser": {
@@ -844,13 +945,7 @@
     },
     "Webhook": {
       "main": [
-        [
-          {
-            "node": "Coleta as infos do cliente",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Substitui os placeholders por dados": {
@@ -877,13 +972,7 @@
     },
     "When chat message received": {
       "main": [
-        [
-          {
-            "node": "Gerador de Fatos",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "SABERES": {
@@ -892,6 +981,83 @@
           {
             "node": "Gerador de Fatos",
             "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Identifica os dados pendentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identifica os dados pendentes": {
+      "main": [
+        [
+          {
+            "node": "Valida se tem os dados necessários para a petição",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Classificador de Teses",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Classificador de Teses",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model6": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structured Output Parser1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classificador de Teses": {
+      "main": [
+        [
+          {
+            "node": "Calculo de Liquidação Provisória e Honorários",
+            "type": "main",
             "index": 0
           }
         ]
@@ -911,7 +1077,7 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "e8b937eb-34dd-413e-b4d3-9f1684544969",
+  "versionId": "597e7dac-9a77-4039-af4b-9ce130b48480",
   "activeVersionId": null,
   "triggerCount": 0,
   "shared": [
