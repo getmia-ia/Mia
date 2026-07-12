@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-10T18:27:46.746Z",
+  "updatedAt": "2026-07-11T22:20:32.626Z",
   "createdAt": "2026-07-10T14:33:14.975Z",
   "id": "ldhyu7g01w1yrBEv",
   "name": "Monteiro - 2.6 - Notificação Email",
@@ -23,19 +23,6 @@
     },
     {
       "parameters": {
-        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\n\nreturn $input.all();"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        576,
-        288
-      ],
-      "id": "7803c4dd-07c6-46f0-a866-f1fa86bcb5d2",
-      "name": "Monta o corpo do email"
-    },
-    {
-      "parameters": {
         "content": "### Envia o email",
         "height": 288,
         "color": 4
@@ -43,7 +30,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        752,
+        1168,
         176
       ],
       "id": "9594df53-6f25-4e0a-93f1-941158347e93",
@@ -65,32 +52,14 @@
           ]
         },
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "from",
-              "value": "no-reply@getmia.com.br"
-            },
-            {
-              "name": "to",
-              "value": "={{ $json.to }}"
-            },
-            {
-              "name": "subject",
-              "value": "={{ $json.subject }}"
-            },
-            {
-              "name": "html",
-              "value": "={{ $json.html }}"
-            }
-          ]
-        },
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  from: \"no-reply@getmia.com.br\",\n  to: [ $('Edit Fields').first().json.condomino_email ],\n  subject: $('Montar o html do email').first().json.subject,\n  html: $('Montar o html do email').first().json.html,\n  attachments: [\n    {\n      filename: \"documento.pdf\",\n      content: $json.data\n    }\n  ]\n}) }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        768,
+        1248,
         288
       ],
       "id": "ae22dd91-bc98-4b75-b957-ad73f65ab0a6",
@@ -134,7 +103,7 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "notificar-pergunta-condominio",
+        "path": "disparo-notificacao-multa-condomino",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
@@ -149,46 +118,30 @@
     },
     {
       "parameters": {
-        "operation": "get",
-        "tableId": "condominos",
-        "filters": {
-          "conditions": [
-            {
-              "keyName": "id",
-              "keyValue": "={{ $json.id }}"
-            }
-          ]
-        }
-      },
-      "type": "n8n-nodes-base.supabase",
-      "typeVersion": 1,
-      "position": [
-        400,
-        288
-      ],
-      "id": "d5ffa515-01e1-4134-8570-dd74a37dbcd2",
-      "name": "Busca os dados do condômino ",
-      "credentials": {
-        "supabaseApi": {
-          "id": "FcbZyD53kbkf6Vxp",
-          "name": "Monteiro - Supabase"
-        }
-      }
-    },
-    {
-      "parameters": {
         "assignments": {
           "assignments": [
             {
               "id": "87e9f760-605c-4388-8791-d868559bf6d4",
-              "name": "id",
-              "value": "0007830f-7de4-4622-b708-6d3b79f34649",
+              "name": "id_notfOUmulta",
+              "value": "={{ $json.body.id }}",
               "type": "string"
             },
             {
               "id": "fa300118-8edd-42d8-a02b-d0f6e3a8aada",
-              "name": "",
-              "value": "",
+              "name": "origem",
+              "value": "={{ $json.body.origem }}",
+              "type": "string"
+            },
+            {
+              "id": "af2c31cd-7e46-431d-a0d2-521686858fa0",
+              "name": "condomino_email",
+              "value": "={{ $json.body.condomino_email }}",
+              "type": "string"
+            },
+            {
+              "id": "9e34e5b6-77d5-4308-90f3-292ec958c556",
+              "name": "condominio_nome",
+              "value": "={{ $json.body.condominio_nome }}",
               "type": "string"
             }
           ]
@@ -203,20 +156,73 @@
       ],
       "id": "65b10c5f-a098-421c-a640-3e88126441a8",
       "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  CASE WHEN d.origem = 'multa'\n       THEN 'Aplicação de Multa'\n       ELSE 'Notificação de Infração' END               AS tipo_documento,\n\n  c.nome                                                AS nome_condominio,\n  c.endereco                                            AS endereco_condominio,\n  c.cnpj                                                AS numero_cnpj,\n  c.logo_url                                            AS logo_condominio,\n  c.sindico_nome                                        AS nome_sindico,\n  ''::text                                              AS cidade,\n\n  to_char(now() AT TIME ZONE 'America/Fortaleza',\n          'FMDD \"de\" TMMonth \"de\" YYYY')                AS data_submissao,\n\n  cm.bloco                                              AS numero_bloco,\n  cm.unidade                                            AS numero_unidade,\n\n  to_char(d.data_infracao, 'DD/MM/YYYY')                AS data_infracao,\n  d.infracao                                            AS infracao,\n  d.regimento_artigo                                    AS regimento_artigo,\n  d.regimento_clausula                                  AS regimento_clausula,\n\n  d.pdf_url                                             AS documento_url,\n\n  CASE\n    WHEN d.prazo_tipo = 'imediato' THEN 'Imediato'\n    WHEN d.prazo_tipo = 'dias'     THEN d.prazo_dias || ' dia(s)'\n    ELSE ''\n  END                                                   AS prazo_regularizacao,\n\n  cm.email                                              AS condomino_email\nFROM (\n  SELECT 'notificacao'::text AS origem,\n         id, condominio_id, condomino_id, data_infracao,\n         infracao, regimento_artigo, regimento_clausula,\n         prazo_tipo, prazo_dias, pdf_url\n  FROM public.notificacoes\n  WHERE $2 = 'notificacao' AND id = $1::uuid\n\n  UNION ALL\n\n  SELECT 'multa'::text AS origem,\n         id, condominio_id, condomino_id, data_infracao,\n         infracao, regimento_artigo, regimento_clausula,\n         prazo_tipo, prazo_dias, pdf_url\n  FROM public.multas\n  WHERE $2 = 'multa' AND id = $1::uuid\n) d\nJOIN public.condominios c ON c.id = d.condominio_id\nJOIN public.condominos  cm ON cm.id = d.condomino_id\nLIMIT 1;\n",
+        "options": {
+          "queryReplacement": "={{ $json.id_notfOUmulta }}, {{ $json.origem }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        432,
+        288
+      ],
+      "id": "085e102b-3875-442c-affd-522f92590f3f",
+      "name": "Busca os dados da infração",
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\n\n// ============================================\n// SUBJECT DINÂMICO\n// ============================================\nlet subject = '';\n\n// Função auxiliar para montar o identificador da unidade\nfunction getIdentificador() {\n  let id = '';\n  if (j.numero_bloco) {\n    id += ` - Bloco ${j.numero_bloco}`;\n  }\n  if (j.numero_unidade) {\n    id += ` - Unidade ${j.numero_unidade}`;\n  }\n  return id;\n}\n\nif (j.tipo_documento) {\n  const tipo = j.tipo_documento.toLowerCase();\n  const identificador = getIdentificador();\n  \n  if (tipo.includes('multa')) {\n    subject = `MULTA - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n  } else if (tipo.includes('notificação') || tipo.includes('notificacao')) {\n    subject = `NOTIFICAÇÃO DE INFRAÇÃO - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n  } else if (tipo.includes('advertência') || tipo.includes('advertencia')) {\n    subject = `ADVERTÊNCIA - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n  } else if (tipo.includes('cobrança') || tipo.includes('cobranca')) {\n    subject = `COBRANÇA - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n  } else {\n    subject = `${j.tipo_documento} - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n  }\n} else {\n  const identificador = getIdentificador();\n  subject = `Comunicado - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n}\n\n// ============================================\n// HTML\n// ============================================\nconst html = `\n<!doctype html>\n<html lang=\"pt-BR\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <title>${j.tipo_documento || ''} — ${j.nome_condominio || ''}</title>\n  </head>\n  <body style=\"margin:0;padding:0;background:#f5f3ee;font-family:Georgia,'Times New Roman',serif;color:#1a2030;\">\n    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:#f5f3ee;padding:32px 12px;\">\n      <tr>\n        <td align=\"center\">\n          <table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"max-width:600px;width:100%;background:#ffffff;border:1px solid #e5e0d6;border-radius:6px;overflow:hidden;\">\n\n            <!-- Header -->\n            <tr>\n              <td style=\"background:#0d2a4a;padding:28px 32px;text-align:center;\">\n                ${j.logo_condominio ? `\n                <div style=\"margin-bottom:12px;\">\n                  <img src=\"${j.logo_condominio}\" alt=\"${j.nome_condominio || ''}\" style=\"max-height:56px;max-width:180px;display:inline-block;\" />\n                </div>\n                ` : ''}\n                <div style=\"font-family:Georgia,'Times New Roman',serif;color:#ffffff;font-size:20px;letter-spacing:0.08em;font-weight:600;\">\n                  MONTEIRO RAMALHO\n                </div>\n                <div style=\"margin-top:4px;font-family:Arial,Helvetica,sans-serif;color:#c9a84c;font-size:10px;letter-spacing:0.3em;text-transform:uppercase;\">\n                  Advogados Associados\n                </div>\n              </td>\n            </tr>\n            <tr><td style=\"height:3px;background:#c9a84c;\"></td></tr>\n\n            <!-- Intro -->\n            <tr>\n              <td style=\"padding:36px 32px 8px 32px;\">\n                <p style=\"margin:0 0 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:#6b7280;\">\n                  ${j.tipo_documento || ''}\n                </p>\n                <h1 style=\"margin:0 0 12px 0;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.3;color:#0d2a4a;font-weight:600;\">\n                  ${j.nome_condominio || ''}\n                </h1>\n                <p style=\"margin:0 0 20px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1a2030;\">\n                  Prezado(a) condômino(a)${j.numero_bloco ? ` do <strong>Bloco ${j.numero_bloco}${j.numero_unidade ? ` — Unidade ${j.numero_unidade}` : ''}</strong>` : (j.numero_unidade ? ` da <strong>Unidade ${j.numero_unidade}</strong>` : '')},<br/>\n                  ${j.data_infracao ? `segue abaixo o resumo da ocorrência registrada em <strong>${j.data_infracao}</strong>.` : 'segue abaixo o resumo da ocorrência registrada.'} O documento completo está disponível no link ao final.\n                </p>\n              </td>\n            </tr>\n\n            <!-- Card infração -->\n            <tr>\n              <td style=\"padding:0 32px 8px 32px;\">\n                <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:#f5f3ee;border:1px solid #e5e0d6;border-radius:4px;\">\n                  ${j.infracao ? `\n                  <tr>\n                    <td style=\"padding:18px 20px;\">\n                      <div style=\"font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#6b7280;margin-bottom:6px;\">\n                        Infração cometida\n                      </div>\n                      <div style=\"font-family:Georgia,'Times New Roman',serif;font-size:15px;line-height:1.6;color:#1a2030;\">\n                        ${j.infracao}\n                      </div>\n                    </td>\n                  </tr>\n                  ` : ''}\n                  ${j.regimento_clausula ? `\n                  <tr><td style=\"border-top:1px solid #e5e0d6;\"></td></tr>\n                  <tr>\n                    <td style=\"padding:18px 20px;\">\n                      <div style=\"font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#6b7280;margin-bottom:6px;\">\n                        Disposição regimental violada\n                      </div>\n                      <div style=\"font-family:Georgia,'Times New Roman',serif;font-size:14px;line-height:1.6;color:#1a2030;\">\n                        ${j.regimento_artigo ? `<strong>Art. ${j.regimento_artigo}</strong> — ` : ''}${j.regimento_clausula}\n                      </div>\n                    </td>\n                  </tr>\n                  ` : ''}\n                </table>\n              </td>\n            </tr>\n\n            ${j.prazo_regularizacao ? `\n            <!-- Prazo -->\n            <tr>\n              <td style=\"padding:16px 32px 0 32px;\">\n                <p style=\"margin:0;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.6;color:#1a2030;\">\n                  <strong style=\"color:#0d2a4a;\">Prazo para regularização:</strong> ${j.prazo_regularizacao}\n                </p>\n              </td>\n            </tr>\n            ` : ''}\n\n            ${j.documento_url ? `\n            <!-- Botão -->\n            <tr>\n              <td style=\"padding:28px 32px 8px 32px;text-align:center;\">\n                <a href=\"${j.documento_url}\"\n                   style=\"display:inline-block;background:#0d2a4a;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:4px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;letter-spacing:0.04em;\">\n                  Abrir documento completo\n                </a>\n              </td>\n            </tr>\n            ` : ''}\n\n            <!-- Footer -->\n            <tr><td style=\"border-top:1px solid #e5e0d6;\"></td></tr>\n            <tr>\n              <td style=\"padding:20px 32px;background:#fafaf7;text-align:center;\">\n                <p style=\"margin:0 0 4px 0;font-family:Georgia,'Times New Roman',serif;font-size:13px;color:#0d2a4a;font-weight:600;\">\n                  ${j.nome_condominio || ''}\n                </p>\n                ${j.endereco_condominio ? `\n                <p style=\"margin:0 0 2px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;\">\n                  ${j.endereco_condominio}${j.cidade ? ` · ${j.cidade}` : ''}\n                </p>\n                ` : (j.cidade ? `\n                <p style=\"margin:0 0 2px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;\">\n                  ${j.cidade}\n                </p>\n                ` : '')}\n                ${j.numero_cnpj ? `\n                <p style=\"margin:0 0 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;\">\n                  CNPJ ${j.numero_cnpj}\n                </p>\n                ` : ''}\n                ${j.nome_sindico ? `\n                <p style=\"margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;\">\n                  ${j.nome_sindico} — síndico${j.data_submissao ? ` · ${j.data_submissao}` : ''}\n                </p>\n                ` : (j.data_submissao ? `\n                <p style=\"margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;\">\n                  ${j.data_submissao}\n                </p>\n                ` : '')}\n              </td>\n            </tr>\n\n          </table>\n        </td>\n      </tr>\n    </table>\n  </body>\n</html>\n`;\n\n// ============================================\n// RETORNO COM SUBJECT + HTML\n// ============================================\nreturn [{ \n  json: { \n    subject: subject,\n    html: html\n  } \n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        288
+      ],
+      "id": "76292b52-9a63-49fe-a86a-75e436a6ed20",
+      "name": "Montar o html do email"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Busca os dados da infração').item.json.documento_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        832,
+        288
+      ],
+      "id": "400de01f-3cd9-49a7-8705-219522c71ee8",
+      "name": "Baixa o pdf"
+    },
+    {
+      "parameters": {
+        "operation": "binaryToPropery",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        1008,
+        288
+      ],
+      "id": "643b65ba-5f49-479b-a879-3dfbd7d0184c",
+      "name": "Extract from File"
     }
   ],
   "connections": {
-    "Monta o corpo do email": {
-      "main": [
-        [
-          {
-            "node": "Envia Email via resend",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Envia Email via resend": {
       "main": [
         []
@@ -224,14 +230,9 @@
     },
     "Webhook": {
       "main": [
-        []
-      ]
-    },
-    "Busca os dados do condômino ": {
-      "main": [
         [
           {
-            "node": "Monta o corpo do email",
+            "node": "Edit Fields",
             "type": "main",
             "index": 0
           }
@@ -242,7 +243,51 @@
       "main": [
         [
           {
-            "node": "Busca os dados do condômino ",
+            "node": "Busca os dados da infração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca os dados da infração": {
+      "main": [
+        [
+          {
+            "node": "Montar o html do email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar o html do email": {
+      "main": [
+        [
+          {
+            "node": "Baixa o pdf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixa o pdf": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Envia Email via resend",
             "type": "main",
             "index": 0
           }
@@ -260,9 +305,11 @@
     "saveManualExecutions": true
   },
   "staticData": null,
-  "meta": null,
-  "versionId": "ae9d1af8-e452-40fe-aa86-63bf2027c87a",
-  "activeVersionId": "ae9d1af8-e452-40fe-aa86-63bf2027c87a",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "53834166-7a59-4ed4-a3f7-e527f1267e1d",
+  "activeVersionId": "53834166-7a59-4ed4-a3f7-e527f1267e1d",
   "triggerCount": 1,
   "shared": [
     {
@@ -274,9 +321,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-07-10T18:27:46.749Z",
-    "createdAt": "2026-07-10T18:27:46.749Z",
-    "versionId": "ae9d1af8-e452-40fe-aa86-63bf2027c87a",
+    "updatedAt": "2026-07-11T22:20:32.628Z",
+    "createdAt": "2026-07-11T22:20:32.628Z",
+    "versionId": "53834166-7a59-4ed4-a3f7-e527f1267e1d",
     "workflowId": "ldhyu7g01w1yrBEv",
     "nodes": [
       {
@@ -296,19 +343,6 @@
       },
       {
         "parameters": {
-          "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\n\nreturn $input.all();"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          576,
-          288
-        ],
-        "id": "7803c4dd-07c6-46f0-a866-f1fa86bcb5d2",
-        "name": "Monta o corpo do email"
-      },
-      {
-        "parameters": {
           "content": "### Envia o email",
           "height": 288,
           "color": 4
@@ -316,7 +350,7 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          752,
+          1168,
           176
         ],
         "id": "9594df53-6f25-4e0a-93f1-941158347e93",
@@ -338,32 +372,14 @@
             ]
           },
           "sendBody": true,
-          "bodyParameters": {
-            "parameters": [
-              {
-                "name": "from",
-                "value": "no-reply@getmia.com.br"
-              },
-              {
-                "name": "to",
-                "value": "={{ $json.to }}"
-              },
-              {
-                "name": "subject",
-                "value": "={{ $json.subject }}"
-              },
-              {
-                "name": "html",
-                "value": "={{ $json.html }}"
-              }
-            ]
-          },
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({\n  from: \"no-reply@getmia.com.br\",\n  to: [ $('Edit Fields').first().json.condomino_email ],\n  subject: $('Montar o html do email').first().json.subject,\n  html: $('Montar o html do email').first().json.html,\n  attachments: [\n    {\n      filename: \"documento.pdf\",\n      content: $json.data\n    }\n  ]\n}) }}",
           "options": {}
         },
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.3,
         "position": [
-          768,
+          1248,
           288
         ],
         "id": "ae22dd91-bc98-4b75-b957-ad73f65ab0a6",
@@ -407,7 +423,7 @@
       {
         "parameters": {
           "httpMethod": "POST",
-          "path": "notificar-pergunta-condominio",
+          "path": "disparo-notificacao-multa-condomino",
           "options": {}
         },
         "type": "n8n-nodes-base.webhook",
@@ -422,46 +438,30 @@
       },
       {
         "parameters": {
-          "operation": "get",
-          "tableId": "condominos",
-          "filters": {
-            "conditions": [
-              {
-                "keyName": "id",
-                "keyValue": "={{ $json.id }}"
-              }
-            ]
-          }
-        },
-        "type": "n8n-nodes-base.supabase",
-        "typeVersion": 1,
-        "position": [
-          400,
-          288
-        ],
-        "id": "d5ffa515-01e1-4134-8570-dd74a37dbcd2",
-        "name": "Busca os dados do condômino ",
-        "credentials": {
-          "supabaseApi": {
-            "id": "FcbZyD53kbkf6Vxp",
-            "name": "Monteiro - Supabase"
-          }
-        }
-      },
-      {
-        "parameters": {
           "assignments": {
             "assignments": [
               {
                 "id": "87e9f760-605c-4388-8791-d868559bf6d4",
-                "name": "id",
-                "value": "0007830f-7de4-4622-b708-6d3b79f34649",
+                "name": "id_notfOUmulta",
+                "value": "={{ $json.body.id }}",
                 "type": "string"
               },
               {
                 "id": "fa300118-8edd-42d8-a02b-d0f6e3a8aada",
-                "name": "",
-                "value": "",
+                "name": "origem",
+                "value": "={{ $json.body.origem }}",
+                "type": "string"
+              },
+              {
+                "id": "af2c31cd-7e46-431d-a0d2-521686858fa0",
+                "name": "condomino_email",
+                "value": "={{ $json.body.condomino_email }}",
+                "type": "string"
+              },
+              {
+                "id": "9e34e5b6-77d5-4308-90f3-292ec958c556",
+                "name": "condominio_nome",
+                "value": "={{ $json.body.condominio_nome }}",
                 "type": "string"
               }
             ]
@@ -476,20 +476,73 @@
         ],
         "id": "65b10c5f-a098-421c-a640-3e88126441a8",
         "name": "Edit Fields"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT\n  CASE WHEN d.origem = 'multa'\n       THEN 'Aplicação de Multa'\n       ELSE 'Notificação de Infração' END               AS tipo_documento,\n\n  c.nome                                                AS nome_condominio,\n  c.endereco                                            AS endereco_condominio,\n  c.cnpj                                                AS numero_cnpj,\n  c.logo_url                                            AS logo_condominio,\n  c.sindico_nome                                        AS nome_sindico,\n  ''::text                                              AS cidade,\n\n  to_char(now() AT TIME ZONE 'America/Fortaleza',\n          'FMDD \"de\" TMMonth \"de\" YYYY')                AS data_submissao,\n\n  cm.bloco                                              AS numero_bloco,\n  cm.unidade                                            AS numero_unidade,\n\n  to_char(d.data_infracao, 'DD/MM/YYYY')                AS data_infracao,\n  d.infracao                                            AS infracao,\n  d.regimento_artigo                                    AS regimento_artigo,\n  d.regimento_clausula                                  AS regimento_clausula,\n\n  d.pdf_url                                             AS documento_url,\n\n  CASE\n    WHEN d.prazo_tipo = 'imediato' THEN 'Imediato'\n    WHEN d.prazo_tipo = 'dias'     THEN d.prazo_dias || ' dia(s)'\n    ELSE ''\n  END                                                   AS prazo_regularizacao,\n\n  cm.email                                              AS condomino_email\nFROM (\n  SELECT 'notificacao'::text AS origem,\n         id, condominio_id, condomino_id, data_infracao,\n         infracao, regimento_artigo, regimento_clausula,\n         prazo_tipo, prazo_dias, pdf_url\n  FROM public.notificacoes\n  WHERE $2 = 'notificacao' AND id = $1::uuid\n\n  UNION ALL\n\n  SELECT 'multa'::text AS origem,\n         id, condominio_id, condomino_id, data_infracao,\n         infracao, regimento_artigo, regimento_clausula,\n         prazo_tipo, prazo_dias, pdf_url\n  FROM public.multas\n  WHERE $2 = 'multa' AND id = $1::uuid\n) d\nJOIN public.condominios c ON c.id = d.condominio_id\nJOIN public.condominos  cm ON cm.id = d.condomino_id\nLIMIT 1;\n",
+          "options": {
+            "queryReplacement": "={{ $json.id_notfOUmulta }}, {{ $json.origem }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          432,
+          288
+        ],
+        "id": "085e102b-3875-442c-affd-522f92590f3f",
+        "name": "Busca os dados da infração",
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const j = $input.first().json;\n\n// ============================================\n// SUBJECT DINÂMICO\n// ============================================\nlet subject = '';\n\n// Função auxiliar para montar o identificador da unidade\nfunction getIdentificador() {\n  let id = '';\n  if (j.numero_bloco) {\n    id += ` - Bloco ${j.numero_bloco}`;\n  }\n  if (j.numero_unidade) {\n    id += ` - Unidade ${j.numero_unidade}`;\n  }\n  return id;\n}\n\nif (j.tipo_documento) {\n  const tipo = j.tipo_documento.toLowerCase();\n  const identificador = getIdentificador();\n  \n  if (tipo.includes('multa')) {\n    subject = `MULTA - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n  } else if (tipo.includes('notificação') || tipo.includes('notificacao')) {\n    subject = `NOTIFICAÇÃO DE INFRAÇÃO - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n  } else if (tipo.includes('advertência') || tipo.includes('advertencia')) {\n    subject = `ADVERTÊNCIA - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n  } else if (tipo.includes('cobrança') || tipo.includes('cobranca')) {\n    subject = `COBRANÇA - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n  } else {\n    subject = `${j.tipo_documento} - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n  }\n} else {\n  const identificador = getIdentificador();\n  subject = `Comunicado - ${j.nome_condominio || 'Condomínio'}${identificador}`;\n}\n\n// ============================================\n// HTML\n// ============================================\nconst html = `\n<!doctype html>\n<html lang=\"pt-BR\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <title>${j.tipo_documento || ''} — ${j.nome_condominio || ''}</title>\n  </head>\n  <body style=\"margin:0;padding:0;background:#f5f3ee;font-family:Georgia,'Times New Roman',serif;color:#1a2030;\">\n    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:#f5f3ee;padding:32px 12px;\">\n      <tr>\n        <td align=\"center\">\n          <table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"max-width:600px;width:100%;background:#ffffff;border:1px solid #e5e0d6;border-radius:6px;overflow:hidden;\">\n\n            <!-- Header -->\n            <tr>\n              <td style=\"background:#0d2a4a;padding:28px 32px;text-align:center;\">\n                ${j.logo_condominio ? `\n                <div style=\"margin-bottom:12px;\">\n                  <img src=\"${j.logo_condominio}\" alt=\"${j.nome_condominio || ''}\" style=\"max-height:56px;max-width:180px;display:inline-block;\" />\n                </div>\n                ` : ''}\n                <div style=\"font-family:Georgia,'Times New Roman',serif;color:#ffffff;font-size:20px;letter-spacing:0.08em;font-weight:600;\">\n                  MONTEIRO RAMALHO\n                </div>\n                <div style=\"margin-top:4px;font-family:Arial,Helvetica,sans-serif;color:#c9a84c;font-size:10px;letter-spacing:0.3em;text-transform:uppercase;\">\n                  Advogados Associados\n                </div>\n              </td>\n            </tr>\n            <tr><td style=\"height:3px;background:#c9a84c;\"></td></tr>\n\n            <!-- Intro -->\n            <tr>\n              <td style=\"padding:36px 32px 8px 32px;\">\n                <p style=\"margin:0 0 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:#6b7280;\">\n                  ${j.tipo_documento || ''}\n                </p>\n                <h1 style=\"margin:0 0 12px 0;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.3;color:#0d2a4a;font-weight:600;\">\n                  ${j.nome_condominio || ''}\n                </h1>\n                <p style=\"margin:0 0 20px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1a2030;\">\n                  Prezado(a) condômino(a)${j.numero_bloco ? ` do <strong>Bloco ${j.numero_bloco}${j.numero_unidade ? ` — Unidade ${j.numero_unidade}` : ''}</strong>` : (j.numero_unidade ? ` da <strong>Unidade ${j.numero_unidade}</strong>` : '')},<br/>\n                  ${j.data_infracao ? `segue abaixo o resumo da ocorrência registrada em <strong>${j.data_infracao}</strong>.` : 'segue abaixo o resumo da ocorrência registrada.'} O documento completo está disponível no link ao final.\n                </p>\n              </td>\n            </tr>\n\n            <!-- Card infração -->\n            <tr>\n              <td style=\"padding:0 32px 8px 32px;\">\n                <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:#f5f3ee;border:1px solid #e5e0d6;border-radius:4px;\">\n                  ${j.infracao ? `\n                  <tr>\n                    <td style=\"padding:18px 20px;\">\n                      <div style=\"font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#6b7280;margin-bottom:6px;\">\n                        Infração cometida\n                      </div>\n                      <div style=\"font-family:Georgia,'Times New Roman',serif;font-size:15px;line-height:1.6;color:#1a2030;\">\n                        ${j.infracao}\n                      </div>\n                    </td>\n                  </tr>\n                  ` : ''}\n                  ${j.regimento_clausula ? `\n                  <tr><td style=\"border-top:1px solid #e5e0d6;\"></td></tr>\n                  <tr>\n                    <td style=\"padding:18px 20px;\">\n                      <div style=\"font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#6b7280;margin-bottom:6px;\">\n                        Disposição regimental violada\n                      </div>\n                      <div style=\"font-family:Georgia,'Times New Roman',serif;font-size:14px;line-height:1.6;color:#1a2030;\">\n                        ${j.regimento_artigo ? `<strong>Art. ${j.regimento_artigo}</strong> — ` : ''}${j.regimento_clausula}\n                      </div>\n                    </td>\n                  </tr>\n                  ` : ''}\n                </table>\n              </td>\n            </tr>\n\n            ${j.prazo_regularizacao ? `\n            <!-- Prazo -->\n            <tr>\n              <td style=\"padding:16px 32px 0 32px;\">\n                <p style=\"margin:0;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.6;color:#1a2030;\">\n                  <strong style=\"color:#0d2a4a;\">Prazo para regularização:</strong> ${j.prazo_regularizacao}\n                </p>\n              </td>\n            </tr>\n            ` : ''}\n\n            ${j.documento_url ? `\n            <!-- Botão -->\n            <tr>\n              <td style=\"padding:28px 32px 8px 32px;text-align:center;\">\n                <a href=\"${j.documento_url}\"\n                   style=\"display:inline-block;background:#0d2a4a;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:4px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;letter-spacing:0.04em;\">\n                  Abrir documento completo\n                </a>\n              </td>\n            </tr>\n            ` : ''}\n\n            <!-- Footer -->\n            <tr><td style=\"border-top:1px solid #e5e0d6;\"></td></tr>\n            <tr>\n              <td style=\"padding:20px 32px;background:#fafaf7;text-align:center;\">\n                <p style=\"margin:0 0 4px 0;font-family:Georgia,'Times New Roman',serif;font-size:13px;color:#0d2a4a;font-weight:600;\">\n                  ${j.nome_condominio || ''}\n                </p>\n                ${j.endereco_condominio ? `\n                <p style=\"margin:0 0 2px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;\">\n                  ${j.endereco_condominio}${j.cidade ? ` · ${j.cidade}` : ''}\n                </p>\n                ` : (j.cidade ? `\n                <p style=\"margin:0 0 2px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;\">\n                  ${j.cidade}\n                </p>\n                ` : '')}\n                ${j.numero_cnpj ? `\n                <p style=\"margin:0 0 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;\">\n                  CNPJ ${j.numero_cnpj}\n                </p>\n                ` : ''}\n                ${j.nome_sindico ? `\n                <p style=\"margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;\">\n                  ${j.nome_sindico} — síndico${j.data_submissao ? ` · ${j.data_submissao}` : ''}\n                </p>\n                ` : (j.data_submissao ? `\n                <p style=\"margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;\">\n                  ${j.data_submissao}\n                </p>\n                ` : '')}\n              </td>\n            </tr>\n\n          </table>\n        </td>\n      </tr>\n    </table>\n  </body>\n</html>\n`;\n\n// ============================================\n// RETORNO COM SUBJECT + HTML\n// ============================================\nreturn [{ \n  json: { \n    subject: subject,\n    html: html\n  } \n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          640,
+          288
+        ],
+        "id": "76292b52-9a63-49fe-a86a-75e436a6ed20",
+        "name": "Montar o html do email"
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Busca os dados da infração').item.json.documento_url }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          832,
+          288
+        ],
+        "id": "400de01f-3cd9-49a7-8705-219522c71ee8",
+        "name": "Baixa o pdf"
+      },
+      {
+        "parameters": {
+          "operation": "binaryToPropery",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1.1,
+        "position": [
+          1008,
+          288
+        ],
+        "id": "643b65ba-5f49-479b-a879-3dfbd7d0184c",
+        "name": "Extract from File"
       }
     ],
     "connections": {
-      "Monta o corpo do email": {
-        "main": [
-          [
-            {
-              "node": "Envia Email via resend",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "Envia Email via resend": {
         "main": [
           []
@@ -497,14 +550,9 @@
       },
       "Webhook": {
         "main": [
-          []
-        ]
-      },
-      "Busca os dados do condômino ": {
-        "main": [
           [
             {
-              "node": "Monta o corpo do email",
+              "node": "Edit Fields",
               "type": "main",
               "index": 0
             }
@@ -515,7 +563,51 @@
         "main": [
           [
             {
-              "node": "Busca os dados do condômino ",
+              "node": "Busca os dados da infração",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca os dados da infração": {
+        "main": [
+          [
+            {
+              "node": "Montar o html do email",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar o html do email": {
+        "main": [
+          [
+            {
+              "node": "Baixa o pdf",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Baixa o pdf": {
+        "main": [
+          [
+            {
+              "node": "Extract from File",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract from File": {
+        "main": [
+          [
+            {
+              "node": "Envia Email via resend",
               "type": "main",
               "index": 0
             }
