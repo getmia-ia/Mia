@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-05T01:43:50.382Z",
+  "updatedAt": "2026-07-13T18:26:10.748Z",
   "createdAt": "2026-06-05T13:34:34.042Z",
   "id": "JXn1zW0rQCrFjoKP",
   "name": "Monteiro Ramalho - 3.1 - Produção de Contrato",
@@ -15,7 +15,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -976,
+        -1056,
         96
       ],
       "id": "83f898a5-89b3-4309-b73e-f4533b6a9778",
@@ -286,7 +286,7 @@
             {
               "id": "fa581f14-6f84-417c-8c9f-1fe2566aa1f3",
               "name": "cidade_uf",
-              "value": "={{ $json.cidade_uf }}",
+              "value": "={{ $json.cliente_cidade_uf }}",
               "type": "string"
             },
             {
@@ -643,33 +643,6 @@
     },
     {
       "parameters": {
-        "jsCode": "const endereco = ($(\"Webhook\").item.json.body.cliente_endereco || \"\").trim();\n\nconst m = endereco.match(/\\b([A-Z]{2})$/i);\n\nif (!m) {\n  return [{ json: { cidade_uf: null } }];\n}\n\nconst uf = m[1].toUpperCase();\nconst texto = endereco.replace(/\\b[A-Z]{2}$/i, \"\").trim();\n\nconst municipios = $(\"Lista Municipios\")\n  .all()\n  .map(i => i.json.nome)\n  .sort((a, b) => b.length - a.length);\n\nconst normalizar = (str) =>\n  str\n    .normalize(\"NFD\")\n    .replace(/[\\u0300-\\u036f]/g, \"\")\n    .toUpperCase();\n\nconst textoNormalizado = normalizar(texto);\n\nconst cidade = municipios.find(nome =>\n  textoNormalizado.endsWith(normalizar(nome))\n);\n\nreturn [\n  {\n    json: {\n      cidade_uf: cidade ? `${cidade}/${uf}` : null\n    }\n  }\n];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -576,
-        96
-      ],
-      "id": "94fed631-48cd-4573-bee5-cf6e147b008d",
-      "name": "Resolve a cidade_uf"
-    },
-    {
-      "parameters": {
-        "url": "https://servicodados.ibge.gov.br/api/v1/localidades/municipios",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.3,
-      "position": [
-        -768,
-        96
-      ],
-      "id": "22a82edd-0029-4517-9714-56741725fa22",
-      "name": "Lista Municipios"
-    },
-    {
-      "parameters": {
         "jsCode": "// $input agora é a resposta do HTTP Request, porque é ele quem alimenta este node\nconst catalogoResponse = $input.item.json;\nconst catalogo = Array.isArray(catalogoResponse)\n  ? catalogoResponse[0].opcoes\n  : catalogoResponse.opcoes;\n\n// O documento não vem mais do $input — precisa buscar explicitamente\n// do node anterior ao HTTP Request na mesma iteração do loop\nconst documento = $('Verifica se eh termo_autorizacao_inss').item.json;\n\nconst TIPO_ALVO = 'termo_autorizacao_inss'; // confirme esse valor com o SELECT pendente\n\nif (documento.tipo_id !== TIPO_ALVO) {\n  return { json: documento };\n}\n\nlet selecionadas = documento.opcoes_selecionadas;\nif (typeof selecionadas === 'string') {\n  selecionadas = JSON.parse(selecionadas);\n}\nselecionadas = selecionadas || [];\nconst selecionadasSet = new Set(selecionadas);\n\nconst checkboxRequests = catalogo.map(opcao => {\n  const marcado = opcao.grupoPai\n    ? selecionadasSet.has(opcao.id) && selecionadasSet.has(opcao.grupoPai)\n    : selecionadasSet.has(opcao.id);\n\n  return {\n    replaceAllText: {\n      containsText: { text: opcao.placeholder, matchCase: true },\n      replaceText: marcado ? '(X)' : '(   )'\n    }\n  };\n});\n\nreturn {\n  json: {\n    ...documento,\n    checkbox_requests: checkboxRequests\n  }\n};"
       },
       "type": "n8n-nodes-base.code",
@@ -981,6 +954,94 @@
       ],
       "id": "a9f17427-b757-4077-b489-a39344137211",
       "name": "Processar o placeholderList"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Extraia APENAS a cidade e a UF do seguinte endereço brasileiro.\n\nRegras:\n- A entrada pode estar em qualquer formato.\n- Identifique corretamente a cidade (município) e a unidade federativa (UF).\n- Ignore rua, número, bairro, complemento e CEP.\n- Se houver CEP, utilize-o para ajudar na identificação.\n- Nunca invente informações.\n- Se não for possível identificar com segurança, retorne null para ambos os campos.\n\nRetorne SOMENTE um JSON válido neste formato:\n\n{\n  \"cidade\": \"Nome da Cidade\",\n  \"uf\": \"UF\"\n}\n\nou\n\n{\n  \"cidade\": null,\n  \"uf\": null\n}\n\nEndereço:\n{{ $('Webhook').item.json.body.cliente_endereco }}",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -848,
+        96
+      ],
+      "id": "45a0789d-c9b5-492a-a8b8-207a17d9d82f",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"cidade\": \"Nome da Cidade\",\n  \"uf\": \"UF\"\n}\n",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -848,
+        -96
+      ],
+      "id": "1ec0c8c2-6a5c-42e1-934e-538bf983acb7",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "leads_crm",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Webhook').item.json.body.lead_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "cliente_cidade_uf",
+              "fieldValue": "={{ $json.output.cidade }}/{{ $json.output.uf }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        96
+      ],
+      "id": "83e85b11-2d48-469d-87c4-7ac4cb3f3b2b",
+      "name": "Atualiza cidade_uf",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "FcbZyD53kbkf6Vxp",
+          "name": "Monteiro - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -832,
+        288
+      ],
+      "id": "f0e229d5-4d16-4160-941f-81f923f6a9fd",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
     }
   ],
   "connections": {
@@ -1037,7 +1098,7 @@
       "main": [
         [
           {
-            "node": "Lista Municipios",
+            "node": "Basic LLM Chain",
             "type": "main",
             "index": 0
           }
@@ -1129,28 +1190,6 @@
         []
       ]
     },
-    "Lista Municipios": {
-      "main": [
-        [
-          {
-            "node": "Resolve a cidade_uf",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Resolve a cidade_uf": {
-      "main": [
-        [
-          {
-            "node": "Organiza os dados",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Trata os checkbox1": {
       "main": [
         [
@@ -1205,6 +1244,55 @@
           }
         ]
       ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Atualiza cidade_uf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza cidade_uf": {
+      "main": [
+        [
+          {
+            "node": "Organiza os dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Structured Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -1218,8 +1306,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "055ba2f8-2623-42be-b038-4bca289d44ef",
-  "activeVersionId": "055ba2f8-2623-42be-b038-4bca289d44ef",
+  "versionId": "06a0d4c2-5052-4f27-8e13-e42b619cfb78",
+  "activeVersionId": "06a0d4c2-5052-4f27-8e13-e42b619cfb78",
   "triggerCount": 1,
   "shared": [
     {
@@ -1231,9 +1319,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-07-05T01:43:50.384Z",
-    "createdAt": "2026-07-05T01:43:50.384Z",
-    "versionId": "055ba2f8-2623-42be-b038-4bca289d44ef",
+    "updatedAt": "2026-07-13T12:24:20.805Z",
+    "createdAt": "2026-07-13T12:24:20.805Z",
+    "versionId": "06a0d4c2-5052-4f27-8e13-e42b619cfb78",
     "workflowId": "JXn1zW0rQCrFjoKP",
     "nodes": [
       {
@@ -1245,7 +1333,7 @@
         "type": "n8n-nodes-base.webhook",
         "typeVersion": 2.1,
         "position": [
-          -976,
+          -1056,
           96
         ],
         "id": "83f898a5-89b3-4309-b73e-f4533b6a9778",
@@ -1516,7 +1604,7 @@
               {
                 "id": "fa581f14-6f84-417c-8c9f-1fe2566aa1f3",
                 "name": "cidade_uf",
-                "value": "={{ $json.cidade_uf }}",
+                "value": "={{ $json.cliente_cidade_uf }}",
                 "type": "string"
               },
               {
@@ -1873,33 +1961,6 @@
       },
       {
         "parameters": {
-          "jsCode": "const endereco = ($(\"Webhook\").item.json.body.cliente_endereco || \"\").trim();\n\nconst m = endereco.match(/\\b([A-Z]{2})$/i);\n\nif (!m) {\n  return [{ json: { cidade_uf: null } }];\n}\n\nconst uf = m[1].toUpperCase();\nconst texto = endereco.replace(/\\b[A-Z]{2}$/i, \"\").trim();\n\nconst municipios = $(\"Lista Municipios\")\n  .all()\n  .map(i => i.json.nome)\n  .sort((a, b) => b.length - a.length);\n\nconst normalizar = (str) =>\n  str\n    .normalize(\"NFD\")\n    .replace(/[\\u0300-\\u036f]/g, \"\")\n    .toUpperCase();\n\nconst textoNormalizado = normalizar(texto);\n\nconst cidade = municipios.find(nome =>\n  textoNormalizado.endsWith(normalizar(nome))\n);\n\nreturn [\n  {\n    json: {\n      cidade_uf: cidade ? `${cidade}/${uf}` : null\n    }\n  }\n];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          -576,
-          96
-        ],
-        "id": "94fed631-48cd-4573-bee5-cf6e147b008d",
-        "name": "Resolve a cidade_uf"
-      },
-      {
-        "parameters": {
-          "url": "https://servicodados.ibge.gov.br/api/v1/localidades/municipios",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.3,
-        "position": [
-          -768,
-          96
-        ],
-        "id": "22a82edd-0029-4517-9714-56741725fa22",
-        "name": "Lista Municipios"
-      },
-      {
-        "parameters": {
           "jsCode": "// $input agora é a resposta do HTTP Request, porque é ele quem alimenta este node\nconst catalogoResponse = $input.item.json;\nconst catalogo = Array.isArray(catalogoResponse)\n  ? catalogoResponse[0].opcoes\n  : catalogoResponse.opcoes;\n\n// O documento não vem mais do $input — precisa buscar explicitamente\n// do node anterior ao HTTP Request na mesma iteração do loop\nconst documento = $('Verifica se eh termo_autorizacao_inss').item.json;\n\nconst TIPO_ALVO = 'termo_autorizacao_inss'; // confirme esse valor com o SELECT pendente\n\nif (documento.tipo_id !== TIPO_ALVO) {\n  return { json: documento };\n}\n\nlet selecionadas = documento.opcoes_selecionadas;\nif (typeof selecionadas === 'string') {\n  selecionadas = JSON.parse(selecionadas);\n}\nselecionadas = selecionadas || [];\nconst selecionadasSet = new Set(selecionadas);\n\nconst checkboxRequests = catalogo.map(opcao => {\n  const marcado = opcao.grupoPai\n    ? selecionadasSet.has(opcao.id) && selecionadasSet.has(opcao.grupoPai)\n    : selecionadasSet.has(opcao.id);\n\n  return {\n    replaceAllText: {\n      containsText: { text: opcao.placeholder, matchCase: true },\n      replaceText: marcado ? '(X)' : '(   )'\n    }\n  };\n});\n\nreturn {\n  json: {\n    ...documento,\n    checkbox_requests: checkboxRequests\n  }\n};"
         },
         "type": "n8n-nodes-base.code",
@@ -2211,6 +2272,94 @@
         ],
         "id": "a9f17427-b757-4077-b489-a39344137211",
         "name": "Processar o placeholderList"
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=Extraia APENAS a cidade e a UF do seguinte endereço brasileiro.\n\nRegras:\n- A entrada pode estar em qualquer formato.\n- Identifique corretamente a cidade (município) e a unidade federativa (UF).\n- Ignore rua, número, bairro, complemento e CEP.\n- Se houver CEP, utilize-o para ajudar na identificação.\n- Nunca invente informações.\n- Se não for possível identificar com segurança, retorne null para ambos os campos.\n\nRetorne SOMENTE um JSON válido neste formato:\n\n{\n  \"cidade\": \"Nome da Cidade\",\n  \"uf\": \"UF\"\n}\n\nou\n\n{\n  \"cidade\": null,\n  \"uf\": null\n}\n\nEndereço:\n{{ $('Webhook').item.json.body.cliente_endereco }}",
+          "hasOutputParser": true,
+          "batching": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.7,
+        "position": [
+          -848,
+          96
+        ],
+        "id": "45a0789d-c9b5-492a-a8b8-207a17d9d82f",
+        "name": "Basic LLM Chain"
+      },
+      {
+        "parameters": {
+          "jsonSchemaExample": "{\n  \"cidade\": \"Nome da Cidade\",\n  \"uf\": \"UF\"\n}\n",
+          "autoFix": true
+        },
+        "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+        "typeVersion": 1.3,
+        "position": [
+          -848,
+          -96
+        ],
+        "id": "1ec0c8c2-6a5c-42e1-934e-538bf983acb7",
+        "name": "Structured Output Parser"
+      },
+      {
+        "parameters": {
+          "operation": "update",
+          "tableId": "leads_crm",
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $('Webhook').item.json.body.lead_id }}"
+              }
+            ]
+          },
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "cliente_cidade_uf",
+                "fieldValue": "={{ $json.output.cidade }}/{{ $json.output.uf }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          -560,
+          96
+        ],
+        "id": "83e85b11-2d48-469d-87c4-7ac4cb3f3b2b",
+        "name": "Atualiza cidade_uf",
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "FcbZyD53kbkf6Vxp",
+            "name": "Monteiro - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          -832,
+          288
+        ],
+        "id": "f0e229d5-4d16-4160-941f-81f923f6a9fd",
+        "name": "OpenRouter Chat Model",
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
       }
     ],
     "connections": {
@@ -2267,7 +2416,7 @@
         "main": [
           [
             {
-              "node": "Lista Municipios",
+              "node": "Basic LLM Chain",
               "type": "main",
               "index": 0
             }
@@ -2359,28 +2508,6 @@
           []
         ]
       },
-      "Lista Municipios": {
-        "main": [
-          [
-            {
-              "node": "Resolve a cidade_uf",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Resolve a cidade_uf": {
-        "main": [
-          [
-            {
-              "node": "Organiza os dados",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "Trata os checkbox1": {
         "main": [
           [
@@ -2431,6 +2558,55 @@
             {
               "node": "Urls de download (docs e pdf)1",
               "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Structured Output Parser": {
+        "ai_outputParser": [
+          [
+            {
+              "node": "Basic LLM Chain",
+              "type": "ai_outputParser",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Basic LLM Chain": {
+        "main": [
+          [
+            {
+              "node": "Atualiza cidade_uf",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Atualiza cidade_uf": {
+        "main": [
+          [
+            {
+              "node": "Organiza os dados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenRouter Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Basic LLM Chain",
+              "type": "ai_languageModel",
+              "index": 0
+            },
+            {
+              "node": "Structured Output Parser",
+              "type": "ai_languageModel",
               "index": 0
             }
           ]
