@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-21T03:11:18.854Z",
+  "updatedAt": "2026-07-13T18:28:06.111Z",
   "createdAt": "2026-03-10T18:56:13.634Z",
   "id": "W0SzHNpYp6yDpKWa",
   "name": "AgroNegociar - 1.1 - Renovação de Anúncios",
@@ -9,7 +9,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = false\nWHERE id = {{ $node[\"Loop Expirados\"].json.id }};",
+        "query": "UPDATE \"public\".renovacao_anuncios\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = false\nWHERE id = {{ $node[\"Loop Expirados\"].json.id }};",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -30,7 +30,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = false\nWHERE id = {{ $node[\"Loop 8 Dias\"].json.id }};",
+        "query": "UPDATE \"public\".renovacao_anuncios\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = false\nWHERE id = {{ $node[\"Loop 8 Dias\"].json.id }};",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -90,33 +90,10 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "-- 1. INSERÇÃO NA TABELA DE ANALYTICS (A NOSSA FILA DE MENSAGENS)\nINSERT INTO \"Agronegociar_Analytics\".bids_message_queue \n    (user_id, bid_id, nome_produto, email, telefone, tipo, sent, expire, created_at, ultimo_anuncio)\n\n-- 2. SELEÇÃO E FILTRAGEM DOS DADOS BRUTOS\nSELECT DISTINCT ON (b.creator_id) \n    b.creator_id,\n    b.id,\n    p.name,\n    u.email,\n    f.telefone_limpo,\n    CASE \n        WHEN b.expire IS NOT NULL THEN 'expirado' \n        WHEN b.expire IS NULL AND b.created <= now() - interval '8 days' THEN '8dias' \n        ELSE 'ativo' \n    END as tipo,\n    false as sent, \n    b.expire,\n    b.created,\n    b.created as ultimo_anuncio\nFROM cbc.bids b\nLEFT JOIN types.products p ON p.id = b.product_id\nLEFT JOIN cbc.users u ON u.id = b.creator_id\nLEFT JOIN cbc.user_profiles up ON up.user_id = u.id\nLEFT JOIN cbc.profile_phones pp ON pp.profile_id = up.id\nLEFT JOIN cbc.phones phones ON phones.id = pp.phone_id\n\n-- 3. A \"MÁQUINA DE LAVAR\" TELEFONES\nCROSS JOIN LATERAL (\n    SELECT \n        CASE \n            WHEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') LIKE '55%' \n                THEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n            ELSE '55' || ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n        END as telefone_limpo\n) f\n\n-- 4. REGRAS DE NEGÓCIO\nWHERE b.deleted = false \n  AND b.created >= '2022-01-01' \n  AND phones.number IS NOT NULL \n  AND length(f.telefone_limpo) >= 10 \nORDER BY b.creator_id, b.created DESC \n\n-- 5. UPSERT\nON CONFLICT (user_id) \nDO UPDATE SET\n    bid_id          = EXCLUDED.bid_id,\n    nome_produto    = EXCLUDED.nome_produto,\n    telefone        = EXCLUDED.telefone,\n    tipo            = EXCLUDED.tipo,\n    expire          = EXCLUDED.expire,\n    created_at      = EXCLUDED.created_at,\n    ultimo_anuncio  = EXCLUDED.created_at,\n    sent = CASE \n                WHEN \"Agronegociar_Analytics\".bids_message_queue.created_at != EXCLUDED.created_at \n                  OR EXCLUDED.tipo = 'ativo'\n                THEN false \n                ELSE \"Agronegociar_Analytics\".bids_message_queue.sent \n           END,\n    sent_at = CASE \n                WHEN \"Agronegociar_Analytics\".bids_message_queue.created_at != EXCLUDED.created_at\n                  OR EXCLUDED.tipo = 'ativo'\n                THEN NULL \n                ELSE \"Agronegociar_Analytics\".bids_message_queue.sent_at \n              END;",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
-      "position": [
-        -3200,
-        6352
-      ],
-      "id": "6b1a6e55-3d4b-49ab-8bcf-74683c70d1aa",
-      "name": "Atualiza Tabela Analytics1",
-      "alwaysOutputData": true,
-      "credentials": {
-        "postgres": {
-          "id": "htyT6TWxXxRh5mZQ",
-          "name": "Postgres N8N workflow"
-        }
-      }
-    },
-    {
-      "parameters": {
         "rule": {
           "interval": [
             {
-              "triggerAtHour": 12,
-              "triggerAtMinute": 6
+              "triggerAtHour": 22
             }
           ]
         }
@@ -133,7 +110,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id, user_id, bid_id, nome_produto, email, telefone\nFROM \"Agronegociar_Analytics\".bids_message_queue\nWHERE sent = false\n  AND tipo = 'expirado'\nORDER BY created_at DESC\nLIMIT 40;",
+        "query": "SELECT id, user_id, bid_id, nome_produto, email, telefone\nFROM \"public\".renovacao_anuncios\nWHERE sent = false\n  AND tipo = 'expirado'\nORDER BY created_at DESC\nLIMIT 40;",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -146,15 +123,15 @@
       "name": "Busca 30 Expirados1",
       "credentials": {
         "postgres": {
-          "id": "htyT6TWxXxRh5mZQ",
-          "name": "Postgres N8N workflow"
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
         }
       }
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id, user_id, bid_id, nome_produto, email, telefone\nFROM \"Agronegociar_Analytics\".bids_message_queue\nWHERE sent = false\n  AND tipo = '8dias'\nORDER BY created_at DESC\nLIMIT 40;",
+        "query": "SELECT id, user_id, bid_id, nome_produto, email, telefone\nFROM \"public\".renovacao_anuncios\nWHERE sent = false\n  AND tipo = '8dias'\nORDER BY created_at DESC\nLIMIT 40;",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -202,7 +179,7 @@
       "parameters": {
         "resource": "chat-api",
         "instanceName": "AgroNegociar - Comercial",
-        "numbers": "={{ $json.telefone }}"
+        "numbers": "={{ $node[\"Loop Expirados\"].json.telefone }}"
       },
       "type": "n8n-nodes-evolution-api.evolutionApi",
       "typeVersion": 1,
@@ -224,7 +201,7 @@
       "parameters": {
         "resource": "chat-api",
         "instanceName": "AgroNegociar - Comercial",
-        "numbers": "={{ $json.telefone }}"
+        "numbers": "={{ $node[\"Loop 8 Dias\"].json.telefone }}"
       },
       "type": "n8n-nodes-evolution-api.evolutionApi",
       "typeVersion": 1,
@@ -288,7 +265,7 @@
         "resource": "messages-api",
         "instanceName": "AgroNegociar - Comercial",
         "remoteJid": "={{ $node[\"Loop Expirados\"].json.telefone }}",
-        "messageText": "=Olá! Tudo bem? 😊 Sou a Luana, da AgroNegociar.\n\nNotei aqui que o seu anúncio de *{{ $node[\"Loop Expirados\"].json.nome_produto }} (ID:{{ $('Loop Expirados').item.json.bid_id }})* expirou e saiu do ar. Passando para saber se você quer renovar o anúncio?\n\nSe quiser colocar ele no topo das buscas de novo, é só me responder SIM por aqui mesmo! 🌱\n\nSe preferir ver todos os seus itens, o link é este:\n🔗 agronegociar.com.br\n\nBoas negociações! 🤝",
+        "messageText": "=Olá! Tudo bem? 😊 Sou a Luana, da AgroNegociar.\n\nNotei que o seu anúncio de *{{ $node[\"Loop Expirados\"].json.nome_produto }} (ID:{{ $('Loop Expirados').item.json.bid_id }})* expirou. Quer renovar? Se sim, responda SIM por aqui e colocamos ele no topo de novo! 🌱\n\nAproveite para acessar nosso link abaixo e conhecer nossa nova plataforma, com layout moderno e mais funcionalidades para melhorar suas vendas:\n🔗 agronegociar.com.br\n\nBoas negociações! 🤝",
         "options_message": {}
       },
       "type": "n8n-nodes-evolution-api.evolutionApi",
@@ -338,7 +315,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = true\nWHERE id = {{ $node[\"Loop Expirados\"].json.id }};",
+        "query": "UPDATE \"public\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = true\nWHERE id = {{ $node[\"Loop Expirados\"].json.id }};",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -359,7 +336,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE \"Agronegociar_Analytics\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = true\nWHERE id = {{ $node[\"Loop 8 Dias\"].json.id }};",
+        "query": "UPDATE \"public\".bids_message_queue\nSET sent = true,\n    sent_at = now(),\n    tem_whatsapp = true\nWHERE id = {{ $node[\"Loop 8 Dias\"].json.id }};",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -455,6 +432,28 @@
       "id": "adfd099f-a1ee-4b7e-8ea3-f1f71577b1dd",
       "name": "Sticky Note7",
       "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO \"public\".renovacao_anuncios \n    (user_id, bid_id, nome_produto, email, telefone, tipo, sent, expire, created_at, ultimo_anuncio)\nSELECT DISTINCT ON (b.creator_id) \n    b.creator_id,\n    b.id,\n    p.name,\n    u.email,\n    f.telefone_limpo,\n    CASE \n        WHEN b.expire IS NOT NULL THEN 'expirado' \n        WHEN b.expire IS NULL AND b.created <= now() - interval '8 days' THEN '8dias' \n        ELSE 'ativo' \n    END as tipo,\n    false as sent, \n    b.expire,\n    b.created,\n    b.created as ultimo_anuncio\nFROM an_prod_cbc.bids b\nLEFT JOIN an_prod_types.products p ON p.id = b.product_id\nLEFT JOIN an_prod_cbc.users u ON u.id = b.creator_id\nLEFT JOIN an_prod_cbc.user_profiles up ON up.user_id = u.id\nLEFT JOIN an_prod_cbc.profile_phones pp ON pp.profile_id = up.id\nLEFT JOIN an_prod_cbc.phones phones ON phones.id = pp.phone_id\nCROSS JOIN LATERAL (\n    SELECT \n        CASE \n            WHEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') LIKE '55%' \n                THEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n            ELSE '55' || ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n        END as telefone_limpo\n) f\nWHERE b.deleted = false \n  AND b.created >= '2022-01-01' \n  AND phones.number IS NOT NULL \n  AND length(f.telefone_limpo) >= 10 \nORDER BY b.creator_id, b.created DESC \nON CONFLICT (user_id) \nDO UPDATE SET\n    bid_id          = EXCLUDED.bid_id,\n    nome_produto    = EXCLUDED.nome_produto,\n    telefone        = EXCLUDED.telefone,\n    tipo            = EXCLUDED.tipo,\n    expire          = EXCLUDED.expire,\n    created_at      = EXCLUDED.created_at,\n    ultimo_anuncio  = EXCLUDED.created_at,\n    sent = CASE \n                WHEN \"public\".renovacao_anuncios.created_at != EXCLUDED.created_at \n                  OR EXCLUDED.tipo = 'ativo'\n                THEN false \n                ELSE \"public\".renovacao_anuncios.sent \n           END,\n    sent_at = CASE \n                WHEN \"public\".renovacao_anuncios.created_at != EXCLUDED.created_at\n                  OR EXCLUDED.tipo = 'ativo'\n                THEN NULL \n                ELSE \"public\".renovacao_anuncios.sent_at \n              END;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -3200,
+        6352
+      ],
+      "id": "6b1a6e55-3d4b-49ab-8bcf-74683c70d1aa",
+      "name": "Atualiza Tabela Renovação",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
+        }
+      }
     }
   ],
   "connections": {
@@ -502,27 +501,11 @@
         ]
       ]
     },
-    "Atualiza Tabela Analytics1": {
-      "main": [
-        [
-          {
-            "node": "Busca 30 Expirados1",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Busca 30 de 8 Dias1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Schedule Trigger": {
       "main": [
         [
           {
-            "node": "Atualiza Tabela Analytics1",
+            "node": "Atualiza Tabela Renovação",
             "type": "main",
             "index": 0
           }
@@ -698,6 +681,22 @@
           }
         ]
       ]
+    },
+    "Atualiza Tabela Renovação": {
+      "main": [
+        [
+          {
+            "node": "Busca 30 Expirados1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Busca 30 de 8 Dias1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -719,7 +718,7 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "83e540fd-3adc-4e95-a468-5eb3c0210d50",
+  "versionId": "5bae134b-d836-4080-a5d4-98b0a112e675",
   "activeVersionId": null,
   "triggerCount": 1,
   "shared": [
