@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-07T19:24:46.124Z",
+  "updatedAt": "2026-07-14T22:51:49.439Z",
   "createdAt": "2026-07-06T19:25:42.047Z",
   "id": "XJg4iA8Wgs0oQuhy",
   "name": "Eleva - OCR Relatório B3",
@@ -18,7 +18,7 @@
       "type": "n8n-nodes-base.extractFromFile",
       "typeVersion": 1,
       "position": [
-        192,
+        464,
         544
       ],
       "id": "02172330-b6df-4d5e-9c94-2f4967203726",
@@ -53,7 +53,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        448,
+        656,
         528
       ],
       "id": "4a567fc7-5476-43f5-8bd9-709d4c9225de",
@@ -61,34 +61,13 @@
     },
     {
       "parameters": {
-        "inputType": "url",
-        "url": "={{ $('Recebe link do Supabase Storage').first().json.body.fileUrl }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.mistralAi",
-      "typeVersion": 1,
-      "position": [
-        448,
-        736
-      ],
-      "id": "4280bbd0-7cf9-4175-9ae1-e0e03e35135b",
-      "name": "Extract text",
-      "credentials": {
-        "mistralCloudApi": {
-          "id": "V81QQS8om3rLYwbV",
-          "name": "Mistral Cloud account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const allItems = $input.all();\nconst rows = [];\n\n// Função auxiliar para converter strings monetárias em floats limpos para o banco\nfunction parseValue(val) {\n  if (!val) return 0;\n  return parseFloat(val.trim().replace(/\\s/g, '').replace('R$', '').replace(/\\./g, '').replace(',', '.'));\n}\n\nfor (const item of allItems) {\n  const textArray = item.json.text || [];\n  const submittedAt = item.json.submittedAt;\n  const fullText = textArray.join('\\n');\n\n  // 1. EXTRAÇÃO DINÂMICA DA DATA DE REFERÊNCIA (Ex: \"Data: 06/2026\" vira \"2026-06\")\n  let dataReferencia = null;\n  const dateMatch = fullText.match(/Data:\\s*(\\d{2})\\/(\\d{4})/i);\n  if (dateMatch) {\n    dataReferencia = `${dateMatch[2]}-${dateMatch[1]}`;\n  }\n\n  // Normaliza quebras de linha que costumam separar o símbolo R$ dos números\n  const cleanText = fullText\n    .replace(/\\r/g, '')\n    .replace(/\\n\\s*R\\$\\s*/g, ' R$ ')\n    .replace(/R\\$\\s*\\n\\s*/g, ' R$ ');\n\n  // 2. DIVISÃO DINÂMICA POR SEÇÕES (Garante que Proventos não vazem para o Tesouro)\n  const sections = cleanText.split(/(?=Posição\\s*-\\s*|Proventos\\s+recebidos|Negociação)/i);\n\n  for (const sectionText of sections) {\n    if (!sectionText.trim()) continue;\n\n    // Descobre o título real da seção para saber como tratá-la\n    const titleLine = sectionText.split('\\n')[0].trim();\n    let category = titleLine.replace(/^Posição\\s*-\\s*/i, '').split('-')[0].trim();\n\n    // Comprime múltiplos espaços e quebras de linha para estabilizar o comportamento do Regex\n    const cleanSection = sectionText.replace(/\\s+/g, ' ').trim();\n\n    // =========================================================================\n    // REGRA A: RENDA VARIÁVEL (Ações, FIIs, BDRs, ETFs, Fundos)\n    // =========================================================================\n    if (['Ações', 'BDR', 'ETF', 'FII', 'Fundos de Investimentos'].some(cat => titleLine.includes(cat))) {\n      // Captura: Ticker (1), Nome Ativo (2), Tipo (3), Instituição (4), Qtd (5), Preço (6), Total (7)\n      const assetRegex = /([A-Z]{4}\\d{1,2})\\s*-\\s*(.+?)\\s+(UNIT|ON|PN|Cotas|Direito|Fundo|Ações|BDR)\\s+(.+?)\\s+(\\d+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n      let match;\n      while ((match = assetRegex.exec(cleanSection)) !== null) {\n        rows.push({\n          ticker: match[1].toUpperCase(),\n          nome_ativo: match[2].trim(),\n          tipo_ativo: match[3].trim(),\n          instituicao: match[4].trim(), // Captura qualquer corretora/banco textualmente aqui\n          categoria: category,\n          quantidade: parseInt(match[5], 10),\n          preco_fechamento: parseValue(match[6]),\n          valor_atualizado: parseValue(match[7]),\n          tipo_registro: 'Posição Custódia',\n          data_referencia: dataReferencia,\n          submitted_at: submittedAt\n        });\n      }\n    }\n\n    // =========================================================================\n    // REGRA B: TESOURO DIRETO\n    // =========================================================================\n    else if (titleLine.includes('Tesouro Direto')) {\n      // Captura o título do Tesouro, a instituição no meio e os valores no fim de forma posicional\n      const tesouroRegex = /(Tesouro\\s+[A-Za-z0-9\\s]+?)\\s+(.+?)\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n      let match;\n      while ((match = tesouroRegex.exec(cleanSection)) !== null) {\n        rows.push({\n          ticker: 'TESOURO',\n          nome_ativo: match[1].trim(),\n          tipo_ativo: 'Título Público',\n          instituicao: match[2].trim(), // Dinâmico\n          categoria: 'Tesouro Direto',\n          quantidade: parseValue(match[4]),\n          preco_fechamento: 0,\n          valor_atualizado: parseValue(match[6]),\n          tipo_registro: 'Posição Custódia',\n          data_referencia: dataReferencia,\n          submitted_at: submittedAt\n        });\n      }\n    }\n\n    // =========================================================================\n    // REGRA C: RDB (Recibo de Depósito Bancário)\n    // =========================================================================\n    else if (titleLine.includes('RDB')) {\n      const rdbRegex = /(RDB\\s*-?\\s*.+?)\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+(\\d+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n      let match;\n      while ((match = rdbRegex.exec(cleanSection)) !== null) {\n        let rdbText = match[1].replace(/^RDB\\s*-?\\s*/i, '').trim();\n        \n        // Como o PDF costuma duplicar o nome do banco (Produto e Instituição colados), \n        // testamos se a string se repete e dividimos ao meio de forma inteligente\n        let halfLength = Math.floor(rdbText.length / 2);\n        let firstHalf = rdbText.substring(0, halfLength).trim();\n        let secondHalf = rdbText.substring(halfLength).trim();\n        \n        let instituicao = rdbText;\n        let nomeAtivo = match[1].trim();\n\n        if (firstHalf === secondHalf || secondHalf.includes(firstHalf)) {\n          instituicao = firstHalf;\n          nomeAtivo = \"RDB - \" + firstHalf;\n        }\n\n        rows.push({\n          ticker: 'RDB',\n          nome_ativo: nomeAtivo,\n          tipo_ativo: 'Renda Fixa',\n          instituicao: instituicao, // Dinâmico (ex: CRESOL, Nu, etc.)\n          categoria: 'RDB',\n          quantidade: parseInt(match[3], 10),\n          preco_fechamento: parseValue(match[4]),\n          valor_atualizado: parseValue(match[5]),\n          tipo_registro: 'Posição Custódia',\n          data_referencia: dataReferencia,\n          submitted_at: submittedAt\n        });\n      }\n    }\n\n\n    // =========================================================================\n    // REGRA E: NEGOCIAÇÕES NO PERÍODO\n    // =========================================================================\n    else if (titleLine.includes('Negociação') || titleLine.includes('Resumo dos negócios')) {\n      const negociaoRegex = /([A-Z]{4}\\d{1,2}[A-Z]?)\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+(.+?)\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n      let match;\n      while ((match = negociaoRegex.exec(cleanSection)) !== null) {\n        rows.push({\n          ticker: match[1].toUpperCase(),\n          nome_ativo: 'Negociação de Ativo',\n          tipo_ativo: 'Movimentação',\n          instituicao: match[3].trim(),\n          categoria: 'Negociação',\n          quantidade: parseInt(match[6], 10), // Quantidade Líquida\n          preco_fechamento: parseValue(match[7]), // Preço Médio Compra\n          valor_atualizado: parseValue(match[8]), // Preço Médio Venda\n          tipo_registro: 'Negociação',\n          data_referencia: dataReferencia,\n          submitted_at: submittedAt\n        });\n      }\n    }\n  }\n}\n\nreturn rows;"
+        "jsCode": "// ===== Metadados =====\nconst fileName = $('Webhook').item.json.body.fileName || '';\nconst meses = {\n  janeiro: '01', fevereiro: '02', 'março': '03', marco: '03', abril: '04',\n  maio: '05', junho: '06', julho: '07', agosto: '08', setembro: '09',\n  outubro: '10', novembro: '11', dezembro: '12'\n};\nconst submittedAt = null;\n\nfunction num(v) {\n  if (v === undefined || v === null) return 0;\n  const s = String(v).trim();\n  if (s === '' || s === '-') return 0;\n  const n = parseFloat(s.replace(/\\./g, '').replace(',', '.'));\n  return isNaN(n) ? 0 : n;\n}\n\n// ===== Junta todo o texto extraído do PDF =====\nconst allItems = $input.all();\nlet fullText = '';\nfor (const item of allItems) {\n  const t = item.json.text;\n  if (Array.isArray(t)) fullText += t.join('\\n') + '\\n';\n  else if (typeof t === 'string') fullText += t + '\\n';\n}\n\n// Data de referência: \"Data: 06/2026\" do PDF, senão nome do arquivo\nlet dataReferencia = null;\nconst dateMatch = fullText.match(/Data:\\s*(\\d{2})\\/(\\d{4})/i);\nif (dateMatch) {\n  dataReferencia = `${dateMatch[2]}-${dateMatch[1]}`;\n} else {\n  const fileMatch = fileName.match(/(\\d{4})-([a-zçÇ]+)/i);\n  if (fileMatch) {\n    const mes = meses[fileMatch[2].toLowerCase()];\n    if (mes) dataReferencia = `${fileMatch[1]}-${mes}`;\n  }\n}\n\n// Normaliza espaçamento e junta o R$ separado por quebra de linha\nlet clean = fullText\n  .replace(/\\r/g, '')\n  .replace(/\\n\\s*R\\$\\s*/g, ' R$ ')\n  .replace(/R\\$\\s*\\n\\s*/g, ' R$ ')\n  .replace(/\\n/g, ' ')\n  .replace(/\\s+/g, ' ');\n\nconst rows = [];\n\n// Delimitadores de seção (para saber onde cada tabela termina)\nconst todosTitulos = [\n  /Posição\\s*-\\s*Ações/i, /Posição\\s*-\\s*BDR/i, /Posição\\s*-\\s*ETF/i,\n  /Posição\\s*-\\s*FII/i, /Posição\\s*-\\s*Fundos/i, /Posição\\s*-\\s*RDB/i,\n  /Posição\\s*-\\s*Tesouro/i, /Proventos\\s+recebidos/i, /Reembolsos/i,\n  /Negociação/i, /Resumo\\s+dos\\s+negócios/i\n];\n\nfunction fatia(inicioRegex, fimRegexList) {\n  const ini = clean.search(inicioRegex);\n  if (ini === -1) return '';\n  let fim = clean.length;\n  for (const fr of fimRegexList) {\n    const idx = clean.slice(ini + 1).search(fr);\n    if (idx !== -1 && (ini + 1 + idx) < fim) fim = ini + 1 + idx;\n  }\n  return clean.slice(ini, fim);\n}\n\n// =========================================================================\n// RENDA VARIÁVEL: Ações, BDR, ETF, FII, Fundos\n// =========================================================================\nconst secoesRV = [\n  { titulo: /Posição\\s*-\\s*Ações/i, categoria: 'Ações' },\n  { titulo: /Posição\\s*-\\s*BDR/i, categoria: 'BDR' },\n  { titulo: /Posição\\s*-\\s*ETF/i, categoria: 'ETF' },\n  { titulo: /Posição\\s*-\\s*FII/i, categoria: 'FII' },\n  { titulo: /Posição\\s*-\\s*Fundos/i, categoria: 'Fundos de Investimentos' }\n];\n\nconst assetRegex = /([A-Z][A-Z0-9]{2,7})\\s*-\\s*(.+?)\\s+(UNIT|ON|PN|Cotas|Direito|Fundo|Ações|BDR)\\s+(NU\\s+INVESTIMENTOS.+?CTVM)\\s+(\\d+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n\nfor (const sec of secoesRV) {\n  const fims = todosTitulos.filter(t => t.source !== sec.titulo.source);\n  let texto = fatia(sec.titulo, fims);\n  if (!texto) continue;\n\n  // Remove título + cabeçalho da tabela (até \"Valor Atualizado\") de todas as páginas\n  texto = texto.replace(/Posição\\s*-\\s*[^]*?Valor\\s+Atualizado/gi, '');\n\n  let m;\n  assetRegex.lastIndex = 0;\n  while ((m = assetRegex.exec(texto)) !== null) {\n    rows.push({\n      ticker: m[1].toUpperCase(),\n      nome_ativo: m[2].trim(),\n      tipo_ativo: m[3].trim(),\n      instituicao: m[4].replace(/\\s+/g, ' ').trim(),\n      categoria: sec.categoria,\n      quantidade: num(m[5]),\n      preco_fechamento: num(m[6]),\n      valor_atualizado: num(m[7]),\n      tipo_registro: 'Posição Custódia',\n      data_referencia: dataReferencia,\n      submitted_at: submittedAt\n    });\n  }\n}\n\n// =========================================================================\n// RDB\n// =========================================================================\n{\n  let texto = fatia(/Posição\\s*-\\s*RDB/i,\n    [/Posição\\s*-\\s*Tesouro/i, /Proventos/i, /Negociação/i]);\n  if (texto) {\n    // Remove o cabeçalho da tabela de TODAS as páginas (flag g)\n    texto = texto.replace(/Posição\\s*-\\s*RDB[^]*?Valor\\s+atualizado/gi, '');\n\n    const rdbRegex = /RDB\\s*-\\s*(.+?)\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+(\\d+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n    let m;\n    while ((m = rdbRegex.exec(texto)) !== null) {\n      let bloco = m[1].replace(/\\s+/g, ' ').trim();\n      let metade = Math.floor(bloco.length / 2);\n      let inst = bloco.substring(0, metade).trim();\n      inst = inst.replace(/\\s*RDB\\s*-?\\s*$/i, '').trim();\n      rows.push({\n        ticker: 'RDB',\n        nome_ativo: ('RDB - ' + inst).replace(/\\s+/g, ' ').trim(),\n        tipo_ativo: 'Renda Fixa',\n        instituicao: inst,\n        categoria: 'RDB',\n        quantidade: num(m[3]),\n        preco_fechamento: num(m[4]),\n        valor_atualizado: num(m[5]),\n        tipo_registro: 'Posição Custódia',\n        data_referencia: dataReferencia,\n        submitted_at: submittedAt\n      });\n    }\n  }\n}\n\n// =========================================================================\n// TESOURO DIRETO\n// preco_fechamento = valor aplicado (coluna do PDF)\n// =========================================================================\n{\n  const texto = fatia(/Posição\\s*-\\s*Tesouro/i,\n    [/Proventos/i, /Reembolsos/i, /Negociação/i]);\n  if (texto) {\n    const tesRegex = /(Tesouro\\s+[A-Za-zÀ-ú]+\\s+\\d{4})\\s+(.+?)\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n    let m;\n    while ((m = tesRegex.exec(texto)) !== null) {\n      rows.push({\n        ticker: 'TESOURO',\n        nome_ativo: m[1].trim(),\n        tipo_ativo: 'Título Público',\n        instituicao: m[2].replace(/\\s+/g, ' ').trim(),\n        categoria: 'Tesouro Direto',\n        quantidade: num(m[4]),\n        preco_fechamento: num(m[5]),   // valor aplicado\n        valor_atualizado: num(m[6]),   // valor atualizado\n        tipo_registro: 'Posição Custódia',\n        data_referencia: dataReferencia,\n        submitted_at: submittedAt\n      });\n    }\n  }\n}\n\nreturn rows.map(r => ({ json: r }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        688,
-        512
+        896,
+        544
       ],
       "id": "bf04f401-d073-48df-9828-9d3427df0b68",
       "name": "Code in JavaScript"
@@ -102,8 +81,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -208,
-        544
+        -304,
+        1120
       ],
       "id": "2944f085-812a-4767-b23c-348868147c59",
       "name": "Webhook",
@@ -123,8 +102,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -16,
-        544
+        -128,
+        1120
       ],
       "id": "305dc909-fbcb-48d6-9651-9e54776047b9",
       "name": "Baixa Arquivo do Supabase Storage"
@@ -172,8 +151,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        928,
-        512
+        1136,
+        544
       ],
       "id": "6f6674b3-c9b6-4bfe-9aa4-c8b8f620d98b",
       "name": "Upload pra Plataforma4",
@@ -220,11 +199,277 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1168,
-        512
+        1376,
+        544
       ],
       "id": "73f5d619-bd3a-4721-83db-a794c13ec35b",
       "name": "HTTP Request",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5baf5eb8-762c-47f2-baa9-b54532e33894",
+              "leftValue": "={{ $json.body.file_name }}",
+              "rightValue": "pdf",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        96,
+        1120
+      ],
+      "id": "432f727b-99a9-4e88-a7c9-65b58f443ada",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "binaryPropertyName": "=data",
+        "options": {
+          "sheetName": "Posição - BDR"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        464,
+        928
+      ],
+      "id": "17bda7be-f4c4-4764-a80a-2bf1a41ce77f",
+      "name": "Extrai BDR",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "binaryPropertyName": "=data",
+        "options": {
+          "sheetName": "Posição - ETF"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        464,
+        1088
+      ],
+      "id": "07920155-ab8a-4007-be16-562410f7562b",
+      "name": "Extrai ETF",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "binaryPropertyName": "=data",
+        "options": {
+          "sheetName": "Posição - Fundos"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        464,
+        1232
+      ],
+      "id": "dfea4552-1a4e-495c-b08c-2e73e4d5f3b0",
+      "name": "Extrai Fundos",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "binaryPropertyName": "=data",
+        "options": {
+          "sheetName": "Posição - Renda Fixa"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        464,
+        1392
+      ],
+      "id": "7585e629-4f3b-4ad6-aa17-0154fc9885f9",
+      "name": "Extrai Renda Fixa",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "binaryPropertyName": "=data",
+        "options": {
+          "sheetName": "Posição - Tesouro Direto"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        464,
+        1552
+      ],
+      "id": "1931562a-91be-4dcb-adf4-76bcd9c25767",
+      "name": "Extrai Tesouro Direto",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "binaryPropertyName": "=data",
+        "options": {
+          "sheetName": "Posição - Ações"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        464,
+        768
+      ],
+      "id": "0052f245-e57a-4ec3-b89a-193b27735604",
+      "name": "Extrai Ações",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "numberInputs": 6
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1232,
+        1088
+      ],
+      "id": "c398caf5-6624-4308-9f9b-392f65eaca95",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fileName = $('Webhook').item.json.body.fileName || '';\nconst meses = {\n  janeiro: '01', fevereiro: '02', 'março': '03', marco: '03', abril: '04',\n  maio: '05', junho: '06', julho: '07', agosto: '08', setembro: '09',\n  outubro: '10', novembro: '11', dezembro: '12'\n};\nlet dataReferencia = null;\nconst fileMatch = fileName.match(/(\\d{4})-([a-zçÇ]+)/i);\nif (fileMatch) {\n  const mes = meses[fileMatch[2].toLowerCase()];\n  if (mes) dataReferencia = `${fileMatch[1]}-${mes}`;\n}\nconst submittedAt = null;\n\nfunction num(v) {\n  if (v === undefined || v === null) return 0;\n  if (typeof v === 'number') return v;\n  let s = String(v).trim();\n  if (s === '' || s === '-') return 0;\n  // Formato BR (1.234,56): tem vírgula → ponto é milhar, vírgula é decimal\n  if (s.includes(',')) {\n    s = s.replace(/\\./g, '').replace(',', '.');\n  }\n  // Só ponto (64.46): ponto já é o decimal, não mexe\n  const n = parseFloat(s);\n  return isNaN(n) ? 0 : n;\n}\n\nfunction rowsFrom(nodeName) {\n  try { return $(nodeName).all().map(i => i.json); } catch (e) { return []; }\n}\nconst rows = [];\nconst posicaoNodes = {\n  'Extrai Ações': 'Ações',\n  'Extrai BDR': 'BDR',\n  'Extrai ETF': 'ETF',\n  'Extrai Fundos': 'Fundos de Investimentos'\n};\nfor (const [nodeName, categoria] of Object.entries(posicaoNodes)) {\n  for (const r of rowsFrom(nodeName)) {\n    if (!r['Código de Negociação']) continue;\n    const produto = String(r['Produto'] || '').trim();\n    const partes = produto.split(' - ');\n    const nome = partes.length > 1 ? partes.slice(1).join(' - ').trim() : produto;\n    rows.push({\n      ticker: String(r['Código de Negociação']).toUpperCase(),\n      nome_ativo: nome,\n      tipo_ativo: r['Tipo'] || null,\n      instituicao: r['Instituição'] || null,\n      categoria,\n      quantidade: num(r['Quantidade']),\n      preco_fechamento: num(r['Preço de Fechamento']),\n      valor_atualizado: num(r['Valor Atualizado']),\n      tipo_registro: 'Posição Custódia',\n      data_referencia: dataReferencia,\n      submitted_at: submittedAt\n    });\n  }\n}\nfor (const r of rowsFrom('Extrai Renda Fixa')) {\n  if (!r['Código']) continue;\n  const produto = String(r['Produto'] || '').trim();\n  rows.push({\n    ticker: 'RDB',\n    nome_ativo: produto,\n    tipo_ativo: 'Renda Fixa',\n    instituicao: r['Instituição'] || null,\n    categoria: produto.toUpperCase().startsWith('RDB') ? 'RDB' : 'Renda Fixa',\n    quantidade: num(r['Quantidade']),\n    preco_fechamento: num(r['Preço Atualizado MTM']) || num(r['Preço Atualizado CURVA']),\n    valor_atualizado: num(r['Valor Atualizado MTM']) || num(r['Valor Atualizado CURVA']),\n    tipo_registro: 'Posição Custódia',\n    data_referencia: dataReferencia,\n    submitted_at: submittedAt\n  });\n}\nfor (const r of rowsFrom('Extrai Tesouro Direto')) {\n  if (!r['Produto']) continue;\n  const quantidade = num(r['Quantidade']);\n  const valorAtualizado = num(r['Valor Atualizado']);\n  rows.push({\n    ticker: 'TESOURO',\n    nome_ativo: r['Produto'],\n    tipo_ativo: 'Título Público',\n    instituicao: r['Instituição'] || null,\n    categoria: 'Tesouro Direto',\n    quantidade,\n    preco_fechamento: quantidade > 0 ? valorAtualizado / quantidade : 0,\n    valor_atualizado: valorAtualizado,\n    tipo_registro: 'Posição Custódia',\n    data_referencia: dataReferencia,\n    submitted_at: submittedAt\n  });\n}\nfor (const r of rowsFrom('Extrai Negociações')) {\n  if (!r['Código de Negociação']) continue;\n  rows.push({\n    ticker: String(r['Código de Negociação']).toUpperCase(),\n    nome_ativo: 'Negociação de Ativo',\n    tipo_ativo: 'Movimentação',\n    instituicao: r['Instituição'] || null,\n    categoria: 'Negociação',\n    quantidade: num(r['Quantidade (Líquida)']),\n    preco_fechamento: num(r['Preço Médio (Compra)']),\n    valor_atualizado: num(r['Preço Médio (Venda)']),\n    tipo_registro: 'Negociação',\n    data_referencia: dataReferencia,\n    submitted_at: submittedAt\n  });\n}\nreturn rows.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        1152
+      ],
+      "id": "139fc409-c2c5-44e9-966b-e1b3c9565b73",
+      "name": "Code in JavaScript1",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "tableId": "investment_assets",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "user_id",
+              "fieldValue": "={{ $('Webhook').first().json.body.user_id }}"
+            },
+            {
+              "fieldId": "owner_id",
+              "fieldValue": "={{ $('Webhook').first().json.body.ownerId }}"
+            },
+            {
+              "fieldId": "name",
+              "fieldValue": "={{ $json.ticker }}"
+            },
+            {
+              "fieldId": "asset_class",
+              "fieldValue": "={{ $json.categoria }}"
+            },
+            {
+              "fieldId": "institution",
+              "fieldValue": "={{ $json.instituicao }}"
+            },
+            {
+              "fieldId": "liquidity",
+              "fieldValue": "=null"
+            },
+            {
+              "fieldId": "invested_amount",
+              "fieldValue": "={{ $json.valor_atualizado }}"
+            },
+            {
+              "fieldId": "current_amount",
+              "fieldValue": "={{ $json.valor_atualizado }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        1152
+      ],
+      "id": "83155f68-5e31-4eef-99fc-8ad6aa92c522",
+      "name": "Upload pra Plataforma",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "kajlEDhCYmeLcxgQ",
+          "name": "ELEVA - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qsteyqjzsljsomcqidwf.supabase.co/functions/v1/b3-import-callback",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.callback_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "jobId",
+              "value": "={{ $('Webhook').first().json.body.jobId }}"
+            },
+            {
+              "name": "status",
+              "value": "completed"
+            },
+            {
+              "name": "imported_count",
+              "value": "={{ $('Upload pra Plataforma').all().length }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1968,
+        1152
+      ],
+      "id": "16d3b65e-e93b-4e51-92a7-173a990c8411",
+      "name": "HTTP Request1",
       "executeOnce": true
     }
   ],
@@ -238,13 +483,7 @@
             "index": 0
           }
         ],
-        [
-          {
-            "node": "Extract text",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Verifica se extraiu texto do documento": {
@@ -256,11 +495,6 @@
             "index": 0
           }
         ],
-        []
-      ]
-    },
-    "Extract text": {
-      "main": [
         []
       ]
     },
@@ -279,7 +513,7 @@
       "main": [
         [
           {
-            "node": "Extrai os dados do pdf separando por página",
+            "node": "If",
             "type": "main",
             "index": 0
           }
@@ -307,15 +541,163 @@
           }
         ]
       ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Extrai os dados do pdf separando por página",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extrai Ações",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extrai BDR",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extrai ETF",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extrai Fundos",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extrai Renda Fixa",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extrai Tesouro Direto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai Ações": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai BDR": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Extrai ETF": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Extrai Fundos": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Extrai Renda Fixa": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Extrai Tesouro Direto": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Upload pra Plataforma",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload pra Plataforma": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
   },
   "staticData": null,
   "meta": null,
-  "versionId": "846d449f-c35a-4186-862a-72536f0cf648",
-  "activeVersionId": "846d449f-c35a-4186-862a-72536f0cf648",
+  "versionId": "7219214d-3a4f-446d-94a7-fdefc309e1a5",
+  "activeVersionId": "7219214d-3a4f-446d-94a7-fdefc309e1a5",
   "triggerCount": 1,
   "shared": [
     {
@@ -327,9 +709,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-07-07T19:24:46.126Z",
-    "createdAt": "2026-07-07T19:24:46.126Z",
-    "versionId": "846d449f-c35a-4186-862a-72536f0cf648",
+    "updatedAt": "2026-07-14T22:51:49.442Z",
+    "createdAt": "2026-07-14T22:51:49.442Z",
+    "versionId": "7219214d-3a4f-446d-94a7-fdefc309e1a5",
     "workflowId": "XJg4iA8Wgs0oQuhy",
     "nodes": [
       {
@@ -344,7 +726,7 @@
         "type": "n8n-nodes-base.extractFromFile",
         "typeVersion": 1,
         "position": [
-          192,
+          464,
           544
         ],
         "id": "02172330-b6df-4d5e-9c94-2f4967203726",
@@ -379,7 +761,7 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.3,
         "position": [
-          448,
+          656,
           528
         ],
         "id": "4a567fc7-5476-43f5-8bd9-709d4c9225de",
@@ -387,34 +769,13 @@
       },
       {
         "parameters": {
-          "inputType": "url",
-          "url": "={{ $('Recebe link do Supabase Storage').first().json.body.fileUrl }}",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.mistralAi",
-        "typeVersion": 1,
-        "position": [
-          448,
-          736
-        ],
-        "id": "4280bbd0-7cf9-4175-9ae1-e0e03e35135b",
-        "name": "Extract text",
-        "credentials": {
-          "mistralCloudApi": {
-            "id": "V81QQS8om3rLYwbV",
-            "name": "Mistral Cloud account"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "jsCode": "const allItems = $input.all();\nconst rows = [];\n\n// Função auxiliar para converter strings monetárias em floats limpos para o banco\nfunction parseValue(val) {\n  if (!val) return 0;\n  return parseFloat(val.trim().replace(/\\s/g, '').replace('R$', '').replace(/\\./g, '').replace(',', '.'));\n}\n\nfor (const item of allItems) {\n  const textArray = item.json.text || [];\n  const submittedAt = item.json.submittedAt;\n  const fullText = textArray.join('\\n');\n\n  // 1. EXTRAÇÃO DINÂMICA DA DATA DE REFERÊNCIA (Ex: \"Data: 06/2026\" vira \"2026-06\")\n  let dataReferencia = null;\n  const dateMatch = fullText.match(/Data:\\s*(\\d{2})\\/(\\d{4})/i);\n  if (dateMatch) {\n    dataReferencia = `${dateMatch[2]}-${dateMatch[1]}`;\n  }\n\n  // Normaliza quebras de linha que costumam separar o símbolo R$ dos números\n  const cleanText = fullText\n    .replace(/\\r/g, '')\n    .replace(/\\n\\s*R\\$\\s*/g, ' R$ ')\n    .replace(/R\\$\\s*\\n\\s*/g, ' R$ ');\n\n  // 2. DIVISÃO DINÂMICA POR SEÇÕES (Garante que Proventos não vazem para o Tesouro)\n  const sections = cleanText.split(/(?=Posição\\s*-\\s*|Proventos\\s+recebidos|Negociação)/i);\n\n  for (const sectionText of sections) {\n    if (!sectionText.trim()) continue;\n\n    // Descobre o título real da seção para saber como tratá-la\n    const titleLine = sectionText.split('\\n')[0].trim();\n    let category = titleLine.replace(/^Posição\\s*-\\s*/i, '').split('-')[0].trim();\n\n    // Comprime múltiplos espaços e quebras de linha para estabilizar o comportamento do Regex\n    const cleanSection = sectionText.replace(/\\s+/g, ' ').trim();\n\n    // =========================================================================\n    // REGRA A: RENDA VARIÁVEL (Ações, FIIs, BDRs, ETFs, Fundos)\n    // =========================================================================\n    if (['Ações', 'BDR', 'ETF', 'FII', 'Fundos de Investimentos'].some(cat => titleLine.includes(cat))) {\n      // Captura: Ticker (1), Nome Ativo (2), Tipo (3), Instituição (4), Qtd (5), Preço (6), Total (7)\n      const assetRegex = /([A-Z]{4}\\d{1,2})\\s*-\\s*(.+?)\\s+(UNIT|ON|PN|Cotas|Direito|Fundo|Ações|BDR)\\s+(.+?)\\s+(\\d+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n      let match;\n      while ((match = assetRegex.exec(cleanSection)) !== null) {\n        rows.push({\n          ticker: match[1].toUpperCase(),\n          nome_ativo: match[2].trim(),\n          tipo_ativo: match[3].trim(),\n          instituicao: match[4].trim(), // Captura qualquer corretora/banco textualmente aqui\n          categoria: category,\n          quantidade: parseInt(match[5], 10),\n          preco_fechamento: parseValue(match[6]),\n          valor_atualizado: parseValue(match[7]),\n          tipo_registro: 'Posição Custódia',\n          data_referencia: dataReferencia,\n          submitted_at: submittedAt\n        });\n      }\n    }\n\n    // =========================================================================\n    // REGRA B: TESOURO DIRETO\n    // =========================================================================\n    else if (titleLine.includes('Tesouro Direto')) {\n      // Captura o título do Tesouro, a instituição no meio e os valores no fim de forma posicional\n      const tesouroRegex = /(Tesouro\\s+[A-Za-z0-9\\s]+?)\\s+(.+?)\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n      let match;\n      while ((match = tesouroRegex.exec(cleanSection)) !== null) {\n        rows.push({\n          ticker: 'TESOURO',\n          nome_ativo: match[1].trim(),\n          tipo_ativo: 'Título Público',\n          instituicao: match[2].trim(), // Dinâmico\n          categoria: 'Tesouro Direto',\n          quantidade: parseValue(match[4]),\n          preco_fechamento: 0,\n          valor_atualizado: parseValue(match[6]),\n          tipo_registro: 'Posição Custódia',\n          data_referencia: dataReferencia,\n          submitted_at: submittedAt\n        });\n      }\n    }\n\n    // =========================================================================\n    // REGRA C: RDB (Recibo de Depósito Bancário)\n    // =========================================================================\n    else if (titleLine.includes('RDB')) {\n      const rdbRegex = /(RDB\\s*-?\\s*.+?)\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+(\\d+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n      let match;\n      while ((match = rdbRegex.exec(cleanSection)) !== null) {\n        let rdbText = match[1].replace(/^RDB\\s*-?\\s*/i, '').trim();\n        \n        // Como o PDF costuma duplicar o nome do banco (Produto e Instituição colados), \n        // testamos se a string se repete e dividimos ao meio de forma inteligente\n        let halfLength = Math.floor(rdbText.length / 2);\n        let firstHalf = rdbText.substring(0, halfLength).trim();\n        let secondHalf = rdbText.substring(halfLength).trim();\n        \n        let instituicao = rdbText;\n        let nomeAtivo = match[1].trim();\n\n        if (firstHalf === secondHalf || secondHalf.includes(firstHalf)) {\n          instituicao = firstHalf;\n          nomeAtivo = \"RDB - \" + firstHalf;\n        }\n\n        rows.push({\n          ticker: 'RDB',\n          nome_ativo: nomeAtivo,\n          tipo_ativo: 'Renda Fixa',\n          instituicao: instituicao, // Dinâmico (ex: CRESOL, Nu, etc.)\n          categoria: 'RDB',\n          quantidade: parseInt(match[3], 10),\n          preco_fechamento: parseValue(match[4]),\n          valor_atualizado: parseValue(match[5]),\n          tipo_registro: 'Posição Custódia',\n          data_referencia: dataReferencia,\n          submitted_at: submittedAt\n        });\n      }\n    }\n\n\n    // =========================================================================\n    // REGRA E: NEGOCIAÇÕES NO PERÍODO\n    // =========================================================================\n    else if (titleLine.includes('Negociação') || titleLine.includes('Resumo dos negócios')) {\n      const negociaoRegex = /([A-Z]{4}\\d{1,2}[A-Z]?)\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+(.+?)\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n      let match;\n      while ((match = negociaoRegex.exec(cleanSection)) !== null) {\n        rows.push({\n          ticker: match[1].toUpperCase(),\n          nome_ativo: 'Negociação de Ativo',\n          tipo_ativo: 'Movimentação',\n          instituicao: match[3].trim(),\n          categoria: 'Negociação',\n          quantidade: parseInt(match[6], 10), // Quantidade Líquida\n          preco_fechamento: parseValue(match[7]), // Preço Médio Compra\n          valor_atualizado: parseValue(match[8]), // Preço Médio Venda\n          tipo_registro: 'Negociação',\n          data_referencia: dataReferencia,\n          submitted_at: submittedAt\n        });\n      }\n    }\n  }\n}\n\nreturn rows;"
+          "jsCode": "// ===== Metadados =====\nconst fileName = $('Webhook').item.json.body.fileName || '';\nconst meses = {\n  janeiro: '01', fevereiro: '02', 'março': '03', marco: '03', abril: '04',\n  maio: '05', junho: '06', julho: '07', agosto: '08', setembro: '09',\n  outubro: '10', novembro: '11', dezembro: '12'\n};\nconst submittedAt = null;\n\nfunction num(v) {\n  if (v === undefined || v === null) return 0;\n  const s = String(v).trim();\n  if (s === '' || s === '-') return 0;\n  const n = parseFloat(s.replace(/\\./g, '').replace(',', '.'));\n  return isNaN(n) ? 0 : n;\n}\n\n// ===== Junta todo o texto extraído do PDF =====\nconst allItems = $input.all();\nlet fullText = '';\nfor (const item of allItems) {\n  const t = item.json.text;\n  if (Array.isArray(t)) fullText += t.join('\\n') + '\\n';\n  else if (typeof t === 'string') fullText += t + '\\n';\n}\n\n// Data de referência: \"Data: 06/2026\" do PDF, senão nome do arquivo\nlet dataReferencia = null;\nconst dateMatch = fullText.match(/Data:\\s*(\\d{2})\\/(\\d{4})/i);\nif (dateMatch) {\n  dataReferencia = `${dateMatch[2]}-${dateMatch[1]}`;\n} else {\n  const fileMatch = fileName.match(/(\\d{4})-([a-zçÇ]+)/i);\n  if (fileMatch) {\n    const mes = meses[fileMatch[2].toLowerCase()];\n    if (mes) dataReferencia = `${fileMatch[1]}-${mes}`;\n  }\n}\n\n// Normaliza espaçamento e junta o R$ separado por quebra de linha\nlet clean = fullText\n  .replace(/\\r/g, '')\n  .replace(/\\n\\s*R\\$\\s*/g, ' R$ ')\n  .replace(/R\\$\\s*\\n\\s*/g, ' R$ ')\n  .replace(/\\n/g, ' ')\n  .replace(/\\s+/g, ' ');\n\nconst rows = [];\n\n// Delimitadores de seção (para saber onde cada tabela termina)\nconst todosTitulos = [\n  /Posição\\s*-\\s*Ações/i, /Posição\\s*-\\s*BDR/i, /Posição\\s*-\\s*ETF/i,\n  /Posição\\s*-\\s*FII/i, /Posição\\s*-\\s*Fundos/i, /Posição\\s*-\\s*RDB/i,\n  /Posição\\s*-\\s*Tesouro/i, /Proventos\\s+recebidos/i, /Reembolsos/i,\n  /Negociação/i, /Resumo\\s+dos\\s+negócios/i\n];\n\nfunction fatia(inicioRegex, fimRegexList) {\n  const ini = clean.search(inicioRegex);\n  if (ini === -1) return '';\n  let fim = clean.length;\n  for (const fr of fimRegexList) {\n    const idx = clean.slice(ini + 1).search(fr);\n    if (idx !== -1 && (ini + 1 + idx) < fim) fim = ini + 1 + idx;\n  }\n  return clean.slice(ini, fim);\n}\n\n// =========================================================================\n// RENDA VARIÁVEL: Ações, BDR, ETF, FII, Fundos\n// =========================================================================\nconst secoesRV = [\n  { titulo: /Posição\\s*-\\s*Ações/i, categoria: 'Ações' },\n  { titulo: /Posição\\s*-\\s*BDR/i, categoria: 'BDR' },\n  { titulo: /Posição\\s*-\\s*ETF/i, categoria: 'ETF' },\n  { titulo: /Posição\\s*-\\s*FII/i, categoria: 'FII' },\n  { titulo: /Posição\\s*-\\s*Fundos/i, categoria: 'Fundos de Investimentos' }\n];\n\nconst assetRegex = /([A-Z][A-Z0-9]{2,7})\\s*-\\s*(.+?)\\s+(UNIT|ON|PN|Cotas|Direito|Fundo|Ações|BDR)\\s+(NU\\s+INVESTIMENTOS.+?CTVM)\\s+(\\d+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n\nfor (const sec of secoesRV) {\n  const fims = todosTitulos.filter(t => t.source !== sec.titulo.source);\n  let texto = fatia(sec.titulo, fims);\n  if (!texto) continue;\n\n  // Remove título + cabeçalho da tabela (até \"Valor Atualizado\") de todas as páginas\n  texto = texto.replace(/Posição\\s*-\\s*[^]*?Valor\\s+Atualizado/gi, '');\n\n  let m;\n  assetRegex.lastIndex = 0;\n  while ((m = assetRegex.exec(texto)) !== null) {\n    rows.push({\n      ticker: m[1].toUpperCase(),\n      nome_ativo: m[2].trim(),\n      tipo_ativo: m[3].trim(),\n      instituicao: m[4].replace(/\\s+/g, ' ').trim(),\n      categoria: sec.categoria,\n      quantidade: num(m[5]),\n      preco_fechamento: num(m[6]),\n      valor_atualizado: num(m[7]),\n      tipo_registro: 'Posição Custódia',\n      data_referencia: dataReferencia,\n      submitted_at: submittedAt\n    });\n  }\n}\n\n// =========================================================================\n// RDB\n// =========================================================================\n{\n  let texto = fatia(/Posição\\s*-\\s*RDB/i,\n    [/Posição\\s*-\\s*Tesouro/i, /Proventos/i, /Negociação/i]);\n  if (texto) {\n    // Remove o cabeçalho da tabela de TODAS as páginas (flag g)\n    texto = texto.replace(/Posição\\s*-\\s*RDB[^]*?Valor\\s+atualizado/gi, '');\n\n    const rdbRegex = /RDB\\s*-\\s*(.+?)\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+(\\d+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n    let m;\n    while ((m = rdbRegex.exec(texto)) !== null) {\n      let bloco = m[1].replace(/\\s+/g, ' ').trim();\n      let metade = Math.floor(bloco.length / 2);\n      let inst = bloco.substring(0, metade).trim();\n      inst = inst.replace(/\\s*RDB\\s*-?\\s*$/i, '').trim();\n      rows.push({\n        ticker: 'RDB',\n        nome_ativo: ('RDB - ' + inst).replace(/\\s+/g, ' ').trim(),\n        tipo_ativo: 'Renda Fixa',\n        instituicao: inst,\n        categoria: 'RDB',\n        quantidade: num(m[3]),\n        preco_fechamento: num(m[4]),\n        valor_atualizado: num(m[5]),\n        tipo_registro: 'Posição Custódia',\n        data_referencia: dataReferencia,\n        submitted_at: submittedAt\n      });\n    }\n  }\n}\n\n// =========================================================================\n// TESOURO DIRETO\n// preco_fechamento = valor aplicado (coluna do PDF)\n// =========================================================================\n{\n  const texto = fatia(/Posição\\s*-\\s*Tesouro/i,\n    [/Proventos/i, /Reembolsos/i, /Negociação/i]);\n  if (texto) {\n    const tesRegex = /(Tesouro\\s+[A-Za-zÀ-ú]+\\s+\\d{4})\\s+(.+?)\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)\\s+R\\$\\s*([\\d.,]+)/gi;\n    let m;\n    while ((m = tesRegex.exec(texto)) !== null) {\n      rows.push({\n        ticker: 'TESOURO',\n        nome_ativo: m[1].trim(),\n        tipo_ativo: 'Título Público',\n        instituicao: m[2].replace(/\\s+/g, ' ').trim(),\n        categoria: 'Tesouro Direto',\n        quantidade: num(m[4]),\n        preco_fechamento: num(m[5]),   // valor aplicado\n        valor_atualizado: num(m[6]),   // valor atualizado\n        tipo_registro: 'Posição Custódia',\n        data_referencia: dataReferencia,\n        submitted_at: submittedAt\n      });\n    }\n  }\n}\n\nreturn rows.map(r => ({ json: r }));"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          688,
-          512
+          896,
+          544
         ],
         "id": "bf04f401-d073-48df-9828-9d3427df0b68",
         "name": "Code in JavaScript"
@@ -428,8 +789,8 @@
         "type": "n8n-nodes-base.webhook",
         "typeVersion": 2.1,
         "position": [
-          -208,
-          544
+          -304,
+          1120
         ],
         "id": "2944f085-812a-4767-b23c-348868147c59",
         "name": "Webhook",
@@ -449,8 +810,8 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          -16,
-          544
+          -128,
+          1120
         ],
         "id": "305dc909-fbcb-48d6-9651-9e54776047b9",
         "name": "Baixa Arquivo do Supabase Storage"
@@ -498,8 +859,8 @@
         "type": "n8n-nodes-base.supabase",
         "typeVersion": 1,
         "position": [
-          928,
-          512
+          1136,
+          544
         ],
         "id": "6f6674b3-c9b6-4bfe-9aa4-c8b8f620d98b",
         "name": "Upload pra Plataforma4",
@@ -546,11 +907,277 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.3,
         "position": [
-          1168,
-          512
+          1376,
+          544
         ],
         "id": "73f5d619-bd3a-4721-83db-a794c13ec35b",
         "name": "HTTP Request",
+        "executeOnce": true
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "5baf5eb8-762c-47f2-baa9-b54532e33894",
+                "leftValue": "={{ $json.body.file_name }}",
+                "rightValue": "pdf",
+                "operator": {
+                  "type": "string",
+                  "operation": "endsWith"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          96,
+          1120
+        ],
+        "id": "432f727b-99a9-4e88-a7c9-65b58f443ada",
+        "name": "If"
+      },
+      {
+        "parameters": {
+          "operation": "xlsx",
+          "binaryPropertyName": "=data",
+          "options": {
+            "sheetName": "Posição - BDR"
+          }
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          464,
+          928
+        ],
+        "id": "17bda7be-f4c4-4764-a80a-2bf1a41ce77f",
+        "name": "Extrai BDR",
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "operation": "xlsx",
+          "binaryPropertyName": "=data",
+          "options": {
+            "sheetName": "Posição - ETF"
+          }
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          464,
+          1088
+        ],
+        "id": "07920155-ab8a-4007-be16-562410f7562b",
+        "name": "Extrai ETF",
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "operation": "xlsx",
+          "binaryPropertyName": "=data",
+          "options": {
+            "sheetName": "Posição - Fundos"
+          }
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          464,
+          1232
+        ],
+        "id": "dfea4552-1a4e-495c-b08c-2e73e4d5f3b0",
+        "name": "Extrai Fundos",
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "operation": "xlsx",
+          "binaryPropertyName": "=data",
+          "options": {
+            "sheetName": "Posição - Renda Fixa"
+          }
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          464,
+          1392
+        ],
+        "id": "7585e629-4f3b-4ad6-aa17-0154fc9885f9",
+        "name": "Extrai Renda Fixa",
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "operation": "xlsx",
+          "binaryPropertyName": "=data",
+          "options": {
+            "sheetName": "Posição - Tesouro Direto"
+          }
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          464,
+          1552
+        ],
+        "id": "1931562a-91be-4dcb-adf4-76bcd9c25767",
+        "name": "Extrai Tesouro Direto",
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "operation": "xlsx",
+          "binaryPropertyName": "=data",
+          "options": {
+            "sheetName": "Posição - Ações"
+          }
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          464,
+          768
+        ],
+        "id": "0052f245-e57a-4ec3-b89a-193b27735604",
+        "name": "Extrai Ações",
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "numberInputs": 6
+        },
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          1232,
+          1088
+        ],
+        "id": "c398caf5-6624-4308-9f9b-392f65eaca95",
+        "name": "Merge"
+      },
+      {
+        "parameters": {
+          "jsCode": "const fileName = $('Webhook').item.json.body.fileName || '';\nconst meses = {\n  janeiro: '01', fevereiro: '02', 'março': '03', marco: '03', abril: '04',\n  maio: '05', junho: '06', julho: '07', agosto: '08', setembro: '09',\n  outubro: '10', novembro: '11', dezembro: '12'\n};\nlet dataReferencia = null;\nconst fileMatch = fileName.match(/(\\d{4})-([a-zçÇ]+)/i);\nif (fileMatch) {\n  const mes = meses[fileMatch[2].toLowerCase()];\n  if (mes) dataReferencia = `${fileMatch[1]}-${mes}`;\n}\nconst submittedAt = null;\n\nfunction num(v) {\n  if (v === undefined || v === null) return 0;\n  if (typeof v === 'number') return v;\n  let s = String(v).trim();\n  if (s === '' || s === '-') return 0;\n  // Formato BR (1.234,56): tem vírgula → ponto é milhar, vírgula é decimal\n  if (s.includes(',')) {\n    s = s.replace(/\\./g, '').replace(',', '.');\n  }\n  // Só ponto (64.46): ponto já é o decimal, não mexe\n  const n = parseFloat(s);\n  return isNaN(n) ? 0 : n;\n}\n\nfunction rowsFrom(nodeName) {\n  try { return $(nodeName).all().map(i => i.json); } catch (e) { return []; }\n}\nconst rows = [];\nconst posicaoNodes = {\n  'Extrai Ações': 'Ações',\n  'Extrai BDR': 'BDR',\n  'Extrai ETF': 'ETF',\n  'Extrai Fundos': 'Fundos de Investimentos'\n};\nfor (const [nodeName, categoria] of Object.entries(posicaoNodes)) {\n  for (const r of rowsFrom(nodeName)) {\n    if (!r['Código de Negociação']) continue;\n    const produto = String(r['Produto'] || '').trim();\n    const partes = produto.split(' - ');\n    const nome = partes.length > 1 ? partes.slice(1).join(' - ').trim() : produto;\n    rows.push({\n      ticker: String(r['Código de Negociação']).toUpperCase(),\n      nome_ativo: nome,\n      tipo_ativo: r['Tipo'] || null,\n      instituicao: r['Instituição'] || null,\n      categoria,\n      quantidade: num(r['Quantidade']),\n      preco_fechamento: num(r['Preço de Fechamento']),\n      valor_atualizado: num(r['Valor Atualizado']),\n      tipo_registro: 'Posição Custódia',\n      data_referencia: dataReferencia,\n      submitted_at: submittedAt\n    });\n  }\n}\nfor (const r of rowsFrom('Extrai Renda Fixa')) {\n  if (!r['Código']) continue;\n  const produto = String(r['Produto'] || '').trim();\n  rows.push({\n    ticker: 'RDB',\n    nome_ativo: produto,\n    tipo_ativo: 'Renda Fixa',\n    instituicao: r['Instituição'] || null,\n    categoria: produto.toUpperCase().startsWith('RDB') ? 'RDB' : 'Renda Fixa',\n    quantidade: num(r['Quantidade']),\n    preco_fechamento: num(r['Preço Atualizado MTM']) || num(r['Preço Atualizado CURVA']),\n    valor_atualizado: num(r['Valor Atualizado MTM']) || num(r['Valor Atualizado CURVA']),\n    tipo_registro: 'Posição Custódia',\n    data_referencia: dataReferencia,\n    submitted_at: submittedAt\n  });\n}\nfor (const r of rowsFrom('Extrai Tesouro Direto')) {\n  if (!r['Produto']) continue;\n  const quantidade = num(r['Quantidade']);\n  const valorAtualizado = num(r['Valor Atualizado']);\n  rows.push({\n    ticker: 'TESOURO',\n    nome_ativo: r['Produto'],\n    tipo_ativo: 'Título Público',\n    instituicao: r['Instituição'] || null,\n    categoria: 'Tesouro Direto',\n    quantidade,\n    preco_fechamento: quantidade > 0 ? valorAtualizado / quantidade : 0,\n    valor_atualizado: valorAtualizado,\n    tipo_registro: 'Posição Custódia',\n    data_referencia: dataReferencia,\n    submitted_at: submittedAt\n  });\n}\nfor (const r of rowsFrom('Extrai Negociações')) {\n  if (!r['Código de Negociação']) continue;\n  rows.push({\n    ticker: String(r['Código de Negociação']).toUpperCase(),\n    nome_ativo: 'Negociação de Ativo',\n    tipo_ativo: 'Movimentação',\n    instituicao: r['Instituição'] || null,\n    categoria: 'Negociação',\n    quantidade: num(r['Quantidade (Líquida)']),\n    preco_fechamento: num(r['Preço Médio (Compra)']),\n    valor_atualizado: num(r['Preço Médio (Venda)']),\n    tipo_registro: 'Negociação',\n    data_referencia: dataReferencia,\n    submitted_at: submittedAt\n  });\n}\nreturn rows.map(r => ({ json: r }));"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1536,
+          1152
+        ],
+        "id": "139fc409-c2c5-44e9-966b-e1b3c9565b73",
+        "name": "Code in JavaScript1",
+        "executeOnce": true
+      },
+      {
+        "parameters": {
+          "tableId": "investment_assets",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "user_id",
+                "fieldValue": "={{ $('Webhook').first().json.body.user_id }}"
+              },
+              {
+                "fieldId": "owner_id",
+                "fieldValue": "={{ $('Webhook').first().json.body.ownerId }}"
+              },
+              {
+                "fieldId": "name",
+                "fieldValue": "={{ $json.ticker }}"
+              },
+              {
+                "fieldId": "asset_class",
+                "fieldValue": "={{ $json.categoria }}"
+              },
+              {
+                "fieldId": "institution",
+                "fieldValue": "={{ $json.instituicao }}"
+              },
+              {
+                "fieldId": "liquidity",
+                "fieldValue": "=null"
+              },
+              {
+                "fieldId": "invested_amount",
+                "fieldValue": "={{ $json.valor_atualizado }}"
+              },
+              {
+                "fieldId": "current_amount",
+                "fieldValue": "={{ $json.valor_atualizado }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1776,
+          1152
+        ],
+        "id": "83155f68-5e31-4eef-99fc-8ad6aa92c522",
+        "name": "Upload pra Plataforma",
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "kajlEDhCYmeLcxgQ",
+            "name": "ELEVA - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://qsteyqjzsljsomcqidwf.supabase.co/functions/v1/b3-import-callback",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('Webhook').first().json.body.callback_token }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "jobId",
+                "value": "={{ $('Webhook').first().json.body.jobId }}"
+              },
+              {
+                "name": "status",
+                "value": "completed"
+              },
+              {
+                "name": "imported_count",
+                "value": "={{ $('Upload pra Plataforma').all().length }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1968,
+          1152
+        ],
+        "id": "16d3b65e-e93b-4e51-92a7-173a990c8411",
+        "name": "HTTP Request1",
         "executeOnce": true
       }
     ],
@@ -564,13 +1191,7 @@
               "index": 0
             }
           ],
-          [
-            {
-              "node": "Extract text",
-              "type": "main",
-              "index": 0
-            }
-          ]
+          []
         ]
       },
       "Verifica se extraiu texto do documento": {
@@ -582,11 +1203,6 @@
               "index": 0
             }
           ],
-          []
-        ]
-      },
-      "Extract text": {
-        "main": [
           []
         ]
       },
@@ -605,7 +1221,7 @@
         "main": [
           [
             {
-              "node": "Extrai os dados do pdf separando por página",
+              "node": "If",
               "type": "main",
               "index": 0
             }
@@ -628,6 +1244,148 @@
           [
             {
               "node": "HTTP Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "If": {
+        "main": [
+          [
+            {
+              "node": "Extrai os dados do pdf separando por página",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Extrai Ações",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Extrai BDR",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Extrai ETF",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Extrai Fundos",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Extrai Renda Fixa",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Extrai Tesouro Direto",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai Ações": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai BDR": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Extrai ETF": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 2
+            }
+          ]
+        ]
+      },
+      "Extrai Fundos": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 3
+            }
+          ]
+        ]
+      },
+      "Extrai Renda Fixa": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 4
+            }
+          ]
+        ]
+      },
+      "Extrai Tesouro Direto": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 5
+            }
+          ]
+        ]
+      },
+      "Merge": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript1": {
+        "main": [
+          [
+            {
+              "node": "Upload pra Plataforma",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upload pra Plataforma": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request1",
               "type": "main",
               "index": 0
             }
