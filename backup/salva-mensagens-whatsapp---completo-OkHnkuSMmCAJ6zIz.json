@@ -1,0 +1,425 @@
+{
+  "updatedAt": "2026-07-15T17:37:30.447Z",
+  "createdAt": "2026-07-15T14:46:13.961Z",
+  "id": "OkHnkuSMmCAJ6zIz",
+  "name": "Salva Mensagens WhatsApp - Completo",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## FLUXO: ESPELHO DO CHAT\nGrava TODAS as mensagens (enviadas e recebidas) no Postgres.",
+        "height": 420,
+        "width": 1268,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        16
+      ],
+      "id": "8a548c4a-2162-47d8-ac0d-7311ffe54049",
+      "name": "Sticky Instruções"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "salva-mensagens-agronegociar",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        96,
+        224
+      ],
+      "id": "71accb7a-ed3d-48d3-9c30-c962442e1eb1",
+      "name": "Webhook Mensagens",
+      "webhookId": "salva-mensagens-wa-001"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1000000-0000-0000-0000-000000000001",
+              "leftValue": "={{ $json.body.data.key.remoteJid }}",
+              "rightValue": "@g.us",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            },
+            {
+              "id": "c1000000-0000-0000-0000-000000000002",
+              "leftValue": "={{ $json.body.data.key.remoteJid }}",
+              "rightValue": "status@broadcast",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        320,
+        224
+      ],
+      "id": "bbf8e193-d466-49c1-86a0-fda6aa71aca3",
+      "name": "Ignora Grupos e Status"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1000000-0000-0000-0000-000000000001",
+              "name": "telefone",
+              "value": "={{ $json.body.data.key.remoteJid.split('@')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "b1000000-0000-0000-0000-000000000002",
+              "name": "nome",
+              "value": "={{ (() => {\n  const enviada = $json.body.event === 'send.message' || $json.body.data.key.fromMe === true;\n  const pn = ($json.body.data.pushName || '').trim();\n  const ehNumero = /^[\\d\\s()+\\-]+$/.test(pn);\n  return (enviada || ehNumero) ? '' : pn;\n})() }}",
+              "type": "string"
+            },
+            {
+              "id": "b1000000-0000-0000-0000-000000000003",
+              "name": "mensagem",
+              "value": "={{ $json.body.data.message?.conversation || $json.body.data.message?.extendedTextMessage?.text || '[' + ($json.body.data.messageType || 'sem_texto') + ']' }}",
+              "type": "string"
+            },
+            {
+              "id": "b1000000-0000-0000-0000-000000000004",
+              "name": "direcao",
+              "value": "={{ $json.body.event === 'send.message' || $json.body.data.key.fromMe === true ? 'enviada' : 'recebida' }}",
+              "type": "string"
+            },
+            {
+              "id": "b1000000-0000-0000-0000-000000000005",
+              "name": "tipo_mensagem",
+              "value": "={{ $json.body.data.messageType || 'desconhecido' }}",
+              "type": "string"
+            },
+            {
+              "id": "b1000000-0000-0000-0000-000000000006",
+              "name": "message_id",
+              "value": "={{ $json.body.data.key.id }}",
+              "type": "string"
+            },
+            {
+              "id": "b1000000-0000-0000-0000-000000000007",
+              "name": "instancia",
+              "value": "={{ $json.body.instance || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        592,
+        208
+      ],
+      "id": "c04537dd-392b-4cda-a4e0-d02e3f234e08",
+      "name": "Extrai Dados1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO public.historico_mensagens\n  (id_usuario, telefone, nome_usuario, mensagem_usuario, mensagem_agente, message_type, id_conversa, nome_app, ativo)\nSELECT $1, $1,\n  COALESCE(\n    NULLIF($2, ''),\n    (SELECT h.nome_usuario FROM public.historico_mensagens h\n     WHERE h.telefone = $1 AND h.nome_usuario IS NOT NULL AND h.nome_usuario <> ''\n     ORDER BY h.created_at DESC LIMIT 1)\n  ),\n  CASE WHEN $3 = 'recebida' THEN $4 END,\n  CASE WHEN $3 = 'enviada'  THEN $4 END,\n  $5, $6, $7, true\nWHERE NOT EXISTS (\n  SELECT 1 FROM public.historico_mensagens WHERE id_conversa = $6\n);",
+        "options": {
+          "queryReplacement": "={{ [$json.telefone, $json.nome, $json.direcao, $json.mensagem, $json.tipo_mensagem, $json.message_id, 'AGRO-COMERCIAL'] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        864,
+        208
+      ],
+      "id": "eb9959eb-9f22-4720-8608-6215c8657d1e",
+      "name": "Salva Mensagem1",
+      "credentials": {
+        "postgres": {
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Mensagens": {
+      "main": [
+        [
+          {
+            "node": "Ignora Grupos e Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ignora Grupos e Status": {
+      "main": [
+        [
+          {
+            "node": "Extrai Dados1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai Dados1": {
+      "main": [
+        [
+          {
+            "node": "Salva Mensagem1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "bf49b02f-3427-48d7-9620-86a322efde7e",
+  "activeVersionId": "bf49b02f-3427-48d7-9620-86a322efde7e",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-07-15T14:46:13.961Z",
+      "createdAt": "2026-07-15T14:46:13.961Z",
+      "role": "workflow:owner",
+      "workflowId": "OkHnkuSMmCAJ6zIz",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-07-15T17:37:30.450Z",
+    "createdAt": "2026-07-15T17:37:30.450Z",
+    "versionId": "bf49b02f-3427-48d7-9620-86a322efde7e",
+    "workflowId": "OkHnkuSMmCAJ6zIz",
+    "nodes": [
+      {
+        "parameters": {
+          "content": "## FLUXO: ESPELHO DO CHAT\nGrava TODAS as mensagens (enviadas e recebidas) no Postgres.",
+          "height": 420,
+          "width": 1268,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -160,
+          16
+        ],
+        "id": "8a548c4a-2162-47d8-ac0d-7311ffe54049",
+        "name": "Sticky Instruções"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "salva-mensagens-agronegociar",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          96,
+          224
+        ],
+        "id": "71accb7a-ed3d-48d3-9c30-c962442e1eb1",
+        "name": "Webhook Mensagens",
+        "webhookId": "salva-mensagens-wa-001"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "c1000000-0000-0000-0000-000000000001",
+                "leftValue": "={{ $json.body.data.key.remoteJid }}",
+                "rightValue": "@g.us",
+                "operator": {
+                  "type": "string",
+                  "operation": "notContains"
+                }
+              },
+              {
+                "id": "c1000000-0000-0000-0000-000000000002",
+                "leftValue": "={{ $json.body.data.key.remoteJid }}",
+                "rightValue": "status@broadcast",
+                "operator": {
+                  "type": "string",
+                  "operation": "notContains"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          320,
+          224
+        ],
+        "id": "bbf8e193-d466-49c1-86a0-fda6aa71aca3",
+        "name": "Ignora Grupos e Status"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "b1000000-0000-0000-0000-000000000001",
+                "name": "telefone",
+                "value": "={{ $json.body.data.key.remoteJid.split('@')[0] }}",
+                "type": "string"
+              },
+              {
+                "id": "b1000000-0000-0000-0000-000000000002",
+                "name": "nome",
+                "value": "={{ (() => {\n  const enviada = $json.body.event === 'send.message' || $json.body.data.key.fromMe === true;\n  const pn = ($json.body.data.pushName || '').trim();\n  const ehNumero = /^[\\d\\s()+\\-]+$/.test(pn);\n  return (enviada || ehNumero) ? '' : pn;\n})() }}",
+                "type": "string"
+              },
+              {
+                "id": "b1000000-0000-0000-0000-000000000003",
+                "name": "mensagem",
+                "value": "={{ $json.body.data.message?.conversation || $json.body.data.message?.extendedTextMessage?.text || '[' + ($json.body.data.messageType || 'sem_texto') + ']' }}",
+                "type": "string"
+              },
+              {
+                "id": "b1000000-0000-0000-0000-000000000004",
+                "name": "direcao",
+                "value": "={{ $json.body.event === 'send.message' || $json.body.data.key.fromMe === true ? 'enviada' : 'recebida' }}",
+                "type": "string"
+              },
+              {
+                "id": "b1000000-0000-0000-0000-000000000005",
+                "name": "tipo_mensagem",
+                "value": "={{ $json.body.data.messageType || 'desconhecido' }}",
+                "type": "string"
+              },
+              {
+                "id": "b1000000-0000-0000-0000-000000000006",
+                "name": "message_id",
+                "value": "={{ $json.body.data.key.id }}",
+                "type": "string"
+              },
+              {
+                "id": "b1000000-0000-0000-0000-000000000007",
+                "name": "instancia",
+                "value": "={{ $json.body.instance || '' }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          592,
+          208
+        ],
+        "id": "c04537dd-392b-4cda-a4e0-d02e3f234e08",
+        "name": "Extrai Dados1"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO public.historico_mensagens\n  (id_usuario, telefone, nome_usuario, mensagem_usuario, mensagem_agente, message_type, id_conversa, nome_app, ativo)\nSELECT $1, $1,\n  COALESCE(\n    NULLIF($2, ''),\n    (SELECT h.nome_usuario FROM public.historico_mensagens h\n     WHERE h.telefone = $1 AND h.nome_usuario IS NOT NULL AND h.nome_usuario <> ''\n     ORDER BY h.created_at DESC LIMIT 1)\n  ),\n  CASE WHEN $3 = 'recebida' THEN $4 END,\n  CASE WHEN $3 = 'enviada'  THEN $4 END,\n  $5, $6, $7, true\nWHERE NOT EXISTS (\n  SELECT 1 FROM public.historico_mensagens WHERE id_conversa = $6\n);",
+          "options": {
+            "queryReplacement": "={{ [$json.telefone, $json.nome, $json.direcao, $json.mensagem, $json.tipo_mensagem, $json.message_id, 'AGRO-COMERCIAL'] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          864,
+          208
+        ],
+        "id": "eb9959eb-9f22-4720-8608-6215c8657d1e",
+        "name": "Salva Mensagem1",
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Webhook Mensagens": {
+        "main": [
+          [
+            {
+              "node": "Ignora Grupos e Status",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ignora Grupos e Status": {
+        "main": [
+          [
+            {
+              "node": "Extrai Dados1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai Dados1": {
+        "main": [
+          [
+            {
+              "node": "Salva Mensagem1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
