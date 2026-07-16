@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-14T17:40:51.906Z",
+  "updatedAt": "2026-07-15T18:33:47.398Z",
   "createdAt": "2026-07-08T13:03:21.420Z",
   "id": "3HjTGkIHQZOLbrTt",
   "name": "Monteiro Ramalho - 4.2 - Petição RT",
@@ -8,7 +8,7 @@
   "nodes": [
     {
       "parameters": {
-        "jsCode": "const item = items[0].json;\n\nconst dados = item.triagem || {};\nconst vinculo = dados.vinculo || {};\nconst rescisao = dados.rescisao || {};\nconst documentos = item.documentos_recebidos || [];\n\n// ---------- 1. Bloqueios (mínimo pro motor de cálculo rodar) ----------\n\nconst bloqueios = [];\n\nif (!vinculo.inicio) {\n  bloqueios.push(\"Data de admissão (vinculo.inicio)\");\n}\n\nif (vinculo.salario_medio === undefined || vinculo.salario_medio === null || vinculo.salario_medio === \"\") {\n  bloqueios.push(\"Salário médio (vinculo.salario_medio)\");\n}\n\nif (!rescisao.tipo) {\n  bloqueios.push(\"Tipo de rescisão (rescisao.tipo)\");\n} else if (rescisao.tipo !== \"ainda_trabalhando\" && !vinculo.fim) {\n  bloqueios.push(\"Data de saída (vinculo.fim) — obrigatória quando o vínculo já terminou\");\n}\n\nconst podeGerar = bloqueios.length === 0;\n\n// ---------- 2. Extração de dados da empresa (a partir da CTPS) ----------\n// Best-effort via regex — a CTPS Digital tem formato padronizado pelo\n// governo, então isso tende a ser estável, mas SEMPRE precisa de\n// confirmação humana antes do protocolo (não confie 100% às ciegas).\n\nconst ctps = documentos.find(d => d.tipo_documento === \"ctps\");\nconst empresa = { razao_social: null, cnpj: null, endereco: null, admissao_ctps: null, salario_ctps: null };\n\nif (ctps && ctps.texto_extraido) {\n  const texto = ctps.texto_extraido;\n\n  const matchEstabelecimento = texto.match(/Estabelecimento\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\n  if (matchEstabelecimento) empresa.razao_social = matchEstabelecimento[1].trim();\n\n  const matchCnpj = texto.match(/\\*\\*CNPJ:\\s*([\\d.\\/-]+)\\*\\*/);\n  if (matchCnpj) empresa.cnpj = matchCnpj[1].trim();\n\n  // linha em negrito imediatamente após o CNPJ costuma ser o endereço\n  const matchEndereco = texto.match(/\\*\\*CNPJ:\\s*[\\d.\\/-]+\\*\\*\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\n  if (matchEndereco) empresa.endereco = matchEndereco[1].trim();\n\n  const matchAdmissao = texto.match(/(\\d{2}\\/\\d{2}\\/\\d{4})\\s*-\\s*(Aberto|Fechado)/);\n  if (matchAdmissao) empresa.admissao_ctps = matchAdmissao[1];\n\n  const matchSalario = texto.match(/Salário contratual\\s*\\n+\\s*\\*\\*R\\$\\s*([\\d.,]+)/);\n  if (matchSalario) empresa.salario_ctps = matchSalario[1];\n}\n\n// ---------- 3. Divergências entre triagem e documento ----------\n// Não bloqueia a geração — mas precisa ficar visível, porque o motor\n// de cálculo vai usar os dados da triagem, e alguém (Dr. Lucas) tem\n// que confirmar se isso está certo antes do protocolo.\n\nconst divergencias = [];\n\nfunction paraISO(dataBR) {\n  if (!dataBR) return null;\n  const [d, m, y] = dataBR.split(\"/\");\n  return `${y}-${m}-${d}`;\n}\n\nif (empresa.admissao_ctps) {\n  const admissaoCtpsISO = paraISO(empresa.admissao_ctps);\n  if (vinculo.inicio && admissaoCtpsISO && vinculo.inicio !== admissaoCtpsISO) {\n    divergencias.push(\n      `Data de admissão informada pela cliente (${vinculo.inicio}) diverge da CTPS (${admissaoCtpsISO})`\n    );\n  }\n}\n\nif (empresa.salario_ctps) {\n  const salarioCtpsNum = parseFloat(empresa.salario_ctps.replace(\".\", \"\").replace(\",\", \".\"));\n  if (vinculo.salario_medio && Math.abs(vinculo.salario_medio - salarioCtpsNum) > 0.01) {\n    divergencias.push(\n      `Salário informado pela cliente (R$ ${vinculo.salario_medio}) diverge do salário contratual na CTPS (R$ ${salarioCtpsNum})`\n    );\n  }\n}\n\n// ---------- 4. Pendências já conhecidas pela entrevista ----------\n\nconst pendenciasConhecidas = Array.isArray(dados.pendencias_peticao)\n  ? dados.pendencias_peticao\n  : [];\n\nreturn [{\n  json: {\n    id: item.id,\n    nome: item.cliente_nome_completo || item.nome,\n    telefone: item.telefone,\n    triagem: dados,\n    documentos_recebidos: documentos,\n    empresa,\n    pode_gerar: podeGerar,\n    bloqueios,\n    divergencias,\n    pendencias_conhecidas: pendenciasConhecidas,\n  },\n}];"
+        "jsCode": "const item = items[0].json;\nconst dados = item.triagem || {};\nconst vinculo = dados.vinculo || {};\nconst rescisao = dados.rescisao || {};\nconst documentos = item.documentos_recebidos || [];\n\n// ---------- 1. Bloqueios (mínimo pro motor de cálculo rodar) ----------\nconst bloqueios = [];\n\nif (!vinculo.inicio) {\n  bloqueios.push(\"Data de admissão (vinculo.inicio)\");\n}\nif (vinculo.salario_medio === undefined || vinculo.salario_medio === null || vinculo.salario_medio === \"\") {\n  bloqueios.push(\"Salário médio (vinculo.salario_medio)\");\n}\nif (!rescisao.tipo) {\n  bloqueios.push(\"Tipo de rescisão (rescisao.tipo)\");\n} else if (rescisao.tipo !== \"ainda_trabalhando\" && !vinculo.fim) {\n  bloqueios.push(\"Data de saída (vinculo.fim) — obrigatória quando o vínculo já terminou\");\n}\n\n// ---------- 2. Extração de dados da empresa (a partir da CTPS) ----------\nconst ctps = documentos.find(d => d.tipo_documento === \"ctps\");\nconst empresa = { razao_social: null, cnpj: null, endereco: null, admissao_ctps: null, salario_ctps: null };\n\nif (ctps && ctps.texto_extraido) {\n  const texto = ctps.texto_extraido;\n\n  const matchEstabelecimento = texto.match(/Estabelecimento\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\n  if (matchEstabelecimento) empresa.razao_social = matchEstabelecimento[1].trim();\n\n  const matchCnpj = texto.match(/\\*\\*CNPJ:\\s*([\\d.\\/-]+)\\*\\*/);\n  if (matchCnpj) empresa.cnpj = matchCnpj[1].trim();\n\n  const matchEndereco = texto.match(/\\*\\*CNPJ:\\s*[\\d.\\/-]+\\*\\*\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\n  if (matchEndereco) empresa.endereco = matchEndereco[1].trim();\n\n  const matchAdmissao = texto.match(/(\\d{2}\\/\\d{2}\\/\\d{4})\\s*-\\s*(Aberto|Fechado)/);\n  if (matchAdmissao) empresa.admissao_ctps = matchAdmissao[1];\n\n  const matchSalario = texto.match(/Salário contratual\\s*\\n+\\s*\\*\\*R\\$\\s*([\\d.,]+)/);\n  if (matchSalario) empresa.salario_ctps = matchSalario[1];\n}\n\n// ---------- 🆕 2.5 Complementa dados da empresa via consulta externa ----------\nconst alertasEmpresa = [];\nconst cnpjConhecido = dados.cnpj_empresa || empresa.cnpj || null;\nconst faltaAlgo = !empresa.razao_social || !empresa.cnpj || !empresa.endereco;\n\nif (faltaAlgo && cnpjConhecido) {\n  const cnpjLimpo = String(cnpjConhecido).replace(/\\D/g, \"\");\n\n  if (cnpjLimpo.length === 14) {\n    try {\n      const resposta = await this.helpers.httpRequest({\n        method: \"GET\",\n        url: `https://www.receitaws.com.br/v1/cnpj/${cnpjLimpo}`,\n        json: true,\n      });\n\n      if (resposta && resposta.status !== \"ERROR\" && resposta.nome) {\n        empresa.razao_social = empresa.razao_social || resposta.nome;\n        empresa.cnpj = empresa.cnpj || cnpjConhecido;\n\n        if (!empresa.endereco && resposta.logradouro) {\n          const cepFormatado = (resposta.cep || \"\").replace(/\\D/g, \"\").replace(/(\\d{5})(\\d{3})/, \"$1-$2\");\n          empresa.endereco = [\n            resposta.logradouro,\n            resposta.numero || \"S/N\",\n            resposta.complemento,\n            resposta.bairro,\n            `${resposta.municipio}/${(resposta.uf || \"\").toUpperCase()}`,\n            cepFormatado,\n          ].filter(Boolean).join(\", \");\n        }\n\n        alertasEmpresa.push(\n          \"Dados da empresa complementados via consulta pública de CNPJ (ReceitaWS) — CONFIRMAR antes do protocolo.\"\n        );\n      } else {\n        alertasEmpresa.push(\n          `Consulta à ReceitaWS para o CNPJ ${cnpjConhecido} não retornou dados válidos (status: ${resposta?.status || \"desconhecido\"}).`\n        );\n      }\n    } catch (erro) {\n      alertasEmpresa.push(\n        `Falha ao consultar CNPJ ${cnpjConhecido} na ReceitaWS: ${erro.message} — dados da empresa continuam incompletos.`\n      );\n    }\n  } else {\n    alertasEmpresa.push(\n      `CNPJ informado (\"${cnpjConhecido}\") não tem 14 dígitos válidos — não foi possível consultar.`\n    );\n  }\n} else if (faltaAlgo && !cnpjConhecido && vinculo.empresa) {\n  alertasEmpresa.push(\n    `Empresa identificada apenas pelo nome informado pelo cliente (\"${vinculo.empresa}\") — ` +\n    `sem CNPJ nem CTPS para confirmar. Dr. Lucas precisa localizar manualmente.`\n  );\n}\n\n// bloqueio final de empresa, já considerando o que foi complementado acima\nif (!empresa.razao_social || !empresa.cnpj || !empresa.endereco) {\n  bloqueios.push(\n    `Dados da empresa incompletos (razão social: ${empresa.razao_social ? \"ok\" : \"faltando\"}, ` +\n    `CNPJ: ${empresa.cnpj ? \"ok\" : \"faltando\"}, endereço: ${empresa.endereco ? \"ok\" : \"faltando\"})`\n  );\n}\n\nconst podeGerar = bloqueios.length === 0;\n\n// ---------- 3. Divergências entre triagem e documento ----------\nconst divergencias = [];\n\nfunction paraISO(dataBR) {\n  if (!dataBR) return null;\n  const [d, m, y] = dataBR.split(\"/\");\n  return `${y}-${m}-${d}`;\n}\n\nif (empresa.admissao_ctps) {\n  const admissaoCtpsISO = paraISO(empresa.admissao_ctps);\n  if (vinculo.inicio && admissaoCtpsISO && vinculo.inicio !== admissaoCtpsISO) {\n    divergencias.push(\n      `Data de admissão informada pela cliente (${vinculo.inicio}) diverge da CTPS (${admissaoCtpsISO})`\n    );\n  }\n}\n\nif (empresa.salario_ctps) {\n  const salarioCtpsNum = parseFloat(empresa.salario_ctps.replace(\".\", \"\").replace(\",\", \".\"));\n  if (vinculo.salario_medio && Math.abs(vinculo.salario_medio - salarioCtpsNum) > 0.01) {\n    divergencias.push(\n      `Salário informado pela cliente (R$ ${vinculo.salario_medio}) diverge do salário contratual na CTPS (R$ ${salarioCtpsNum})`\n    );\n  }\n}\n\n// ---------- 4. Pendências já conhecidas pela entrevista ----------\nconst pendenciasConhecidas = Array.isArray(dados.pendencias_peticao)\n  ? dados.pendencias_peticao\n  : [];\n\nreturn [{\n  json: {\n    id: item.id,\n    nome: item.cliente_nome_completo || item.nome,\n    telefone: item.telefone,\n    triagem: dados,\n    documentos_recebidos: documentos,\n    empresa,\n    pode_gerar: podeGerar,\n    bloqueios,\n    divergencias,\n    pendencias_conhecidas: pendenciasConhecidas,\n    alertas_empresa: alertasEmpresa,\n  },\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -106,7 +106,7 @@
     },
     {
       "parameters": {
-        "model": "={{ $json.resolvedModel }}",
+        "model": "={{ $('Verifica modelo da openRouter').first().json.resolvedModel }}",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
@@ -133,7 +133,7 @@
           "parameters": [
             {
               "name": "model",
-              "value": "anthropic/claude-sonnet-5"
+              "value": "openai/gpt-5"
             }
           ]
         },
@@ -1051,21 +1051,6 @@
       ],
       "id": "877e295a-1f81-4f40-a9f0-54bcd47fb7ed",
       "name": "Sticky Note"
-    },
-    {
-      "parameters": {
-        "content": "Achar solução para dados da empresa",
-        "width": 368,
-        "color": 3
-      },
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        -224,
-        560
-      ],
-      "id": "3c4801d2-eac7-43c4-987c-4929cb70d887",
-      "name": "Sticky Note4"
     }
   ],
   "connections": {
@@ -1479,8 +1464,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "3d05d5ba-d8f3-4b8d-afe0-646238ad8626",
-  "activeVersionId": "3d05d5ba-d8f3-4b8d-afe0-646238ad8626",
+  "versionId": "568a1730-61a2-46fa-b8b6-769369ad2b3a",
+  "activeVersionId": "568a1730-61a2-46fa-b8b6-769369ad2b3a",
   "triggerCount": 2,
   "shared": [
     {
@@ -1492,14 +1477,14 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-07-14T17:40:51.908Z",
-    "createdAt": "2026-07-14T17:40:51.908Z",
-    "versionId": "3d05d5ba-d8f3-4b8d-afe0-646238ad8626",
+    "updatedAt": "2026-07-15T18:33:47.401Z",
+    "createdAt": "2026-07-15T18:33:47.401Z",
+    "versionId": "568a1730-61a2-46fa-b8b6-769369ad2b3a",
     "workflowId": "3HjTGkIHQZOLbrTt",
     "nodes": [
       {
         "parameters": {
-          "jsCode": "const item = items[0].json;\n\nconst dados = item.triagem || {};\nconst vinculo = dados.vinculo || {};\nconst rescisao = dados.rescisao || {};\nconst documentos = item.documentos_recebidos || [];\n\n// ---------- 1. Bloqueios (mínimo pro motor de cálculo rodar) ----------\n\nconst bloqueios = [];\n\nif (!vinculo.inicio) {\n  bloqueios.push(\"Data de admissão (vinculo.inicio)\");\n}\n\nif (vinculo.salario_medio === undefined || vinculo.salario_medio === null || vinculo.salario_medio === \"\") {\n  bloqueios.push(\"Salário médio (vinculo.salario_medio)\");\n}\n\nif (!rescisao.tipo) {\n  bloqueios.push(\"Tipo de rescisão (rescisao.tipo)\");\n} else if (rescisao.tipo !== \"ainda_trabalhando\" && !vinculo.fim) {\n  bloqueios.push(\"Data de saída (vinculo.fim) — obrigatória quando o vínculo já terminou\");\n}\n\nconst podeGerar = bloqueios.length === 0;\n\n// ---------- 2. Extração de dados da empresa (a partir da CTPS) ----------\n// Best-effort via regex — a CTPS Digital tem formato padronizado pelo\n// governo, então isso tende a ser estável, mas SEMPRE precisa de\n// confirmação humana antes do protocolo (não confie 100% às ciegas).\n\nconst ctps = documentos.find(d => d.tipo_documento === \"ctps\");\nconst empresa = { razao_social: null, cnpj: null, endereco: null, admissao_ctps: null, salario_ctps: null };\n\nif (ctps && ctps.texto_extraido) {\n  const texto = ctps.texto_extraido;\n\n  const matchEstabelecimento = texto.match(/Estabelecimento\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\n  if (matchEstabelecimento) empresa.razao_social = matchEstabelecimento[1].trim();\n\n  const matchCnpj = texto.match(/\\*\\*CNPJ:\\s*([\\d.\\/-]+)\\*\\*/);\n  if (matchCnpj) empresa.cnpj = matchCnpj[1].trim();\n\n  // linha em negrito imediatamente após o CNPJ costuma ser o endereço\n  const matchEndereco = texto.match(/\\*\\*CNPJ:\\s*[\\d.\\/-]+\\*\\*\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\n  if (matchEndereco) empresa.endereco = matchEndereco[1].trim();\n\n  const matchAdmissao = texto.match(/(\\d{2}\\/\\d{2}\\/\\d{4})\\s*-\\s*(Aberto|Fechado)/);\n  if (matchAdmissao) empresa.admissao_ctps = matchAdmissao[1];\n\n  const matchSalario = texto.match(/Salário contratual\\s*\\n+\\s*\\*\\*R\\$\\s*([\\d.,]+)/);\n  if (matchSalario) empresa.salario_ctps = matchSalario[1];\n}\n\n// ---------- 3. Divergências entre triagem e documento ----------\n// Não bloqueia a geração — mas precisa ficar visível, porque o motor\n// de cálculo vai usar os dados da triagem, e alguém (Dr. Lucas) tem\n// que confirmar se isso está certo antes do protocolo.\n\nconst divergencias = [];\n\nfunction paraISO(dataBR) {\n  if (!dataBR) return null;\n  const [d, m, y] = dataBR.split(\"/\");\n  return `${y}-${m}-${d}`;\n}\n\nif (empresa.admissao_ctps) {\n  const admissaoCtpsISO = paraISO(empresa.admissao_ctps);\n  if (vinculo.inicio && admissaoCtpsISO && vinculo.inicio !== admissaoCtpsISO) {\n    divergencias.push(\n      `Data de admissão informada pela cliente (${vinculo.inicio}) diverge da CTPS (${admissaoCtpsISO})`\n    );\n  }\n}\n\nif (empresa.salario_ctps) {\n  const salarioCtpsNum = parseFloat(empresa.salario_ctps.replace(\".\", \"\").replace(\",\", \".\"));\n  if (vinculo.salario_medio && Math.abs(vinculo.salario_medio - salarioCtpsNum) > 0.01) {\n    divergencias.push(\n      `Salário informado pela cliente (R$ ${vinculo.salario_medio}) diverge do salário contratual na CTPS (R$ ${salarioCtpsNum})`\n    );\n  }\n}\n\n// ---------- 4. Pendências já conhecidas pela entrevista ----------\n\nconst pendenciasConhecidas = Array.isArray(dados.pendencias_peticao)\n  ? dados.pendencias_peticao\n  : [];\n\nreturn [{\n  json: {\n    id: item.id,\n    nome: item.cliente_nome_completo || item.nome,\n    telefone: item.telefone,\n    triagem: dados,\n    documentos_recebidos: documentos,\n    empresa,\n    pode_gerar: podeGerar,\n    bloqueios,\n    divergencias,\n    pendencias_conhecidas: pendenciasConhecidas,\n  },\n}];"
+          "jsCode": "const item = items[0].json;\nconst dados = item.triagem || {};\nconst vinculo = dados.vinculo || {};\nconst rescisao = dados.rescisao || {};\nconst documentos = item.documentos_recebidos || [];\n\n// ---------- 1. Bloqueios (mínimo pro motor de cálculo rodar) ----------\nconst bloqueios = [];\n\nif (!vinculo.inicio) {\n  bloqueios.push(\"Data de admissão (vinculo.inicio)\");\n}\nif (vinculo.salario_medio === undefined || vinculo.salario_medio === null || vinculo.salario_medio === \"\") {\n  bloqueios.push(\"Salário médio (vinculo.salario_medio)\");\n}\nif (!rescisao.tipo) {\n  bloqueios.push(\"Tipo de rescisão (rescisao.tipo)\");\n} else if (rescisao.tipo !== \"ainda_trabalhando\" && !vinculo.fim) {\n  bloqueios.push(\"Data de saída (vinculo.fim) — obrigatória quando o vínculo já terminou\");\n}\n\n// ---------- 2. Extração de dados da empresa (a partir da CTPS) ----------\nconst ctps = documentos.find(d => d.tipo_documento === \"ctps\");\nconst empresa = { razao_social: null, cnpj: null, endereco: null, admissao_ctps: null, salario_ctps: null };\n\nif (ctps && ctps.texto_extraido) {\n  const texto = ctps.texto_extraido;\n\n  const matchEstabelecimento = texto.match(/Estabelecimento\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\n  if (matchEstabelecimento) empresa.razao_social = matchEstabelecimento[1].trim();\n\n  const matchCnpj = texto.match(/\\*\\*CNPJ:\\s*([\\d.\\/-]+)\\*\\*/);\n  if (matchCnpj) empresa.cnpj = matchCnpj[1].trim();\n\n  const matchEndereco = texto.match(/\\*\\*CNPJ:\\s*[\\d.\\/-]+\\*\\*\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\n  if (matchEndereco) empresa.endereco = matchEndereco[1].trim();\n\n  const matchAdmissao = texto.match(/(\\d{2}\\/\\d{2}\\/\\d{4})\\s*-\\s*(Aberto|Fechado)/);\n  if (matchAdmissao) empresa.admissao_ctps = matchAdmissao[1];\n\n  const matchSalario = texto.match(/Salário contratual\\s*\\n+\\s*\\*\\*R\\$\\s*([\\d.,]+)/);\n  if (matchSalario) empresa.salario_ctps = matchSalario[1];\n}\n\n// ---------- 🆕 2.5 Complementa dados da empresa via consulta externa ----------\nconst alertasEmpresa = [];\nconst cnpjConhecido = dados.cnpj_empresa || empresa.cnpj || null;\nconst faltaAlgo = !empresa.razao_social || !empresa.cnpj || !empresa.endereco;\n\nif (faltaAlgo && cnpjConhecido) {\n  const cnpjLimpo = String(cnpjConhecido).replace(/\\D/g, \"\");\n\n  if (cnpjLimpo.length === 14) {\n    try {\n      const resposta = await this.helpers.httpRequest({\n        method: \"GET\",\n        url: `https://www.receitaws.com.br/v1/cnpj/${cnpjLimpo}`,\n        json: true,\n      });\n\n      if (resposta && resposta.status !== \"ERROR\" && resposta.nome) {\n        empresa.razao_social = empresa.razao_social || resposta.nome;\n        empresa.cnpj = empresa.cnpj || cnpjConhecido;\n\n        if (!empresa.endereco && resposta.logradouro) {\n          const cepFormatado = (resposta.cep || \"\").replace(/\\D/g, \"\").replace(/(\\d{5})(\\d{3})/, \"$1-$2\");\n          empresa.endereco = [\n            resposta.logradouro,\n            resposta.numero || \"S/N\",\n            resposta.complemento,\n            resposta.bairro,\n            `${resposta.municipio}/${(resposta.uf || \"\").toUpperCase()}`,\n            cepFormatado,\n          ].filter(Boolean).join(\", \");\n        }\n\n        alertasEmpresa.push(\n          \"Dados da empresa complementados via consulta pública de CNPJ (ReceitaWS) — CONFIRMAR antes do protocolo.\"\n        );\n      } else {\n        alertasEmpresa.push(\n          `Consulta à ReceitaWS para o CNPJ ${cnpjConhecido} não retornou dados válidos (status: ${resposta?.status || \"desconhecido\"}).`\n        );\n      }\n    } catch (erro) {\n      alertasEmpresa.push(\n        `Falha ao consultar CNPJ ${cnpjConhecido} na ReceitaWS: ${erro.message} — dados da empresa continuam incompletos.`\n      );\n    }\n  } else {\n    alertasEmpresa.push(\n      `CNPJ informado (\"${cnpjConhecido}\") não tem 14 dígitos válidos — não foi possível consultar.`\n    );\n  }\n} else if (faltaAlgo && !cnpjConhecido && vinculo.empresa) {\n  alertasEmpresa.push(\n    `Empresa identificada apenas pelo nome informado pelo cliente (\"${vinculo.empresa}\") — ` +\n    `sem CNPJ nem CTPS para confirmar. Dr. Lucas precisa localizar manualmente.`\n  );\n}\n\n// bloqueio final de empresa, já considerando o que foi complementado acima\nif (!empresa.razao_social || !empresa.cnpj || !empresa.endereco) {\n  bloqueios.push(\n    `Dados da empresa incompletos (razão social: ${empresa.razao_social ? \"ok\" : \"faltando\"}, ` +\n    `CNPJ: ${empresa.cnpj ? \"ok\" : \"faltando\"}, endereço: ${empresa.endereco ? \"ok\" : \"faltando\"})`\n  );\n}\n\nconst podeGerar = bloqueios.length === 0;\n\n// ---------- 3. Divergências entre triagem e documento ----------\nconst divergencias = [];\n\nfunction paraISO(dataBR) {\n  if (!dataBR) return null;\n  const [d, m, y] = dataBR.split(\"/\");\n  return `${y}-${m}-${d}`;\n}\n\nif (empresa.admissao_ctps) {\n  const admissaoCtpsISO = paraISO(empresa.admissao_ctps);\n  if (vinculo.inicio && admissaoCtpsISO && vinculo.inicio !== admissaoCtpsISO) {\n    divergencias.push(\n      `Data de admissão informada pela cliente (${vinculo.inicio}) diverge da CTPS (${admissaoCtpsISO})`\n    );\n  }\n}\n\nif (empresa.salario_ctps) {\n  const salarioCtpsNum = parseFloat(empresa.salario_ctps.replace(\".\", \"\").replace(\",\", \".\"));\n  if (vinculo.salario_medio && Math.abs(vinculo.salario_medio - salarioCtpsNum) > 0.01) {\n    divergencias.push(\n      `Salário informado pela cliente (R$ ${vinculo.salario_medio}) diverge do salário contratual na CTPS (R$ ${salarioCtpsNum})`\n    );\n  }\n}\n\n// ---------- 4. Pendências já conhecidas pela entrevista ----------\nconst pendenciasConhecidas = Array.isArray(dados.pendencias_peticao)\n  ? dados.pendencias_peticao\n  : [];\n\nreturn [{\n  json: {\n    id: item.id,\n    nome: item.cliente_nome_completo || item.nome,\n    telefone: item.telefone,\n    triagem: dados,\n    documentos_recebidos: documentos,\n    empresa,\n    pode_gerar: podeGerar,\n    bloqueios,\n    divergencias,\n    pendencias_conhecidas: pendenciasConhecidas,\n    alertas_empresa: alertasEmpresa,\n  },\n}];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -1597,7 +1582,7 @@
       },
       {
         "parameters": {
-          "model": "={{ $json.resolvedModel }}",
+          "model": "={{ $('Verifica modelo da openRouter').first().json.resolvedModel }}",
           "options": {}
         },
         "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
@@ -1624,7 +1609,7 @@
             "parameters": [
               {
                 "name": "model",
-                "value": "anthropic/claude-sonnet-5"
+                "value": "openai/gpt-5"
               }
             ]
           },
@@ -2542,21 +2527,6 @@
         ],
         "id": "877e295a-1f81-4f40-a9f0-54bcd47fb7ed",
         "name": "Sticky Note"
-      },
-      {
-        "parameters": {
-          "content": "Achar solução para dados da empresa",
-          "width": 368,
-          "color": 3
-        },
-        "type": "n8n-nodes-base.stickyNote",
-        "typeVersion": 1,
-        "position": [
-          -224,
-          560
-        ],
-        "id": "3c4801d2-eac7-43c4-987c-4929cb70d887",
-        "name": "Sticky Note4"
       }
     ],
     "connections": {
