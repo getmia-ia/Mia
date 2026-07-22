@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-20T21:57:48.667Z",
+  "updatedAt": "2026-07-21T21:11:47.669Z",
   "createdAt": "2026-07-20T18:40:06.227Z",
   "id": "SZ0ko4bJ8ZLgIw7s",
   "name": "Finamob - 6.03 - SDR Finamob - Calendar1",
@@ -105,7 +105,7 @@
       "parameters": {
         "content": "## Marcar Reunião",
         "height": 512,
-        "width": 2400,
+        "width": 2688,
         "color": 4
       },
       "type": "n8n-nodes-base.stickyNote",
@@ -283,6 +283,31 @@
               },
               "renameOutput": true,
               "outputKey": "cancelarReuniao"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "6dc01dde-deaa-4687-b410-520253b45098",
+                    "leftValue": "={{ $('trigger').item.json.type }}",
+                    "rightValue": "adicionarConvidado",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "adicionarConvidado"
             }
           ]
         },
@@ -339,7 +364,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// ===============================\n// INPUT\n// ===============================\nconst input = $items(\"trigger\")[0].json;\nconst { dia, horario, nome, empresa, email, telefone, descricao } = input;\n\nconst tz = \"America/Sao_Paulo\";\n\n// ===============================\n// DATA ATUAL EM SP\n// ===============================\nconst agora = new Date().toLocaleString(\"sv-SE\", { timeZone: tz });\nconst hojeStr = agora.slice(0, 10);\nconst agoraSP = agora.slice(11, 16);\n\nfunction somaMinutos(hhmm, min) {\n  const [h, m] = hhmm.split(\":\").map(Number);\n  const total = h * 60 + m + min;\n  return String(Math.floor(total / 60)).padStart(2, \"0\") + \":\" +\n         String(total % 60).padStart(2, \"0\");\n}\n\nconst limite = somaMinutos(agoraSP, 30);\n\n// ===============================\n// PEGAR TODOS OS SLOTS (FORMATO REAL)\n// ===============================\nconst slotsBase = $items(\"Gerar Slots Livres\").map(item => item.json);\n\nif (!slotsBase.length) {\n  throw new Error(\"Nenhum slot retornado pelo node 'Gerar Slots Livres'.\");\n}\n\n// ===============================\n// FILTRAR PASSADO E < 30 MIN\n// ===============================\nconst slots = slotsBase.filter(slot => {\n  const slotDia  = slot.start.slice(0, 10);\n  const slotHora = slot.start.slice(11, 16);\n\n  if (slotDia === hojeStr) return slotHora >= limite;\n  return slotDia > hojeStr;\n});\n\n// ===============================\n// VERIFICAR HORÁRIO SOLICITADO\n// ===============================\nlet solicitadoKey;\n\nif (horario.includes(\"T\")) {\n  solicitadoKey = horario.slice(0, 16);\n} else {\n  solicitadoKey = `${dia}T${horario}`;\n}\nconst encontrado = slots.find(slot => slot.start === solicitadoKey);\n\nif (encontrado) {\n  return [{\n    json: {\n      status: \"ok\",\n      message: `Horário disponível: ${dia} ${horario}. Pode agendar.`,\n      dados: {\n        nome,\n        empresa,\n        email,\n        telefone,\n        descricao,\n        inicio: { dateTime: `${encontrado.start}:00`, timeZone: tz },\n        fim:    { dateTime: `${encontrado.end}:00`,   timeZone: tz }\n      }\n    }\n  }];\n}\n\n// ===============================\n// AGRUPAR POR DIA\n// ===============================\nconst slotsPorDia = {};\n\nfor (const slot of slots) {\n  const d = slot.start.slice(0, 10);\n  if (!slotsPorDia[d]) slotsPorDia[d] = [];\n  slotsPorDia[d].push(slot);\n}\n\nfor (const d in slotsPorDia) {\n  slotsPorDia[d].sort((a, b) => a.start.localeCompare(b.start));\n}\n\n// ===============================\n// FUNÇÃO PARA SOMAR DIAS\n// ===============================\nfunction addDias(dataStr, n) {\n  const d = new Date(dataStr + \"T00:00:00Z\");\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\n// ===============================\n// BUSCAR ALTERNATIVAS\n// ===============================\nlet alternativas = [];\n\nconst prev = addDias(dia, -1);\nconst next = addDias(dia, +1);\n\nalternativas.push(...(slotsPorDia[prev]?.slice(0, 2) || []));\nalternativas.push(...(slotsPorDia[dia]?.slice(0, 2)  || []));\nalternativas.push(...(slotsPorDia[next]?.slice(0, 2) || []));\n\nlet offset = 2;\n\nwhile (alternativas.length < 2 && offset <= 7) {\n  alternativas.push(...(slotsPorDia[addDias(dia, -offset)]?.slice(0, 2) || []));\n  alternativas.push(...(slotsPorDia[addDias(dia, +offset)]?.slice(0, 2) || []));\n  offset++;\n}\n\nalternativas = alternativas\n  .slice(0, 6)\n  .map(slot => ({\n    inicio: { dateTime: `${slot.start}:00`, timeZone: tz },\n    fim:    { dateTime: `${slot.end}:00`,   timeZone: tz }\n  }));\n\n// ===============================\n// RETORNO INDISPONÍVEL\n// ===============================\nreturn [{\n  json: {\n    status: \"indisponivel\",\n    message: `O horário ${dia} ${horario} não está disponível.`,\n    alternativas\n  }\n}];"
+        "jsCode": "// ===============================\n// INPUT\n// ===============================\nconst input = $items(\"trigger\")[0].json;\nconst { dia, horario, nome, empresa, email, telefone, descricao, convidados } = input; // <-- NOVO: adicionado \"convidados\"\n\nconst convidadosNormalizados = (convidados || [])                                   // <-- NOVO\n  .filter(c => c?.email)                                                            // <-- NOVO\n  .map(c => ({ nome: c.nome || \"\", email: c.email.trim().toLowerCase() }))          // <-- NOVO\n  .filter(c => c.email !== (email || \"\").trim().toLowerCase())                      // <-- NOVO\n  .filter((c, i, arr) => arr.findIndex(x => x.email === c.email) === i);            // <-- NOVO\n\nconst tz = \"America/Sao_Paulo\";\n\n// ===============================\n// DATA ATUAL EM SP\n// ===============================\nconst agora = new Date().toLocaleString(\"sv-SE\", { timeZone: tz });\nconst hojeStr = agora.slice(0, 10);\nconst agoraSP = agora.slice(11, 16);\n\nfunction somaMinutos(hhmm, min) {\n  const [h, m] = hhmm.split(\":\").map(Number);\n  const total = h * 60 + m + min;\n  return String(Math.floor(total / 60)).padStart(2, \"0\") + \":\" +\n         String(total % 60).padStart(2, \"0\");\n}\n\nconst limite = somaMinutos(agoraSP, 30);\n\n// ===============================\n// PEGAR TODOS OS SLOTS (FORMATO REAL)\n// ===============================\nconst slotsBase = $items(\"Gerar Slots Livres\").map(item => item.json);\n\nif (!slotsBase.length) {\n  throw new Error(\"Nenhum slot retornado pelo node 'Gerar Slots Livres'.\");\n}\n\n// ===============================\n// FILTRAR PASSADO E < 30 MIN\n// ===============================\nconst slots = slotsBase.filter(slot => {\n  const slotDia  = slot.start.slice(0, 10);\n  const slotHora = slot.start.slice(11, 16);\n\n  if (slotDia === hojeStr) return slotHora >= limite;\n  return slotDia > hojeStr;\n});\n\n// ===============================\n// VERIFICAR HORÁRIO SOLICITADO\n// ===============================\nlet solicitadoKey;\n\nif (horario.includes(\"T\")) {\n  solicitadoKey = horario.slice(0, 16);\n} else {\n  solicitadoKey = `${dia}T${horario}`;\n}\nconst encontrado = slots.find(slot => slot.start === solicitadoKey);\n\nif (encontrado) {\n  return [{\n    json: {\n      status: \"ok\",\n      message: `Horário disponível: ${dia} ${horario}. Pode agendar.`,\n      dados: {\n        nome,\n        empresa,\n        email,\n        telefone,\n        descricao,\n        convidados: convidadosNormalizados, // <-- NOVO\n        inicio: { dateTime: `${encontrado.start}:00`, timeZone: tz },\n        fim:    { dateTime: `${encontrado.end}:00`,   timeZone: tz }\n      }\n    }\n  }];\n}\n\n// ===============================\n// AGRUPAR POR DIA\n// ===============================\nconst slotsPorDia = {};\n\nfor (const slot of slots) {\n  const d = slot.start.slice(0, 10);\n  if (!slotsPorDia[d]) slotsPorDia[d] = [];\n  slotsPorDia[d].push(slot);\n}\n\nfor (const d in slotsPorDia) {\n  slotsPorDia[d].sort((a, b) => a.start.localeCompare(b.start));\n}\n\n// ===============================\n// FUNÇÃO PARA SOMAR DIAS\n// ===============================\nfunction addDias(dataStr, n) {\n  const d = new Date(dataStr + \"T00:00:00Z\");\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\n// ===============================\n// BUSCAR ALTERNATIVAS\n// ===============================\nlet alternativas = [];\n\nconst prev = addDias(dia, -1);\nconst next = addDias(dia, +1);\n\nalternativas.push(...(slotsPorDia[prev]?.slice(0, 2) || []));\nalternativas.push(...(slotsPorDia[dia]?.slice(0, 2)  || []));\nalternativas.push(...(slotsPorDia[next]?.slice(0, 2) || []));\n\nlet offset = 2;\n\nwhile (alternativas.length < 2 && offset <= 7) {\n  alternativas.push(...(slotsPorDia[addDias(dia, -offset)]?.slice(0, 2) || []));\n  alternativas.push(...(slotsPorDia[addDias(dia, +offset)]?.slice(0, 2) || []));\n  offset++;\n}\n\nalternativas = alternativas\n  .slice(0, 6)\n  .map(slot => ({\n    inicio: { dateTime: `${slot.start}:00`, timeZone: tz },\n    fim:    { dateTime: `${slot.end}:00`,   timeZone: tz }\n  }));\n\n// ===============================\n// RETORNO INDISPONÍVEL\n// ===============================\nreturn [{\n  json: {\n    status: \"indisponivel\",\n    message: `O horário ${dia} ${horario} não está disponível.`,\n    alternativas\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -384,14 +409,13 @@
         "calendar": {
           "__rl": true,
           "value": "luizakrum@gmail.com",
-          "mode": "list",
-          "cachedResultName": "luizakrum@gmail.com"
+          "mode": "list"
         },
         "start": "={{ $json.input[0].json.dados.inicio.dateTime }}",
         "end": "={{ $json.input[0].json.dados.fim.dateTime }}",
         "additionalFields": {
           "attendees": [
-            "={{ $json.input[0].json.dados.email }}"
+            "={{ [$json.input[0].json.dados.email, ...($json.input[0].json.dados.convidados || []).map(c => c.email)] }}"
           ],
           "conferenceDataUi": {
             "conferenceDataValues": {
@@ -653,7 +677,7 @@
       "typeVersion": 1.3,
       "position": [
         2112,
-        880
+        912
       ],
       "id": "b89c39e8-669c-4abd-906f-675f282e3b2d",
       "name": "Reagenda a reunião1",
@@ -698,7 +722,7 @@
     {
       "parameters": {
         "inputSource": "jsonExample",
-        "jsonExample": "{\n\"type\": \"listarHorarios\",\n\"tema\": \"funding imobiliario\",\n\"dia\": \"2026-06-15\",\n\"horario\": \"15:00\",\n\"email\": \"usuario@email.com\",\n\"telefone\": \"5511999999999\",\n\"nome\": \"João da Silva\",\n\"empresa\": \"Empresa X\",\n\"descricao\": \"Falou que está buscando funding para um projeto de 40 unidades e quer entender como a imersão pode acelerar sua captação\",\n\"id\": 8100 \n}"
+        "jsonExample": "{\n\"type\": \"agendarReuniao\",\n\"tema\": \"funding imobiliario\",\n\"dia\": \"2026-06-15\",\n\"horario\": \"15:00\",\n\"email\": \"usuario@email.com\",\n\"telefone\": \"5511999999999\",\n\"nome\": \"João da Silva\",\n\"empresa\": \"Empresa X\",\n\"descricao\": \"Falou que está buscando funding para um projeto de 40 unidades e quer entender como a imersão pode acelerar sua captação\",\n\"id\": \"8100\",\n\"convidados\": [\n  { \"nome\": \"Maria Souza\", \"email\": \"maria@empresa.com\" }\n]\n}"
       },
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
@@ -734,8 +758,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        2384,
-        1040
+        2320,
+        976
       ],
       "id": "5a3a9aa2-9e22-42d7-ac2d-f74864156818",
       "name": "API Finamob",
@@ -746,13 +770,13 @@
         "resource": "messages-api",
         "instanceName": "EMI-SDR-DIOGO",
         "remoteJid": "120363425631150537@g.us",
-        "messageText": "=Reunião com *{{ $('trigger').first().json.nome }}* agendada para *{{\n  (() => {\n    let dateTime = null;\n\n    try {\n      dateTime = $('Agendar Reunião no Google Calendar').item.json.start?.dateTime;\n    } catch (e) {}\n\n    if (!dateTime) {\n      try {\n        dateTime = $('Reagenda a reunião1').item.json.start?.dateTime;\n      } catch (e) {}\n    }\n\n    return DateTime\n      .fromISO(dateTime)\n      .setZone('America/Sao_Paulo')\n      .setLocale('pt-BR')\n      .toFormat(\"cccc, dd/MM/yyyy 'às' HH:mm\");\n  })()\n}}*\n\nAssunto: {{ $('trigger').first().json.descricao }}\n\nID: {{ $('trigger').first().json.id }}",
+        "messageText": "=Reunião com *{{ $('trigger').first().json.nome }}* agendada para *{{\n  (() => {\n    let dateTime = null;\n\n    try {\n      dateTime = $('Agendar Reunião no Google Calendar').item.json.start?.dateTime;\n    } catch (e) {}\n\n    if (!dateTime) {\n      try {\n        dateTime = $('Reagenda a reunião1').item.json.start?.dateTime;\n      } catch (e) {}\n    }\n\n    return DateTime\n      .fromISO(dateTime)\n      .setZone('America/Sao_Paulo')\n      .setLocale('pt-BR')\n      .toFormat(\"cccc, dd/MM/yyyy 'às' HH:mm\");\n  })()\n}}*\n\nAssunto: {{ $('trigger').first().json.descricao }}{{\n  (() => {\n    const convs = $('trigger').first().json.convidados || [];\n    if (!convs.length) return '';\n    const lista = convs.map(c => c.nome ? `${c.nome} (${c.email})` : c.email).join(', ');\n    return `\\n\\nConvidado(s) no invite: ${lista}`;\n  })()\n}}\n\nID: {{ $('trigger').first().json.id }}",
         "options_message": {}
       },
       "type": "n8n-nodes-evolution-api.evolutionApi",
       "typeVersion": 1,
       "position": [
-        2576,
+        2720,
         976
       ],
       "id": "c126674e-90c4-4cc4-b21f-b73e84208238",
@@ -790,7 +814,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1072,
+        1040,
         1648
       ],
       "id": "ee191962-0561-4792-8078-bd38028687dd",
@@ -808,8 +832,8 @@
       "type": "n8n-nodes-evolution-api.evolutionApi",
       "typeVersion": 1,
       "position": [
-        1248,
-        1744
+        1232,
+        1648
       ],
       "id": "480cf959-1e1a-4fcc-bd29-b5529413811a",
       "name": "Mensagem de Confirmação1",
@@ -894,7 +918,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2752,
+        2912,
         976
       ],
       "id": "573da6b6-88db-4945-8a18-c9547556d1ed",
@@ -1065,8 +1089,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        2384,
-        880
+        2528,
+        976
       ],
       "id": "23279d88-b20f-4265-aa94-69fc5d7909d1",
       "name": "Upsert Call - Pipeline Finamob"
@@ -1096,42 +1120,183 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1072,
-        1824
+        1040,
+        1808
       ],
       "id": "54b887dd-7eab-4be3-94b7-24422232f990",
       "name": "Upsert Call - Pipeline Finamob1"
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://finamob.com.br/api/calls_api.php",
-        "sendHeaders": "***REMOVIDO***",
-        "headerParameters": {
-          "parameters": [
+        "content": "## ADICIONAR CONVIDADO",
+        "height": 320,
+        "width": 2400,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        368,
+        2352
+      ],
+      "typeVersion": 1,
+      "id": "daed0330-be34-44ce-ba6f-8a53b32be40d",
+      "name": "Sticky Note11"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "luizakrum@gmail.com",
+          "mode": "list",
+          "cachedResultName": "luizakrum@gmail.com"
+        },
+        "returnAll": true,
+        "timeMax": "={{ $now.plus({ week: 2 }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        448,
+        2464
+      ],
+      "id": "4795a7c2-19e2-443d-9393-9fade8cca0c3",
+      "name": "Obter Eventos do Google Calendar4",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const leadEmail = ($('trigger').first().json.email || '').trim().toLowerCase();\nconst now = new Date();\n\nconst matches = items.filter(item => {\n  const event = item.json;\n  if (event.attendees && Array.isArray(event.attendees)) {\n    return event.attendees.some(attendee =>\n      attendee.email && attendee.email.trim().toLowerCase() === leadEmail\n    );\n  }\n  return false;\n});\n\nconst futureMeetings = matches\n  .filter(item => item.json.start?.dateTime && new Date(item.json.start.dateTime) > now)\n  .sort((a, b) => new Date(a.json.start.dateTime) - new Date(b.json.start.dateTime));\n\nif (!futureMeetings.length) {\n  return [{ json: { found: false } }];\n}\n\nconst evento = futureMeetings[0].json;\n\nreturn [{\n  json: {\n    found: true,\n    eventId: evento.id,\n    attendeesAtuais: evento.attendees || []\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        2464
+      ],
+      "id": "c0f5a64a-f8a6-474b-974d-729989bc0ef9",
+      "name": "Identificar Reunião para Adicionar Convidado"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
             {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "X-API-Key",
-              "value": "FINA_API_2026_9f7c2b4e8a1d6c3f0b92e71a54d8c6aa3f19b0e427c85d6f921ce4a0b7d3f8c2"
+              "id": "325a0641-9aab-434d-8649-7e60d4638112",
+              "name": "response",
+              "value": "Não encontrei nenhuma reunião futura marcada para esse e-mail, então não consegui adicionar o convidado",
+              "type": "string"
             }
           ]
         },
+        "includeOtherFields": "={{ false }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1120,
+        2528
+      ],
+      "id": "43fbeca5-564e-4ece-919a-d4ea1bb52549",
+      "name": "Resposta: Reunião Não Encontrada"
+    },
+    {
+      "parameters": {
+        "jsCode": "const evento = $input.first().json;\n\nconst novosConvidados = ($('trigger').first().json.convidados || [])\n  .filter(c => c?.email)\n  .map(c => ({\n    email: c.email.trim().toLowerCase(),\n    displayName: c.nome || \"\"\n  }));\n\nconst existentes = (evento.attendeesAtuais || []).map(a => ({\n  email: (a.email || \"\").trim().toLowerCase(),\n  displayName: a.displayName || \"\"\n}));\n\nconst combinados = [...existentes];\nfor (const novo of novosConvidados) {\n  if (!combinados.some(a => a.email === novo.email)) {\n    combinados.push(novo);\n  }\n}\n\nreturn [{\n  json: {\n    eventId: evento.eventId,\n    attendeesFinal: combinados,\n    nomesAdicionados: novosConvidados.map(c => c.displayName || c.email).join(', ')\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        2384
+      ],
+      "id": "708f059b-7257-418f-a0a9-2627f33d27ba",
+      "name": "Montar Lista de Convidados Atualizada"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "120363425631150537@g.us",
+        "messageText": "=MENSAGEM TESTE\n\n\nConvidado(s) adicionado(s) com sucesso: *{{ $('Montar Lista de Convidados Atualizada').item.json.nomesAdicionados }}*\n\nA reunião com *{{ $('trigger').first().json.nome }}* segue confirmada, sem mudança de data/horário.\n\nID: {{ $('trigger').first().json.id }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        2384
+      ],
+      "id": "59084ab9-4b6a-442c-b279-a4069880b709",
+      "name": "Mensagem de Confirmação3",
+      "credentials": {
+        "evolutionApi": {
+          "id": "keWx5OuE8n8WEbw0",
+          "name": "EMI-SDR-DIOGO"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/luizakrum%40gmail.com/events/{{ $json.eventId }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"action\": \"upsert\",\n  \"phone\": \"5511999999999\",\n  \"dt_call\": \"2026-07-25 14:00\",\n  \"obs\": \"Teste isolado do node\"\n}",
+        "jsonBody": "={{ JSON.stringify({ attendees: $json.attendeesFinal }) }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        2208,
-        640
+        1328,
+        2384
       ],
-      "id": "8a5765c4-e03a-479b-af58-5120aa6c4231",
-      "name": "Upsert Call - Pipeline Finamob2"
+      "id": "c5b65e21-1a4b-4d6d-a7a7-1aa43bd975b0",
+      "name": "Atualizar Convidados do Evento",
+      "credentials": {
+        "googleCalendarOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "93b2c756-d5e2-417e-8097-4ed82995ed36",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        912,
+        2464
+      ],
+      "id": "10554b6d-8f91-4d30-9a1d-7c19bcadd8e9",
+      "name": "Reunião Encontrada?"
     }
   ],
   "connections": {
@@ -1193,6 +1358,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Obter Eventos do Google Calendar4",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1234,11 +1406,6 @@
         [
           {
             "node": "API Finamob",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Upsert Call - Pipeline Finamob",
             "type": "main",
             "index": 0
           }
@@ -1363,11 +1530,6 @@
             "node": "API Finamob",
             "type": "main",
             "index": 0
-          },
-          {
-            "node": "Upsert Call - Pipeline Finamob",
-            "type": "main",
-            "index": 0
           }
         ]
       ]
@@ -1403,12 +1565,24 @@
     },
     "API Finamob": {
       "main": [
-        []
+        [
+          {
+            "node": "Upsert Call - Pipeline Finamob",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "API Finamob1": {
       "main": [
-        []
+        [
+          {
+            "node": "Mensagem de Confirmação1",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "API Finamob2": {
@@ -1491,6 +1665,79 @@
           }
         ]
       ]
+    },
+    "Upsert Call - Pipeline Finamob": {
+      "main": [
+        [
+          {
+            "node": "Mensagem de Confirmação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obter Eventos do Google Calendar4": {
+      "main": [
+        [
+          {
+            "node": "Identificar Reunião para Adicionar Convidado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identificar Reunião para Adicionar Convidado": {
+      "main": [
+        [
+          {
+            "node": "Reunião Encontrada?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Lista de Convidados Atualizada": {
+      "main": [
+        [
+          {
+            "node": "Atualizar Convidados do Evento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualizar Convidados do Evento": {
+      "main": [
+        [
+          {
+            "node": "Mensagem de Confirmação3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reunião Encontrada?": {
+      "main": [
+        [
+          {
+            "node": "Montar Lista de Convidados Atualizada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resposta: Reunião Não Encontrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -1507,7 +1754,7 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "5fe00172-ec94-4769-bc8f-94e82f96b496",
+  "versionId": "bcbf5940-4d2d-41b9-9401-f5e84d133bc5",
   "activeVersionId": null,
   "triggerCount": 0,
   "shared": [
