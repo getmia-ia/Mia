@@ -1,0 +1,875 @@
+{
+  "updatedAt": "2026-07-21T22:46:37.433Z",
+  "createdAt": "2026-07-21T20:15:59.820Z",
+  "id": "VJtRZqd6ebNasdU5",
+  "name": "WhatsApp -> Tasks",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-task",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -656,
+        160
+      ],
+      "id": "5a9d4b3d-68fe-4611-90ba-e7609055018b",
+      "name": "Webhook Evolution",
+      "webhookId": "whatsapp-tasks-hook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.body.event }}",
+              "rightValue": "messages.upsert",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.body.data.key.fromMe }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "c3",
+              "leftValue": "={{ $json.body.data.message.conversation || $json.body.data.message.extendedTextMessage?.text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -448,
+        160
+      ],
+      "id": "3f056cdb-cdd9-416c-86ca-5de068a838ae",
+      "name": "É mensagem de texto recebida?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ==== Parser da mensagem do WhatsApp (Evolution API) ====\nconst body = $input.first().json.body || $input.first().json;\nconst data = body?.data || {};\nconst key = data.key || {};\n\n// ---- Texto da mensagem ----\nconst rawMessage = (\n  data.message?.conversation ||\n  data.message?.extendedTextMessage?.text ||\n  ''\n).trim();\n\n// ---- Grupo vs 1:1 ----\nconst remoteJid = key.remoteJid || '';\nconst isGrupo = remoteJid.endsWith('@g.us');\n\n// ---- Quem enviou (telefone real, tratando LID) ----\nlet jidRemetente = isGrupo\n  ? (key.participantAlt || key.participant || '')\n  : (key.participantAlt || remoteJid || '');\nconst isLid = jidRemetente.endsWith('@lid');\nlet from = jidRemetente.split('@')[0].replace(/\\D/g, '');\nif (!isLid && from.length === 12 && from.startsWith('55')) {\n  from = from.slice(0, 4) + '9' + from.slice(4);\n}\n\n// ---- Onde responder ----\nconst respostaJid = remoteJid;\n\n// ---- Mensagem citada (quote) ----\nconst ctx = data.contextInfo || data.message?.extendedTextMessage?.contextInfo || null;\nconst quoted = ctx?.quotedMessage || null;\nlet textoCitado = '';\nif (quoted) {\n  textoCitado = (\n    quoted.conversation ||\n    quoted.extendedTextMessage?.text ||\n    quoted.imageMessage?.caption ||\n    quoted.videoMessage?.caption ||\n    ''\n  ).trim();\n}\n\n// ---- Detecta comando ----\nconst parts = rawMessage.split(/\\s+/);\nconst first = parts[0] || '';\nconst command = first.startsWith('/') ? first.toLowerCase() : '';\n\n// Tudo depois do comando\nconst resto = rawMessage.slice(first.length).trim();\n\n// Separa as tags (#chave:valor) do título\nconst tags = {};\nconst tagRegex = /#(\\w+):(\\S+)/g;\nlet m;\nwhile ((m = tagRegex.exec(resto)) !== null) {\n  tags[m[1].toLowerCase()] = m[2];\n}\n\n// Título = o resto SEM as tags\nlet titleDigitado = resto.replace(/#\\w+:\\S+/g, '').trim();\n\n// ---- Regra do quote ----\n// Se for /task, não há título digitado (só tags ou nada), e existe quote,\n// usa o texto citado como título.\nlet title = titleDigitado;\nif (command === '/task' && !titleDigitado && textoCitado) {\n  title = textoCitado;\n}\n\nreturn [{\n  json: {\n    from,\n    raw_message: rawMessage,\n    command,\n    title,\n    tags,                        // { org: 'Eleva', area: 'Plataforma' }\n    org: tags.org || '',\n    area: tags.area || '',\n    texto_citado: textoCitado,\n    usou_quote: command === '/task' && !titleDigitado && !!textoCitado,\n    resposta_jid: respostaJid,\n    is_grupo: isGrupo,\n    pusher_name: data.pushName || '',\n    is_command: !!command\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        112
+      ],
+      "id": "2d4e1e61-8026-4141-a945-cf8fdbfc0d9f",
+      "name": "Parse do comando"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1",
+              "leftValue": "={{ $json.valido }}",
+              "rightValue": "desconhecido",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        96,
+        112
+      ],
+      "id": "3a3ad85c-e02b-4272-870a-efecae605f51",
+      "name": "Comando válido?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst parse = $('Parse do comando').first().json;\n\nconst AJUDA =\n  '📋 *Comandos disponíveis:*\\n\\n' +\n  '• /task Descrição #area:Marketing — cria uma tarefa\\n' +\n  '• /hoje — suas tarefas de hoje\\n' +\n  '• /done <id> — concluir tarefa\\n' +\n  '• /ajuda — mostra esta mensagem';\n\nlet mensagem;\n\n// Se o comando foi /ajuda, responde a lista direto (não depende da função)\nif (parse.command === '/ajuda') {\n  mensagem = AJUDA;\n} else if (resp && typeof resp.reply === 'string' && resp.reply.length > 0) {\n  mensagem = resp.reply;\n} else if (resp && resp.ok === false) {\n  let motivo = resp.error || 'erro desconhecido';\n  if (resp.details) {\n    motivo += ' (campos: ' + Object.keys(resp.details).join(', ') + ')';\n  }\n  mensagem = '⚠️ Não consegui processar seu comando.\\nMotivo: ' + motivo;\n} else {\n  mensagem = '⚠️ Ocorreu um erro inesperado. Tente novamente.';\n}\n\nreturn [{\n  json: {\n    mensagem_resposta: mensagem,\n    from: parse.from\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        96
+      ],
+      "id": "e5dc2bd3-9c4a-4d74-8bfe-cc379692a07a",
+      "name": "Montar resposta"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "=MIA-LOGS",
+        "remoteJid": "={{ $('Webhook Evolution').item.json.body.data.key.remoteJid }}",
+        "messageText": "={{ $json.mensagem_resposta }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        992,
+        96
+      ],
+      "id": "51109f84-6938-41ec-8a1b-598a00a37dfe",
+      "name": "Responder no WhatsApp",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "=MIA-LOGS",
+        "remoteJid": "={{ $('Parse do comando').item.json.resposta_jid }}",
+        "messageText": "{{ $json.erro_validacao }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        544,
+        304
+      ],
+      "id": "d986f59a-899c-4165-a9ef-267a45189369",
+      "name": "Enviar ajuda",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5ddc7181-60c9-433b-b2c9-e8ca6f24062a",
+              "name": "secret_whatsapp",
+              "value": "miataskssenhagigantescavouatefingirqueehhash@2026!carambaaindatoescrevendo@2030ehoanodohexa",
+              "type": "string"
+            },
+            {
+              "id": "52b63527-8e69-4077-96c3-3528451a0a47",
+              "name": "token",
+              "value": "***REMOVIDO***",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        336,
+        112
+      ],
+      "id": "4920a2c0-1403-4729-b9e2-3ccee04db196",
+      "name": "secret"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://tyreqzwkazvdkfqipkme.supabase.co/functions/v1/whatsapp-command",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.token }}"
+            },
+            {
+              "name": "apikey",
+              "value": "={{ $json.token }}"
+            },
+            {
+              "name": "x-shared-secret",
+              "value": "={{ $json.secret_whatsapp }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ $('Parse do comando').item.json.from }}"
+            },
+            {
+              "name": "raw_message",
+              "value": "={{ $('Parse do comando').item.json.raw_message }}"
+            },
+            {
+              "name": "command",
+              "value": "={{ $('Parse do comando').item.json.command }}"
+            },
+            {
+              "name": "title",
+              "value": "={{ $('Parse do comando').item.json.title }}"
+            },
+            {
+              "name": "org",
+              "value": "={{ $('Parse do comando').item.json.org }}"
+            },
+            {
+              "name": "area",
+              "value": "={{ $('Parse do comando').item.json.area }}"
+            },
+            {
+              "name": "quoted_text",
+              "value": "={{ $('Parse do comando').item.json.texto_citado }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f85ec31f-5687-4925-b653-5816442ffe55",
+      "name": "Supabase Edge Function",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        528,
+        96
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $input.first().json;\n\nlet valido = true;\nlet erro = '';\n\n// Lista dos únicos comandos que o bot responde\nconst comandosValidos = ['/task', '/hoje', '/done', '/ajuda'];\n\n// ⛔ Não é comando (não começa com /) OU é um comando fora da lista → ignora TUDO\nif (!p.is_command || !comandosValidos.includes(p.command)) {\n  return [{ json: { ...p, valido: false, erro_validacao: '' } }];\n}\n\n// A partir daqui, é garantidamente um dos 4 comandos.\n\nif (p.command === '/task') {\n  if (!p.org) {\n    valido = false;\n    erro =\n      '⚠️ Faltou a organização.\\n\\n' +\n      'Use: /task Descrição #org:NomeDaOrg #area:NomeDaArea\\n' +\n      'Exemplo: /task Corrigir bug #org:Eleva #area:Plataforma';\n  } else if (!p.title) {\n    valido = false;\n    erro =\n      '⚠️ Faltou a descrição da tarefa.\\n\\n' +\n      'Digite o texto após /task, ou responda a uma mensagem com /task.';\n  }\n} else if (p.command === '/done') {\n  const codigo = (p.title || '').trim().split(/\\s+/)[0] || '';\n  if (!codigo) {\n    valido = false;\n    erro =\n      '⚠️ Faltou o código da tarefa.\\n\\n' +\n      'Use: /done <código>\\nExemplo: /done 0232\\nVeja os códigos com /hoje.';\n  }\n}\n\nreturn [{\n  json: { ...p, valido, erro_validacao: erro }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -64,
+        112
+      ],
+      "id": "166ba1a8-046a-4205-96e4-020e406e7330",
+      "name": "Validar comando"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1",
+              "leftValue": "={{ $json.erro_validacao }}",
+              "rightValue": "desconhecido",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        288,
+        240
+      ],
+      "id": "d055bf4b-482b-4f57-aef3-c98de0cd2c3b",
+      "name": "Comando válido?1"
+    }
+  ],
+  "connections": {
+    "Webhook Evolution": {
+      "main": [
+        [
+          {
+            "node": "É mensagem de texto recebida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "É mensagem de texto recebida?": {
+      "main": [
+        [
+          {
+            "node": "Parse do comando",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse do comando": {
+      "main": [
+        [
+          {
+            "node": "Validar comando",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comando válido?": {
+      "main": [
+        [
+          {
+            "node": "secret",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Comando válido?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar resposta": {
+      "main": [
+        [
+          {
+            "node": "Responder no WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "secret": "***REMOVIDO***",
+    "Supabase Edge Function": {
+      "main": [
+        [
+          {
+            "node": "Montar resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar comando": {
+      "main": [
+        [
+          {
+            "node": "Comando válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comando válido?1": {
+      "main": [
+        [
+          {
+            "node": "Enviar ajuda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "affb4b4a-4c01-4f33-90df-cf691654380f",
+  "activeVersionId": "affb4b4a-4c01-4f33-90df-cf691654380f",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-07-21T20:15:59.820Z",
+      "createdAt": "2026-07-21T20:15:59.820Z",
+      "role": "workflow:owner",
+      "workflowId": "VJtRZqd6ebNasdU5",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-07-21T22:46:35.388Z",
+    "createdAt": "2026-07-21T22:46:35.388Z",
+    "versionId": "affb4b4a-4c01-4f33-90df-cf691654380f",
+    "workflowId": "VJtRZqd6ebNasdU5",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "whatsapp-task",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -656,
+          160
+        ],
+        "id": "5a9d4b3d-68fe-4611-90ba-e7609055018b",
+        "name": "Webhook Evolution",
+        "webhookId": "whatsapp-tasks-hook"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "c1",
+                "leftValue": "={{ $json.body.event }}",
+                "rightValue": "messages.upsert",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              },
+              {
+                "id": "c2",
+                "leftValue": "={{ $json.body.data.key.fromMe }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "false",
+                  "singleValue": true
+                }
+              },
+              {
+                "id": "c3",
+                "leftValue": "={{ $json.body.data.message.conversation || $json.body.data.message.extendedTextMessage?.text }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "exists",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -448,
+          160
+        ],
+        "id": "3f056cdb-cdd9-416c-86ca-5de068a838ae",
+        "name": "É mensagem de texto recebida?"
+      },
+      {
+        "parameters": {
+          "jsCode": "// ==== Parser da mensagem do WhatsApp (Evolution API) ====\nconst body = $input.first().json.body || $input.first().json;\nconst data = body?.data || {};\nconst key = data.key || {};\n\n// ---- Texto da mensagem ----\nconst rawMessage = (\n  data.message?.conversation ||\n  data.message?.extendedTextMessage?.text ||\n  ''\n).trim();\n\n// ---- Grupo vs 1:1 ----\nconst remoteJid = key.remoteJid || '';\nconst isGrupo = remoteJid.endsWith('@g.us');\n\n// ---- Quem enviou (telefone real, tratando LID) ----\nlet jidRemetente = isGrupo\n  ? (key.participantAlt || key.participant || '')\n  : (key.participantAlt || remoteJid || '');\nconst isLid = jidRemetente.endsWith('@lid');\nlet from = jidRemetente.split('@')[0].replace(/\\D/g, '');\nif (!isLid && from.length === 12 && from.startsWith('55')) {\n  from = from.slice(0, 4) + '9' + from.slice(4);\n}\n\n// ---- Onde responder ----\nconst respostaJid = remoteJid;\n\n// ---- Mensagem citada (quote) ----\nconst ctx = data.contextInfo || data.message?.extendedTextMessage?.contextInfo || null;\nconst quoted = ctx?.quotedMessage || null;\nlet textoCitado = '';\nif (quoted) {\n  textoCitado = (\n    quoted.conversation ||\n    quoted.extendedTextMessage?.text ||\n    quoted.imageMessage?.caption ||\n    quoted.videoMessage?.caption ||\n    ''\n  ).trim();\n}\n\n// ---- Detecta comando ----\nconst parts = rawMessage.split(/\\s+/);\nconst first = parts[0] || '';\nconst command = first.startsWith('/') ? first.toLowerCase() : '';\n\n// Tudo depois do comando\nconst resto = rawMessage.slice(first.length).trim();\n\n// Separa as tags (#chave:valor) do título\nconst tags = {};\nconst tagRegex = /#(\\w+):(\\S+)/g;\nlet m;\nwhile ((m = tagRegex.exec(resto)) !== null) {\n  tags[m[1].toLowerCase()] = m[2];\n}\n\n// Título = o resto SEM as tags\nlet titleDigitado = resto.replace(/#\\w+:\\S+/g, '').trim();\n\n// ---- Regra do quote ----\n// Se for /task, não há título digitado (só tags ou nada), e existe quote,\n// usa o texto citado como título.\nlet title = titleDigitado;\nif (command === '/task' && !titleDigitado && textoCitado) {\n  title = textoCitado;\n}\n\nreturn [{\n  json: {\n    from,\n    raw_message: rawMessage,\n    command,\n    title,\n    tags,                        // { org: 'Eleva', area: 'Plataforma' }\n    org: tags.org || '',\n    area: tags.area || '',\n    texto_citado: textoCitado,\n    usou_quote: command === '/task' && !titleDigitado && !!textoCitado,\n    resposta_jid: respostaJid,\n    is_grupo: isGrupo,\n    pusher_name: data.pushName || '',\n    is_command: !!command\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -224,
+          112
+        ],
+        "id": "2d4e1e61-8026-4141-a945-cf8fdbfc0d9f",
+        "name": "Parse do comando"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "d1",
+                "leftValue": "={{ $json.valido }}",
+                "rightValue": "desconhecido",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          96,
+          112
+        ],
+        "id": "3a3ad85c-e02b-4272-870a-efecae605f51",
+        "name": "Comando válido?"
+      },
+      {
+        "parameters": {
+          "jsCode": "const resp = $input.first().json;\nconst parse = $('Parse do comando').first().json;\n\nconst AJUDA =\n  '📋 *Comandos disponíveis:*\\n\\n' +\n  '• /task Descrição #area:Marketing — cria uma tarefa\\n' +\n  '• /hoje — suas tarefas de hoje\\n' +\n  '• /done <id> — concluir tarefa\\n' +\n  '• /ajuda — mostra esta mensagem';\n\nlet mensagem;\n\n// Se o comando foi /ajuda, responde a lista direto (não depende da função)\nif (parse.command === '/ajuda') {\n  mensagem = AJUDA;\n} else if (resp && typeof resp.reply === 'string' && resp.reply.length > 0) {\n  mensagem = resp.reply;\n} else if (resp && resp.ok === false) {\n  let motivo = resp.error || 'erro desconhecido';\n  if (resp.details) {\n    motivo += ' (campos: ' + Object.keys(resp.details).join(', ') + ')';\n  }\n  mensagem = '⚠️ Não consegui processar seu comando.\\nMotivo: ' + motivo;\n} else {\n  mensagem = '⚠️ Ocorreu um erro inesperado. Tente novamente.';\n}\n\nreturn [{\n  json: {\n    mensagem_resposta: mensagem,\n    from: parse.from\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          752,
+          96
+        ],
+        "id": "e5dc2bd3-9c4a-4d74-8bfe-cc379692a07a",
+        "name": "Montar resposta"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "=MIA-LOGS",
+          "remoteJid": "={{ $('Webhook Evolution').item.json.body.data.key.remoteJid }}",
+          "messageText": "={{ $json.mensagem_resposta }}",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          992,
+          96
+        ],
+        "id": "51109f84-6938-41ec-8a1b-598a00a37dfe",
+        "name": "Responder no WhatsApp",
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "=MIA-LOGS",
+          "remoteJid": "={{ $('Parse do comando').item.json.resposta_jid }}",
+          "messageText": "{{ $json.erro_validacao }}",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          544,
+          304
+        ],
+        "id": "d986f59a-899c-4165-a9ef-267a45189369",
+        "name": "Enviar ajuda",
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "5ddc7181-60c9-433b-b2c9-e8ca6f24062a",
+                "name": "secret_whatsapp",
+                "value": "miataskssenhagigantescavouatefingirqueehhash@2026!carambaaindatoescrevendo@2030ehoanodohexa",
+                "type": "string"
+              },
+              {
+                "id": "52b63527-8e69-4077-96c3-3528451a0a47",
+                "name": "token",
+                "value": "***REMOVIDO***",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          336,
+          112
+        ],
+        "id": "4920a2c0-1403-4729-b9e2-3ccee04db196",
+        "name": "secret"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://tyreqzwkazvdkfqipkme.supabase.co/functions/v1/whatsapp-command",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "={{ $json.token }}"
+              },
+              {
+                "name": "apikey",
+                "value": "={{ $json.token }}"
+              },
+              {
+                "name": "x-shared-secret",
+                "value": "={{ $json.secret_whatsapp }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "from",
+                "value": "={{ $('Parse do comando').item.json.from }}"
+              },
+              {
+                "name": "raw_message",
+                "value": "={{ $('Parse do comando').item.json.raw_message }}"
+              },
+              {
+                "name": "command",
+                "value": "={{ $('Parse do comando').item.json.command }}"
+              },
+              {
+                "name": "title",
+                "value": "={{ $('Parse do comando').item.json.title }}"
+              },
+              {
+                "name": "org",
+                "value": "={{ $('Parse do comando').item.json.org }}"
+              },
+              {
+                "name": "area",
+                "value": "={{ $('Parse do comando').item.json.area }}"
+              },
+              {
+                "name": "quoted_text",
+                "value": "={{ $('Parse do comando').item.json.texto_citado }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "f85ec31f-5687-4925-b653-5816442ffe55",
+        "name": "Supabase Edge Function",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          528,
+          96
+        ],
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const p = $input.first().json;\n\nlet valido = true;\nlet erro = '';\n\n// Lista dos únicos comandos que o bot responde\nconst comandosValidos = ['/task', '/hoje', '/done', '/ajuda'];\n\n// ⛔ Não é comando (não começa com /) OU é um comando fora da lista → ignora TUDO\nif (!p.is_command || !comandosValidos.includes(p.command)) {\n  return [{ json: { ...p, valido: false, erro_validacao: '' } }];\n}\n\n// A partir daqui, é garantidamente um dos 4 comandos.\n\nif (p.command === '/task') {\n  if (!p.org) {\n    valido = false;\n    erro =\n      '⚠️ Faltou a organização.\\n\\n' +\n      'Use: /task Descrição #org:NomeDaOrg #area:NomeDaArea\\n' +\n      'Exemplo: /task Corrigir bug #org:Eleva #area:Plataforma';\n  } else if (!p.title) {\n    valido = false;\n    erro =\n      '⚠️ Faltou a descrição da tarefa.\\n\\n' +\n      'Digite o texto após /task, ou responda a uma mensagem com /task.';\n  }\n} else if (p.command === '/done') {\n  const codigo = (p.title || '').trim().split(/\\s+/)[0] || '';\n  if (!codigo) {\n    valido = false;\n    erro =\n      '⚠️ Faltou o código da tarefa.\\n\\n' +\n      'Use: /done <código>\\nExemplo: /done 0232\\nVeja os códigos com /hoje.';\n  }\n}\n\nreturn [{\n  json: { ...p, valido, erro_validacao: erro }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -64,
+          112
+        ],
+        "id": "166ba1a8-046a-4205-96e4-020e406e7330",
+        "name": "Validar comando"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "d1",
+                "leftValue": "={{ $json.erro_validacao }}",
+                "rightValue": "desconhecido",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          288,
+          240
+        ],
+        "id": "d055bf4b-482b-4f57-aef3-c98de0cd2c3b",
+        "name": "Comando válido?1"
+      }
+    ],
+    "connections": {
+      "Webhook Evolution": {
+        "main": [
+          [
+            {
+              "node": "É mensagem de texto recebida?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "É mensagem de texto recebida?": {
+        "main": [
+          [
+            {
+              "node": "Parse do comando",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse do comando": {
+        "main": [
+          [
+            {
+              "node": "Validar comando",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Comando válido?": {
+        "main": [
+          [
+            {
+              "node": "secret",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Comando válido?1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar resposta": {
+        "main": [
+          [
+            {
+              "node": "Responder no WhatsApp",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "secret": "***REMOVIDO***",
+      "Supabase Edge Function": {
+        "main": [
+          [
+            {
+              "node": "Montar resposta",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Validar comando": {
+        "main": [
+          [
+            {
+              "node": "Comando válido?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Comando válido?1": {
+        "main": [
+          [
+            {
+              "node": "Enviar ajuda",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
