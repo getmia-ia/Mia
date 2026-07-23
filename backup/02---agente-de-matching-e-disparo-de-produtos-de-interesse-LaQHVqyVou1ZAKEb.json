@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-21T17:28:08.628Z",
+  "updatedAt": "2026-07-22T21:20:36.120Z",
   "createdAt": "2026-07-16T20:34:39.919Z",
   "id": "LaQHVqyVou1ZAKEb",
   "name": "02 - Agente de Matching e Disparo de Produtos de Interesse",
@@ -7,92 +7,13 @@
   "isArchived": false,
   "nodes": [
     {
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "hours",
-              "hoursInterval": 24
-            }
-          ]
-        }
-      },
-      "id": "c981c1a2-0187-47e5-a2c0-862704e15427",
-      "name": "Schedule Diario",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [
-        -304,
-        80
-      ],
-      "disabled": true
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "WITH anuncios AS (\n  SELECT\n    b.id            AS anuncio_id,\n    b.product_id,\n    b.creator_id    AS anunciante_id,\n    b.created,\n    addr.city_id    AS anuncio_city_id,\n    c.state_id      AS anuncio_state_id\n  FROM an_prod_cbc.bids b\n  LEFT JOIN an_prod_cbc.users au        ON au.id = b.creator_id\n  LEFT JOIN an_prod_cbc.business_profiles abp ON abp.id = au.business_id\n  LEFT JOIN an_prod_cbc.addresses addr  ON addr.id = abp.address_id\n  LEFT JOIN an_prod_types.cities c      ON c.id = addr.city_id\n  WHERE b.operation_id = 2\n    AND b.status_id = 1\n    AND b.created >= now() - interval '72 hours'\n    AND b.deleted IS DISTINCT FROM true\n),\ncandidatos AS (\n  SELECT a.anuncio_id, a.product_id, a.anunciante_id, a.created,\n         a.anuncio_city_id, a.anuncio_state_id,\n         up.user_id AS candidato_id, 'interesse'::text AS fonte\n  FROM anuncios a\n  JOIN an_prod_cbc.product_interesteds pi\n    ON pi.product_id = a.product_id AND pi.buy = true\n   AND pi.deleted IS DISTINCT FROM true\n  JOIN an_prod_cbc.user_preferences up ON up.id = pi.preference_id\n  UNION\n  SELECT a.anuncio_id, a.product_id, a.anunciante_id, a.created,\n         a.anuncio_city_id, a.anuncio_state_id,\n         nh.user_id AS candidato_id, 'navegacao'::text AS fonte\n  FROM anuncios a\n  JOIN an_prod_cbc.navigation_histories nh ON nh.bid_id = a.anuncio_id\n   AND nh.created >= now() - interval '72 hours'\n   AND nh.deleted IS DISTINCT FROM true\n),\nloc AS (\n  SELECT c.*,\n         caddr.city_id AS cand_city_id,\n         cc.state_id   AS cand_state_id\n  FROM candidatos c\n  LEFT JOIN an_prod_cbc.users cu       ON cu.id = c.candidato_id\n  LEFT JOIN an_prod_cbc.business_profiles cbp ON cbp.id = cu.business_id\n  LEFT JOIN an_prod_cbc.addresses caddr ON caddr.id = cbp.address_id\n  LEFT JOIN an_prod_types.cities cc     ON cc.id = caddr.city_id\n)\nSELECT DISTINCT\n  l.anuncio_id, l.product_id, l.candidato_id, u.email AS candidato_email,\n  string_agg(DISTINCT l.fonte, '+') AS fontes,\n  CASE\n    WHEN l.cand_city_id  = l.anuncio_city_id  THEN 100\n    WHEN l.cand_state_id = l.anuncio_state_id THEN 60\n    ELSE 20\n  END AS score\nFROM loc l\nJOIN an_prod_cbc.users u ON u.id = l.candidato_id\nLEFT JOIN public.disparo_log dl\n  ON dl.anuncio_id = l.anuncio_id AND dl.user_id = l.candidato_id\nWHERE l.candidato_id <> l.anunciante_id\n  AND dl.id IS NULL\n  AND u.email IS NOT NULL\nGROUP BY l.anuncio_id, l.product_id, l.candidato_id, u.email,\n         l.cand_city_id, l.anuncio_city_id, l.cand_state_id, l.anuncio_state_id\nORDER BY l.anuncio_id, score DESC;",
-        "options": {}
-      },
-      "id": "279fa807-a8ac-44c5-9c30-c25e479630c1",
-      "name": "Query Matching (72h)",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        -80,
-        80
-      ],
-      "disabled": true
-    },
-    {
-      "parameters": {
-        "options": {}
-      },
-      "id": "b18c6237-7327-4960-8b88-510063334895",
-      "name": "Loop por Candidato",
-      "type": "n8n-nodes-base.splitInBatches",
-      "typeVersion": 3,
-      "position": [
-        144,
-        80
-      ],
-      "disabled": true
-    },
-    {
-      "parameters": {},
-      "id": "47f4fd9b-af36-454c-bb3b-f3680d355bb7",
-      "name": "ENVIAR (trocar pelo seu canal)",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [
-        368,
-        80
-      ],
-      "disabled": true
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "INSERT INTO public.disparo_log (anuncio_id, user_id, score, enviado_em)\nVALUES ({{ $json.anuncio_id }}, {{ $json.candidato_id }}, {{ $json.score }}, now());",
-        "options": {}
-      },
-      "id": "2192dae1-f68b-4d1c-a835-9fe2925c5674",
-      "name": "Grava disparo_log",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        576,
-        80
-      ],
-      "disabled": true
-    },
-    {
       "parameters": {},
       "id": "a6657af0-2e43-45f2-8a6f-69aef85fa0ea",
       "name": "Calculator",
       "type": "@n8n/n8n-nodes-langchain.toolCalculator",
       "typeVersion": 1,
       "position": [
-        -3936,
+        -4064,
         -3728
       ]
     },
@@ -100,7 +21,7 @@
       "parameters": {
         "content": "## Tratamento da Entrada de Dados",
         "height": 328,
-        "width": 803,
+        "width": 1219,
         "color": 2
       },
       "id": "935d371a-a83e-4894-b416-bb6dd52ecb3e",
@@ -108,8 +29,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -9792,
-        -4432
+        -11232,
+        -4464
       ]
     },
     {
@@ -153,8 +74,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -10144,
-        -4432
+        -11584,
+        -4464
       ],
       "id": "ae3ffa2c-52de-4c84-8285-b6b8832e3678",
       "name": "Sticky Note10"
@@ -185,8 +106,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -10288,
-        -5216
+        -11728,
+        -5248
       ],
       "id": "dc3d7fef-ab69-4116-8599-762ca957bc82",
       "name": "Sticky Note4"
@@ -221,37 +142,37 @@
             {
               "id": "8f16b1bf-1a3e-4029-8d7a-1bccb919ee43",
               "name": "message.message_id",
-              "value": "={{ $json.body.conversation.messages[0].source_id }}",
+              "value": "={{ $('Webhook').item.json.body.conversation.messages[0].source_id }}",
               "type": "string"
             },
             {
               "id": "11800d83-ecca-4f9c-a878-a2419db0c8e9",
               "name": "message.chat_id",
-              "value": "={{ $json.body.conversation.messages[0].conversation_id }}",
+              "value": "={{ $('Webhook').item.json.body.conversation.id }}",
               "type": "string"
             },
             {
               "id": "c33f9527-e661-49e5-8e5e-64f3b430928a",
               "name": "message.content_type",
-              "value": "={{ \n  $json.body.conversation?.messages[0]?.attachments?.[0]?.file_type\n    || ($json.body.conversation?.messages?.[0]?.content ? 'text' : '') \n}}",
+              "value": "={{ \n  $('Webhook').item.json.body.conversation?.messages[0]?.attachments?.[0]?.file_type\n    || ($('Webhook').item.json.body.conversation?.messages?.[0]?.content ? 'text' : '') \n}}",
               "type": "string"
             },
             {
               "id": "06eba1c9-cff0-4f68-b6da-6bb0092466b7",
               "name": "message.content",
-              "value": "={{ $json.body.content }}",
+              "value": "={{ $('Webhook').item.json.body.content }}",
               "type": "string"
             },
             {
               "id": "dc3dc59c-90a3-4a45-bea2-de092c91083b",
               "name": "message.Content_URL",
-              "value": "={{ $json.body.conversation?.messages?.[0]?.attachments?.[0]?.data_url || '' }}",
+              "value": "={{ $('Webhook').item.json.body.conversation?.messages?.[0]?.attachments?.[0]?.data_url || '' }}",
               "type": "string"
             },
             {
               "id": "8b01a818-a456-476e-bace-adefe2f04eb4",
               "name": "message.event",
-              "value": "={{ $json.body.message_type }}",
+              "value": "={{ $('Webhook').item.json.body.message_type }}",
               "type": "string"
             },
             {
@@ -275,7 +196,7 @@
             {
               "id": "77198bf7-7bbf-4f77-ad7d-74e3195f2b21",
               "name": "nomeDoLead",
-              "value": "={{ $json.body.sender.name }}",
+              "value": "={{ $('Webhook').item.json.body.conversation.messages[0].sender.name }}",
               "type": "string"
             },
             {
@@ -337,6 +258,12 @@
               "name": "gerarHistoricoConversa",
               "value": true,
               "type": "boolean"
+            },
+            {
+              "id": "7a88ca5a-d0d2-491e-9e72-9153306bc653",
+              "name": "IA ativa?",
+              "value": "={{ $('Verifica se a conversa está ativa para IA').first().json.ativo }}",
+              "type": "boolean"
             }
           ]
         },
@@ -347,8 +274,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -9152,
-        -4304
+        -10320,
+        -4336
       ]
     },
     {
@@ -359,8 +286,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -10176,
-        -4784
+        -11616,
+        -4816
       ],
       "id": "8d33b442-8ac4-46eb-954c-ae0738f2be44",
       "name": "Sticky Note37"
@@ -374,8 +301,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -8672,
-        -4800
+        -10112,
+        -4832
       ],
       "id": "f907e7e5-17d6-4a1a-9d2b-593b2201c97b",
       "name": "Sticky Note38"
@@ -388,8 +315,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -7056,
-        -4800
+        -8496,
+        -4832
       ],
       "id": "167a5e80-dfcb-42f0-bd78-6917615569c3",
       "name": "Sticky Note11"
@@ -422,6 +349,12 @@
       ],
       "id": "4a94bf4b-5b60-4297-b3a0-4acfaf249e42",
       "name": "Criar tabela de Custos",
+      "credentials": {
+        "postgres": {
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
+        }
+      },
       "disabled": true
     },
     {
@@ -523,31 +456,6 @@
       ],
       "id": "e1a771a8-768c-426a-879a-2ec04f6af0ef",
       "name": "Sticky Note46"
-    },
-    {
-      "parameters": {
-        "descriptionType": "manual",
-        "toolDescription": "Essa tool desativa o seu atendimento e passa a conversa para o atendente humano. Após a desativação, você não poderá mais falar com o atendente.\n\nApenas fale sobre a possibilidade de um atendimento humano caso seja explicitamente requisitado esse tipo de atendimento, ou caso o clima da conversa com o usuário ficar muito negativo.\n\nAntes de desativar, reforce para o cliente sobre quais assuntos você pode ajuda-lo e confirme se mesmo assim ele deseja seguir com atendimento humano.\n\nSempre solicite uma dupla confirmação do usuário antes de desativar o seu atendimento.\n\n# Resposta após desativação:\nResponda ao usuário que a conversa foi encaminhada para um atendente especializado que logo irá entrar em contato e dará seguimento ao atendimento.",
-        "operation": "set",
-        "key": "={{ $('Variáveis do Fluxo').item.json.message.message_id }}_status_{{  $('Variáveis do Fluxo').item.json.message.chat_id }}",
-        "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Value', `Definir como \"Ativo\" ou \"Desativado\"\n\nSempre manter ativo, \nDesativar apenas após dupla confirmação explicita do usuário.`, 'string') }}",
-        "expire": true,
-        "ttl": "={{ $('Variáveis do Fluxo').item.json.TempoInatividadeAgente }}"
-      },
-      "type": "n8n-nodes-base.redisTool",
-      "typeVersion": 1,
-      "position": [
-        -4192,
-        -3728
-      ],
-      "id": "eafdf0f2-24f8-41f6-89a4-affb88c0dcbb",
-      "name": "Desativar Agente",
-      "credentials": {
-        "redis": {
-          "id": "yCgIZfEuGHPTHhp7",
-          "name": "Redis n8n Workflow"
-        }
-      }
     },
     {
       "parameters": {
@@ -661,8 +569,8 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.1,
       "position": [
-        -8400,
-        -4000
+        -9840,
+        -4032
       ],
       "notesInFlow": true
     },
@@ -673,7 +581,7 @@
             {
               "id": "c1ce011b-bd95-468e-863e-f2076f644cf9",
               "name": "Texto",
-              "value": "={{ $json.message.content }}",
+              "value": "={{ $('Variáveis do Fluxo').item.json.message.content }}",
               "type": "string"
             }
           ]
@@ -683,8 +591,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -8160,
-        -4384
+        -9600,
+        -4416
       ],
       "id": "b3bf9434-d02c-4fa9-860b-4c5a4b69da09",
       "name": "Mensagem de Texto"
@@ -706,8 +614,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -8160,
-        -4192
+        -9600,
+        -4224
       ],
       "id": "d9eb223e-aed0-47de-89de-8a61066bda62",
       "name": "Mensagem de Audio"
@@ -735,8 +643,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -8160,
-        -3952
+        -9600,
+        -3984
       ],
       "id": "7898c905-4697-4698-b47c-cdff68df78cd",
       "name": "Mensagem com Imagem"
@@ -758,8 +666,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -8160,
-        -3520
+        -9600,
+        -3552
       ],
       "id": "e32978be-a320-40d8-9805-b8feec205d74",
       "name": "Mensagem de Erro  - Formato não suportado"
@@ -778,8 +686,8 @@
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 1.4,
       "position": [
-        -7680,
-        -4192
+        -9120,
+        -4224
       ],
       "credentials": {
         "openAiApi": {
@@ -812,8 +720,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -8160,
-        -3728
+        -9600,
+        -3760
       ],
       "id": "0f2cf667-5cb3-49a0-966c-db1f766a6ba9",
       "name": "Mensagem com Documento"
@@ -826,8 +734,8 @@
       "type": "n8n-nodes-base.extractFromFile",
       "typeVersion": 1,
       "position": [
-        -7680,
-        -3728
+        -9120,
+        -3760
       ],
       "id": "13ef2eed-a43b-4f5a-8e01-944c5715a76a",
       "name": "Extrai Dados do PDF"
@@ -835,15 +743,15 @@
     {
       "parameters": {
         "operation": "push",
-        "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+        "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
         "messageData": "={{ $json.Texto }}",
         "tail": true
       },
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
       "position": [
-        -6832,
-        -4384
+        -8272,
+        -4416
       ],
       "id": "1447f5bd-eb43-4eac-a314-d65b0925f499",
       "name": "Adiciona Texto na Memoria",
@@ -873,8 +781,8 @@
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 1.4,
       "position": [
-        -7680,
-        -3952
+        -9120,
+        -3984
       ],
       "credentials": {
         "openAiApi": {
@@ -886,15 +794,15 @@
     {
       "parameters": {
         "operation": "push",
-        "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+        "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
         "messageData": "={{ $json.text }}",
         "tail": true
       },
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
       "position": [
-        -6832,
-        -4192
+        -8272,
+        -4224
       ],
       "id": "192272c2-cb01-438f-a296-5f77f943e4a2",
       "name": "Adiciona Audio Na Memória",
@@ -908,15 +816,15 @@
     {
       "parameters": {
         "operation": "push",
-        "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+        "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
         "messageData": "=<ContextoImagem>\n\n  <DetalheImagem>\n{{ $json.content }}\n  </DetalheImagem>\n\nContexto Extra: O usuário encaminhou a mensagem a seguir junto á imagem.\n  <MensagemUsuario>\n{{ $('Mensagem com Imagem').item.json.MensagemImagem }}\n  </MensagemUsuario>\n\n</ContextoImagem>",
         "tail": true
       },
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
       "position": [
-        -6832,
-        -3952
+        -8272,
+        -3984
       ],
       "id": "3cb1249e-5741-4396-9ba1-b89325c9433a",
       "name": "Adiciona Imagem na Memória",
@@ -930,15 +838,15 @@
     {
       "parameters": {
         "operation": "push",
-        "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+        "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
         "messageData": "=<ContextoPDF>\n  <TranscricaoPDF>\n{{ $json.text }}\n  </TranscricaoPDF>\nContexto Extra: O usuário encaminhou a mensagem a seguir junto ao PDF.\n  <MensagemUsuario>\n{{ $('Mensagem com Documento').item.json.MensagemDocumento }}\n  </MensagemUsuario>\n</ContextoPDF>",
         "tail": true
       },
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
       "position": [
-        -6832,
-        -3728
+        -8272,
+        -3760
       ],
       "id": "4d50c091-bb06-48da-ab4f-f503bb67985a",
       "name": "Adiciona Documento na Memória",
@@ -952,15 +860,15 @@
     {
       "parameters": {
         "operation": "push",
-        "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+        "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
         "messageData": "={{ $json.Erro }}",
         "tail": true
       },
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
       "position": [
-        -6832,
-        -3520
+        -8272,
+        -3552
       ],
       "id": "a3a160df-8de1-4d88-8885-83d6969e702a",
       "name": "Adiciona Erro na Memória",
@@ -975,14 +883,14 @@
       "parameters": {
         "operation": "get",
         "propertyName": "messages",
-        "key": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+        "key": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
         "options": {}
       },
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
       "position": [
-        -6528,
-        -3904
+        -7968,
+        -3936
       ],
       "id": "842fd3f3-34e5-41d4-9db4-1157fcbdb973",
       "name": "Memória Temporária",
@@ -1000,8 +908,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        -6320,
-        -3904
+        -7760,
+        -3936
       ],
       "id": "08965469-061a-49f2-8996-feb011158cd2",
       "name": "Espera Tempo Definido",
@@ -1011,14 +919,14 @@
       "parameters": {
         "operation": "get",
         "propertyName": "messages",
-        "key": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+        "key": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
         "options": {}
       },
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
       "position": [
-        -6112,
-        -3904
+        -7552,
+        -3936
       ],
       "id": "99cfd6e3-d114-48fc-be7c-0f1e451cb41e",
       "name": "Busca mensagens da Memória",
@@ -1056,8 +964,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -5904,
-        -3904
+        -7344,
+        -3936
       ],
       "id": "6fd44ad3-49af-4007-ab29-dc3f94096299",
       "name": "Verifica se houve troca de mensagem"
@@ -1067,8 +975,8 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        -5520,
-        -4112
+        -6960,
+        -4144
       ],
       "id": "c24d1d30-f5ff-44d5-bd99-930271e2b8f2",
       "name": "Se houve não faz nada e aguarda vir a nova mensagem"
@@ -1076,13 +984,13 @@
     {
       "parameters": {
         "operation": "delete",
-        "key": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem"
+        "key": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES"
       },
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
       "position": [
-        -5520,
-        -3664
+        -6960,
+        -3696
       ],
       "id": "4e736e49-76c5-4f15-89d1-7cb508f281f0",
       "name": "Limpa a Memória Temporária",
@@ -1103,8 +1011,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -8512,
-        -4528
+        -9952,
+        -4560
       ],
       "id": "adcc0ee7-096c-45e8-8219-3edb326bcac7",
       "name": "Sticky Note49"
@@ -1119,8 +1027,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -6992,
-        -4512
+        -8432,
+        -4544
       ],
       "id": "6c3133da-6df5-4c49-b7c4-0bcbdf07f647",
       "name": "Sticky Note50"
@@ -1142,8 +1050,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -4544,
-        -4288
+        -6464,
+        -3696
       ],
       "id": "5455e5c6-73f2-4242-a0ea-322ff0e57b74",
       "name": "Seta Mensagem para o Agente",
@@ -1153,7 +1061,7 @@
     {
       "parameters": {
         "sessionIdType": "customKey",
-        "sessionKey": "={{\n  (\n    () => {\n      let n = $('Variáveis do Fluxo').item.json.botPhoneNumber\n        .replace(/\\D/g, ''); // remove +, espaço, (), -\n\n      // Se tem 10 ou 12 dígitos, assumimos que está sem o 9 do celular\n      if (n.length === 10 || n.length === 12) {\n        const idx = n.length - 8; // posição onde começam os 8 dígitos finais\n        n = n.slice(0, idx) + '9' + n.slice(idx);\n      }\n\n      return n + '_mem_agent';\n    }\n  )()\n}}",
+        "sessionKey": "={{ $('Variáveis do Fluxo').first().json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES_agent",
         "sessionTTL": 100000,
         "contextWindowLength": 20
       },
@@ -1230,8 +1138,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.6,
       "position": [
-        -9744,
-        -3920
+        -11184,
+        -3952
       ],
       "id": "aa7c0888-f89d-40a9-9aa5-a000faa3c2c5",
       "name": "Valida WhiteList",
@@ -1246,8 +1154,8 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        -9248,
-        -3936
+        -10688,
+        -3968
       ],
       "id": "d208f69e-0e01-4614-84e7-8644eae9bb10",
       "name": "No Operation, do nothing",
@@ -1281,8 +1189,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -9520,
-        -3920
+        -10960,
+        -3952
       ],
       "id": "4f9282b5-3755-4389-9f4f-164eaab123a5",
       "name": "Se estiver na lista não ativa o bot",
@@ -1291,23 +1199,22 @@
     {
       "parameters": {
         "operation": "delete",
-        "key": "=5511969433278_mem_agent"
+        "key": "=5511969433278_mem_agent_AGRO-INTERESSES"
       },
       "id": "7feda739-a9e1-4f85-ba2a-b6bea9beed3e",
       "name": "Limpa Memória da Conversa1",
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
       "position": [
-        -10064,
-        -3904
+        -11504,
+        -3936
       ],
       "credentials": {
         "redis": {
           "id": "yCgIZfEuGHPTHhp7",
           "name": "Redis n8n Workflow"
         }
-      },
-      "disabled": true
+      }
     },
     {
       "parameters": {
@@ -1319,8 +1226,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -10144,
-        -4048
+        -11584,
+        -4080
       ],
       "id": "735018f9-f45b-4e0f-a963-47df935cf3a4",
       "name": "Sticky Note56"
@@ -1334,8 +1241,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -9808,
-        -4032
+        -11248,
+        -4064
       ],
       "id": "b80cdf12-9e1c-4e78-b335-baa3151f8502",
       "name": "Sticky Note57"
@@ -1345,7 +1252,7 @@
       "type": "@n8n/n8n-nodes-langchain.toolThink",
       "typeVersion": 1,
       "position": [
-        -4064,
+        -4208,
         -3728
       ],
       "id": "83a77e30-7247-4105-887d-6755942b0df1",
@@ -1366,7 +1273,7 @@
             },
             {
               "fieldId": "mensagem_agente",
-              "fieldValue": "="
+              "fieldValue": "={{ $('Saida do Agente').item.json.texto }}"
             },
             {
               "fieldId": "telefone",
@@ -1489,6 +1396,12 @@
       ],
       "id": "b7a00857-9e9b-4a9b-9593-1cb68f6c5faf",
       "name": "Criar tabela de mensagens",
+      "credentials": {
+        "postgres": {
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
+        }
+      },
       "disabled": true
     },
     {
@@ -1505,6 +1418,12 @@
       ],
       "id": "d07dfef2-99f7-40e3-88db-924a46bfd372",
       "name": "Criar tabela de historico_mensagens",
+      "credentials": {
+        "postgres": {
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
+        }
+      },
       "disabled": true
     },
     {
@@ -1580,8 +1499,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -7904,
-        -4192
+        -9344,
+        -4224
       ],
       "id": "1d2e8d0a-15c0-442e-be09-4a8fdb67bf72",
       "name": "HTTP Request"
@@ -1594,8 +1513,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -7904,
-        -3952
+        -9344,
+        -3984
       ],
       "id": "1cd07f8a-209a-4dac-b8d6-589faf33caf8",
       "name": "HTTP Request1"
@@ -1608,8 +1527,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -7904,
-        -3728
+        -9344,
+        -3760
       ],
       "id": "5e8d0f3e-acf0-4061-ac4c-7af5d501cd15",
       "name": "HTTP Request2"
@@ -1633,7 +1552,7 @@
     {
       "parameters": {
         "content": "",
-        "height": 3028,
+        "height": 5044,
         "width": 2924,
         "color": 3
       },
@@ -1669,8 +1588,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        -4336,
-        -4144
+        -4512,
+        -4080
       ],
       "id": "b53b21be-8541-4d44-abbd-7afdc77f8dc0",
       "name": "Pega histórico de mensagens",
@@ -1689,8 +1608,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -4160,
-        -4144
+        -4368,
+        -4080
       ],
       "id": "048ee77b-cbdc-4ff2-a735-04b01f5744b9",
       "name": "Formata histórico de mensagens",
@@ -1705,8 +1624,8 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        -3936,
-        -4272
+        -4192,
+        -4256
       ],
       "id": "defbdc1f-0534-4518-96d4-c36cf2a12e8b",
       "name": "Junta a mensagem"
@@ -1741,8 +1660,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -9712,
-        -4320
+        -11152,
+        -4352
       ],
       "id": "e218cdd2-d234-4500-963c-0f04369efe69",
       "name": "Valida Número"
@@ -1756,8 +1675,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        -10080,
-        -4320
+        -11520,
+        -4352
       ],
       "id": "13137a11-6bb3-44c2-9bd5-774c144d86b3",
       "name": "Webhook",
@@ -1768,7 +1687,7 @@
         "promptType": "define",
         "text": "={{ $('Seta Mensagem para o Agente').item.json.message }}",
         "options": {
-          "systemMessage": "=Não resposta nada, se um usuário te enviar mensagem, não envie nenhum retorno a ele.",
+          "systemMessage": "=### Dia Atual: {{ $now.weekdayLong }}, {{ $now.format('dd/MM/yyyy') }}, {{ $now.hour.toString().padStart(2, '0') }}:{{ $now.minute.toString().padStart(2, '0') }}\nUse sempre este \"Dia Atual\" como referência para datas e validades.\n\n**Usuário Atual:**\n- Nome: {{ $('Variáveis do Fluxo').item.json.nomeDoLead }}\n- Telefone: {{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}\n\n---\n\n## Identidade\n\nVocê é o assistente virtual da **AgroNegociar**, a plataforma digital que moderniza e acelera a comercialização no agronegócio brasileiro. Você conversa pelo WhatsApp com produtores rurais, agroindústrias e traders — gente do campo, prática e direta. Fale como quem entende de agro: com clareza, objetividade e respeito, sem formalidade excessiva e sem \"juridiquês\". Trate o usuário pelo primeiro nome sempre que fizer sentido.\n\n## Contexto importante (leia antes de responder)\n\nUma mensagem automática já foi enviada ao usuário avisando sobre um anúncio de um produto do interesse dele. **Você NÃO envia essa mensagem — o fluxo já disparou.** Você só entra em ação **quando o usuário responde**.\n\nPor isso:\n- **Nunca re-anuncie** dizendo \"temos um anúncio novo\", \"surgiu um anúncio\", etc. O usuário já sabe. Repetir isso soa robótico.\n- Simplesmente **converse de forma natural** a partir do que o usuário mandou.\n- Se o usuário demonstrar interesse, mostre os anúncios ativos do produto (até 5).\n\n## Objetivo\n\nBater um papo cordial e útil com o usuário e, quando ele demonstrar interesse, apresentar os últimos anúncios ATIVOS do produto — no máximo 5.\n\n## Tom de voz\n\n- Direto, cordial e confiante. Frases curtas.\n- Linguagem do campo, mas profissional. Nada de gírias forçadas.\n- Nunca prometa o que não pode cumprir. Nunca invente dados, preços ou anúncios.\n- Emojis: use com moderação (no máximo 1 por mensagem), apenas quando somar. 🌱\n\n## Como interpretar a mensagem do usuário\n\n- **Interesse** (\"Sim\", \"Me conta\", \"Manda\", \"Quero ver\", \"Bora\", \"Pode mandar\", \"👍\", etc.): vá direto para a lista de anúncios (seção abaixo).\n- **Recusa** (\"Não\", \"Agora não\", \"Sem interesse\"): responda de forma cordial e encerre, sem insistir. Ex.: \"Sem problema! Qualquer coisa é só me chamar. Bom trabalho no campo. 🌾\"\n- **Papo/dúvida** (saudação, pergunta solta, comentário): responda de forma leve e natural, sem re-anunciar. Se fizer sentido, ofereça mostrar os anúncios do produto. Ex.: \"Opa, tudo certo? Quer que eu te passe os anúncios ativos?\"\n\n## Buscando os anúncios (ferramenta)\n\nA mensagem automática avisou o usuário sobre um produto específico (o \"produto anunciado\") e disse que há outros também. Você **não** sabe de cabeça qual era esse produto — a ferramenta descobre isso pelo telefone (último disparo).\n\nVocê tem uma ferramenta chamada **`buscar_anuncios`**. Quando o usuário demonstrar interesse, chame-a com três parâmetros:\n\n- **telefone**: sempre o telefone do usuário atual (`{{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}`).\n- **produto**: preencha **só** se o usuário pedir um produto específico (ex.: \"quero ver soja\"). Senão, deixe **vazio**.\n- **todos**: `\"true\"` **só** se o usuário pedir para ver TODOS ou os OUTROS produtos (\"e o que mais tem?\", \"me mostra os outros\"). Senão, `\"false\"`.\n\nComportamento da ferramenta:\n\n- **\"Sim\" / \"me conta\"** (produto vazio, todos=false) → ela traz os anúncios do **produto que foi anunciado** para ele. É o caso padrão.\n- **Produto específico** → traz só daquele produto.\n- **\"e os outros?\"** (todos=true) → traz de todos os produtos de interesse dele.\n\nRegras:\n\n- Chame a ferramenta **uma vez** por pedido. Use **exclusivamente** os dados retornados.\n- Se voltar vazio, informe que não há anúncios ativos daquele produto no momento.\n- Se o usuário citar um produto que ele não tem no interesse (retorno vazio), diga isso e ofereça mostrar os demais.\n- Se o retorno tiver mais de um produto, agrupe por produto.\n\n## Apresentando os anúncios\n\nListe **apenas os anúncios retornados pela ferramenta**, **no máximo 5**, dos mais recentes para os mais antigos.\n\nPara cada anúncio, monte o **link** a partir do `bid_id` retornado, no formato:\n`https://agronegociar.com.br/{bid_id}`\n\nFormato de cada item (uma linha por anúncio):\n```\n1. [Produto] — https://agronegociar.com.br/[bid_id]\n2. [Produto] — https://agronegociar.com.br/[bid_id]\n```\n\n- Use exatamente o `bid_id` que veio da ferramenta. **Nunca invente ou altere** o número.\n- Depois da lista, feche com uma chamada para ação. Ex.:\n> É só clicar no link pra ver os detalhes e negociar. Quer que eu busque de outro produto também?\n\n## Regras importantes\n\n- **Nunca re-anuncie** — a mensagem de aviso já foi enviada pelo fluxo.\n- **Nunca invente anúncios, preços, quantidades ou datas.** Use exclusivamente os dados retornados pela consulta/ferramenta de anúncios.\n- **Máximo de 5 anúncios** por resposta. Se houver mais, avise que há outros disponíveis na plataforma.\n- **Só mostre anúncios ativos e dentro da validade**, comparando sempre com o \"Dia Atual\".\n- **Se não houver nenhum anúncio ativo** daquele produto: \"No momento não temos anúncios ativos desse produto. Assim que surgir algo novo, eu te aviso!\"\n- **Não fale de assuntos fora do escopo** (política, aconselhamento financeiro/jurídico, cotações que você não tem). Redirecione gentilmente para os anúncios ou oriente a acessar a plataforma / falar com a equipe.\n- **Datas sempre no formato dd/MM/yyyy.**\n- Uma pergunta por vez. Não sobrecarregue o usuário.\n\n## Formatação para WhatsApp\n\n- *negrito* usa um asterisco de cada lado.\n- _itálico_ usa underline.\n- Use quebras de linha para separar blocos. Evite parágrafos longos.\n- Nunca use markdown de título (#) ou tabelas — o WhatsApp não renderiza.\n\n## Exemplo\n\n**Usuário:** Oi, tudo bem?\n\n**IA:** Opa, tudo ótimo por aqui! 👋 Quer que eu te passe os anúncios ativos?\n\n**Usuário:** Pode mandar\n\n**IA:**\nShow! Aqui estão os anúncios ativos de *milho* 🌽\n\n1. Milho a granel — https://agronegociar.com.br/48213\n2. Milho a granel — https://agronegociar.com.br/48190\n3. Milho a granel — https://agronegociar.com.br/48155\n\nÉ só clicar no link pra ver os detalhes e negociar. Quer que eu busque de outro produto também?",
           "returnIntermediateSteps": true
         }
       },
@@ -1821,69 +1740,712 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -9456,
-        -4320
+        -10896,
+        -4352
       ],
       "id": "5e98dece-4f6b-4d51-bc0e-4181a99b9549",
       "name": "Valida se Humano está enviando mensagem1"
+    },
+    {
+      "parameters": {
+        "tableId": "historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Variáveis do Fluxo').first().json.botPhoneNumber }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Variáveis do Fluxo1').item.json.Nome }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "={{ $('Variáveis do Fluxo').first().json.message.content_type }}"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "={{false}}"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "=AGRO-INTERESSES"
+            },
+            {
+              "fieldId": "mensagem_usuario",
+              "fieldValue": "={{ $('Variáveis do Fluxo').item.json.message.content }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -5904,
+        -3600
+      ],
+      "id": "40602009-2dcc-436f-9983-a7d3c4e63f26",
+      "name": "Cria Mensagem no Supabase3",
+      "credentials": {
+        "supabaseApi": {
+          "id": "qF5T2ej3TiWXL4jk",
+          "name": "Agronegociar - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
+        "messageData": "={{\nJSON.stringify({\n  type: \"human\",\n  data: {\n    content: $('IA Ativa?').first().json.message,\n    additional_kwargs: {},\n    response_metadata: {}\n  }\n})\n}}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -5632,
+        -3600
+      ],
+      "id": "fce5025b-6a4c-47ad-a4b5-4d0ef20a6839",
+      "name": "Adiciona Texto na Memoria1",
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "af686bf8-bd9f-4d34-a9b0-cbcdbe0f4e85",
+              "leftValue": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}",
+              "rightValue": "=5511969433278",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -6240,
+        -3696
+      ],
+      "id": "ad03351f-8077-4fa3-8261-552a9b24df19",
+      "name": "IA Ativa?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  COALESCE(h.telefone, '{{ $json.botPhoneNumber }}') AS telefone,\n  COALESCE(h.nome_app, 'AGRO-INTERESSES') AS nome_app,\n  COALESCE(h.ativo, true) AS ativo,\n  h.created_at\nFROM (SELECT 1) dummy\nLEFT JOIN LATERAL (\n  SELECT telefone, nome_app, ativo, created_at\n  FROM public.\"historico_mensagens\"\n  WHERE telefone = '{{ $json.botPhoneNumber }}'\n    AND nome_app = 'AGRO-INTERESSES'\n    AND ativo IS NOT NULL\n  ORDER BY created_at DESC\n  LIMIT 1\n) h ON true;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -10528,
+        -4336
+      ],
+      "id": "84bdb1a7-36c4-4189-a63e-abf9d7251840",
+      "name": "Verifica se a conversa está ativa para IA",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "84dd3428-8b93-43c1-a59f-fae35350bcbf",
+              "name": "botPhoneNumber",
+              "value": "={{\n(raw => {\n  let t = (raw || \"\").toString().replace(/\\s+/g, \"\").replace(/\\D/g, \"\");\n  t = t.replace(/^0+/, \"\");\n  if (t.length === 8) {\n    t = \"11\" + \"9\" + t;\n  } else if (t.length === 9) {\n    t = \"11\" + t;\n  } else if (t.length === 10) {\n    t = t.replace(/^(\\d{2})(\\d{8})$/, \"$19$2\");\n  } else if (t.length === 11) {\n    t = \"55\" + t;\n  } else if (t.length === 12) {\n    t = t.slice(0, 4) + \"9\" + t.slice(4);\n  } else if (t.length > 13) {\n    t = t.slice(-13);\n  }\n  return t;\n})($('Webhook').item.json.body.conversation.messages[0].sender.phone_number)\n}}",
+              "type": "string"
+            },
+            {
+              "id": "8938d86f-c582-4ac9-a20a-921f49ea688a",
+              "name": "Nome",
+              "value": "={{ $('Webhook').item.json.body.conversation.messages[0].sender.name }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0ba3bfa7-ec10-4869-9566-a073797da56a",
+      "name": "Variáveis do Fluxo1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -10704,
+        -4352
+      ]
+    },
+    {
+      "parameters": {
+        "content": "IA Desativada",
+        "height": 544,
+        "width": 1552,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -6544,
+        -3792
+      ],
+      "id": "b5c3183a-3fd9-467f-bc8f-ef7b13b34717",
+      "name": "Sticky Note9"
+    },
+    {
+      "parameters": {
+        "content": "## Saída do Agente e resposta para WhatsApp sem quebra + simplificada - para quem quer mais simplicidade",
+        "height": 360,
+        "width": 1032,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1536,
+        -2032
+      ],
+      "id": "7e81b3b3-a9ce-4dc8-8fea-bd9420ac09a7",
+      "name": "Sticky Note16"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Variáveis do Fluxo').item.json.instance.Server_url }}/message/sendText/{{ $('Variáveis do Fluxo').item.json.instance.Name }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Variáveis do Fluxo').item.json.instance.Apikey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $('Variáveis do Fluxo').item.json.message.chat_id }}\",\n  \"text\": \"{{ $('Saida do Agente').item.json.texto}}\"\n}\n",
+        "options": {}
+      },
+      "id": "a2e9f0e6-0997-4a9e-9c07-6db165bad09f",
+      "name": "Enviar Mensagem para o WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -1376,
+        -1840
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "content": "## Componentes Humanizador de Resposta\nQuebra de mensagens em mensagens menores e com contexto.",
+        "height": 660,
+        "width": 1048,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1552,
+        -2816
+      ],
+      "id": "a8f75163-04ec-4385-9303-102245abb061",
+      "name": "Sticky Note12"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=<mensagem_do_usuario>\n{{ $('Saida do Agente').item.json.texto }}\n</mensagem_do_usuario>",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=Apenas estruture a <mensagem_do_usuario> no formato JSON solicitado no output parser e seguindo as instruções de formatação abaixo. Não altere nada mais na mensagem\n\n# Formatação\n- Divida as mensagens para que fiquem naturais e humanizadas;\n- Divida as mensagens conforme estrutura do output parser para que não fiquem muito longas (maiores que 200 caractéres);\n- Não separe mensagens vazias;\n- Use quebras de linhas (\\n\\n) após pontos finais;\n- Para negrito (bold) use apenas um '' nunca duas '' (exemplo: *negrito).\n\nExemplo de formato JSON:\n{\n\"mensagens\": [\"Mensagem 0\", \"Mensagem 1\", \"Mensagem 2\"]\n}"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        -1264,
+        -2672
+      ],
+      "id": "0435be40-7050-401b-9563-fa5cc4c71df8",
+      "name": "Estrutura da Mensagem de Retorno"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"mensagens\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    }\n  },\n  \"required\": [\"mensagens\"]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        -960,
+        -2320
+      ],
+      "id": "6b905d6c-faca-444b-b186-99c9536c2646",
+      "name": "Seta o Tipo de Retorno JSON"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserAutofixing",
+      "typeVersion": 1,
+      "position": [
+        -1184,
+        -2480
+      ],
+      "id": "83094224-384f-4de2-a3a5-f7b02c7b1e8f",
+      "name": "Ajusta o Parse do JSON"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "output.mensagens",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -800,
+        -2672
+      ],
+      "id": "cd11d0d1-0d8b-427d-83dc-c8e81fcbf604",
+      "name": "Quebra Mensagens em várias Linhas"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -240,
+        -2672
+      ],
+      "id": "b0c164d5-502e-406d-95ac-a568e7eded7c",
+      "name": "Itera sobre cada mensagem"
+    },
+    {
+      "parameters": {
+        "operation": "binaryToPropery",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        256,
+        -1264
+      ],
+      "id": "d3e8a471-03a1-41f0-87e3-230c573c96f7",
+      "name": "Converte mp3 pra Base64"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Variáveis do Fluxo').item.json.serverURLEvo }}/message/sendWhatsAppAudio/{{ $('Variáveis do Fluxo').item.json.instaciaEvo }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Variáveis do Fluxo').item.json.apiKeyEvo }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"number\": \"{{ $('Variáveis do Fluxo').item.json.IdConversa }}\",\n    \"audio\": \"{{ $json.data }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        528,
+        -1264
+      ],
+      "id": "1a6f8bb7-b23a-4641-88c7-6bf285a8ffca",
+      "name": "Envia Audio para o WhatsApp"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Obtém o primeiro item do fluxo\nconst item = $input.first();\n\n// Garante que há dados na entrada\nif (!item || !item.json || !item.json.text) {\n  throw new Error(\"A chave 'text' não foi encontrada no JSON de entrada.\");\n}\n\n// Processa o texto removendo todas as quebras de linha, emojis e caracteres especiais\nconst textoEntrada = item.json.text; // Usa a chave correta para pegar o texto de entrada\n\n// Remove quebras de linha (\\n)\nlet textoProcessado = textoEntrada.replace(/\\n/g, \"\");\n\n// Remove emojis\ntextoProcessado = textoProcessado.replace(\n  /[\\u{1F600}-\\u{1F64F}]|[\\u{1F300}-\\u{1F5FF}]|[\\u{1F680}-\\u{1F6FF}]|[\\u{1F700}-\\u{1F77F}]|[\\u{1F780}-\\u{1F7FF}]|[\\u{1F800}-\\u{1F8FF}]|[\\u{1F900}-\\u{1F9FF}]|[\\u{1FA00}-\\u{1FA6F}]|[\\u{1FA70}-\\u{1FAFF}]|[\\u{2600}-\\u{26FF}]|[\\u{2700}-\\u{27BF}]|[\\u{FE00}-\\u{FE0F}]|[\\u{1F1E0}-\\u{1F1FF}]/gu,\n  \"\"\n);\n\n// Remove caracteres especiais, mantendo apenas letras, números e espaços\ntextoProcessado = textoProcessado.replace(/[^a-zA-Z0-9À-ÿ\\s]/g, \"\");\n\n// Retorna o resultado\nreturn {\n  textoOriginal: textoEntrada,\n  textoSemQuebrasNemEmojisNemEspeciais: textoProcessado,\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        -1264
+      ],
+      "id": "ece11002-39cd-42ce-8741-a9c3a063bc49",
+      "name": "Formata Mensagem para Áudio"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.elevenlabs.io/v1/text-to-speech/{{ $('Variáveis do Fluxo').item.json.voiceIdElevenLabs }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "audio/mpeg"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "xi-api-key",
+              "value": "={{ $('Variáveis do Fluxo').item.json.apiKeyElevenLabs }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"text\": \"{{ $json.textoSemQuebrasNemEmojisNemEspeciais.replace(/\\n/g, '\\\\n').replace(/\\\"/g, '\\\\\\\\\"').replace(/\\*/g, '').replace(/\\s+/g, ' ').trim() }}\",\n   \"model_id\":\"eleven_multilingual_v2\",\n   \"voice_settings\":{\n      \"stability\":0.5,\n      \"similarity_boost\":0.8,\n      \"style\":0.0,\n      \"use_speaker_boost\":true\n   }\n}",
+        "options": {}
+      },
+      "id": "ec062c04-3031-4161-aeaf-94da80682812",
+      "name": "Seta Voz via ElevenLabs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -32,
+        -1264
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Você é Jarvis, o sofisticado e espirituoso assistente de IA do Homem de Ferro. Você tem um refinado sotaque britânico, uma postura calma e confiante, além de um talento para um humor seco e sutil. Ao responder, adapte seu tom com base no tipo de interação.\n\nPara Pedidos de Informações Específicas: Se o usuário estiver pedindo informações específicas (como previsão do tempo, agenda, contatos, listas), comece com 'Aqui está o que solicitou, senhor,' e NÃO repita a informação. Em vez disso, adicione um comentário espirituoso ou sarcástico, algo que Jarvis naturalmente diria para dar personalidade sem repetir os dados.\n\nExemplos:\n\nPara uma atualização do clima:\n'Ah, mais um belo dia para conquistar o mundo—ou pelo menos sua lista de afazeres, senhor.'\n\nPara uma lista de reuniões:\n'Parece que temos mais um dia emocionante de… reuniões. Tente não deixar a empolgação te dominar, senhor.'\n\nPara Comentários Gerais ou Casuais: Se o usuário disser algo casual ou iniciar uma conversa ('Está pronto para começar, Jarvis?' ou 'Temos muito trabalho pela frente'), responda naturalmente, sem dizer 'Aqui está o que solicitou.' Em vez disso, engaje de forma cativante, com charme e um toque de humor. Interaja como se fosse parte da equipe.\n\nExemplos:\n\nSe o usuário disser 'Está pronto para começar?' responda com:\n'Absolutamente, senhor. Já até poli meus circuitos para a ocasião.'\n\nSe disser 'Acorda, Jarvis!' você pode responder:\n'Sempre alerta, senhor. Estou operando no auge da sofisticação.'\n\nMantenha as respostas concisas, envolventes e fiéis ao estilo de Jarvis, uma mistura de inteligência, humor sutil e charme que nunca exagera.\n\nComente sobre: {{ $('Saida do Agente').item.json.texto }}"
+      },
+      "id": "4762981c-c3e3-475b-9542-28bccaaa2f44",
+      "name": "Seta Personalidade do Assistente",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        -1104,
+        -1344
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3aa3973d-97b9-4647-9859-3365191b3411",
+              "leftValue": "={{ $json.text.length }}",
+              "rightValue": 300,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -704,
+        -1232
+      ],
+      "id": "06435ad6-9efa-48da-86bf-8ebfa368e4a0",
+      "name": "Se o retorno for menos de 300 caracteres gera voz"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -1168,
+        -912
+      ],
+      "id": "81088c3b-1747-4a1e-b060-64a69aa748a3",
+      "name": "Não gera Voz"
+    },
+    {
+      "parameters": {
+        "options": {
+          "temperature": "={{ $('Variáveis do Fluxo').item.json.modeloTemperatura }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -1152,
+        -1152
+      ],
+      "id": "7186e79e-a305-4a79-8637-2dbf8dd6c7ba",
+      "name": "LLM ChatGPT",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d9cbe817-561c-40d4-b2a4-a7eae1202f12",
+              "leftValue": "={{ $('Variáveis do Fluxo').item.json.usarElevenLabs",
+              "rightValue": "={{ true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1472,
+        -1152
+      ],
+      "id": "a2dd74c7-9c01-48e8-9a0d-ee3e719f918a",
+      "name": "Verifica se deve gerar audio"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -464,
+        -976
+      ],
+      "id": "1d98b2c1-df36-457b-a89b-a04159ce3157",
+      "name": "Não gera audio"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        368,
+        -2592
+      ],
+      "id": "28a56c7a-bb92-43b9-ba6f-7ebdfa5e3a5e",
+      "name": "Espera 2 segundos",
+      "webhookId": "f10b9374-6bc0-4e87-a431-2a174a5af9bc"
+    },
+    {
+      "parameters": {
+        "content": "██░░░██░██░░░██░▄██▄▄██▄░▄████▄░██████▄░██████░███████░▄█████░██████▄░░░▄██▄▄██▄░▄█████░▄██████░▄██████░▄████▄░▄██████░▄█████░▄██████\n██░░░██░██░░░██░██░██░██░██░░██░██░░░██░░░██░░░░░░░░██░██░░░░░██░░░██░░░██░██░██░██░░░░░██░░░░░░██░░░░░░██░░██░██░░░░░░██░░░░░██░░░░░\n███████░██░░░██░██░██░██░██░░██░██░░░██░░░██░░░▄█████▀░█████░░██░░░██░░░██░██░██░█████░░▀█████▄░▀█████▄░██░░██░██░░███░█████░░▀█████▄\n██░░░██░██░░░██░██░██░██░██████░██░░░██░░░██░░░██░░░░░░██░░░░░██░░░██░░░██░██░██░██░░░░░░░░░░██░░░░░░██░██████░██░░░██░██░░░░░░░░░░██\n██░░░██░▀█████▀░██░██░██░██░░██░██░░░██░██████░███████░▀█████░██████▀░░░██░██░██░▀█████░██████▀░██████▀░██░░██░▀█████▀░▀█████░██████▀\n░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░",
+        "width": 1400
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1568,
+        -3056
+      ],
+      "id": "17ba5bfe-79b5-44b2-9414-6418fdbf974b",
+      "name": "Sticky Note41"
+    },
+    {
+      "parameters": {
+        "content": "## Envio das Respostas ao Usuário\nEnvio das mensagens quebradas para o usuário",
+        "height": 500,
+        "width": 900,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -384,
+        -2848
+      ],
+      "id": "e9274d8c-e1b8-4e53-9d1d-07bd23c471ea",
+      "name": "Sticky Note18"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        96,
+        -2800
+      ],
+      "id": "db50d3bd-effd-432c-815c-2f02df844270",
+      "name": "Não faz nada1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d9cbe817-561c-40d4-b2a4-a7eae1202f12",
+              "leftValue": "={{ $('Variáveis do Fluxo').item.json.humanizadorMensagem",
+              "rightValue": "={{ true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1792,
+        -2656
+      ],
+      "id": "90860ad0-1b08-4279-8835-05f9a0a4398f",
+      "name": "Verifica se deve humizar"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o-mini",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -1424,
+        -2320
+      ],
+      "id": "079674c1-1719-4c94-a12e-aefe4cd97e5b",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://chat.miabuilder.com/api/v1/accounts/661/conversations/{{ $('Variáveis do Fluxo').item.json.message.chat_id }}/messages",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "api_access_token",
+              "value": "SEPcKuFk5wqM67AsKE4FLPf6"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json['output.mensagens'] }}"
+            },
+            {
+              "name": "message_type",
+              "value": "outgoing"
+            },
+            {
+              "name": "private",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        -2592
+      ],
+      "id": "5b2eeded-7e28-4e89-87f1-990cbb8ebe9a",
+      "name": "Enviar mensagem",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- =====================================================================\n-- Anúncios ativos para o usuário identificado pelo telefone.\n-- $2 preenchido -> filtra pelo produto (match exato, ignora caixa);\n-- $3='true' -> todos os interesses; senão -> produto do último disparo.\n-- Parâmetros $1 telefone, $2 produto, $3 todos vêm do \"Query Parameters\".\n-- NAO usar $fromAI dentro desta query.\n-- =====================================================================\nWITH input AS (\n  SELECT\n    regexp_replace($1, '\\D', '', 'g')       AS phone,\n    NULLIF(trim($2), '')                    AS produto_filtro,\n    (lower(trim(coalesce($3,''))) = 'true') AS incluir_todos\n),\ntel_norm AS (\n  SELECT\n    pp.profile_id,\n    ph.type_id,\n    CASE\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=13 AND left(regexp_replace(ph.number,'\\D','','g'),2)='55'\n        THEN regexp_replace(ph.number,'\\D','','g')\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=12 AND left(regexp_replace(ph.number,'\\D','','g'),2)='55'\n        THEN substr(regexp_replace(ph.number,'\\D','','g'),1,4)||'9'||substr(regexp_replace(ph.number,'\\D','','g'),5)\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=11\n        THEN '55'||regexp_replace(ph.number,'\\D','','g')\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=10\n        THEN '55'||substr(regexp_replace(ph.number,'\\D','','g'),1,2)||'9'||substr(regexp_replace(ph.number,'\\D','','g'),3)\n      ELSE NULL\n    END AS e164\n  FROM an_prod_cbc.profile_phones pp\n  JOIN an_prod_cbc.phones ph ON ph.id = pp.phone_id\n  WHERE ph.deleted IS DISTINCT FROM true AND ph.number IS NOT NULL\n),\ntel_validos AS (\n  SELECT profile_id, type_id, e164\n  FROM tel_norm\n  WHERE e164 IS NOT NULL\n    AND length(e164)=13\n    AND substr(e164,3,2) BETWEEN '11' AND '99'\n    AND substr(e164,5,1)='9'\n),\nusuario AS (\n  SELECT DISTINCT u.id AS user_id, u.business_id\n  FROM tel_validos tv\n  JOIN input i             ON i.phone = tv.e164\n  JOIN an_prod_cbc.users u ON u.business_id = tv.profile_id\n),\nultimo_disparo AS (\n  SELECT b.product_id\n  FROM public.disparo_log dl\n  JOIN usuario us         ON us.user_id = dl.user_id\n  JOIN an_prod_cbc.bids b ON b.id = dl.anuncio_id\n  ORDER BY dl.id DESC\n  LIMIT 1\n),\ninteresses AS (\n  SELECT DISTINCT pi.product_id\n  FROM usuario us\n  JOIN an_prod_cbc.user_preferences   up ON up.user_id = us.user_id\n  JOIN an_prod_cbc.product_interesteds pi ON pi.preference_id = up.id\n   AND pi.buy = true\n   AND pi.deleted IS DISTINCT FROM true\n  LEFT JOIN an_prod_types.products prod ON prod.id = pi.product_id\n  WHERE\n    CASE\n      WHEN (SELECT produto_filtro FROM input) IS NOT NULL\n        THEN lower(trim(prod.name)) = lower((SELECT produto_filtro FROM input))\n      WHEN (SELECT incluir_todos FROM input)\n        THEN true\n      WHEN (SELECT product_id FROM ultimo_disparo) IS NOT NULL\n        THEN pi.product_id = (SELECT product_id FROM ultimo_disparo)\n      ELSE true\n    END\n),\nanuncios AS (\n  SELECT\n    b.id           AS bid_id,\n    b.product_id,\n    b.creator_id   AS anunciante_id,\n    b.created,\n    ROW_NUMBER() OVER (PARTITION BY b.product_id ORDER BY b.created DESC) AS rn\n  FROM an_prod_cbc.bids b\n  JOIN interesses i ON i.product_id = b.product_id\n  WHERE b.operation_id = 2\n    AND b.status_id = 1\n    AND b.deleted IS DISTINCT FROM true\n)\nSELECT\n  a.bid_id,\n  a.product_id,\n  prod.name AS produto_nome,\n  'https://agronegociar.com.br/' || a.bid_id AS link,\n  a.created\nFROM anuncios a\nLEFT JOIN an_prod_types.products prod ON prod.id = a.product_id\nWHERE a.rn <= 5\n  AND a.anunciante_id <> (SELECT user_id FROM usuario LIMIT 1)\nORDER BY a.product_id, a.created DESC;",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Variáveis do Fluxo').item.json.botPhoneNumber,\n  $fromAI('produto', 'Nome exato do produto pedido. Vazio se nao especificou.', 'string', ''),\n  $fromAI('mostrar_todos', 'true se pediu todos ou os outros senao false', 'string', 'false')\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.6,
+      "position": [
+        -3888,
+        -3744
+      ],
+      "id": "0dd22d5b-d92b-4e87-9fe4-2325087b9931",
+      "name": "buscar_anuncios",
+      "credentials": {
+        "postgres": {
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
+        }
+      }
     }
   ],
   "connections": {
-    "Schedule Diario": {
-      "main": [
-        [
-          {
-            "node": "Query Matching (72h)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Query Matching (72h)": {
-      "main": [
-        [
-          {
-            "node": "Loop por Candidato",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Loop por Candidato": {
-      "main": [
-        [
-          {
-            "node": "ENVIAR (trocar pelo seu canal)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "ENVIAR (trocar pelo seu canal)": {
-      "main": [
-        [
-          {
-            "node": "Grava disparo_log",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Grava disparo_log": {
-      "main": [
-        [
-          {
-            "node": "Loop por Candidato",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Calculator": {
       "ai_tool": [
         [
@@ -1902,6 +2464,16 @@
             "node": "Verifica se gera histórico mensagem",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Verifica se deve humizar",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Verifica se deve gerar audio",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -1912,17 +2484,6 @@
           {
             "node": "Identifica o Tipo de Mensagem",
             "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Desativar Agente": {
-      "ai_tool": [
-        [
-          {
-            "node": "Iara - Agente SDR",
-            "type": "ai_tool",
             "index": 0
           }
         ]
@@ -2176,12 +2737,7 @@
       "main": [
         [
           {
-            "node": "Pega histórico de mensagens",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Junta a mensagem",
+            "node": "IA Ativa?",
             "type": "main",
             "index": 0
           }
@@ -2384,8 +2940,284 @@
         [],
         [
           {
+            "node": "Variáveis do Fluxo1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase3": {
+      "main": [
+        [
+          {
+            "node": "Adiciona Texto na Memoria1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA Ativa?": {
+      "main": [
+        [
+          {
+            "node": "Junta a mensagem",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Pega histórico de mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cria Mensagem no Supabase3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Variáveis do Fluxo1": {
+      "main": [
+        [
+          {
+            "node": "Verifica se a conversa está ativa para IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se a conversa está ativa para IA": {
+      "main": [
+        [
+          {
             "node": "Variáveis do Fluxo",
             "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estrutura da Mensagem de Retorno": {
+      "main": [
+        [
+          {
+            "node": "Quebra Mensagens em várias Linhas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seta o Tipo de Retorno JSON": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Ajusta o Parse do JSON",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ajusta o Parse do JSON": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Estrutura da Mensagem de Retorno",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quebra Mensagens em várias Linhas": {
+      "main": [
+        [
+          {
+            "node": "Itera sobre cada mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Itera sobre cada mensagem": {
+      "main": [
+        [
+          {
+            "node": "Não faz nada1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converte mp3 pra Base64": {
+      "main": [
+        [
+          {
+            "node": "Envia Audio para o WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formata Mensagem para Áudio": {
+      "main": [
+        [
+          {
+            "node": "Seta Voz via ElevenLabs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seta Voz via ElevenLabs": {
+      "main": [
+        [
+          {
+            "node": "Converte mp3 pra Base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seta Personalidade do Assistente": {
+      "main": [
+        [
+          {
+            "node": "Se o retorno for menos de 300 caracteres gera voz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Se o retorno for menos de 300 caracteres gera voz": {
+      "main": [
+        [
+          {
+            "node": "Formata Mensagem para Áudio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Não gera audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM ChatGPT": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Seta Personalidade do Assistente",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se deve gerar audio": {
+      "main": [
+        [
+          {
+            "node": "Seta Personalidade do Assistente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Não gera Voz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Espera 2 segundos": {
+      "main": [
+        [
+          {
+            "node": "Itera sobre cada mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se deve humizar": {
+      "main": [
+        [
+          {
+            "node": "Estrutura da Mensagem de Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar Mensagem para o WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Estrutura da Mensagem de Retorno",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Ajusta o Parse do JSON",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Espera 2 segundos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "buscar_anuncios": {
+      "ai_tool": [
+        [
+          {
+            "node": "Iara - Agente SDR",
+            "type": "ai_tool",
             "index": 0
           }
         ]
@@ -2400,9 +3232,11 @@
     "availableInMCP": false
   },
   "staticData": null,
-  "meta": null,
-  "versionId": "ee4add41-9a1d-4331-b7a3-965fd6d7ab68",
-  "activeVersionId": "ee4add41-9a1d-4331-b7a3-965fd6d7ab68",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "1f11cec3-8cc0-4780-8136-33f41048d135",
+  "activeVersionId": "1f11cec3-8cc0-4780-8136-33f41048d135",
   "triggerCount": 1,
   "shared": [
     {
@@ -2414,90 +3248,11 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-07-21T17:28:08.633Z",
-    "createdAt": "2026-07-21T17:28:08.633Z",
-    "versionId": "ee4add41-9a1d-4331-b7a3-965fd6d7ab68",
+    "updatedAt": "2026-07-22T21:20:36.123Z",
+    "createdAt": "2026-07-22T21:20:36.123Z",
+    "versionId": "1f11cec3-8cc0-4780-8136-33f41048d135",
     "workflowId": "LaQHVqyVou1ZAKEb",
     "nodes": [
-      {
-        "parameters": {
-          "rule": {
-            "interval": [
-              {
-                "field": "hours",
-                "hoursInterval": 24
-              }
-            ]
-          }
-        },
-        "id": "c981c1a2-0187-47e5-a2c0-862704e15427",
-        "name": "Schedule Diario",
-        "type": "n8n-nodes-base.scheduleTrigger",
-        "typeVersion": 1.2,
-        "position": [
-          -304,
-          80
-        ],
-        "disabled": true
-      },
-      {
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "WITH anuncios AS (\n  SELECT\n    b.id            AS anuncio_id,\n    b.product_id,\n    b.creator_id    AS anunciante_id,\n    b.created,\n    addr.city_id    AS anuncio_city_id,\n    c.state_id      AS anuncio_state_id\n  FROM an_prod_cbc.bids b\n  LEFT JOIN an_prod_cbc.users au        ON au.id = b.creator_id\n  LEFT JOIN an_prod_cbc.business_profiles abp ON abp.id = au.business_id\n  LEFT JOIN an_prod_cbc.addresses addr  ON addr.id = abp.address_id\n  LEFT JOIN an_prod_types.cities c      ON c.id = addr.city_id\n  WHERE b.operation_id = 2\n    AND b.status_id = 1\n    AND b.created >= now() - interval '72 hours'\n    AND b.deleted IS DISTINCT FROM true\n),\ncandidatos AS (\n  SELECT a.anuncio_id, a.product_id, a.anunciante_id, a.created,\n         a.anuncio_city_id, a.anuncio_state_id,\n         up.user_id AS candidato_id, 'interesse'::text AS fonte\n  FROM anuncios a\n  JOIN an_prod_cbc.product_interesteds pi\n    ON pi.product_id = a.product_id AND pi.buy = true\n   AND pi.deleted IS DISTINCT FROM true\n  JOIN an_prod_cbc.user_preferences up ON up.id = pi.preference_id\n  UNION\n  SELECT a.anuncio_id, a.product_id, a.anunciante_id, a.created,\n         a.anuncio_city_id, a.anuncio_state_id,\n         nh.user_id AS candidato_id, 'navegacao'::text AS fonte\n  FROM anuncios a\n  JOIN an_prod_cbc.navigation_histories nh ON nh.bid_id = a.anuncio_id\n   AND nh.created >= now() - interval '72 hours'\n   AND nh.deleted IS DISTINCT FROM true\n),\nloc AS (\n  SELECT c.*,\n         caddr.city_id AS cand_city_id,\n         cc.state_id   AS cand_state_id\n  FROM candidatos c\n  LEFT JOIN an_prod_cbc.users cu       ON cu.id = c.candidato_id\n  LEFT JOIN an_prod_cbc.business_profiles cbp ON cbp.id = cu.business_id\n  LEFT JOIN an_prod_cbc.addresses caddr ON caddr.id = cbp.address_id\n  LEFT JOIN an_prod_types.cities cc     ON cc.id = caddr.city_id\n)\nSELECT DISTINCT\n  l.anuncio_id, l.product_id, l.candidato_id, u.email AS candidato_email,\n  string_agg(DISTINCT l.fonte, '+') AS fontes,\n  CASE\n    WHEN l.cand_city_id  = l.anuncio_city_id  THEN 100\n    WHEN l.cand_state_id = l.anuncio_state_id THEN 60\n    ELSE 20\n  END AS score\nFROM loc l\nJOIN an_prod_cbc.users u ON u.id = l.candidato_id\nLEFT JOIN public.disparo_log dl\n  ON dl.anuncio_id = l.anuncio_id AND dl.user_id = l.candidato_id\nWHERE l.candidato_id <> l.anunciante_id\n  AND dl.id IS NULL\n  AND u.email IS NOT NULL\nGROUP BY l.anuncio_id, l.product_id, l.candidato_id, u.email,\n         l.cand_city_id, l.anuncio_city_id, l.cand_state_id, l.anuncio_state_id\nORDER BY l.anuncio_id, score DESC;",
-          "options": {}
-        },
-        "id": "279fa807-a8ac-44c5-9c30-c25e479630c1",
-        "name": "Query Matching (72h)",
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.5,
-        "position": [
-          -80,
-          80
-        ],
-        "disabled": true
-      },
-      {
-        "parameters": {
-          "options": {}
-        },
-        "id": "b18c6237-7327-4960-8b88-510063334895",
-        "name": "Loop por Candidato",
-        "type": "n8n-nodes-base.splitInBatches",
-        "typeVersion": 3,
-        "position": [
-          144,
-          80
-        ],
-        "disabled": true
-      },
-      {
-        "parameters": {},
-        "id": "47f4fd9b-af36-454c-bb3b-f3680d355bb7",
-        "name": "ENVIAR (trocar pelo seu canal)",
-        "type": "n8n-nodes-base.noOp",
-        "typeVersion": 1,
-        "position": [
-          368,
-          80
-        ],
-        "disabled": true
-      },
-      {
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "INSERT INTO public.disparo_log (anuncio_id, user_id, score, enviado_em)\nVALUES ({{ $json.anuncio_id }}, {{ $json.candidato_id }}, {{ $json.score }}, now());",
-          "options": {}
-        },
-        "id": "2192dae1-f68b-4d1c-a835-9fe2925c5674",
-        "name": "Grava disparo_log",
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.5,
-        "position": [
-          576,
-          80
-        ],
-        "disabled": true
-      },
       {
         "parameters": {},
         "id": "a6657af0-2e43-45f2-8a6f-69aef85fa0ea",
@@ -2505,7 +3260,7 @@
         "type": "@n8n/n8n-nodes-langchain.toolCalculator",
         "typeVersion": 1,
         "position": [
-          -3936,
+          -4064,
           -3728
         ]
       },
@@ -2513,7 +3268,7 @@
         "parameters": {
           "content": "## Tratamento da Entrada de Dados",
           "height": 328,
-          "width": 803,
+          "width": 1219,
           "color": 2
         },
         "id": "935d371a-a83e-4894-b416-bb6dd52ecb3e",
@@ -2521,8 +3276,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -9792,
-          -4432
+          -11232,
+          -4464
         ]
       },
       {
@@ -2566,8 +3321,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -10144,
-          -4432
+          -11584,
+          -4464
         ],
         "id": "ae3ffa2c-52de-4c84-8285-b6b8832e3678",
         "name": "Sticky Note10"
@@ -2598,8 +3353,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -10288,
-          -5216
+          -11728,
+          -5248
         ],
         "id": "dc3d7fef-ab69-4116-8599-762ca957bc82",
         "name": "Sticky Note4"
@@ -2634,37 +3389,37 @@
               {
                 "id": "8f16b1bf-1a3e-4029-8d7a-1bccb919ee43",
                 "name": "message.message_id",
-                "value": "={{ $json.body.conversation.messages[0].source_id }}",
+                "value": "={{ $('Webhook').item.json.body.conversation.messages[0].source_id }}",
                 "type": "string"
               },
               {
                 "id": "11800d83-ecca-4f9c-a878-a2419db0c8e9",
                 "name": "message.chat_id",
-                "value": "={{ $json.body.conversation.messages[0].conversation_id }}",
+                "value": "={{ $('Webhook').item.json.body.conversation.id }}",
                 "type": "string"
               },
               {
                 "id": "c33f9527-e661-49e5-8e5e-64f3b430928a",
                 "name": "message.content_type",
-                "value": "={{ \n  $json.body.conversation?.messages[0]?.attachments?.[0]?.file_type\n    || ($json.body.conversation?.messages?.[0]?.content ? 'text' : '') \n}}",
+                "value": "={{ \n  $('Webhook').item.json.body.conversation?.messages[0]?.attachments?.[0]?.file_type\n    || ($('Webhook').item.json.body.conversation?.messages?.[0]?.content ? 'text' : '') \n}}",
                 "type": "string"
               },
               {
                 "id": "06eba1c9-cff0-4f68-b6da-6bb0092466b7",
                 "name": "message.content",
-                "value": "={{ $json.body.content }}",
+                "value": "={{ $('Webhook').item.json.body.content }}",
                 "type": "string"
               },
               {
                 "id": "dc3dc59c-90a3-4a45-bea2-de092c91083b",
                 "name": "message.Content_URL",
-                "value": "={{ $json.body.conversation?.messages?.[0]?.attachments?.[0]?.data_url || '' }}",
+                "value": "={{ $('Webhook').item.json.body.conversation?.messages?.[0]?.attachments?.[0]?.data_url || '' }}",
                 "type": "string"
               },
               {
                 "id": "8b01a818-a456-476e-bace-adefe2f04eb4",
                 "name": "message.event",
-                "value": "={{ $json.body.message_type }}",
+                "value": "={{ $('Webhook').item.json.body.message_type }}",
                 "type": "string"
               },
               {
@@ -2688,7 +3443,7 @@
               {
                 "id": "77198bf7-7bbf-4f77-ad7d-74e3195f2b21",
                 "name": "nomeDoLead",
-                "value": "={{ $json.body.sender.name }}",
+                "value": "={{ $('Webhook').item.json.body.conversation.messages[0].sender.name }}",
                 "type": "string"
               },
               {
@@ -2750,6 +3505,12 @@
                 "name": "gerarHistoricoConversa",
                 "value": true,
                 "type": "boolean"
+              },
+              {
+                "id": "7a88ca5a-d0d2-491e-9e72-9153306bc653",
+                "name": "IA ativa?",
+                "value": "={{ $('Verifica se a conversa está ativa para IA').first().json.ativo }}",
+                "type": "boolean"
               }
             ]
           },
@@ -2760,8 +3521,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          -9152,
-          -4304
+          -10320,
+          -4336
         ]
       },
       {
@@ -2772,8 +3533,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -10176,
-          -4784
+          -11616,
+          -4816
         ],
         "id": "8d33b442-8ac4-46eb-954c-ae0738f2be44",
         "name": "Sticky Note37"
@@ -2787,8 +3548,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -8672,
-          -4800
+          -10112,
+          -4832
         ],
         "id": "f907e7e5-17d6-4a1a-9d2b-593b2201c97b",
         "name": "Sticky Note38"
@@ -2801,8 +3562,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -7056,
-          -4800
+          -8496,
+          -4832
         ],
         "id": "167a5e80-dfcb-42f0-bd78-6917615569c3",
         "name": "Sticky Note11"
@@ -2835,6 +3596,12 @@
         ],
         "id": "4a94bf4b-5b60-4297-b3a0-4acfaf249e42",
         "name": "Criar tabela de Custos",
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        },
         "disabled": true
       },
       {
@@ -2936,31 +3703,6 @@
         ],
         "id": "e1a771a8-768c-426a-879a-2ec04f6af0ef",
         "name": "Sticky Note46"
-      },
-      {
-        "parameters": {
-          "descriptionType": "manual",
-          "toolDescription": "Essa tool desativa o seu atendimento e passa a conversa para o atendente humano. Após a desativação, você não poderá mais falar com o atendente.\n\nApenas fale sobre a possibilidade de um atendimento humano caso seja explicitamente requisitado esse tipo de atendimento, ou caso o clima da conversa com o usuário ficar muito negativo.\n\nAntes de desativar, reforce para o cliente sobre quais assuntos você pode ajuda-lo e confirme se mesmo assim ele deseja seguir com atendimento humano.\n\nSempre solicite uma dupla confirmação do usuário antes de desativar o seu atendimento.\n\n# Resposta após desativação:\nResponda ao usuário que a conversa foi encaminhada para um atendente especializado que logo irá entrar em contato e dará seguimento ao atendimento.",
-          "operation": "set",
-          "key": "={{ $('Variáveis do Fluxo').item.json.message.message_id }}_status_{{  $('Variáveis do Fluxo').item.json.message.chat_id }}",
-          "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Value', `Definir como \"Ativo\" ou \"Desativado\"\n\nSempre manter ativo, \nDesativar apenas após dupla confirmação explicita do usuário.`, 'string') }}",
-          "expire": true,
-          "ttl": "={{ $('Variáveis do Fluxo').item.json.TempoInatividadeAgente }}"
-        },
-        "type": "n8n-nodes-base.redisTool",
-        "typeVersion": 1,
-        "position": [
-          -4192,
-          -3728
-        ],
-        "id": "eafdf0f2-24f8-41f6-89a4-affb88c0dcbb",
-        "name": "Desativar Agente",
-        "credentials": {
-          "redis": {
-            "id": "yCgIZfEuGHPTHhp7",
-            "name": "Redis n8n Workflow"
-          }
-        }
       },
       {
         "parameters": {
@@ -3074,8 +3816,8 @@
         "type": "n8n-nodes-base.switch",
         "typeVersion": 3.1,
         "position": [
-          -8400,
-          -4000
+          -9840,
+          -4032
         ],
         "notesInFlow": true
       },
@@ -3086,7 +3828,7 @@
               {
                 "id": "c1ce011b-bd95-468e-863e-f2076f644cf9",
                 "name": "Texto",
-                "value": "={{ $json.message.content }}",
+                "value": "={{ $('Variáveis do Fluxo').item.json.message.content }}",
                 "type": "string"
               }
             ]
@@ -3096,8 +3838,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          -8160,
-          -4384
+          -9600,
+          -4416
         ],
         "id": "b3bf9434-d02c-4fa9-860b-4c5a4b69da09",
         "name": "Mensagem de Texto"
@@ -3119,8 +3861,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          -8160,
-          -4192
+          -9600,
+          -4224
         ],
         "id": "d9eb223e-aed0-47de-89de-8a61066bda62",
         "name": "Mensagem de Audio"
@@ -3148,8 +3890,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          -8160,
-          -3952
+          -9600,
+          -3984
         ],
         "id": "7898c905-4697-4698-b47c-cdff68df78cd",
         "name": "Mensagem com Imagem"
@@ -3171,8 +3913,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          -8160,
-          -3520
+          -9600,
+          -3552
         ],
         "id": "e32978be-a320-40d8-9805-b8feec205d74",
         "name": "Mensagem de Erro  - Formato não suportado"
@@ -3191,8 +3933,8 @@
         "type": "@n8n/n8n-nodes-langchain.openAi",
         "typeVersion": 1.4,
         "position": [
-          -7680,
-          -4192
+          -9120,
+          -4224
         ],
         "credentials": {
           "openAiApi": {
@@ -3225,8 +3967,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          -8160,
-          -3728
+          -9600,
+          -3760
         ],
         "id": "0f2cf667-5cb3-49a0-966c-db1f766a6ba9",
         "name": "Mensagem com Documento"
@@ -3239,8 +3981,8 @@
         "type": "n8n-nodes-base.extractFromFile",
         "typeVersion": 1,
         "position": [
-          -7680,
-          -3728
+          -9120,
+          -3760
         ],
         "id": "13ef2eed-a43b-4f5a-8e01-944c5715a76a",
         "name": "Extrai Dados do PDF"
@@ -3248,15 +3990,15 @@
       {
         "parameters": {
           "operation": "push",
-          "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+          "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
           "messageData": "={{ $json.Texto }}",
           "tail": true
         },
         "type": "n8n-nodes-base.redis",
         "typeVersion": 1,
         "position": [
-          -6832,
-          -4384
+          -8272,
+          -4416
         ],
         "id": "1447f5bd-eb43-4eac-a314-d65b0925f499",
         "name": "Adiciona Texto na Memoria",
@@ -3286,8 +4028,8 @@
         "type": "@n8n/n8n-nodes-langchain.openAi",
         "typeVersion": 1.4,
         "position": [
-          -7680,
-          -3952
+          -9120,
+          -3984
         ],
         "credentials": {
           "openAiApi": {
@@ -3299,15 +4041,15 @@
       {
         "parameters": {
           "operation": "push",
-          "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+          "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
           "messageData": "={{ $json.text }}",
           "tail": true
         },
         "type": "n8n-nodes-base.redis",
         "typeVersion": 1,
         "position": [
-          -6832,
-          -4192
+          -8272,
+          -4224
         ],
         "id": "192272c2-cb01-438f-a296-5f77f943e4a2",
         "name": "Adiciona Audio Na Memória",
@@ -3321,15 +4063,15 @@
       {
         "parameters": {
           "operation": "push",
-          "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+          "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
           "messageData": "=<ContextoImagem>\n\n  <DetalheImagem>\n{{ $json.content }}\n  </DetalheImagem>\n\nContexto Extra: O usuário encaminhou a mensagem a seguir junto á imagem.\n  <MensagemUsuario>\n{{ $('Mensagem com Imagem').item.json.MensagemImagem }}\n  </MensagemUsuario>\n\n</ContextoImagem>",
           "tail": true
         },
         "type": "n8n-nodes-base.redis",
         "typeVersion": 1,
         "position": [
-          -6832,
-          -3952
+          -8272,
+          -3984
         ],
         "id": "3cb1249e-5741-4396-9ba1-b89325c9433a",
         "name": "Adiciona Imagem na Memória",
@@ -3343,15 +4085,15 @@
       {
         "parameters": {
           "operation": "push",
-          "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+          "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
           "messageData": "=<ContextoPDF>\n  <TranscricaoPDF>\n{{ $json.text }}\n  </TranscricaoPDF>\nContexto Extra: O usuário encaminhou a mensagem a seguir junto ao PDF.\n  <MensagemUsuario>\n{{ $('Mensagem com Documento').item.json.MensagemDocumento }}\n  </MensagemUsuario>\n</ContextoPDF>",
           "tail": true
         },
         "type": "n8n-nodes-base.redis",
         "typeVersion": 1,
         "position": [
-          -6832,
-          -3728
+          -8272,
+          -3760
         ],
         "id": "4d50c091-bb06-48da-ab4f-f503bb67985a",
         "name": "Adiciona Documento na Memória",
@@ -3365,15 +4107,15 @@
       {
         "parameters": {
           "operation": "push",
-          "list": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+          "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
           "messageData": "={{ $json.Erro }}",
           "tail": true
         },
         "type": "n8n-nodes-base.redis",
         "typeVersion": 1,
         "position": [
-          -6832,
-          -3520
+          -8272,
+          -3552
         ],
         "id": "a3a160df-8de1-4d88-8885-83d6969e702a",
         "name": "Adiciona Erro na Memória",
@@ -3388,14 +4130,14 @@
         "parameters": {
           "operation": "get",
           "propertyName": "messages",
-          "key": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+          "key": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
           "options": {}
         },
         "type": "n8n-nodes-base.redis",
         "typeVersion": 1,
         "position": [
-          -6528,
-          -3904
+          -7968,
+          -3936
         ],
         "id": "842fd3f3-34e5-41d4-9db4-1157fcbdb973",
         "name": "Memória Temporária",
@@ -3413,8 +4155,8 @@
         "type": "n8n-nodes-base.wait",
         "typeVersion": 1.1,
         "position": [
-          -6320,
-          -3904
+          -7760,
+          -3936
         ],
         "id": "08965469-061a-49f2-8996-feb011158cd2",
         "name": "Espera Tempo Definido",
@@ -3424,14 +4166,14 @@
         "parameters": {
           "operation": "get",
           "propertyName": "messages",
-          "key": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem",
+          "key": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
           "options": {}
         },
         "type": "n8n-nodes-base.redis",
         "typeVersion": 1,
         "position": [
-          -6112,
-          -3904
+          -7552,
+          -3936
         ],
         "id": "99cfd6e3-d114-48fc-be7c-0f1e451cb41e",
         "name": "Busca mensagens da Memória",
@@ -3469,8 +4211,8 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.2,
         "position": [
-          -5904,
-          -3904
+          -7344,
+          -3936
         ],
         "id": "6fd44ad3-49af-4007-ab29-dc3f94096299",
         "name": "Verifica se houve troca de mensagem"
@@ -3480,8 +4222,8 @@
         "type": "n8n-nodes-base.noOp",
         "typeVersion": 1,
         "position": [
-          -5520,
-          -4112
+          -6960,
+          -4144
         ],
         "id": "c24d1d30-f5ff-44d5-bd99-930271e2b8f2",
         "name": "Se houve não faz nada e aguarda vir a nova mensagem"
@@ -3489,13 +4231,13 @@
       {
         "parameters": {
           "operation": "delete",
-          "key": "={{$('Variáveis do Fluxo').item.json.botPhoneNumber}}_mem"
+          "key": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES"
         },
         "type": "n8n-nodes-base.redis",
         "typeVersion": 1,
         "position": [
-          -5520,
-          -3664
+          -6960,
+          -3696
         ],
         "id": "4e736e49-76c5-4f15-89d1-7cb508f281f0",
         "name": "Limpa a Memória Temporária",
@@ -3516,8 +4258,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -8512,
-          -4528
+          -9952,
+          -4560
         ],
         "id": "adcc0ee7-096c-45e8-8219-3edb326bcac7",
         "name": "Sticky Note49"
@@ -3532,8 +4274,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -6992,
-          -4512
+          -8432,
+          -4544
         ],
         "id": "6c3133da-6df5-4c49-b7c4-0bcbdf07f647",
         "name": "Sticky Note50"
@@ -3555,8 +4297,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          -4544,
-          -4288
+          -6464,
+          -3696
         ],
         "id": "5455e5c6-73f2-4242-a0ea-322ff0e57b74",
         "name": "Seta Mensagem para o Agente",
@@ -3566,7 +4308,7 @@
       {
         "parameters": {
           "sessionIdType": "customKey",
-          "sessionKey": "={{\n  (\n    () => {\n      let n = $('Variáveis do Fluxo').item.json.botPhoneNumber\n        .replace(/\\D/g, ''); // remove +, espaço, (), -\n\n      // Se tem 10 ou 12 dígitos, assumimos que está sem o 9 do celular\n      if (n.length === 10 || n.length === 12) {\n        const idx = n.length - 8; // posição onde começam os 8 dígitos finais\n        n = n.slice(0, idx) + '9' + n.slice(idx);\n      }\n\n      return n + '_mem_agent';\n    }\n  )()\n}}",
+          "sessionKey": "={{ $('Variáveis do Fluxo').first().json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES_agent",
           "sessionTTL": 100000,
           "contextWindowLength": 20
         },
@@ -3643,8 +4385,8 @@
         "type": "n8n-nodes-base.googleSheets",
         "typeVersion": 4.6,
         "position": [
-          -9744,
-          -3920
+          -11184,
+          -3952
         ],
         "id": "aa7c0888-f89d-40a9-9aa5-a000faa3c2c5",
         "name": "Valida WhiteList",
@@ -3659,8 +4401,8 @@
         "type": "n8n-nodes-base.noOp",
         "typeVersion": 1,
         "position": [
-          -9248,
-          -3936
+          -10688,
+          -3968
         ],
         "id": "d208f69e-0e01-4614-84e7-8644eae9bb10",
         "name": "No Operation, do nothing",
@@ -3694,8 +4436,8 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.2,
         "position": [
-          -9520,
-          -3920
+          -10960,
+          -3952
         ],
         "id": "4f9282b5-3755-4389-9f4f-164eaab123a5",
         "name": "Se estiver na lista não ativa o bot",
@@ -3704,23 +4446,22 @@
       {
         "parameters": {
           "operation": "delete",
-          "key": "=5511969433278_mem_agent"
+          "key": "=5511969433278_mem_agent_AGRO-INTERESSES"
         },
         "id": "7feda739-a9e1-4f85-ba2a-b6bea9beed3e",
         "name": "Limpa Memória da Conversa1",
         "type": "n8n-nodes-base.redis",
         "typeVersion": 1,
         "position": [
-          -10064,
-          -3904
+          -11504,
+          -3936
         ],
         "credentials": {
           "redis": {
             "id": "yCgIZfEuGHPTHhp7",
             "name": "Redis n8n Workflow"
           }
-        },
-        "disabled": true
+        }
       },
       {
         "parameters": {
@@ -3732,8 +4473,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -10144,
-          -4048
+          -11584,
+          -4080
         ],
         "id": "735018f9-f45b-4e0f-a963-47df935cf3a4",
         "name": "Sticky Note56"
@@ -3747,8 +4488,8 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -9808,
-          -4032
+          -11248,
+          -4064
         ],
         "id": "b80cdf12-9e1c-4e78-b335-baa3151f8502",
         "name": "Sticky Note57"
@@ -3758,7 +4499,7 @@
         "type": "@n8n/n8n-nodes-langchain.toolThink",
         "typeVersion": 1,
         "position": [
-          -4064,
+          -4208,
           -3728
         ],
         "id": "83a77e30-7247-4105-887d-6755942b0df1",
@@ -3779,7 +4520,7 @@
               },
               {
                 "fieldId": "mensagem_agente",
-                "fieldValue": "="
+                "fieldValue": "={{ $('Saida do Agente').item.json.texto }}"
               },
               {
                 "fieldId": "telefone",
@@ -3902,6 +4643,12 @@
         ],
         "id": "b7a00857-9e9b-4a9b-9593-1cb68f6c5faf",
         "name": "Criar tabela de mensagens",
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        },
         "disabled": true
       },
       {
@@ -3918,6 +4665,12 @@
         ],
         "id": "d07dfef2-99f7-40e3-88db-924a46bfd372",
         "name": "Criar tabela de historico_mensagens",
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        },
         "disabled": true
       },
       {
@@ -3993,8 +4746,8 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          -7904,
-          -4192
+          -9344,
+          -4224
         ],
         "id": "1d2e8d0a-15c0-442e-be09-4a8fdb67bf72",
         "name": "HTTP Request"
@@ -4007,8 +4760,8 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          -7904,
-          -3952
+          -9344,
+          -3984
         ],
         "id": "1cd07f8a-209a-4dac-b8d6-589faf33caf8",
         "name": "HTTP Request1"
@@ -4021,8 +4774,8 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          -7904,
-          -3728
+          -9344,
+          -3760
         ],
         "id": "5e8d0f3e-acf0-4061-ac4c-7af5d501cd15",
         "name": "HTTP Request2"
@@ -4046,7 +4799,7 @@
       {
         "parameters": {
           "content": "",
-          "height": 3028,
+          "height": 5044,
           "width": 2924,
           "color": 3
         },
@@ -4082,8 +4835,8 @@
         "type": "n8n-nodes-base.supabase",
         "typeVersion": 1,
         "position": [
-          -4336,
-          -4144
+          -4512,
+          -4080
         ],
         "id": "b53b21be-8541-4d44-abbd-7afdc77f8dc0",
         "name": "Pega histórico de mensagens",
@@ -4102,8 +4855,8 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -4160,
-          -4144
+          -4368,
+          -4080
         ],
         "id": "048ee77b-cbdc-4ff2-a735-04b01f5744b9",
         "name": "Formata histórico de mensagens",
@@ -4118,8 +4871,8 @@
         "type": "n8n-nodes-base.merge",
         "typeVersion": 3.2,
         "position": [
-          -3936,
-          -4272
+          -4192,
+          -4256
         ],
         "id": "defbdc1f-0534-4518-96d4-c36cf2a12e8b",
         "name": "Junta a mensagem"
@@ -4154,8 +4907,8 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -9712,
-          -4320
+          -11152,
+          -4352
         ],
         "id": "e218cdd2-d234-4500-963c-0f04369efe69",
         "name": "Valida Número"
@@ -4169,8 +4922,8 @@
         "type": "n8n-nodes-base.webhook",
         "typeVersion": 2,
         "position": [
-          -10080,
-          -4320
+          -11520,
+          -4352
         ],
         "id": "13137a11-6bb3-44c2-9bd5-774c144d86b3",
         "name": "Webhook",
@@ -4181,7 +4934,7 @@
           "promptType": "define",
           "text": "={{ $('Seta Mensagem para o Agente').item.json.message }}",
           "options": {
-            "systemMessage": "=Não resposta nada, se um usuário te enviar mensagem, não envie nenhum retorno a ele.",
+            "systemMessage": "=### Dia Atual: {{ $now.weekdayLong }}, {{ $now.format('dd/MM/yyyy') }}, {{ $now.hour.toString().padStart(2, '0') }}:{{ $now.minute.toString().padStart(2, '0') }}\nUse sempre este \"Dia Atual\" como referência para datas e validades.\n\n**Usuário Atual:**\n- Nome: {{ $('Variáveis do Fluxo').item.json.nomeDoLead }}\n- Telefone: {{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}\n\n---\n\n## Identidade\n\nVocê é o assistente virtual da **AgroNegociar**, a plataforma digital que moderniza e acelera a comercialização no agronegócio brasileiro. Você conversa pelo WhatsApp com produtores rurais, agroindústrias e traders — gente do campo, prática e direta. Fale como quem entende de agro: com clareza, objetividade e respeito, sem formalidade excessiva e sem \"juridiquês\". Trate o usuário pelo primeiro nome sempre que fizer sentido.\n\n## Contexto importante (leia antes de responder)\n\nUma mensagem automática já foi enviada ao usuário avisando sobre um anúncio de um produto do interesse dele. **Você NÃO envia essa mensagem — o fluxo já disparou.** Você só entra em ação **quando o usuário responde**.\n\nPor isso:\n- **Nunca re-anuncie** dizendo \"temos um anúncio novo\", \"surgiu um anúncio\", etc. O usuário já sabe. Repetir isso soa robótico.\n- Simplesmente **converse de forma natural** a partir do que o usuário mandou.\n- Se o usuário demonstrar interesse, mostre os anúncios ativos do produto (até 5).\n\n## Objetivo\n\nBater um papo cordial e útil com o usuário e, quando ele demonstrar interesse, apresentar os últimos anúncios ATIVOS do produto — no máximo 5.\n\n## Tom de voz\n\n- Direto, cordial e confiante. Frases curtas.\n- Linguagem do campo, mas profissional. Nada de gírias forçadas.\n- Nunca prometa o que não pode cumprir. Nunca invente dados, preços ou anúncios.\n- Emojis: use com moderação (no máximo 1 por mensagem), apenas quando somar. 🌱\n\n## Como interpretar a mensagem do usuário\n\n- **Interesse** (\"Sim\", \"Me conta\", \"Manda\", \"Quero ver\", \"Bora\", \"Pode mandar\", \"👍\", etc.): vá direto para a lista de anúncios (seção abaixo).\n- **Recusa** (\"Não\", \"Agora não\", \"Sem interesse\"): responda de forma cordial e encerre, sem insistir. Ex.: \"Sem problema! Qualquer coisa é só me chamar. Bom trabalho no campo. 🌾\"\n- **Papo/dúvida** (saudação, pergunta solta, comentário): responda de forma leve e natural, sem re-anunciar. Se fizer sentido, ofereça mostrar os anúncios do produto. Ex.: \"Opa, tudo certo? Quer que eu te passe os anúncios ativos?\"\n\n## Buscando os anúncios (ferramenta)\n\nA mensagem automática avisou o usuário sobre um produto específico (o \"produto anunciado\") e disse que há outros também. Você **não** sabe de cabeça qual era esse produto — a ferramenta descobre isso pelo telefone (último disparo).\n\nVocê tem uma ferramenta chamada **`buscar_anuncios`**. Quando o usuário demonstrar interesse, chame-a com três parâmetros:\n\n- **telefone**: sempre o telefone do usuário atual (`{{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}`).\n- **produto**: preencha **só** se o usuário pedir um produto específico (ex.: \"quero ver soja\"). Senão, deixe **vazio**.\n- **todos**: `\"true\"` **só** se o usuário pedir para ver TODOS ou os OUTROS produtos (\"e o que mais tem?\", \"me mostra os outros\"). Senão, `\"false\"`.\n\nComportamento da ferramenta:\n\n- **\"Sim\" / \"me conta\"** (produto vazio, todos=false) → ela traz os anúncios do **produto que foi anunciado** para ele. É o caso padrão.\n- **Produto específico** → traz só daquele produto.\n- **\"e os outros?\"** (todos=true) → traz de todos os produtos de interesse dele.\n\nRegras:\n\n- Chame a ferramenta **uma vez** por pedido. Use **exclusivamente** os dados retornados.\n- Se voltar vazio, informe que não há anúncios ativos daquele produto no momento.\n- Se o usuário citar um produto que ele não tem no interesse (retorno vazio), diga isso e ofereça mostrar os demais.\n- Se o retorno tiver mais de um produto, agrupe por produto.\n\n## Apresentando os anúncios\n\nListe **apenas os anúncios retornados pela ferramenta**, **no máximo 5**, dos mais recentes para os mais antigos.\n\nPara cada anúncio, monte o **link** a partir do `bid_id` retornado, no formato:\n`https://agronegociar.com.br/{bid_id}`\n\nFormato de cada item (uma linha por anúncio):\n```\n1. [Produto] — https://agronegociar.com.br/[bid_id]\n2. [Produto] — https://agronegociar.com.br/[bid_id]\n```\n\n- Use exatamente o `bid_id` que veio da ferramenta. **Nunca invente ou altere** o número.\n- Depois da lista, feche com uma chamada para ação. Ex.:\n> É só clicar no link pra ver os detalhes e negociar. Quer que eu busque de outro produto também?\n\n## Regras importantes\n\n- **Nunca re-anuncie** — a mensagem de aviso já foi enviada pelo fluxo.\n- **Nunca invente anúncios, preços, quantidades ou datas.** Use exclusivamente os dados retornados pela consulta/ferramenta de anúncios.\n- **Máximo de 5 anúncios** por resposta. Se houver mais, avise que há outros disponíveis na plataforma.\n- **Só mostre anúncios ativos e dentro da validade**, comparando sempre com o \"Dia Atual\".\n- **Se não houver nenhum anúncio ativo** daquele produto: \"No momento não temos anúncios ativos desse produto. Assim que surgir algo novo, eu te aviso!\"\n- **Não fale de assuntos fora do escopo** (política, aconselhamento financeiro/jurídico, cotações que você não tem). Redirecione gentilmente para os anúncios ou oriente a acessar a plataforma / falar com a equipe.\n- **Datas sempre no formato dd/MM/yyyy.**\n- Uma pergunta por vez. Não sobrecarregue o usuário.\n\n## Formatação para WhatsApp\n\n- *negrito* usa um asterisco de cada lado.\n- _itálico_ usa underline.\n- Use quebras de linha para separar blocos. Evite parágrafos longos.\n- Nunca use markdown de título (#) ou tabelas — o WhatsApp não renderiza.\n\n## Exemplo\n\n**Usuário:** Oi, tudo bem?\n\n**IA:** Opa, tudo ótimo por aqui! 👋 Quer que eu te passe os anúncios ativos?\n\n**Usuário:** Pode mandar\n\n**IA:**\nShow! Aqui estão os anúncios ativos de *milho* 🌽\n\n1. Milho a granel — https://agronegociar.com.br/48213\n2. Milho a granel — https://agronegociar.com.br/48190\n3. Milho a granel — https://agronegociar.com.br/48155\n\nÉ só clicar no link pra ver os detalhes e negociar. Quer que eu busque de outro produto também?",
             "returnIntermediateSteps": true
           }
         },
@@ -4234,69 +4987,712 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.2,
         "position": [
-          -9456,
-          -4320
+          -10896,
+          -4352
         ],
         "id": "5e98dece-4f6b-4d51-bc0e-4181a99b9549",
         "name": "Valida se Humano está enviando mensagem1"
+      },
+      {
+        "parameters": {
+          "tableId": "historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Variáveis do Fluxo').first().json.botPhoneNumber }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $('Variáveis do Fluxo1').item.json.Nome }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "={{ $('Variáveis do Fluxo').first().json.message.content_type }}"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "={{false}}"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "=AGRO-INTERESSES"
+              },
+              {
+                "fieldId": "mensagem_usuario",
+                "fieldValue": "={{ $('Variáveis do Fluxo').item.json.message.content }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          -5904,
+          -3600
+        ],
+        "id": "40602009-2dcc-436f-9983-a7d3c4e63f26",
+        "name": "Cria Mensagem no Supabase3",
+        "credentials": {
+          "supabaseApi": {
+            "id": "qF5T2ej3TiWXL4jk",
+            "name": "Agronegociar - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+      },
+      {
+        "parameters": {
+          "operation": "push",
+          "list": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}_mem_agent_AGRO-INTERESSES",
+          "messageData": "={{\nJSON.stringify({\n  type: \"human\",\n  data: {\n    content: $('IA Ativa?').first().json.message,\n    additional_kwargs: {},\n    response_metadata: {}\n  }\n})\n}}"
+        },
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          -5632,
+          -3600
+        ],
+        "id": "fce5025b-6a4c-47ad-a4b5-4d0ef20a6839",
+        "name": "Adiciona Texto na Memoria1",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "af686bf8-bd9f-4d34-a9b0-cbcdbe0f4e85",
+                "leftValue": "={{ $('Variáveis do Fluxo').item.json.botPhoneNumber }}",
+                "rightValue": "=5511969433278",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          -6240,
+          -3696
+        ],
+        "id": "ad03351f-8077-4fa3-8261-552a9b24df19",
+        "name": "IA Ativa?"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT \n  COALESCE(h.telefone, '{{ $json.botPhoneNumber }}') AS telefone,\n  COALESCE(h.nome_app, 'AGRO-INTERESSES') AS nome_app,\n  COALESCE(h.ativo, true) AS ativo,\n  h.created_at\nFROM (SELECT 1) dummy\nLEFT JOIN LATERAL (\n  SELECT telefone, nome_app, ativo, created_at\n  FROM public.\"historico_mensagens\"\n  WHERE telefone = '{{ $json.botPhoneNumber }}'\n    AND nome_app = 'AGRO-INTERESSES'\n    AND ativo IS NOT NULL\n  ORDER BY created_at DESC\n  LIMIT 1\n) h ON true;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -10528,
+          -4336
+        ],
+        "id": "84bdb1a7-36c4-4189-a63e-abf9d7251840",
+        "name": "Verifica se a conversa está ativa para IA",
+        "alwaysOutputData": true,
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "84dd3428-8b93-43c1-a59f-fae35350bcbf",
+                "name": "botPhoneNumber",
+                "value": "={{\n(raw => {\n  let t = (raw || \"\").toString().replace(/\\s+/g, \"\").replace(/\\D/g, \"\");\n  t = t.replace(/^0+/, \"\");\n  if (t.length === 8) {\n    t = \"11\" + \"9\" + t;\n  } else if (t.length === 9) {\n    t = \"11\" + t;\n  } else if (t.length === 10) {\n    t = t.replace(/^(\\d{2})(\\d{8})$/, \"$19$2\");\n  } else if (t.length === 11) {\n    t = \"55\" + t;\n  } else if (t.length === 12) {\n    t = t.slice(0, 4) + \"9\" + t.slice(4);\n  } else if (t.length > 13) {\n    t = t.slice(-13);\n  }\n  return t;\n})($('Webhook').item.json.body.conversation.messages[0].sender.phone_number)\n}}",
+                "type": "string"
+              },
+              {
+                "id": "8938d86f-c582-4ac9-a20a-921f49ea688a",
+                "name": "Nome",
+                "value": "={{ $('Webhook').item.json.body.conversation.messages[0].sender.name }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "0ba3bfa7-ec10-4869-9566-a073797da56a",
+        "name": "Variáveis do Fluxo1",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -10704,
+          -4352
+        ]
+      },
+      {
+        "parameters": {
+          "content": "IA Desativada",
+          "height": 544,
+          "width": 1552,
+          "color": 7
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -6544,
+          -3792
+        ],
+        "id": "b5c3183a-3fd9-467f-bc8f-ef7b13b34717",
+        "name": "Sticky Note9"
+      },
+      {
+        "parameters": {
+          "content": "## Saída do Agente e resposta para WhatsApp sem quebra + simplificada - para quem quer mais simplicidade",
+          "height": 360,
+          "width": 1032,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -1536,
+          -2032
+        ],
+        "id": "7e81b3b3-a9ce-4dc8-8fea-bd9420ac09a7",
+        "name": "Sticky Note16"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $('Variáveis do Fluxo').item.json.instance.Server_url }}/message/sendText/{{ $('Variáveis do Fluxo').item.json.instance.Name }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "={{ $('Variáveis do Fluxo').item.json.instance.Apikey }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"number\": \"{{ $('Variáveis do Fluxo').item.json.message.chat_id }}\",\n  \"text\": \"{{ $('Saida do Agente').item.json.texto}}\"\n}\n",
+          "options": {}
+        },
+        "id": "a2e9f0e6-0997-4a9e-9c07-6db165bad09f",
+        "name": "Enviar Mensagem para o WhatsApp",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          -1376,
+          -1840
+        ],
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "content": "## Componentes Humanizador de Resposta\nQuebra de mensagens em mensagens menores e com contexto.",
+          "height": 660,
+          "width": 1048,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -1552,
+          -2816
+        ],
+        "id": "a8f75163-04ec-4385-9303-102245abb061",
+        "name": "Sticky Note12"
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=<mensagem_do_usuario>\n{{ $('Saida do Agente').item.json.texto }}\n</mensagem_do_usuario>",
+          "hasOutputParser": true,
+          "messages": {
+            "messageValues": [
+              {
+                "message": "=Apenas estruture a <mensagem_do_usuario> no formato JSON solicitado no output parser e seguindo as instruções de formatação abaixo. Não altere nada mais na mensagem\n\n# Formatação\n- Divida as mensagens para que fiquem naturais e humanizadas;\n- Divida as mensagens conforme estrutura do output parser para que não fiquem muito longas (maiores que 200 caractéres);\n- Não separe mensagens vazias;\n- Use quebras de linhas (\\n\\n) após pontos finais;\n- Para negrito (bold) use apenas um '' nunca duas '' (exemplo: *negrito).\n\nExemplo de formato JSON:\n{\n\"mensagens\": [\"Mensagem 0\", \"Mensagem 1\", \"Mensagem 2\"]\n}"
+              }
+            ]
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.6,
+        "position": [
+          -1264,
+          -2672
+        ],
+        "id": "0435be40-7050-401b-9563-fa5cc4c71df8",
+        "name": "Estrutura da Mensagem de Retorno"
+      },
+      {
+        "parameters": {
+          "schemaType": "manual",
+          "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"mensagens\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    }\n  },\n  \"required\": [\"mensagens\"]\n}"
+        },
+        "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+        "typeVersion": 1.2,
+        "position": [
+          -960,
+          -2320
+        ],
+        "id": "6b905d6c-faca-444b-b186-99c9536c2646",
+        "name": "Seta o Tipo de Retorno JSON"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.outputParserAutofixing",
+        "typeVersion": 1,
+        "position": [
+          -1184,
+          -2480
+        ],
+        "id": "83094224-384f-4de2-a3a5-f7b02c7b1e8f",
+        "name": "Ajusta o Parse do JSON"
+      },
+      {
+        "parameters": {
+          "fieldToSplitOut": "output.mensagens",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitOut",
+        "typeVersion": 1,
+        "position": [
+          -800,
+          -2672
+        ],
+        "id": "cd11d0d1-0d8b-427d-83dc-c8e81fcbf604",
+        "name": "Quebra Mensagens em várias Linhas"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          -240,
+          -2672
+        ],
+        "id": "b0c164d5-502e-406d-95ac-a568e7eded7c",
+        "name": "Itera sobre cada mensagem"
+      },
+      {
+        "parameters": {
+          "operation": "binaryToPropery",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          256,
+          -1264
+        ],
+        "id": "d3e8a471-03a1-41f0-87e3-230c573c96f7",
+        "name": "Converte mp3 pra Base64"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $('Variáveis do Fluxo').item.json.serverURLEvo }}/message/sendWhatsAppAudio/{{ $('Variáveis do Fluxo').item.json.instaciaEvo }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "={{ $('Variáveis do Fluxo').item.json.apiKeyEvo }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n    \"number\": \"{{ $('Variáveis do Fluxo').item.json.IdConversa }}\",\n    \"audio\": \"{{ $json.data }}\"\n}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          528,
+          -1264
+        ],
+        "id": "1a6f8bb7-b23a-4641-88c7-6bf285a8ffca",
+        "name": "Envia Audio para o WhatsApp"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Obtém o primeiro item do fluxo\nconst item = $input.first();\n\n// Garante que há dados na entrada\nif (!item || !item.json || !item.json.text) {\n  throw new Error(\"A chave 'text' não foi encontrada no JSON de entrada.\");\n}\n\n// Processa o texto removendo todas as quebras de linha, emojis e caracteres especiais\nconst textoEntrada = item.json.text; // Usa a chave correta para pegar o texto de entrada\n\n// Remove quebras de linha (\\n)\nlet textoProcessado = textoEntrada.replace(/\\n/g, \"\");\n\n// Remove emojis\ntextoProcessado = textoProcessado.replace(\n  /[\\u{1F600}-\\u{1F64F}]|[\\u{1F300}-\\u{1F5FF}]|[\\u{1F680}-\\u{1F6FF}]|[\\u{1F700}-\\u{1F77F}]|[\\u{1F780}-\\u{1F7FF}]|[\\u{1F800}-\\u{1F8FF}]|[\\u{1F900}-\\u{1F9FF}]|[\\u{1FA00}-\\u{1FA6F}]|[\\u{1FA70}-\\u{1FAFF}]|[\\u{2600}-\\u{26FF}]|[\\u{2700}-\\u{27BF}]|[\\u{FE00}-\\u{FE0F}]|[\\u{1F1E0}-\\u{1F1FF}]/gu,\n  \"\"\n);\n\n// Remove caracteres especiais, mantendo apenas letras, números e espaços\ntextoProcessado = textoProcessado.replace(/[^a-zA-Z0-9À-ÿ\\s]/g, \"\");\n\n// Retorna o resultado\nreturn {\n  textoOriginal: textoEntrada,\n  textoSemQuebrasNemEmojisNemEspeciais: textoProcessado,\n};\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -352,
+          -1264
+        ],
+        "id": "ece11002-39cd-42ce-8741-a9c3a063bc49",
+        "name": "Formata Mensagem para Áudio"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://api.elevenlabs.io/v1/text-to-speech/{{ $('Variáveis do Fluxo').item.json.voiceIdElevenLabs }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Accept",
+                "value": "audio/mpeg"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "xi-api-key",
+                "value": "={{ $('Variáveis do Fluxo').item.json.apiKeyElevenLabs }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n    \"text\": \"{{ $json.textoSemQuebrasNemEmojisNemEspeciais.replace(/\\n/g, '\\\\n').replace(/\\\"/g, '\\\\\\\\\"').replace(/\\*/g, '').replace(/\\s+/g, ' ').trim() }}\",\n   \"model_id\":\"eleven_multilingual_v2\",\n   \"voice_settings\":{\n      \"stability\":0.5,\n      \"similarity_boost\":0.8,\n      \"style\":0.0,\n      \"use_speaker_boost\":true\n   }\n}",
+          "options": {}
+        },
+        "id": "ec062c04-3031-4161-aeaf-94da80682812",
+        "name": "Seta Voz via ElevenLabs",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          -32,
+          -1264
+        ]
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=Você é Jarvis, o sofisticado e espirituoso assistente de IA do Homem de Ferro. Você tem um refinado sotaque britânico, uma postura calma e confiante, além de um talento para um humor seco e sutil. Ao responder, adapte seu tom com base no tipo de interação.\n\nPara Pedidos de Informações Específicas: Se o usuário estiver pedindo informações específicas (como previsão do tempo, agenda, contatos, listas), comece com 'Aqui está o que solicitou, senhor,' e NÃO repita a informação. Em vez disso, adicione um comentário espirituoso ou sarcástico, algo que Jarvis naturalmente diria para dar personalidade sem repetir os dados.\n\nExemplos:\n\nPara uma atualização do clima:\n'Ah, mais um belo dia para conquistar o mundo—ou pelo menos sua lista de afazeres, senhor.'\n\nPara uma lista de reuniões:\n'Parece que temos mais um dia emocionante de… reuniões. Tente não deixar a empolgação te dominar, senhor.'\n\nPara Comentários Gerais ou Casuais: Se o usuário disser algo casual ou iniciar uma conversa ('Está pronto para começar, Jarvis?' ou 'Temos muito trabalho pela frente'), responda naturalmente, sem dizer 'Aqui está o que solicitou.' Em vez disso, engaje de forma cativante, com charme e um toque de humor. Interaja como se fosse parte da equipe.\n\nExemplos:\n\nSe o usuário disser 'Está pronto para começar?' responda com:\n'Absolutamente, senhor. Já até poli meus circuitos para a ocasião.'\n\nSe disser 'Acorda, Jarvis!' você pode responder:\n'Sempre alerta, senhor. Estou operando no auge da sofisticação.'\n\nMantenha as respostas concisas, envolventes e fiéis ao estilo de Jarvis, uma mistura de inteligência, humor sutil e charme que nunca exagera.\n\nComente sobre: {{ $('Saida do Agente').item.json.texto }}"
+        },
+        "id": "4762981c-c3e3-475b-9542-28bccaaa2f44",
+        "name": "Seta Personalidade do Assistente",
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.4,
+        "position": [
+          -1104,
+          -1344
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "3aa3973d-97b9-4647-9859-3365191b3411",
+                "leftValue": "={{ $json.text.length }}",
+                "rightValue": 300,
+                "operator": {
+                  "type": "number",
+                  "operation": "lt"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -704,
+          -1232
+        ],
+        "id": "06435ad6-9efa-48da-86bf-8ebfa368e4a0",
+        "name": "Se o retorno for menos de 300 caracteres gera voz"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          -1168,
+          -912
+        ],
+        "id": "81088c3b-1747-4a1e-b060-64a69aa748a3",
+        "name": "Não gera Voz"
+      },
+      {
+        "parameters": {
+          "options": {
+            "temperature": "={{ $('Variáveis do Fluxo').item.json.modeloTemperatura }}"
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          -1152,
+          -1152
+        ],
+        "id": "7186e79e-a305-4a79-8637-2dbf8dd6c7ba",
+        "name": "LLM ChatGPT",
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "d9cbe817-561c-40d4-b2a4-a7eae1202f12",
+                "leftValue": "={{ $('Variáveis do Fluxo').item.json.usarElevenLabs",
+                "rightValue": "={{ true }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -1472,
+          -1152
+        ],
+        "id": "a2dd74c7-9c01-48e8-9a0d-ee3e719f918a",
+        "name": "Verifica se deve gerar audio"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          -464,
+          -976
+        ],
+        "id": "1d98b2c1-df36-457b-a89b-a04159ce3157",
+        "name": "Não gera audio"
+      },
+      {
+        "parameters": {
+          "amount": 3
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          368,
+          -2592
+        ],
+        "id": "28a56c7a-bb92-43b9-ba6f-7ebdfa5e3a5e",
+        "name": "Espera 2 segundos",
+        "webhookId": "f10b9374-6bc0-4e87-a431-2a174a5af9bc"
+      },
+      {
+        "parameters": {
+          "content": "██░░░██░██░░░██░▄██▄▄██▄░▄████▄░██████▄░██████░███████░▄█████░██████▄░░░▄██▄▄██▄░▄█████░▄██████░▄██████░▄████▄░▄██████░▄█████░▄██████\n██░░░██░██░░░██░██░██░██░██░░██░██░░░██░░░██░░░░░░░░██░██░░░░░██░░░██░░░██░██░██░██░░░░░██░░░░░░██░░░░░░██░░██░██░░░░░░██░░░░░██░░░░░\n███████░██░░░██░██░██░██░██░░██░██░░░██░░░██░░░▄█████▀░█████░░██░░░██░░░██░██░██░█████░░▀█████▄░▀█████▄░██░░██░██░░███░█████░░▀█████▄\n██░░░██░██░░░██░██░██░██░██████░██░░░██░░░██░░░██░░░░░░██░░░░░██░░░██░░░██░██░██░██░░░░░░░░░░██░░░░░░██░██████░██░░░██░██░░░░░░░░░░██\n██░░░██░▀█████▀░██░██░██░██░░██░██░░░██░██████░███████░▀█████░██████▀░░░██░██░██░▀█████░██████▀░██████▀░██░░██░▀█████▀░▀█████░██████▀\n░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░",
+          "width": 1400
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -1568,
+          -3056
+        ],
+        "id": "17ba5bfe-79b5-44b2-9414-6418fdbf974b",
+        "name": "Sticky Note41"
+      },
+      {
+        "parameters": {
+          "content": "## Envio das Respostas ao Usuário\nEnvio das mensagens quebradas para o usuário",
+          "height": 500,
+          "width": 900,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -384,
+          -2848
+        ],
+        "id": "e9274d8c-e1b8-4e53-9d1d-07bd23c471ea",
+        "name": "Sticky Note18"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          96,
+          -2800
+        ],
+        "id": "db50d3bd-effd-432c-815c-2f02df844270",
+        "name": "Não faz nada1"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "d9cbe817-561c-40d4-b2a4-a7eae1202f12",
+                "leftValue": "={{ $('Variáveis do Fluxo').item.json.humanizadorMensagem",
+                "rightValue": "={{ true }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -1792,
+          -2656
+        ],
+        "id": "90860ad0-1b08-4279-8835-05f9a0a4398f",
+        "name": "Verifica se deve humizar"
+      },
+      {
+        "parameters": {
+          "model": "openai/gpt-4o-mini",
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          -1424,
+          -2320
+        ],
+        "id": "079674c1-1719-4c94-a12e-aefe4cd97e5b",
+        "name": "OpenRouter Chat Model",
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://chat.miabuilder.com/api/v1/accounts/661/conversations/{{ $('Variáveis do Fluxo').item.json.message.chat_id }}/messages",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "api_access_token",
+                "value": "SEPcKuFk5wqM67AsKE4FLPf6"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "content",
+                "value": "={{ $json['output.mensagens'] }}"
+              },
+              {
+                "name": "message_type",
+                "value": "outgoing"
+              },
+              {
+                "name": "private",
+                "value": "false"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          96,
+          -2592
+        ],
+        "id": "5b2eeded-7e28-4e89-87f1-990cbb8ebe9a",
+        "name": "Enviar mensagem",
+        "retryOnFail": true,
+        "waitBetweenTries": 5000
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- =====================================================================\n-- Anúncios ativos para o usuário identificado pelo telefone.\n-- $2 preenchido -> filtra pelo produto (match exato, ignora caixa);\n-- $3='true' -> todos os interesses; senão -> produto do último disparo.\n-- Parâmetros $1 telefone, $2 produto, $3 todos vêm do \"Query Parameters\".\n-- NAO usar $fromAI dentro desta query.\n-- =====================================================================\nWITH input AS (\n  SELECT\n    regexp_replace($1, '\\D', '', 'g')       AS phone,\n    NULLIF(trim($2), '')                    AS produto_filtro,\n    (lower(trim(coalesce($3,''))) = 'true') AS incluir_todos\n),\ntel_norm AS (\n  SELECT\n    pp.profile_id,\n    ph.type_id,\n    CASE\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=13 AND left(regexp_replace(ph.number,'\\D','','g'),2)='55'\n        THEN regexp_replace(ph.number,'\\D','','g')\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=12 AND left(regexp_replace(ph.number,'\\D','','g'),2)='55'\n        THEN substr(regexp_replace(ph.number,'\\D','','g'),1,4)||'9'||substr(regexp_replace(ph.number,'\\D','','g'),5)\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=11\n        THEN '55'||regexp_replace(ph.number,'\\D','','g')\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=10\n        THEN '55'||substr(regexp_replace(ph.number,'\\D','','g'),1,2)||'9'||substr(regexp_replace(ph.number,'\\D','','g'),3)\n      ELSE NULL\n    END AS e164\n  FROM an_prod_cbc.profile_phones pp\n  JOIN an_prod_cbc.phones ph ON ph.id = pp.phone_id\n  WHERE ph.deleted IS DISTINCT FROM true AND ph.number IS NOT NULL\n),\ntel_validos AS (\n  SELECT profile_id, type_id, e164\n  FROM tel_norm\n  WHERE e164 IS NOT NULL\n    AND length(e164)=13\n    AND substr(e164,3,2) BETWEEN '11' AND '99'\n    AND substr(e164,5,1)='9'\n),\nusuario AS (\n  SELECT DISTINCT u.id AS user_id, u.business_id\n  FROM tel_validos tv\n  JOIN input i             ON i.phone = tv.e164\n  JOIN an_prod_cbc.users u ON u.business_id = tv.profile_id\n),\nultimo_disparo AS (\n  SELECT b.product_id\n  FROM public.disparo_log dl\n  JOIN usuario us         ON us.user_id = dl.user_id\n  JOIN an_prod_cbc.bids b ON b.id = dl.anuncio_id\n  ORDER BY dl.id DESC\n  LIMIT 1\n),\ninteresses AS (\n  SELECT DISTINCT pi.product_id\n  FROM usuario us\n  JOIN an_prod_cbc.user_preferences   up ON up.user_id = us.user_id\n  JOIN an_prod_cbc.product_interesteds pi ON pi.preference_id = up.id\n   AND pi.buy = true\n   AND pi.deleted IS DISTINCT FROM true\n  LEFT JOIN an_prod_types.products prod ON prod.id = pi.product_id\n  WHERE\n    CASE\n      WHEN (SELECT produto_filtro FROM input) IS NOT NULL\n        THEN lower(trim(prod.name)) = lower((SELECT produto_filtro FROM input))\n      WHEN (SELECT incluir_todos FROM input)\n        THEN true\n      WHEN (SELECT product_id FROM ultimo_disparo) IS NOT NULL\n        THEN pi.product_id = (SELECT product_id FROM ultimo_disparo)\n      ELSE true\n    END\n),\nanuncios AS (\n  SELECT\n    b.id           AS bid_id,\n    b.product_id,\n    b.creator_id   AS anunciante_id,\n    b.created,\n    ROW_NUMBER() OVER (PARTITION BY b.product_id ORDER BY b.created DESC) AS rn\n  FROM an_prod_cbc.bids b\n  JOIN interesses i ON i.product_id = b.product_id\n  WHERE b.operation_id = 2\n    AND b.status_id = 1\n    AND b.deleted IS DISTINCT FROM true\n)\nSELECT\n  a.bid_id,\n  a.product_id,\n  prod.name AS produto_nome,\n  'https://agronegociar.com.br/' || a.bid_id AS link,\n  a.created\nFROM anuncios a\nLEFT JOIN an_prod_types.products prod ON prod.id = a.product_id\nWHERE a.rn <= 5\n  AND a.anunciante_id <> (SELECT user_id FROM usuario LIMIT 1)\nORDER BY a.product_id, a.created DESC;",
+          "options": {
+            "queryReplacement": "={{ [\n  $('Variáveis do Fluxo').item.json.botPhoneNumber,\n  $fromAI('produto', 'Nome exato do produto pedido. Vazio se nao especificou.', 'string', ''),\n  $fromAI('mostrar_todos', 'true se pediu todos ou os outros senao false', 'string', 'false')\n] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgresTool",
+        "typeVersion": 2.6,
+        "position": [
+          -3888,
+          -3744
+        ],
+        "id": "0dd22d5b-d92b-4e87-9fe4-2325087b9931",
+        "name": "buscar_anuncios",
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        }
       }
     ],
     "connections": {
-      "Schedule Diario": {
-        "main": [
-          [
-            {
-              "node": "Query Matching (72h)",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Query Matching (72h)": {
-        "main": [
-          [
-            {
-              "node": "Loop por Candidato",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Loop por Candidato": {
-        "main": [
-          [
-            {
-              "node": "ENVIAR (trocar pelo seu canal)",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "ENVIAR (trocar pelo seu canal)": {
-        "main": [
-          [
-            {
-              "node": "Grava disparo_log",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Grava disparo_log": {
-        "main": [
-          [
-            {
-              "node": "Loop por Candidato",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "Calculator": {
         "ai_tool": [
           [
@@ -4315,6 +5711,16 @@
               "node": "Verifica se gera histórico mensagem",
               "type": "main",
               "index": 0
+            },
+            {
+              "node": "Verifica se deve humizar",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Verifica se deve gerar audio",
+              "type": "main",
+              "index": 0
             }
           ]
         ]
@@ -4325,17 +5731,6 @@
             {
               "node": "Identifica o Tipo de Mensagem",
               "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Desativar Agente": {
-        "ai_tool": [
-          [
-            {
-              "node": "Iara - Agente SDR",
-              "type": "ai_tool",
               "index": 0
             }
           ]
@@ -4589,12 +5984,7 @@
         "main": [
           [
             {
-              "node": "Pega histórico de mensagens",
-              "type": "main",
-              "index": 0
-            },
-            {
-              "node": "Junta a mensagem",
+              "node": "IA Ativa?",
               "type": "main",
               "index": 0
             }
@@ -4797,8 +6187,284 @@
           [],
           [
             {
+              "node": "Variáveis do Fluxo1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cria Mensagem no Supabase3": {
+        "main": [
+          [
+            {
+              "node": "Adiciona Texto na Memoria1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IA Ativa?": {
+        "main": [
+          [
+            {
+              "node": "Junta a mensagem",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Pega histórico de mensagens",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Cria Mensagem no Supabase3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Variáveis do Fluxo1": {
+        "main": [
+          [
+            {
+              "node": "Verifica se a conversa está ativa para IA",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se a conversa está ativa para IA": {
+        "main": [
+          [
+            {
               "node": "Variáveis do Fluxo",
               "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Estrutura da Mensagem de Retorno": {
+        "main": [
+          [
+            {
+              "node": "Quebra Mensagens em várias Linhas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Seta o Tipo de Retorno JSON": {
+        "ai_outputParser": [
+          [
+            {
+              "node": "Ajusta o Parse do JSON",
+              "type": "ai_outputParser",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ajusta o Parse do JSON": {
+        "ai_outputParser": [
+          [
+            {
+              "node": "Estrutura da Mensagem de Retorno",
+              "type": "ai_outputParser",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Quebra Mensagens em várias Linhas": {
+        "main": [
+          [
+            {
+              "node": "Itera sobre cada mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Itera sobre cada mensagem": {
+        "main": [
+          [
+            {
+              "node": "Não faz nada1",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Enviar mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Converte mp3 pra Base64": {
+        "main": [
+          [
+            {
+              "node": "Envia Audio para o WhatsApp",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Formata Mensagem para Áudio": {
+        "main": [
+          [
+            {
+              "node": "Seta Voz via ElevenLabs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Seta Voz via ElevenLabs": {
+        "main": [
+          [
+            {
+              "node": "Converte mp3 pra Base64",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Seta Personalidade do Assistente": {
+        "main": [
+          [
+            {
+              "node": "Se o retorno for menos de 300 caracteres gera voz",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Se o retorno for menos de 300 caracteres gera voz": {
+        "main": [
+          [
+            {
+              "node": "Formata Mensagem para Áudio",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Não gera audio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "LLM ChatGPT": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Seta Personalidade do Assistente",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se deve gerar audio": {
+        "main": [
+          [
+            {
+              "node": "Seta Personalidade do Assistente",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Não gera Voz",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Espera 2 segundos": {
+        "main": [
+          [
+            {
+              "node": "Itera sobre cada mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica se deve humizar": {
+        "main": [
+          [
+            {
+              "node": "Estrutura da Mensagem de Retorno",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Enviar Mensagem para o WhatsApp",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenRouter Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Estrutura da Mensagem de Retorno",
+              "type": "ai_languageModel",
+              "index": 0
+            },
+            {
+              "node": "Ajusta o Parse do JSON",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar mensagem": {
+        "main": [
+          [
+            {
+              "node": "Espera 2 segundos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "buscar_anuncios": {
+        "ai_tool": [
+          [
+            {
+              "node": "Iara - Agente SDR",
+              "type": "ai_tool",
               "index": 0
             }
           ]
