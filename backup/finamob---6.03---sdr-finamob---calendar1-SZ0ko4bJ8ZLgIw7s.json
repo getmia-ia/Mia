@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-22T18:55:00.732Z",
+  "updatedAt": "2026-07-23T21:23:18.132Z",
   "createdAt": "2026-07-20T18:40:06.227Z",
   "id": "SZ0ko4bJ8ZLgIw7s",
   "name": "Finamob - 6.03 - SDR Finamob - Calendar1",
@@ -364,7 +364,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// ===============================\n// INPUT\n// ===============================\nconst input = $items(\"trigger\")[0].json;\nconst { dia, horario, nome, empresa, email, telefone, descricao, convidados } = input; // <-- NOVO: adicionado \"convidados\"\n\nconst convidadosNormalizados = (convidados || [])                                   // <-- NOVO\n  .filter(c => c?.email)                                                            // <-- NOVO\n  .map(c => ({ nome: c.nome || \"\", email: c.email.trim().toLowerCase() }))          // <-- NOVO\n  .filter(c => c.email !== (email || \"\").trim().toLowerCase())                      // <-- NOVO\n  .filter((c, i, arr) => arr.findIndex(x => x.email === c.email) === i);            // <-- NOVO\n\nconst tz = \"America/Sao_Paulo\";\n\n// ===============================\n// DATA ATUAL EM SP\n// ===============================\nconst agora = new Date().toLocaleString(\"sv-SE\", { timeZone: tz });\nconst hojeStr = agora.slice(0, 10);\nconst agoraSP = agora.slice(11, 16);\n\nfunction somaMinutos(hhmm, min) {\n  const [h, m] = hhmm.split(\":\").map(Number);\n  const total = h * 60 + m + min;\n  return String(Math.floor(total / 60)).padStart(2, \"0\") + \":\" +\n         String(total % 60).padStart(2, \"0\");\n}\n\nconst limite = somaMinutos(agoraSP, 30);\n\n// ===============================\n// PEGAR TODOS OS SLOTS (FORMATO REAL)\n// ===============================\nconst slotsBase = $items(\"Gerar Slots Livres\").map(item => item.json);\n\nif (!slotsBase.length) {\n  throw new Error(\"Nenhum slot retornado pelo node 'Gerar Slots Livres'.\");\n}\n\n// ===============================\n// FILTRAR PASSADO E < 30 MIN\n// ===============================\nconst slots = slotsBase.filter(slot => {\n  const slotDia  = slot.start.slice(0, 10);\n  const slotHora = slot.start.slice(11, 16);\n\n  if (slotDia === hojeStr) return slotHora >= limite;\n  return slotDia > hojeStr;\n});\n\n// ===============================\n// VERIFICAR HORÁRIO SOLICITADO\n// ===============================\nlet solicitadoKey;\n\nif (horario.includes(\"T\")) {\n  solicitadoKey = horario.slice(0, 16);\n} else {\n  solicitadoKey = `${dia}T${horario}`;\n}\nconst encontrado = slots.find(slot => slot.start === solicitadoKey);\n\nif (encontrado) {\n  return [{\n    json: {\n      status: \"ok\",\n      message: `Horário disponível: ${dia} ${horario}. Pode agendar.`,\n      dados: {\n        nome,\n        empresa,\n        email,\n        telefone,\n        descricao,\n        convidados: convidadosNormalizados, // <-- NOVO\n        inicio: { dateTime: `${encontrado.start}:00`, timeZone: tz },\n        fim:    { dateTime: `${encontrado.end}:00`,   timeZone: tz }\n      }\n    }\n  }];\n}\n\n// ===============================\n// AGRUPAR POR DIA\n// ===============================\nconst slotsPorDia = {};\n\nfor (const slot of slots) {\n  const d = slot.start.slice(0, 10);\n  if (!slotsPorDia[d]) slotsPorDia[d] = [];\n  slotsPorDia[d].push(slot);\n}\n\nfor (const d in slotsPorDia) {\n  slotsPorDia[d].sort((a, b) => a.start.localeCompare(b.start));\n}\n\n// ===============================\n// FUNÇÃO PARA SOMAR DIAS\n// ===============================\nfunction addDias(dataStr, n) {\n  const d = new Date(dataStr + \"T00:00:00Z\");\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\n// ===============================\n// BUSCAR ALTERNATIVAS\n// ===============================\nlet alternativas = [];\n\nconst prev = addDias(dia, -1);\nconst next = addDias(dia, +1);\n\nalternativas.push(...(slotsPorDia[prev]?.slice(0, 2) || []));\nalternativas.push(...(slotsPorDia[dia]?.slice(0, 2)  || []));\nalternativas.push(...(slotsPorDia[next]?.slice(0, 2) || []));\n\nlet offset = 2;\n\nwhile (alternativas.length < 2 && offset <= 7) {\n  alternativas.push(...(slotsPorDia[addDias(dia, -offset)]?.slice(0, 2) || []));\n  alternativas.push(...(slotsPorDia[addDias(dia, +offset)]?.slice(0, 2) || []));\n  offset++;\n}\n\nalternativas = alternativas\n  .slice(0, 6)\n  .map(slot => ({\n    inicio: { dateTime: `${slot.start}:00`, timeZone: tz },\n    fim:    { dateTime: `${slot.end}:00`,   timeZone: tz }\n  }));\n\n// ===============================\n// RETORNO INDISPONÍVEL\n// ===============================\nreturn [{\n  json: {\n    status: \"indisponivel\",\n    message: `O horário ${dia} ${horario} não está disponível.`,\n    alternativas\n  }\n}];"
+        "jsCode": "// ===============================\n// INPUT\n// ===============================\nconst input = $items(\"trigger\")[0].json;\nconst { dia, horario, nome, empresa, email, telefone, descricao, convidados } = input; // <-- NOVO: adicionado \"convidados\"\n\nlet convidadosArray = [];\ntry {\n  convidadosArray = convidados ? JSON.parse(convidados) : [];\n} catch (e) {\n  console.log('Erro ao fazer parse de convidados:', convidados, e.message);\n  convidadosArray = [];\n}\n\nconst convidadosNormalizados = (convidadosArray || [])                              // <-- NOVO\n  .filter(c => c?.email)                                                            // <-- NOVO\n  .map(c => ({ nome: c.nome || \"\", email: c.email.trim().toLowerCase() }))          // <-- NOVO\n  .filter(c => c.email !== (email || \"\").trim().toLowerCase())                      // <-- NOVO\n  .filter((c, i, arr) => arr.findIndex(x => x.email === c.email) === i);            // <-- NOVO\n\nconst tz = \"America/Sao_Paulo\";\n\n// ===============================\n// DATA ATUAL EM SP\n// ===============================\nconst agora = new Date().toLocaleString(\"sv-SE\", { timeZone: tz });\nconst hojeStr = agora.slice(0, 10);\nconst agoraSP = agora.slice(11, 16);\n\nfunction somaMinutos(hhmm, min) {\n  const [h, m] = hhmm.split(\":\").map(Number);\n  const total = h * 60 + m + min;\n  return String(Math.floor(total / 60)).padStart(2, \"0\") + \":\" +\n         String(total % 60).padStart(2, \"0\");\n}\n\nconst limite = somaMinutos(agoraSP, 30);\n\n// ===============================\n// PEGAR TODOS OS SLOTS (FORMATO REAL)\n// ===============================\nconst slotsBase = $items(\"Gerar Slots Livres\").map(item => item.json);\n\nif (!slotsBase.length) {\n  throw new Error(\"Nenhum slot retornado pelo node 'Gerar Slots Livres'.\");\n}\n\n// ===============================\n// FILTRAR PASSADO E < 30 MIN\n// ===============================\nconst slots = slotsBase.filter(slot => {\n  const slotDia  = slot.start.slice(0, 10);\n  const slotHora = slot.start.slice(11, 16);\n\n  if (slotDia === hojeStr) return slotHora >= limite;\n  return slotDia > hojeStr;\n});\n\n// ===============================\n// VERIFICAR HORÁRIO SOLICITADO\n// ===============================\nlet solicitadoKey;\n\nif (horario.includes(\"T\")) {\n  solicitadoKey = horario.slice(0, 16);\n} else {\n  solicitadoKey = `${dia}T${horario}`;\n}\nconst encontrado = slots.find(slot => slot.start === solicitadoKey);\n\nif (encontrado) {\n  return [{\n    json: {\n      status: \"ok\",\n      message: `Horário disponível: ${dia} ${horario}. Pode agendar.`,\n      dados: {\n        nome,\n        empresa,\n        email,\n        telefone,\n        descricao,\n        convidados: convidadosNormalizados, // <-- NOVO\n        inicio: { dateTime: `${encontrado.start}:00`, timeZone: tz },\n        fim:    { dateTime: `${encontrado.end}:00`,   timeZone: tz }\n      }\n    }\n  }];\n}\n\n// ===============================\n// AGRUPAR POR DIA\n// ===============================\nconst slotsPorDia = {};\n\nfor (const slot of slots) {\n  const d = slot.start.slice(0, 10);\n  if (!slotsPorDia[d]) slotsPorDia[d] = [];\n  slotsPorDia[d].push(slot);\n}\n\nfor (const d in slotsPorDia) {\n  slotsPorDia[d].sort((a, b) => a.start.localeCompare(b.start));\n}\n\n// ===============================\n// FUNÇÃO PARA SOMAR DIAS\n// ===============================\nfunction addDias(dataStr, n) {\n  const d = new Date(dataStr + \"T00:00:00Z\");\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\n// ===============================\n// BUSCAR ALTERNATIVAS\n// ===============================\nlet alternativas = [];\n\nconst prev = addDias(dia, -1);\nconst next = addDias(dia, +1);\n\nalternativas.push(...(slotsPorDia[prev]?.slice(0, 2) || []));\nalternativas.push(...(slotsPorDia[dia]?.slice(0, 2)  || []));\nalternativas.push(...(slotsPorDia[next]?.slice(0, 2) || []));\n\nlet offset = 2;\n\nwhile (alternativas.length < 2 && offset <= 7) {\n  alternativas.push(...(slotsPorDia[addDias(dia, -offset)]?.slice(0, 2) || []));\n  alternativas.push(...(slotsPorDia[addDias(dia, +offset)]?.slice(0, 2) || []));\n  offset++;\n}\n\nalternativas = alternativas\n  .slice(0, 6)\n  .map(slot => ({\n    inicio: { dateTime: `${slot.start}:00`, timeZone: tz },\n    fim:    { dateTime: `${slot.end}:00`,   timeZone: tz }\n  }));\n\n// ===============================\n// RETORNO INDISPONÍVEL\n// ===============================\nreturn [{\n  json: {\n    status: \"indisponivel\",\n    message: `O horário ${dia} ${horario} não está disponível.`,\n    alternativas\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -409,13 +409,14 @@
         "calendar": {
           "__rl": true,
           "value": "luizakrum@gmail.com",
-          "mode": "list"
+          "mode": "list",
+          "cachedResultName": "luizakrum@gmail.com"
         },
         "start": "={{ $json.input[0].json.dados.inicio.dateTime }}",
         "end": "={{ $json.input[0].json.dados.fim.dateTime }}",
         "additionalFields": {
           "attendees": [
-            "={{ [$json.input[0].json.dados.email, ...($json.input[0].json.dados.convidados || []).map(c => c.email)] }}"
+            "={{ [$json.input[0].json.dados.email, ...($json.input[0].json.dados.convidados || []).map(c => c.email)].join(',') }}"
           ],
           "conferenceDataUi": {
             "conferenceDataValues": {
@@ -722,7 +723,7 @@
     {
       "parameters": {
         "inputSource": "jsonExample",
-        "jsonExample": "{\n\"type\": \"agendarReuniao\",\n\"tema\": \"funding imobiliario\",\n\"dia\": \"2026-06-15\",\n\"horario\": \"15:00\",\n\"email\": \"usuario@email.com\",\n\"telefone\": \"5511999999999\",\n\"nome\": \"João da Silva\",\n\"empresa\": \"Empresa X\",\n\"descricao\": \"Falou que está buscando funding para um projeto de 40 unidades e quer entender como a imersão pode acelerar sua captação\",\n\"id\": \"8100\",\n\"convidados\": [\n  { \"nome\": \"Maria Souza\", \"email\": \"maria@empresa.com\" }\n]\n}"
+        "jsonExample": "{\n\"type\": \"agendarReuniao\",\n\"tema\": \"funding imobiliario\",\n\"dia\": \"2026-06-15\",\n\"horario\": \"15:00\",\n\"email\": \"usuario@email.com\",\n\"telefone\": \"5511999999999\",\n\"nome\": \"João da Silva\",\n\"empresa\": \"Empresa X\",\n\"descricao\": \"Falou que está buscando funding para um projeto de 40 unidades e quer entender como a imersão pode acelerar sua captação\",\n\"id\": \"8100\",\n\"convidados\": []\n}"
       },
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
@@ -1668,13 +1669,7 @@
     },
     "Upsert Call - Pipeline Finamob": {
       "main": [
-        [
-          {
-            "node": "Mensagem de Confirmação",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Obter Eventos do Google Calendar4": {
@@ -1754,7 +1749,7 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "0a9e0dc8-8bbf-42e6-8c1a-a92e6fdc7666",
+  "versionId": "2b88095b-d60b-4048-be88-b15c03800a29",
   "activeVersionId": null,
   "triggerCount": 0,
   "shared": [
