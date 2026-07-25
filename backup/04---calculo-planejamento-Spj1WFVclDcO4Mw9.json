@@ -1,0 +1,142 @@
+{
+  "updatedAt": "2026-07-24T22:41:30.585Z",
+  "createdAt": "2026-07-24T20:13:15.600Z",
+  "id": "Spj1WFVclDcO4Mw9",
+  "name": "04 - Calculo Planejamento",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "owner_id"
+            },
+            {
+              "name": "start_date"
+            },
+            {
+              "name": "end_date"
+            }
+          ]
+        }
+      },
+      "id": "9cab004a-4b1f-4444-b020-20332328dfdf",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        2032,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with periodo as (\n  select generate_series($2::date, $3::date, interval '1 month')::date as mes_ref\n),\nmeses as (\n  select extract(year from mes_ref)::int as ano,\n         extract(month from mes_ref)::int - 1 as mes_idx\n  from periodo\n),\nplanejado as (\n  select b.category_id, sum(b.planned_value) as planejado\n  from public.budgets b\n  join meses m on b.year = m.ano and b.month = m.mes_idx\n  where b.owner_id = $1::uuid\n  group by b.category_id\n),\nrealizado as (\n  select t.category_id, sum(t.value) as realizado\n  from public.transactions t\n  where t.owner_id = $1::uuid\n    and t.date >= $2::date\n    and t.date <= $3::date\n  group by t.category_id\n)\nselect\n  coalesce(p.category_id, r.category_id) as category_id,\n  coalesce(p.planejado, 0) as planejado,\n  coalesce(r.realizado, 0) as realizado\nfrom planejado p\nfull outer join realizado r on p.category_id = r.category_id\norder by category_id;",
+        "options": {
+          "queryReplacement": "={{ [$json.owner_id, $json.start_date, $json.end_date] }}"
+        }
+      },
+      "id": "49d07fa8-97ab-4b5e-b1cc-29f0defc4b00",
+      "name": "Calcular Planejado x Realizado1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2336,
+        32
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "769u9DNAemYPOCzL",
+          "name": "ELEVA - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const compRows = $('Calcular Planejado x Realizado1').all().map(i => i.json);\nconst lancRows = $input.all().map(i => i.json);\nconst trigger = $('When Executed by Another Workflow').item.json;\n\nfunction formatBRL(n) {\n  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\n}\n\nfunction formatDate(iso) {\n  const d = new Date(iso);\n  const dd = String(d.getUTCDate()).padStart(2, '0');\n  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');\n  return `${dd}/${mm}`;\n}\n\n// Agrupa lançamentos por category_id, já ordenados do mais recente pro mais antigo\nconst porCategoria = {};\nfor (const r of lancRows) {\n  if (!porCategoria[r.category_id]) porCategoria[r.category_id] = [];\n  porCategoria[r.category_id].push(r);\n}\n\nconst detalhamentoPorCategoria = {};\nfor (const [catId, itens] of Object.entries(porCategoria)) {\n  const linhas = itens.map(i => `- **${formatDate(i.date)}**: **R$ ${formatBRL(Number(i.value))}** - ${i.description}`);\n  const total = itens.reduce((acc, i) => acc + Number(i.value), 0);\n  detalhamentoPorCategoria[catId] = {\n    texto: linhas.join('\\n'),\n    total: Number(total.toFixed(2)),\n    quantidade: itens.length\n  };\n}\n\nreturn [{\n  json: {\n    periodo: { start_date: trigger.start_date, end_date: trigger.end_date },\n    categorias: compRows.map(r => ({\n      category_id: r.category_id,\n      planejado: Number(r.planejado),\n      realizado: Number(r.realizado)\n    })),\n    lancamentos: lancRows.map(r => ({\n      date: r.date,\n      category_id: r.category_id,\n      description: r.description,\n      value: Number(r.value)\n    })),\n    detalhamento_por_categoria: detalhamentoPorCategoria\n  }\n}];"
+      },
+      "id": "976fcb18-a62d-4114-ba54-f9bc6025bbb4",
+      "name": "Formatar Retorno1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2624,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select date, category_id, description, value\nfrom public.transactions\nwhere owner_id = $1::uuid\n  and date >= $2::date\n  and date <= $3::date\norder by date desc;",
+        "options": {
+          "queryReplacement": "={{ [$json.owner_id, $json.start_date, $json.end_date] }}"
+        }
+      },
+      "id": "32b0c0e7-3d00-4bcd-bd45-023ea0b0c304",
+      "name": "Buscar Lancamentos do Periodo1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2336,
+        544
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "769u9DNAemYPOCzL",
+          "name": "ELEVA - Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Calcular Planejado x Realizado1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Buscar Lancamentos do Periodo1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Lancamentos do Periodo1": {
+      "main": [
+        [
+          {
+            "node": "Formatar Retorno1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "3ad6c3b2-182c-4950-9122-69e7d4212a14",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-07-24T20:13:15.600Z",
+      "createdAt": "2026-07-24T20:13:15.600Z",
+      "role": "workflow:owner",
+      "workflowId": "Spj1WFVclDcO4Mw9",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
