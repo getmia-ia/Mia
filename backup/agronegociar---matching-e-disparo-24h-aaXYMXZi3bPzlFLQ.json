@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-07-23T16:44:52.191Z",
+  "updatedAt": "2026-07-24T13:19:12.335Z",
   "createdAt": "2026-07-20T20:21:51.131Z",
   "id": "aaXYMXZi3bPzlFLQ",
   "name": "AgroNegociar - Matching e Disparo (24h)",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
@@ -278,7 +278,7 @@
       "parameters": {
         "resource": "chat-api",
         "instanceName": "AgroNegociar - Comercial",
-        "numbers": "={{ $json.numeros }}"
+        "numbers": "={{ $json.numeros.join(',') }}"
       },
       "type": "n8n-nodes-evolution-api.evolutionApi",
       "typeVersion": 1,
@@ -299,7 +299,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Resposta do Evolution (lote) -> normaliza para uma lista de { number/jid, exists }\nconst items = $input.all().map(i => i.json);\nlet lista = [];\nif (items.length === 1) {\n  const j = items[0];\n  lista = Array.isArray(j) ? j : (j.data || j.result || [j]);\n} else {\n  lista = items.flatMap(j => Array.isArray(j) ? j : (j.data || j.result || [j]));\n}\n\n// mapa: digitos do numero -> exists\nconst existe = {};\nfor (const it of lista) {\n  const num = String((it && (it.number || it.jid)) || '').replace(/\\D/g, '');\n  if (num) existe[num] = it.exists === true;\n}\n\n// linhas originais montadas no node anterior\nconst rows = $('Monta lista de números').first().json.rows;\n\n// mantem so quem tem WhatsApp e limita a 30 envios\nconst comWhats = rows.filter(r => existe[String(r.telefone).replace(/\\D/g,'')] === true);\nreturn comWhats.slice(0, 30).map(r => ({ json: r }));"
+        "jsCode": "const items = $input.all().map(i => i.json);\nlet lista = [];\nif (items.length === 1) {\n  const j = items[0];\n  lista = Array.isArray(j) ? j : (j.data || j.result || [j]);\n} else {\n  lista = items.flatMap(j => Array.isArray(j) ? j : (j.data || j.result || [j]));\n}\n\nconst digits = s => String(s || '').replace(/\\D/g, '');\n\n// gera as variantes com e sem o 9 (problema clássico BR)\nfunction variantes(num) {\n  const d = digits(num);\n  const set = new Set([d]);\n  if (d.length === 13 && d.substr(4, 1) === '9') set.add(d.substr(0, 4) + d.substr(5)); // tira o 9\n  else if (d.length === 12) set.add(d.substr(0, 4) + '9' + d.substr(4));                // põe o 9\n  return [...set];\n}\n\n// mapa de quem tem WhatsApp, indexado por TODAS as variantes\nconst existe = {};\nfor (const it of lista) {\n  const num = digits(it && (it.number || it.jid));\n  if (num && it.exists === true) for (const v of variantes(num)) existe[v] = true;\n}\n\nconst rows = $('Monta lista de números').first().json.rows;\n\n// mantém só quem tem WhatsApp (comparando variantes)\nconst comWhats = rows.filter(r => variantes(r.telefone).some(v => existe[v] === true));\n\n// 1 disparo por pessoa/dia: mantém a linha de maior score\nconst porTelefone = {};\nfor (const r of comWhats) {\n  const k = digits(r.telefone);\n  if (!porTelefone[k] || Number(r.score) > Number(porTelefone[k].score)) porTelefone[k] = r;\n}\n\nreturn Object.values(porTelefone).slice(0, 30).map(r => ({ json: r }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -373,7 +373,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO public.disparo_log (anuncio_id, user_id, score, enviado_em)\nVALUES ({{ $('Montar Body Template1').item.json.anuncio_id }}, {{ $('Montar Body Template').item.json.candidato_id }}, {{ $('Montar Body Template').item.json.score }}, now());",
+        "query": "INSERT INTO public.disparo_log (anuncio_id, user_id, score, enviado_em)\nVALUES ({{ $('Montar Body Template1').item.json.anuncio_id }}, {{ $('Montar Body Template1').item.json.candidato_id }}, {{ $('Montar Body Template1').item.json.score }}, now());",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -459,7 +459,7 @@
     },
     {
       "parameters": {
-        "amount": "=1"
+        "amount": "={{ Math.floor(Math.random() * 8) + 5 }}"
       },
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -498,7 +498,8 @@
         "rule": {
           "interval": [
             {
-              "triggerAtHour": 9
+              "triggerAtHour": 10,
+              "triggerAtMinute": 20
             }
           ]
         }
@@ -757,18 +758,25 @@
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
   },
   "staticData": {
     "node:Schedule Trigger": {
+      "recurrenceRules": []
+    },
+    "node:Disparador Diário": {
       "recurrenceRules": []
     }
   },
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "9f7e0a1b-0256-4d86-9cc3-21e4e1d3f4bd",
-  "activeVersionId": null,
+  "versionId": "3d411aee-4da9-4a7e-be0e-e7ef3e3e8e4b",
+  "activeVersionId": "3d411aee-4da9-4a7e-be0e-e7ef3e3e8e4b",
   "triggerCount": 1,
   "shared": [
     {
@@ -779,6 +787,766 @@
       "projectId": "nRxOu1L1N41Jyveq"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "updatedAt": "2026-07-24T13:19:10.795Z",
+    "createdAt": "2026-07-24T13:19:10.795Z",
+    "versionId": "3d411aee-4da9-4a7e-be0e-e7ef3e3e8e4b",
+    "workflowId": "aaXYMXZi3bPzlFLQ",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 9
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          1072,
+          -32
+        ],
+        "id": "bb1bd19c-b56a-431d-b802-3da49e5fbaff",
+        "name": "Schedule Trigger",
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "boolean": [
+              {
+                "value1": "={{ ($json.data?.[0]?.exists) ?? ($json[0]?.exists) ?? false }}",
+                "value2": true
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 1,
+        "position": [
+          1920,
+          -32
+        ],
+        "id": "8005a9c8-0245-47cb-861f-b3de57e5b66e",
+        "name": "Tem WhatsApp?",
+        "disabled": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $('Loop Interessados').item.json;\n\n// ---- Valor ----\nfunction fmtNum(n){\n  const [int, dec] = Number(n).toFixed(2).split('.');\n  return int.replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.') + ',' + dec;\n}\nconst precoNum = Number(item.anuncio_price);\nconst temValor = !!precoNum && precoNum > 0;\nconst simbolo  = { 1: 'R$', 2: 'US$', 3: '€' }[item.moeda_id] || 'R$';\nconst unidade  = item.price_unit_nome ? '/' + item.price_unit_nome : '';\nconst valorFmt = temValor ? `${simbolo} ${fmtNum(precoNum)}${unidade}` : null;\n\n// ---- Região ----\nconst cidade = (item.anuncio_cidade || '').trim();\nconst uf     = (item.anuncio_uf || '').trim();\nlet regiaoFmt = null;\nif (cidade && uf) regiaoFmt = `${cidade}/${uf}`;\nelse if (uf)      regiaoFmt = uf;\nelse if (cidade)  regiaoFmt = cidade;\nconst temRegiao = !!regiaoFmt;\n\nconst produto = String(item.produto_nome || 'seu produto');\n\n// ---- Escolha do template + texto final (o que realmente será enviado) ----\n// IMPORTANTE: os textos abaixo devem ser IDÊNTICOS ao corpo aprovado de cada\n// template no Meta. Ajuste as strings se a redação do seu template for diferente.\nconst saudacao = 'Olá, tudo bem? 😊\\n\\nSou a Luana, da AgroNegociar.\\n\\n';\nconst fim = '\\n\\nQuer que eu te mande o link?';\n\nlet templateName, params, textoLog;\nif (temValor && temRegiao) {\n  templateName = 'template_1_agronegociar';   // Template 1: preço + local\n  params = [produto, valorFmt, regiaoFmt];\n  textoLog = `${saudacao}Vi aqui no seu cadastro que você possui interesse em ${produto} e acabou de surgir um anúncio no valor de ${valorFmt} na região de ${regiaoFmt}.${fim}`;\n} else if (temValor) {\n  templateName = 'template_2_agronegociar';   // Template 2: só preço\n  params = [produto, valorFmt];\n  textoLog = `${saudacao}Vi aqui no seu cadastro que você possui interesse em ${produto} e acabou de surgir um anúncio de ${produto} no valor de ${valorFmt}.${fim}`;\n} else {\n  templateName = 'template_4_agronegociar';   // Template 3: nenhum dos dois\n  params = [produto];\n  textoLog = `${saudacao}Vi aqui no seu cadastro que você possui interesse em ${produto} e acabou de surgir um anúncio de ${produto}.${fim}`;\n}\n\nconst body = {\n  messaging_product: 'whatsapp',\n  to: String(item.telefone),\n  type: 'template',\n  template: {\n    name: templateName,\n    language: { code: 'pt_BR' },\n    components: [\n      { type: 'body', parameters: params.map(t => ({ type: 'text', text: String(t) })) }\n    ]\n  }\n};\n\nreturn [{\n  json: {\n    resultado: body,\n    telefone: item.telefone,\n    whatsapp_number_id: '1123205217553260',\n    anuncio_id: item.anuncio_id,\n    candidato_id: item.candidato_id,\n    score: item.score,\n    template_usado: templateName,\n    texto_log: textoLog\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2144,
+          -48
+        ],
+        "id": "3d811be5-3f6c-431c-8bb0-feee978758e1",
+        "name": "Montar Body Template",
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://graph.facebook.com/v22.0/1123205217553260/messages",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.resultado) }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2384,
+          -32
+        ],
+        "id": "37435557-ce4d-4541-885a-ae29b0eb0baf",
+        "name": "Enviar Template",
+        "retryOnFail": true,
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "disabled": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO public.disparo_log (anuncio_id, user_id, score, enviado_em)\nVALUES ({{ $('Montar Body Template').item.json.anuncio_id }}, {{ $('Montar Body Template').item.json.candidato_id }}, {{ $('Montar Body Template').item.json.score }}, now());",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          2624,
+          -32
+        ],
+        "id": "edcb8239-503a-4ee8-989e-008c4e3251c0",
+        "name": "Grava disparo_log",
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        },
+        "disabled": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "amount": "=1"
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          3216,
+          -16
+        ],
+        "id": "b20607a8-caa7-411d-af08-79213a52dfac",
+        "name": "Wait",
+        "webhookId": "wait-expirado-001",
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "resource": "chat-api",
+          "instanceName": "AgroNegociar - Comercial",
+          "numbers": "={{ $json.telefone }}"
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1712,
+          -16
+        ],
+        "id": "9f864336-f5a8-4765-885c-abe223df381a",
+        "name": "Check WA Expirado1",
+        "credentials": {
+          "evolutionApi": {
+            "id": "LpFE8TuJugE26UUu",
+            "name": "AGRONEGOCIAR-COMERCIAL"
+          }
+        },
+        "disabled": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          1472,
+          -32
+        ],
+        "id": "0f56fc80-2738-4b54-a9dc-45c1c43a2280",
+        "name": "Loop Interessados",
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "WITH anuncios AS (\n  SELECT\n    b.id            AS anuncio_id,\n    b.product_id,\n    b.creator_id    AS anunciante_id,\n    b.created,\n    b.price,\n    b.price_unit_id,\n    b.currency_id,\n    abp.city_id     AS anuncio_city_id,\n    abp.state_id    AS anuncio_state_id\n  FROM an_prod_cbc.bids b\n  LEFT JOIN an_prod_cbc.users au             ON au.id = b.creator_id\n  LEFT JOIN an_prod_cbc.business_profiles abp ON abp.business_id = au.business_id\n  WHERE b.operation_id = 2\n    AND b.status_id = 1\n    AND b.created >= now() - interval '24 hours'\n    AND b.deleted IS DISTINCT FROM true\n),\ncandidatos AS (\n  SELECT a.anuncio_id, a.product_id, a.anunciante_id, a.created,\n         a.anuncio_city_id, a.anuncio_state_id,\n         a.price, a.price_unit_id, a.currency_id,\n         up.user_id AS candidato_id, 'interesse'::text AS fonte\n  FROM anuncios a\n  JOIN an_prod_cbc.product_interesteds pi\n    ON pi.product_id = a.product_id AND pi.buy = true\n   AND pi.deleted IS DISTINCT FROM true\n  JOIN an_prod_cbc.user_preferences up ON up.id = pi.preference_id\n  UNION\n  SELECT a.anuncio_id, a.product_id, a.anunciante_id, a.created,\n         a.anuncio_city_id, a.anuncio_state_id,\n         a.price, a.price_unit_id, a.currency_id,\n         nh.user_id AS candidato_id, 'navegacao'::text AS fonte\n  FROM anuncios a\n  JOIN an_prod_cbc.navigation_histories nh ON nh.bid_id = a.anuncio_id\n   AND nh.created >= now() - interval '72 hours'\n   AND nh.deleted IS DISTINCT FROM true\n),\nloc AS (\n  SELECT c.*,\n         cu.business_id AS cand_business_id,\n         caddr.city_id AS cand_city_id,\n         cc.state_id   AS cand_state_id\n  FROM candidatos c\n  LEFT JOIN an_prod_cbc.users cu       ON cu.id = c.candidato_id\n  LEFT JOIN an_prod_cbc.business_profiles cbp ON cbp.id = cu.business_id\n  LEFT JOIN an_prod_cbc.addresses caddr ON caddr.id = cbp.address_id\n  LEFT JOIN an_prod_types.cities cc     ON cc.id = caddr.city_id\n),\ntel_norm AS (\n  SELECT\n    bp.id AS profile_id,\n    ph.type_id,\n    CASE\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=13 AND left(regexp_replace(ph.number,'\\D','','g'),2)='55'\n        THEN regexp_replace(ph.number,'\\D','','g')\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=12 AND left(regexp_replace(ph.number,'\\D','','g'),2)='55'\n        THEN substr(regexp_replace(ph.number,'\\D','','g'),1,4)||'9'||substr(regexp_replace(ph.number,'\\D','','g'),5)\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=11\n        THEN '55'||regexp_replace(ph.number,'\\D','','g')\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=10\n        THEN '55'||substr(regexp_replace(ph.number,'\\D','','g'),1,2)||'9'||substr(regexp_replace(ph.number,'\\D','','g'),3)\n      ELSE NULL\n    END AS e164\n  FROM an_prod_cbc.business_profiles bp\n  JOIN an_prod_cbc.profile_phones pp ON pp.profile_id = bp.id\n  JOIN an_prod_cbc.phones ph ON ph.id = pp.phone_id\n  WHERE ph.deleted IS DISTINCT FROM true AND ph.number IS NOT NULL\n),\ntel_validos AS (\n  SELECT profile_id, type_id, e164\n  FROM tel_norm\n  WHERE e164 IS NOT NULL\n    AND length(e164)=13\n    AND substr(e164,3,2) BETWEEN '11' AND '99'\n    AND substr(e164,5,1)='9'\n),\ntel_melhor AS (\n  SELECT profile_id,\n    (ARRAY_AGG(e164 ORDER BY CASE WHEN type_id=2 THEN 0 ELSE 1 END))[1] AS telefone\n  FROM tel_validos\n  GROUP BY profile_id\n)\nSELECT DISTINCT\n  l.anuncio_id, l.product_id,\n  prod.name AS produto_nome,\n  l.candidato_id,\n  tm.telefone,\n  u.email AS candidato_email,\n  l.price          AS anuncio_price,\n  ppu.name         AS price_unit_nome,\n  l.currency_id    AS moeda_id,\n  aci.name         AS anuncio_cidade,\n  ast.uf           AS anuncio_uf,\n  string_agg(DISTINCT l.fonte, '+') AS fontes,\n  CASE\n    WHEN l.cand_city_id  = l.anuncio_city_id  THEN 100\n    WHEN l.cand_state_id = l.anuncio_state_id THEN 60\n    ELSE 20\n  END AS score\nFROM loc l\nJOIN an_prod_cbc.users u ON u.id = l.candidato_id\nLEFT JOIN an_prod_types.products prod ON prod.id = l.product_id\nLEFT JOIN an_prod_types.product_price_units ppu ON ppu.id = l.price_unit_id\nLEFT JOIN an_prod_types.cities aci ON aci.id = l.anuncio_city_id\nLEFT JOIN an_prod_types.states ast ON ast.id = l.anuncio_state_id\nJOIN tel_melhor tm ON tm.profile_id = l.cand_business_id\nLEFT JOIN public.disparo_log dl\n  ON dl.anuncio_id = l.anuncio_id AND dl.user_id = l.candidato_id\nWHERE l.candidato_id <> l.anunciante_id\n  AND dl.id IS NULL\nGROUP BY l.anuncio_id, l.product_id, prod.name, l.candidato_id,\n         tm.telefone, u.email,\n         l.price, ppu.name, l.currency_id, aci.name, ast.uf,\n         l.cand_city_id, l.anuncio_city_id, l.cand_state_id, l.anuncio_state_id\nORDER BY l.anuncio_id, score DESC\nlimit 30",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1232,
+          -32
+        ],
+        "id": "544a03d5-75e1-4ea7-bc6a-3c4da2ef5b51",
+        "name": "Query Matching (24h)",
+        "alwaysOutputData": true,
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        },
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "tableId": "historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $('Montar Body Template').item.json.telefone }}"
+              },
+              {
+                "fieldId": "mensagem_usuario",
+                "fieldValue": "="
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "={{ $('Montar Body Template').item.json.texto_log }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Montar Body Template').item.json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "="
+              },
+              {
+                "fieldId": "id_conversa",
+                "fieldValue": "={{ $('Montar Body Template').item.json.telefone }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "={{ $('Montar Body Template').item.json.template_usado }}"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "=AGRO-INTERESSES"
+              },
+              {
+                "fieldId": "origem",
+                "fieldValue": "ia"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2896,
+          -32
+        ],
+        "id": "98601dc8-8c28-404c-8547-699405444ac4",
+        "name": "Cria Mensagem no Supabase",
+        "credentials": {
+          "supabaseApi": {
+            "id": "qF5T2ej3TiWXL4jk",
+            "name": "Agronegociar - Supabase"
+          }
+        },
+        "disabled": true,
+        "onError": "continueRegularOutput",
+        "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Junta todos os telefones do pool num array unico para checar o WhatsApp de uma vez\nconst rows = $input.all().map(i => i.json);\nconst numeros = [...new Set(rows.map(r => String(r.telefone)))];\nreturn [{ json: { numeros, rows } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1504,
+          512
+        ],
+        "id": "9f2eac0b-2bc6-4ca2-91a1-db14130d81b7",
+        "name": "Monta lista de números"
+      },
+      {
+        "parameters": {
+          "resource": "chat-api",
+          "instanceName": "AgroNegociar - Comercial",
+          "numbers": "={{ $json.numeros.join(',') }}"
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1728,
+          512
+        ],
+        "id": "bf056603-0856-4522-a09b-a61cd4485426",
+        "name": "Check WA (lote)",
+        "credentials": {
+          "evolutionApi": {
+            "id": "LpFE8TuJugE26UUu",
+            "name": "AGRONEGOCIAR-COMERCIAL"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Checa o WhatsApp de todos os numeros de uma vez. Se a sua versao do Evolution nao aceitar array no campo 'numbers', troque a expressao por: {{ $json.numeros.join(',') }}"
+      },
+      {
+        "parameters": {
+          "jsCode": "const items = $input.all().map(i => i.json);\nlet lista = [];\nif (items.length === 1) {\n  const j = items[0];\n  lista = Array.isArray(j) ? j : (j.data || j.result || [j]);\n} else {\n  lista = items.flatMap(j => Array.isArray(j) ? j : (j.data || j.result || [j]));\n}\n\nconst digits = s => String(s || '').replace(/\\D/g, '');\n\n// gera as variantes com e sem o 9 (problema clássico BR)\nfunction variantes(num) {\n  const d = digits(num);\n  const set = new Set([d]);\n  if (d.length === 13 && d.substr(4, 1) === '9') set.add(d.substr(0, 4) + d.substr(5)); // tira o 9\n  else if (d.length === 12) set.add(d.substr(0, 4) + '9' + d.substr(4));                // põe o 9\n  return [...set];\n}\n\n// mapa de quem tem WhatsApp, indexado por TODAS as variantes\nconst existe = {};\nfor (const it of lista) {\n  const num = digits(it && (it.number || it.jid));\n  if (num && it.exists === true) for (const v of variantes(num)) existe[v] = true;\n}\n\nconst rows = $('Monta lista de números').first().json.rows;\n\n// mantém só quem tem WhatsApp (comparando variantes)\nconst comWhats = rows.filter(r => variantes(r.telefone).some(v => existe[v] === true));\n\n// 1 disparo por pessoa/dia: mantém a linha de maior score\nconst porTelefone = {};\nfor (const r of comWhats) {\n  const k = digits(r.telefone);\n  if (!porTelefone[k] || Number(r.score) > Number(porTelefone[k].score)) porTelefone[k] = r;\n}\n\nreturn Object.values(porTelefone).slice(0, 30).map(r => ({ json: r }));"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1952,
+          512
+        ],
+        "id": "83c376f7-2491-47ae-8818-34da5117c8f1",
+        "name": "Filtra com WhatsApp + limita 30"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          2176,
+          512
+        ],
+        "id": "662fcf13-4b75-4f2d-adc4-7e216b586ae8",
+        "name": "Loop Interessados1"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $('Loop Interessados1').item.json;\n\n// ---- Valor ----\nfunction fmtNum(n){\n  const [int, dec] = Number(n).toFixed(2).split('.');\n  return int.replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.') + ',' + dec;\n}\nconst precoNum = Number(item.anuncio_price);\nconst temValor = !!precoNum && precoNum > 0;\nconst simbolo  = { 1: 'R$', 2: 'US$', 3: '€' }[item.moeda_id] || 'R$';\nconst unidade  = item.price_unit_nome ? '/' + item.price_unit_nome : '';\nconst valorFmt = temValor ? `${simbolo} ${fmtNum(precoNum)}${unidade}` : null;\n\n// ---- Região ----\nconst cidade = (item.anuncio_cidade || '').trim();\nconst uf     = (item.anuncio_uf || '').trim();\nlet regiaoFmt = null;\nif (cidade && uf) regiaoFmt = `${cidade}/${uf}`;\nelse if (uf)      regiaoFmt = uf;\nelse if (cidade)  regiaoFmt = cidade;\nconst temRegiao = !!regiaoFmt;\n\nconst produto = String(item.produto_nome || 'seu produto');\n\n// ---- Escolha do template + texto final (o que realmente será enviado) ----\n// IMPORTANTE: os textos abaixo devem ser IDÊNTICOS ao corpo aprovado de cada\n// template no Meta. Ajuste as strings se a redação do seu template for diferente.\nconst saudacao = 'Olá, tudo bem? 😊\\n\\nSou a Luana, da AgroNegociar.\\n\\n';\nconst fim = '\\n\\nQuer que eu te mande o link?';\n\nlet templateName, params, textoLog;\nif (temValor && temRegiao) {\n  templateName = 'template_1_agronegociar';   // Template 1: preço + local\n  params = [produto, valorFmt, regiaoFmt];\n  textoLog = `${saudacao}Vi aqui no seu cadastro que você possui interesse em ${produto} e acabou de surgir um anúncio no valor de ${valorFmt} na região de ${regiaoFmt}.${fim}`;\n} else if (temValor) {\n  templateName = 'template_2_agronegociar';   // Template 2: só preço\n  params = [produto, valorFmt];\n  textoLog = `${saudacao}Vi aqui no seu cadastro que você possui interesse em ${produto} e acabou de surgir um anúncio de ${produto} no valor de ${valorFmt}.${fim}`;\n} else {\n  templateName = 'template_4_agronegociar';   // Template sem valor\n  params = [produto];\n  textoLog = `${saudacao}Vi aqui no seu cadastro que você possui interesse em ${produto} e acabou de surgir um anúncio de ${produto}.${fim}`;\n}\n\nconst body = {\n  messaging_product: 'whatsapp',\n  to: String(item.telefone),\n  type: 'template',\n  template: {\n    name: templateName,\n    language: { code: 'pt_BR' },\n    components: [\n      { type: 'body', parameters: params.map(t => ({ type: 'text', text: String(t) })) }\n    ]\n  }\n};\n\nreturn [{\n  json: {\n    resultado: body,\n    telefone: item.telefone,\n    whatsapp_number_id: '1123205217553260',\n    anuncio_id: item.anuncio_id,\n    candidato_id: item.candidato_id,\n    score: item.score,\n    template_usado: templateName,\n    texto_log: textoLog\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2384,
+          496
+        ],
+        "id": "528745a1-07ec-43ea-8380-81f8244c41d7",
+        "name": "Montar Body Template1"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://graph.facebook.com/v22.0/1123205217553260/messages",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.resultado) }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2608,
+          512
+        ],
+        "id": "5917ea0d-4ee2-4671-aa6c-c6213bd4840a",
+        "name": "Enviar Template1",
+        "retryOnFail": true,
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO public.disparo_log (anuncio_id, user_id, score, enviado_em)\nVALUES ({{ $('Montar Body Template1').item.json.anuncio_id }}, {{ $('Montar Body Template1').item.json.candidato_id }}, {{ $('Montar Body Template1').item.json.score }}, now());",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          2832,
+          512
+        ],
+        "id": "770edc0f-a76d-400a-86f8-fca092e8404a",
+        "name": "Grava disparo_log1",
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "tableId": "historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $('Montar Body Template1').item.json.telefone }}"
+              },
+              {
+                "fieldId": "mensagem_usuario",
+                "fieldValue": "="
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "={{ $('Montar Body Template1').item.json.texto_log }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Montar Body Template1').item.json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "="
+              },
+              {
+                "fieldId": "id_conversa",
+                "fieldValue": "={{ $('Montar Body Template1').item.json.telefone }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "={{ $('Montar Body Template1').item.json.template_usado }}"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "=AGRO-INTERESSES"
+              },
+              {
+                "fieldId": "origem",
+                "fieldValue": "ia"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          3056,
+          512
+        ],
+        "id": "dbf6cfc8-67ec-480e-a570-d47c86acb22a",
+        "name": "Cria Mensagem no Supabase1",
+        "credentials": {
+          "supabaseApi": {
+            "id": "qF5T2ej3TiWXL4jk",
+            "name": "Agronegociar - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+      },
+      {
+        "parameters": {
+          "amount": "={{ Math.floor(Math.random() * 8) + 5 }}"
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          3264,
+          528
+        ],
+        "id": "43e877c6-49b8-4b53-90d4-af22b21752d7",
+        "name": "Wait1",
+        "webhookId": "wait-expirado-001"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "WITH anuncios AS (\n  SELECT\n    b.id            AS anuncio_id,\n    b.product_id,\n    b.creator_id    AS anunciante_id,\n    b.created,\n    b.price,\n    b.price_unit_id,\n    b.currency_id,\n    abp.city_id     AS anuncio_city_id,\n    abp.state_id    AS anuncio_state_id\n  FROM an_prod_cbc.bids b\n  LEFT JOIN an_prod_cbc.users au             ON au.id = b.creator_id\n  LEFT JOIN an_prod_cbc.business_profiles abp ON abp.business_id = au.business_id\n  WHERE b.operation_id = 2\n    AND b.status_id = 1\n    AND b.created >= now() - interval '24 hours'\n    AND b.deleted IS DISTINCT FROM true\n),\ncandidatos AS (\n  SELECT a.anuncio_id, a.product_id, a.anunciante_id, a.created,\n         a.anuncio_city_id, a.anuncio_state_id,\n         a.price, a.price_unit_id, a.currency_id,\n         up.user_id AS candidato_id, 'interesse'::text AS fonte\n  FROM anuncios a\n  JOIN an_prod_cbc.product_interesteds pi\n    ON pi.product_id = a.product_id AND pi.buy = true\n   AND pi.deleted IS DISTINCT FROM true\n  JOIN an_prod_cbc.user_preferences up ON up.id = pi.preference_id\n  UNION\n  SELECT a.anuncio_id, a.product_id, a.anunciante_id, a.created,\n         a.anuncio_city_id, a.anuncio_state_id,\n         a.price, a.price_unit_id, a.currency_id,\n         nh.user_id AS candidato_id, 'navegacao'::text AS fonte\n  FROM anuncios a\n  JOIN an_prod_cbc.navigation_histories nh ON nh.bid_id = a.anuncio_id\n   AND nh.created >= now() - interval '72 hours'\n   AND nh.deleted IS DISTINCT FROM true\n),\nloc AS (\n  SELECT c.*,\n         cu.business_id AS cand_business_id,\n         caddr.city_id AS cand_city_id,\n         cc.state_id   AS cand_state_id\n  FROM candidatos c\n  LEFT JOIN an_prod_cbc.users cu       ON cu.id = c.candidato_id\n  LEFT JOIN an_prod_cbc.business_profiles cbp ON cbp.id = cu.business_id\n  LEFT JOIN an_prod_cbc.addresses caddr ON caddr.id = cbp.address_id\n  LEFT JOIN an_prod_types.cities cc     ON cc.id = caddr.city_id\n),\ntel_norm AS (\n  SELECT\n    bp.id AS profile_id,\n    ph.type_id,\n    CASE\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=13 AND left(regexp_replace(ph.number,'\\D','','g'),2)='55'\n        THEN regexp_replace(ph.number,'\\D','','g')\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=12 AND left(regexp_replace(ph.number,'\\D','','g'),2)='55'\n        THEN substr(regexp_replace(ph.number,'\\D','','g'),1,4)||'9'||substr(regexp_replace(ph.number,'\\D','','g'),5)\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=11\n        THEN '55'||regexp_replace(ph.number,'\\D','','g')\n      WHEN length(regexp_replace(ph.number,'\\D','','g'))=10\n        THEN '55'||substr(regexp_replace(ph.number,'\\D','','g'),1,2)||'9'||substr(regexp_replace(ph.number,'\\D','','g'),3)\n      ELSE NULL\n    END AS e164\n  FROM an_prod_cbc.business_profiles bp\n  JOIN an_prod_cbc.profile_phones pp ON pp.profile_id = bp.id\n  JOIN an_prod_cbc.phones ph ON ph.id = pp.phone_id\n  WHERE ph.deleted IS DISTINCT FROM true AND ph.number IS NOT NULL\n),\ntel_validos AS (\n  SELECT profile_id, type_id, e164\n  FROM tel_norm\n  WHERE e164 IS NOT NULL\n    AND length(e164)=13\n    AND substr(e164,3,2) BETWEEN '11' AND '99'\n    AND substr(e164,5,1)='9'\n),\ntel_melhor AS (\n  SELECT profile_id,\n    (ARRAY_AGG(e164 ORDER BY CASE WHEN type_id=2 THEN 0 ELSE 1 END))[1] AS telefone\n  FROM tel_validos\n  GROUP BY profile_id\n)\nSELECT DISTINCT\n  l.anuncio_id, l.product_id,\n  prod.name AS produto_nome,\n  l.candidato_id,\n  tm.telefone,\n  u.email AS candidato_email,\n  l.price          AS anuncio_price,\n  ppu.name         AS price_unit_nome,\n  l.currency_id    AS moeda_id,\n  aci.name         AS anuncio_cidade,\n  ast.uf           AS anuncio_uf,\n  string_agg(DISTINCT l.fonte, '+') AS fontes,\n  CASE\n    WHEN l.cand_city_id  = l.anuncio_city_id  THEN 100\n    WHEN l.cand_state_id = l.anuncio_state_id THEN 60\n    ELSE 20\n  END AS score\nFROM loc l\nJOIN an_prod_cbc.users u ON u.id = l.candidato_id\nLEFT JOIN an_prod_types.products prod ON prod.id = l.product_id\nLEFT JOIN an_prod_types.product_price_units ppu ON ppu.id = l.price_unit_id\nLEFT JOIN an_prod_types.cities aci ON aci.id = l.anuncio_city_id\nLEFT JOIN an_prod_types.states ast ON ast.id = l.anuncio_state_id\nJOIN tel_melhor tm ON tm.profile_id = l.cand_business_id\nLEFT JOIN public.disparo_log dl\n  ON dl.anuncio_id = l.anuncio_id AND dl.user_id = l.candidato_id\nWHERE l.candidato_id <> l.anunciante_id\n  AND dl.id IS NULL\nGROUP BY l.anuncio_id, l.product_id, prod.name, l.candidato_id,\n         tm.telefone, u.email,\n         l.price, ppu.name, l.currency_id, aci.name, ast.uf,\n         l.cand_city_id, l.anuncio_city_id, l.cand_state_id, l.anuncio_state_id\nORDER BY l.anuncio_id, score DESC\nlimit 120",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1296,
+          512
+        ],
+        "id": "1ebbb7a1-9ca8-4273-8073-f32cbad3a997",
+        "name": "Query Matching",
+        "alwaysOutputData": true,
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 10,
+                "triggerAtMinute": 20
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          1104,
+          512
+        ],
+        "id": "1eba8b7b-aaa3-4877-a8d7-8f858f33d8bf",
+        "name": "Disparador Diário"
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "Query Matching (24h)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tem WhatsApp?": {
+        "main": [
+          [
+            {
+              "node": "Montar Body Template",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Wait",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar Body Template": {
+        "main": [
+          [
+            {
+              "node": "Enviar Template",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar Template": {
+        "main": [
+          [
+            {
+              "node": "Grava disparo_log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Grava disparo_log": {
+        "main": [
+          [
+            {
+              "node": "Cria Mensagem no Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait": {
+        "main": [
+          [
+            {
+              "node": "Loop Interessados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check WA Expirado1": {
+        "main": [
+          [
+            {
+              "node": "Tem WhatsApp?",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "Loop Interessados": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Check WA Expirado1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Query Matching (24h)": {
+        "main": [
+          [
+            {
+              "node": "Loop Interessados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cria Mensagem no Supabase": {
+        "main": [
+          [
+            {
+              "node": "Wait",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta lista de números": {
+        "main": [
+          [
+            {
+              "node": "Check WA (lote)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check WA (lote)": {
+        "main": [
+          [
+            {
+              "node": "Filtra com WhatsApp + limita 30",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Filtra com WhatsApp + limita 30": {
+        "main": [
+          [
+            {
+              "node": "Loop Interessados1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Interessados1": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Montar Body Template1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar Body Template1": {
+        "main": [
+          [
+            {
+              "node": "Enviar Template1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar Template1": {
+        "main": [
+          [
+            {
+              "node": "Grava disparo_log1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Grava disparo_log1": {
+        "main": [
+          [
+            {
+              "node": "Cria Mensagem no Supabase1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cria Mensagem no Supabase1": {
+        "main": [
+          [
+            {
+              "node": "Wait1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait1": {
+        "main": [
+          [
+            {
+              "node": "Loop Interessados1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Query Matching": {
+        "main": [
+          [
+            {
+              "node": "Monta lista de números",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Disparador Diário": {
+        "main": [
+          [
+            {
+              "node": "Query Matching",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
   "tags": []
 }
