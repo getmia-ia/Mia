@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-22T19:29:47.867Z",
+  "updatedAt": "2026-07-24T16:23:19.504Z",
   "createdAt": "2026-07-21T21:36:39.504Z",
   "id": "Ud5mHY58XA9O3nBc",
   "name": "Finamob - 6.08 - SDR Inbound - Reminder",
@@ -199,7 +199,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1328,
+        1472,
         80
       ],
       "id": "8207a24d-1328-4102-ba04-45fd5638b8d2",
@@ -315,7 +315,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1552,
+        1632,
         80
       ],
       "id": "ab87d527-595b-4bbe-aa55-db3175cb769e",
@@ -462,7 +462,7 @@
     },
     {
       "parameters": {
-        "jsCode": "function ajustarTelefone(raw) {\n  if (!raw) return null;\n  let t = raw.toString().replace(/\\D/g, \"\");\n  if (t.length === 11) t = \"55\" + t;\n  if (t.length === 10) t = \"55\" + t;\n  if (t.startsWith(\"55\")) return t;\n  if (t.startsWith(\"+\")) return t.replace(\"+\", \"\");\n  return t;\n}\n\n// Converte \"2026-07-22 09:30:00\" -> Date, de forma segura (sem depender do parser nativo)\nfunction parseDtCall(dtCallStr) {\n  if (!dtCallStr) return null;\n  const [dataPart, horaPart] = dtCallStr.split(\" \");\n  if (!dataPart) return null;\n  const [ano, mes, dia] = dataPart.split(\"-\").map(Number);\n  const [h, m, s] = (horaPart || \"00:00:00\").split(\":\").map(Number);\n  return new Date(ano, mes - 1, dia, h || 0, m || 0, s || 0);\n}\n\n// ========================================\n// Identificar gatilho real (9h ou 10min)\n// ========================================\nlet gatilho = null;\ntry { gatilho = $('Seta o gatilho').first().json.gatilho || null; } catch {}\ntry { gatilho = $('Seta o gatilho1').first().json.gatilho || gatilho; } catch {}\ntry { gatilho = $('Seta o gatilho2').first().json.gatilho || gatilho; } catch {}\nif (!gatilho) {\n  gatilho = \"10min\";\n}\n\nconst filtrados = [];\n\n// ========================================================\n// CASO 0 → Execução das 19h (Lembrete do dia anterior)\n// ========================================================\nif (gatilho === \"19h\") {\n  const agora = new Date();\n  const amanha = new Date(agora);\n  amanha.setDate(amanha.getDate() + 1);\n  const dataAmanha = amanha.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.telefone || lead.whatsapp;\n    const reuniao = lead.dt_call;\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\" \")[0]; // YYYY-MM-DD\n    if (dataReuniao === dataAmanha) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_amanha\"\n        }\n      });\n    }\n  }\n  return filtrados;\n}\n\n// ========================================\n// CASO 1 → Execução das 9h (gatilho = \"9h\")\n// ========================================\nif (gatilho === \"9h\") {\n  const agora = new Date();\n  const hoje = agora.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.telefone || lead.whatsapp;\n    const reuniao = lead.dt_call;\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\" \")[0];\n    if (dataReuniao === hoje) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_hoje\"\n        }\n      });\n    }\n  }\n  return filtrados;\n}\n\n// ========================================\n// CASO 2 → Execução dos 21/51 min (10 min antes)\n// ========================================\nconst agoraUTC = Date.now();\nconst min7 = agoraUTC + 7 * 60 * 1000;\nconst min12 = agoraUTC + 12 * 60 * 1000;\n\nfor (const item of items) {\n  const lead = item.json;\n  const telefone = lead.telefone || lead.whatsapp;\n  const reuniao = lead.dt_call;\n  if (!reuniao) continue;\n\n  const dataObj = parseDtCall(reuniao);\n  if (!dataObj) continue;\n  const timestampReuniao = dataObj.getTime();\n\n  if (timestampReuniao >= min7 && timestampReuniao <= min12) {\n    filtrados.push({\n      json: {\n        ...lead,\n        telefonePadronizado: ajustarTelefone(telefone),\n        motivo: \"reuniao_proximos_10min\"\n      }\n    });\n  }\n}\nreturn filtrados;"
+        "jsCode": "function ajustarTelefone(raw) {\n  if (!raw) return null;\n  let t = raw.toString().replace(/\\D/g, \"\");\n  if (t.length === 11) t = \"55\" + t;\n  if (t.length === 10) t = \"55\" + t;\n  if (t.startsWith(\"55\")) return t;\n  if (t.startsWith(\"+\")) return t.replace(\"+\", \"\");\n  return t;\n}\n\n// Brasil não tem mais horário de verão desde 2019, então o offset é sempre -3h fixo\nconst BRASILIA_OFFSET_HOURS = 3;\n\n// Converte \"2026-07-22 09:30:00\" (horário de Brasília) -> Date UTC correto,\n// independente do timezone do container onde o n8n roda (aqui, UTC).\nfunction parseDtCall(dtCallStr) {\n  if (!dtCallStr) return null;\n  const [dataPart, horaPart] = dtCallStr.split(\" \");\n  if (!dataPart) return null;\n  const [ano, mes, dia] = dataPart.split(\"-\").map(Number);\n  const [h, m, s] = (horaPart || \"00:00:00\").split(\":\").map(Number);\n  return new Date(Date.UTC(ano, mes - 1, dia, (h || 0) + BRASILIA_OFFSET_HOURS, m || 0, s || 0));\n}\n\n// Retorna a data (YYYY-MM-DD) de \"hoje\" ou \"amanhã\" no fuso de Brasília,\n// calculada a partir do timestamp UTC atual (não usa toISOString() puro,\n// que pegaria o dia em UTC e erraria perto da meia-noite de Brasília).\nfunction dataBrasiliaISO(offsetDias = 0) {\n  const agoraUTC = Date.now();\n  const brt = new Date(agoraUTC - BRASILIA_OFFSET_HOURS * 60 * 60 * 1000);\n  brt.setUTCDate(brt.getUTCDate() + offsetDias);\n  return brt.toISOString().split(\"T\")[0];\n}\n\n// ========================================\n// Identificar gatilho real (9h ou 10min)\n// ========================================\nlet gatilho = null;\ntry { gatilho = $('Seta o gatilho').first().json.gatilho || null; } catch {}\ntry { gatilho = $('Seta o gatilho1').first().json.gatilho || gatilho; } catch {}\ntry { gatilho = $('Seta o gatilho2').first().json.gatilho || gatilho; } catch {}\nif (!gatilho) {\n  gatilho = \"10min\";\n}\n\nconst filtrados = [];\n\n// ========================================================\n// CASO 0 → Execução das 19h (Lembrete do dia anterior)\n// ========================================================\nif (gatilho === \"19h\") {\n  const dataAmanha = dataBrasiliaISO(1);\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.telefone || lead.whatsapp;\n    const reuniao = lead.dt_call;\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\" \")[0]; // YYYY-MM-DD\n    if (dataReuniao === dataAmanha) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_amanha\"\n        }\n      });\n    }\n  }\n  return filtrados;\n}\n\n// ========================================\n// CASO 1 → Execução das 9h (gatilho = \"9h\")\n// ========================================\nif (gatilho === \"9h\") {\n  const hoje = dataBrasiliaISO(0);\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.telefone || lead.whatsapp;\n    const reuniao = lead.dt_call;\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\" \")[0];\n    if (dataReuniao === hoje) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_hoje\"\n        }\n      });\n    }\n  }\n  return filtrados;\n}\n\n// ========================================\n// CASO 2 → Execução dos 21/51 min (10 min antes)\n// ========================================\nconst agoraUTC = Date.now();\nconst min7 = agoraUTC + 7 * 60 * 1000;\nconst min12 = agoraUTC + 12 * 60 * 1000;\n\nfor (const item of items) {\n  const lead = item.json;\n  const telefone = lead.telefone || lead.whatsapp;\n  const reuniao = lead.dt_call;\n  if (!reuniao) continue;\n\n  const dataObj = parseDtCall(reuniao);\n  if (!dataObj) continue;\n  const timestampReuniao = dataObj.getTime();\n\n  if (timestampReuniao >= min7 && timestampReuniao <= min12) {\n    filtrados.push({\n      json: {\n        ...lead,\n        telefonePadronizado: ajustarTelefone(telefone),\n        motivo: \"reuniao_proximos_10min\"\n      }\n    });\n  }\n}\nreturn filtrados;"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -556,16 +556,49 @@
     },
     {
       "parameters": {
-        "jsCode": "// Dados do lead\nconst lead = $('Preparar variáveis do lead').first().json;\n\nconst emailLead = (lead.email || \"\").trim().toLowerCase();\n\n// \"2026-07-24 11:30:00\" -> \"2026-07-24T11:30:00\"\nconst dtLead = (lead.dt_call || \"\").replace(\" \", \"T\");\n\nfor (const item of items) {\n  const evento = item.json;\n\n  const inicio = evento.start?.dateTime;\n  if (!inicio) continue;\n\n  // Remove timezone para comparar apenas data/hora\n  const inicioSemTZ = inicio.substring(0, 19);\n\n  if (inicioSemTZ !== dtLead) continue;\n\n  // Verifica se o e-mail está entre os convidados\n  const participantes = evento.attendees || [];\n\n  const encontrouEmail = participantes.some(\n    p => (p.email || \"\").toLowerCase() === emailLead\n  );\n\n  if (!encontrouEmail) continue;\n\n  return [\n    {\n      json: evento\n    }\n  ];\n}\n\n// Não encontrou\nreturn [];"
+        "jsCode": "// Dados do lead\nconst lead = $('Preparar variáveis do lead').first().json;\n\nconst emailLead = (lead.email || \"\").trim().toLowerCase();\n\n// \"2026-07-24 11:30:00\" -> \"2026-07-24T11:30:00\"\nconst dtLead = (lead.dt_call || \"\").replace(\" \", \"T\");\n\nfor (const item of items) {\n  const evento = item.json;\n\n  const inicio = evento.start?.dateTime;\n  if (!inicio) continue;\n\n  // Remove timezone para comparar apenas data/hora\n  const inicioSemTZ = inicio.substring(0, 19);\n\n  if (inicioSemTZ !== dtLead) continue;\n\n  // Verifica se o e-mail está entre os convidados\n  const participantes = evento.attendees || [];\n\n  const encontrouEmail = participantes.some(\n    p => (p.email || \"\").toLowerCase() === emailLead\n  );\n\n  if (!encontrouEmail) continue;\n\n  return [\n    {\n      json: {\n        ...evento,\n        tem_call: true\n      }\n    }\n  ];\n}\n\n// Não encontrou\nreturn [\n  {\n    json: {\n      tem_call: false\n    }\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
+        1136,
         80
       ],
       "id": "5293615d-dbc1-4749-9595-59f6d5b3d5b5",
       "name": "Identificar a reunião agendada daquele lead"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1567d487-edd5-465b-94c1-ceb1871f7648",
+              "leftValue": "={{ $json.tem_call }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1296,
+        80
+      ],
+      "id": "e96ae9bf-3185-4ada-a0a0-4620fe6b7453",
+      "name": "If"
     }
   ],
   "connections": {
@@ -810,7 +843,25 @@
       "main": [
         [
           {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
             "node": "Montar o body da requisição",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rodar lembrete por lead",
             "type": "main",
             "index": 0
           }
@@ -826,7 +877,8 @@
     "saveExecutionProgress": false,
     "errorWorkflow": "xfondpEOYdGLoDo4",
     "saveDataErrorExecution": "all",
-    "saveManualExecutions": true
+    "saveManualExecutions": true,
+    "timeSavedMode": "fixed"
   },
   "staticData": {
     "node:Schedule Trigger": {
@@ -845,8 +897,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "47357f0b-d54d-48aa-adb2-2cfd04bbb0e5",
-  "activeVersionId": "47357f0b-d54d-48aa-adb2-2cfd04bbb0e5",
+  "versionId": "bed25cb4-a738-4075-a38f-f47b883922c0",
+  "activeVersionId": "bed25cb4-a738-4075-a38f-f47b883922c0",
   "triggerCount": 2,
   "shared": [
     {
@@ -858,9 +910,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-07-22T19:29:47.870Z",
-    "createdAt": "2026-07-22T19:29:47.870Z",
-    "versionId": "47357f0b-d54d-48aa-adb2-2cfd04bbb0e5",
+    "updatedAt": "2026-07-24T16:09:31.012Z",
+    "createdAt": "2026-07-24T16:09:31.012Z",
+    "versionId": "bed25cb4-a738-4075-a38f-f47b883922c0",
     "workflowId": "Ud5mHY58XA9O3nBc",
     "nodes": [
       {
@@ -1056,7 +1108,7 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1328,
+          1472,
           80
         ],
         "id": "8207a24d-1328-4102-ba04-45fd5638b8d2",
@@ -1172,7 +1224,7 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          1552,
+          1632,
           80
         ],
         "id": "ab87d527-595b-4bbe-aa55-db3175cb769e",
@@ -1319,7 +1371,7 @@
       },
       {
         "parameters": {
-          "jsCode": "function ajustarTelefone(raw) {\n  if (!raw) return null;\n  let t = raw.toString().replace(/\\D/g, \"\");\n  if (t.length === 11) t = \"55\" + t;\n  if (t.length === 10) t = \"55\" + t;\n  if (t.startsWith(\"55\")) return t;\n  if (t.startsWith(\"+\")) return t.replace(\"+\", \"\");\n  return t;\n}\n\n// Converte \"2026-07-22 09:30:00\" -> Date, de forma segura (sem depender do parser nativo)\nfunction parseDtCall(dtCallStr) {\n  if (!dtCallStr) return null;\n  const [dataPart, horaPart] = dtCallStr.split(\" \");\n  if (!dataPart) return null;\n  const [ano, mes, dia] = dataPart.split(\"-\").map(Number);\n  const [h, m, s] = (horaPart || \"00:00:00\").split(\":\").map(Number);\n  return new Date(ano, mes - 1, dia, h || 0, m || 0, s || 0);\n}\n\n// ========================================\n// Identificar gatilho real (9h ou 10min)\n// ========================================\nlet gatilho = null;\ntry { gatilho = $('Seta o gatilho').first().json.gatilho || null; } catch {}\ntry { gatilho = $('Seta o gatilho1').first().json.gatilho || gatilho; } catch {}\ntry { gatilho = $('Seta o gatilho2').first().json.gatilho || gatilho; } catch {}\nif (!gatilho) {\n  gatilho = \"10min\";\n}\n\nconst filtrados = [];\n\n// ========================================================\n// CASO 0 → Execução das 19h (Lembrete do dia anterior)\n// ========================================================\nif (gatilho === \"19h\") {\n  const agora = new Date();\n  const amanha = new Date(agora);\n  amanha.setDate(amanha.getDate() + 1);\n  const dataAmanha = amanha.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.telefone || lead.whatsapp;\n    const reuniao = lead.dt_call;\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\" \")[0]; // YYYY-MM-DD\n    if (dataReuniao === dataAmanha) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_amanha\"\n        }\n      });\n    }\n  }\n  return filtrados;\n}\n\n// ========================================\n// CASO 1 → Execução das 9h (gatilho = \"9h\")\n// ========================================\nif (gatilho === \"9h\") {\n  const agora = new Date();\n  const hoje = agora.toISOString().split(\"T\")[0];\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.telefone || lead.whatsapp;\n    const reuniao = lead.dt_call;\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\" \")[0];\n    if (dataReuniao === hoje) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_hoje\"\n        }\n      });\n    }\n  }\n  return filtrados;\n}\n\n// ========================================\n// CASO 2 → Execução dos 21/51 min (10 min antes)\n// ========================================\nconst agoraUTC = Date.now();\nconst min7 = agoraUTC + 7 * 60 * 1000;\nconst min12 = agoraUTC + 12 * 60 * 1000;\n\nfor (const item of items) {\n  const lead = item.json;\n  const telefone = lead.telefone || lead.whatsapp;\n  const reuniao = lead.dt_call;\n  if (!reuniao) continue;\n\n  const dataObj = parseDtCall(reuniao);\n  if (!dataObj) continue;\n  const timestampReuniao = dataObj.getTime();\n\n  if (timestampReuniao >= min7 && timestampReuniao <= min12) {\n    filtrados.push({\n      json: {\n        ...lead,\n        telefonePadronizado: ajustarTelefone(telefone),\n        motivo: \"reuniao_proximos_10min\"\n      }\n    });\n  }\n}\nreturn filtrados;"
+          "jsCode": "function ajustarTelefone(raw) {\n  if (!raw) return null;\n  let t = raw.toString().replace(/\\D/g, \"\");\n  if (t.length === 11) t = \"55\" + t;\n  if (t.length === 10) t = \"55\" + t;\n  if (t.startsWith(\"55\")) return t;\n  if (t.startsWith(\"+\")) return t.replace(\"+\", \"\");\n  return t;\n}\n\n// Brasil não tem mais horário de verão desde 2019, então o offset é sempre -3h fixo\nconst BRASILIA_OFFSET_HOURS = 3;\n\n// Converte \"2026-07-22 09:30:00\" (horário de Brasília) -> Date UTC correto,\n// independente do timezone do container onde o n8n roda (aqui, UTC).\nfunction parseDtCall(dtCallStr) {\n  if (!dtCallStr) return null;\n  const [dataPart, horaPart] = dtCallStr.split(\" \");\n  if (!dataPart) return null;\n  const [ano, mes, dia] = dataPart.split(\"-\").map(Number);\n  const [h, m, s] = (horaPart || \"00:00:00\").split(\":\").map(Number);\n  return new Date(Date.UTC(ano, mes - 1, dia, (h || 0) + BRASILIA_OFFSET_HOURS, m || 0, s || 0));\n}\n\n// Retorna a data (YYYY-MM-DD) de \"hoje\" ou \"amanhã\" no fuso de Brasília,\n// calculada a partir do timestamp UTC atual (não usa toISOString() puro,\n// que pegaria o dia em UTC e erraria perto da meia-noite de Brasília).\nfunction dataBrasiliaISO(offsetDias = 0) {\n  const agoraUTC = Date.now();\n  const brt = new Date(agoraUTC - BRASILIA_OFFSET_HOURS * 60 * 60 * 1000);\n  brt.setUTCDate(brt.getUTCDate() + offsetDias);\n  return brt.toISOString().split(\"T\")[0];\n}\n\n// ========================================\n// Identificar gatilho real (9h ou 10min)\n// ========================================\nlet gatilho = null;\ntry { gatilho = $('Seta o gatilho').first().json.gatilho || null; } catch {}\ntry { gatilho = $('Seta o gatilho1').first().json.gatilho || gatilho; } catch {}\ntry { gatilho = $('Seta o gatilho2').first().json.gatilho || gatilho; } catch {}\nif (!gatilho) {\n  gatilho = \"10min\";\n}\n\nconst filtrados = [];\n\n// ========================================================\n// CASO 0 → Execução das 19h (Lembrete do dia anterior)\n// ========================================================\nif (gatilho === \"19h\") {\n  const dataAmanha = dataBrasiliaISO(1);\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.telefone || lead.whatsapp;\n    const reuniao = lead.dt_call;\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\" \")[0]; // YYYY-MM-DD\n    if (dataReuniao === dataAmanha) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_amanha\"\n        }\n      });\n    }\n  }\n  return filtrados;\n}\n\n// ========================================\n// CASO 1 → Execução das 9h (gatilho = \"9h\")\n// ========================================\nif (gatilho === \"9h\") {\n  const hoje = dataBrasiliaISO(0);\n\n  for (const item of items) {\n    const lead = item.json;\n    const telefone = lead.telefone || lead.whatsapp;\n    const reuniao = lead.dt_call;\n    if (!reuniao) continue;\n\n    const dataReuniao = reuniao.split(\" \")[0];\n    if (dataReuniao === hoje) {\n      filtrados.push({\n        json: {\n          ...lead,\n          telefonePadronizado: ajustarTelefone(telefone),\n          motivo: \"reuniao_hoje\"\n        }\n      });\n    }\n  }\n  return filtrados;\n}\n\n// ========================================\n// CASO 2 → Execução dos 21/51 min (10 min antes)\n// ========================================\nconst agoraUTC = Date.now();\nconst min7 = agoraUTC + 7 * 60 * 1000;\nconst min12 = agoraUTC + 12 * 60 * 1000;\n\nfor (const item of items) {\n  const lead = item.json;\n  const telefone = lead.telefone || lead.whatsapp;\n  const reuniao = lead.dt_call;\n  if (!reuniao) continue;\n\n  const dataObj = parseDtCall(reuniao);\n  if (!dataObj) continue;\n  const timestampReuniao = dataObj.getTime();\n\n  if (timestampReuniao >= min7 && timestampReuniao <= min12) {\n    filtrados.push({\n      json: {\n        ...lead,\n        telefonePadronizado: ajustarTelefone(telefone),\n        motivo: \"reuniao_proximos_10min\"\n      }\n    });\n  }\n}\nreturn filtrados;"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -1413,16 +1465,49 @@
       },
       {
         "parameters": {
-          "jsCode": "// Dados do lead\nconst lead = $('Preparar variáveis do lead').first().json;\n\nconst emailLead = (lead.email || \"\").trim().toLowerCase();\n\n// \"2026-07-24 11:30:00\" -> \"2026-07-24T11:30:00\"\nconst dtLead = (lead.dt_call || \"\").replace(\" \", \"T\");\n\nfor (const item of items) {\n  const evento = item.json;\n\n  const inicio = evento.start?.dateTime;\n  if (!inicio) continue;\n\n  // Remove timezone para comparar apenas data/hora\n  const inicioSemTZ = inicio.substring(0, 19);\n\n  if (inicioSemTZ !== dtLead) continue;\n\n  // Verifica se o e-mail está entre os convidados\n  const participantes = evento.attendees || [];\n\n  const encontrouEmail = participantes.some(\n    p => (p.email || \"\").toLowerCase() === emailLead\n  );\n\n  if (!encontrouEmail) continue;\n\n  return [\n    {\n      json: evento\n    }\n  ];\n}\n\n// Não encontrou\nreturn [];"
+          "jsCode": "// Dados do lead\nconst lead = $('Preparar variáveis do lead').first().json;\n\nconst emailLead = (lead.email || \"\").trim().toLowerCase();\n\n// \"2026-07-24 11:30:00\" -> \"2026-07-24T11:30:00\"\nconst dtLead = (lead.dt_call || \"\").replace(\" \", \"T\");\n\nfor (const item of items) {\n  const evento = item.json;\n\n  const inicio = evento.start?.dateTime;\n  if (!inicio) continue;\n\n  // Remove timezone para comparar apenas data/hora\n  const inicioSemTZ = inicio.substring(0, 19);\n\n  if (inicioSemTZ !== dtLead) continue;\n\n  // Verifica se o e-mail está entre os convidados\n  const participantes = evento.attendees || [];\n\n  const encontrouEmail = participantes.some(\n    p => (p.email || \"\").toLowerCase() === emailLead\n  );\n\n  if (!encontrouEmail) continue;\n\n  return [\n    {\n      json: {\n        ...evento,\n        tem_call: true\n      }\n    }\n  ];\n}\n\n// Não encontrou\nreturn [\n  {\n    json: {\n      tem_call: false\n    }\n  }\n];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1120,
+          1136,
           80
         ],
         "id": "5293615d-dbc1-4749-9595-59f6d5b3d5b5",
         "name": "Identificar a reunião agendada daquele lead"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "1567d487-edd5-465b-94c1-ceb1871f7648",
+                "leftValue": "={{ $json.tem_call }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          1296,
+          80
+        ],
+        "id": "e96ae9bf-3185-4ada-a0a0-4620fe6b7453",
+        "name": "If"
       }
     ],
     "connections": {
@@ -1667,7 +1752,25 @@
         "main": [
           [
             {
+              "node": "If",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "If": {
+        "main": [
+          [
+            {
               "node": "Montar o body da requisição",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Rodar lembrete por lead",
               "type": "main",
               "index": 0
             }
