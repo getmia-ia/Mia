@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-21T22:46:37.433Z",
+  "updatedAt": "2026-07-27T20:20:22.974Z",
   "createdAt": "2026-07-21T20:15:59.820Z",
   "id": "VJtRZqd6ebNasdU5",
   "name": "WhatsApp -> Tasks",
@@ -15,8 +15,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -656,
-        160
+        -944,
+        144
       ],
       "id": "5a9d4b3d-68fe-4611-90ba-e7609055018b",
       "name": "Webhook Evolution",
@@ -69,8 +69,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -448,
-        160
+        -736,
+        128
       ],
       "id": "3f056cdb-cdd9-416c-86ca-5de068a838ae",
       "name": "É mensagem de texto recebida?"
@@ -82,7 +82,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -224,
+        -384,
         112
       ],
       "id": "2d4e1e61-8026-4141-a945-cf8fdbfc0d9f",
@@ -317,11 +317,116 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        288,
-        240
+        304,
+        320
       ],
       "id": "d055bf4b-482b-4f57-aef3-c98de0cd2c3b",
       "name": "Comando válido?1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "s1",
+              "leftValue": "={{ $json.command }}",
+              "rightValue": "/status",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        112
+      ],
+      "id": "1fe90b4b-ca36-45bd-9fd2-007a9b04a8a4",
+      "name": "É /status?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ==== /status: coleta DADOS CRUS -> monta body p/ OpenAI (a IA traduz e formata) ====\nconst helpers = this.helpers;\nconst nowSec  = Math.floor(Date.now() / 1000);\n\n// ===================== CONFIG =====================\nconst N8N_HEALTH_URL    = 'https://webhook.miabuilder.com/healthz'; // CONFIRME. '' para pular.\nconst AWS_ONLY_REGIONS  = ['us-east-1'];   // [] = todas\nconst AWS_SERVICES      = [];              // [] = todos\nconst AWS_WINDOW_HOURS   = 72;\nconst META_RSS          = 'https://metastatus.com/outage-events-feed-whatsapp-business-api.rss';\nconst META_WINDOW_HOURS = 48;\nconst TASKS_HEALTH_URL  = 'https://tyreqzwkazvdkfqipkme.supabase.co/functions/v1/healthz'; // seu projeto Lovable (Cloud). '' p/ pular.\nconst OPENAI_MODEL      = 'gpt-4o-mini';\n// ==================================================\n\nconst clip  = (s, n = 220) => (s && s.length > n) ? s.slice(0, n - 1).trim() + '…' : (s || '');\nconst unesc = s => String(s||'').replace(/<!\\[CDATA\\[|\\]\\]>/g,'').replace(/&amp;/g,'&')\n  .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'\"').replace(/&#39;|&apos;/g,\"'\").trim();\n\nconst services = [];\n\n// --- Statuspage.io ---\n// --- Statuspage.io ---\nasync function statuspage(name, base) {\n  try {\n    const d = await helpers.httpRequest({\n      url: base + '/api/v2/summary.json',\n      json: true,\n      timeout: 10000\n    });\n\n    const ind = (d.status && d.status.indicator) || 'unknown';\n\n    // Regiões que você quer monitorar\n    const REGION_REGEX = /\\b(sa-east-\\d+|us-east-\\d+|us-west-\\d+)\\b/i;\n\n    // Incidentes ativos apenas das regiões SA e US\n    const incidents = (d.incidents || [])\n      .filter(i => !['resolved', 'completed', 'postmortem'].includes(i.status))\n      .filter(i => {\n        const text = JSON.stringify(i);\n        return REGION_REGEX.test(text);\n      })\n      .slice(0, 2)\n      .map(i => ({\n        impact: i.impact,\n        name: i.name,\n        status: i.status,\n        update: clip(\n          (i.incident_updates && i.incident_updates[0])\n            ? i.incident_updates[0].body\n            : ''\n        ),\n        link: i.shortlink || ''\n      }));\n\n    // Componentes afetados apenas das regiões SA e US\n    const affected = (d.components || [])\n      .filter(c => !c.group && c.status && c.status !== 'operational')\n      .filter(c => {\n        const text = JSON.stringify(c);\n        return REGION_REGEX.test(text);\n      })\n      .map(c => ({\n        name: c.name,\n        status: c.status\n      }))\n      .slice(0, 6);\n\n    const maintenance = (d.scheduled_maintenances || [])\n      .filter(m => m.status === 'in_progress')\n      .map(m => m.name)\n      .slice(0, 1);\n\n    // Estado padrão da StatusPage\n    let state = {\n      none: 'ok',\n      minor: 'degraded',\n      major: 'major',\n      critical: 'down',\n      maintenance: 'maintenance'\n    }[ind] || 'unknown';\n\n    // Se houver incidente relevante, ele prevalece\n    if (incidents.length) {\n      if (incidents.some(i => i.impact === 'critical')) {\n        state = 'down';\n      } else if (incidents.some(i => i.impact === 'major')) {\n        state = 'major';\n      } else {\n        state = 'degraded';\n      }\n    }\n\n    return {\n      service: name,\n      state,\n      summary: (d.status && d.status.description) || '',\n      incidents,\n      affected,\n      maintenance\n    };\n\n  } catch (e) {\n    return {\n      service: name,\n      state: 'unknown',\n      error: 'sem resposta'\n    };\n  }\n}\n\nconst sp = await Promise.all([\n  statuspage('Lovable',  'https://status.lovable.dev'),\n  statuspage('Supabase', 'https://status.supabase.com'),\n  statuspage('Resend',   'https://resend-status.com'),\n]);\nservices.push(...sp);\n\n// --- n8n ---\nif (N8N_HEALTH_URL) {\n  try {\n    const r  = await helpers.httpRequest({ url: N8N_HEALTH_URL, timeout: 8000, returnFullResponse: true });\n    const ok = r.statusCode >= 200 && r.statusCode < 300;\n    services.push({ service:'n8n', state: ok ? 'ok' : 'down', http:r.statusCode });\n  } catch (e) {\n    services.push({ service:'n8n', state:'down', error:'inacessível' });\n  }\n} else {\n  services.push({ service:'n8n', state:'unknown', error:'não configurado' });\n}\n\n// --- AWS Health (UTF-16) ---\ntry {\n  const rawResp = await helpers.httpRequest({ url:'https://health.aws.amazon.com/public/currentevents', timeout:12000, encoding:'arraybuffer', json:false });\n  const b = Buffer.isBuffer(rawResp) ? rawResp : Buffer.from(rawResp);\n  let txt;\n  if (b.length >= 2 && b[0] === 0xFF && b[1] === 0xFE) txt = b.toString('utf16le');\n  else if (b.length >= 2 && b[0] === 0xFE && b[1] === 0xFF) { const c = Buffer.from(b); c.swap16(); txt = c.toString('utf16le'); }\n  else { let z=0; for (let k=1;k<Math.min(b.length,200);k+=2) if (b[k]===0) z++; txt = z>50 ? b.toString('utf16le') : b.toString('utf8'); }\n  txt = txt.replace(/^﻿/, '');\n  const events = JSON.parse(txt.slice(txt.indexOf('[')));\n  const lastUpdate = ev => { let mx=parseInt(ev.date,10)||0; for (const l of (ev.event_log||[])){ const t=parseInt(l.timestamp,10)||0; if(t>mx) mx=t; } return mx; };\n  const regionMatch  = ev => !AWS_ONLY_REGIONS.length || AWS_ONLY_REGIONS.some(r => (ev.arn||'').includes(r) || (ev.service||'').includes(r));\n  const serviceMatch = ev => { if(!AWS_SERVICES.length) return true; const h=((ev.service||'')+' '+(ev.service_name||'')+' '+(ev.arn||'')).toLowerCase(); return AWS_SERVICES.some(s=>h.includes(s.toLowerCase())); };\n  const cutoff = nowSec - AWS_WINDOW_HOURS*3600;\n  const recent = (events||[]).filter(ev => lastUpdate(ev) >= cutoff && regionMatch(ev) && serviceMatch(ev));\n  const scope = (AWS_SERVICES.length ? AWS_SERVICES.join('/') : 'todos os serviços') + (AWS_ONLY_REGIONS.length ? ' @ '+AWS_ONLY_REGIONS.join(',') : '');\n  services.push({\n    service:'AWS', scope,\n    state: recent.length ? 'degraded' : 'ok',\n    incidents: recent.slice(0,3).map(ev => ({\n      name: ev.service_name || ev.service, region: ev.region_name || '',\n      summary: ev.summary || '',\n      update: clip((ev.event_log && ev.event_log.length) ? ev.event_log[ev.event_log.length-1].message : '')\n    }))\n  });\n} catch (e) {\n  services.push({ service:'AWS', state:'unknown', error:'sem resposta' });\n}\n\n// --- Meta / WhatsApp Business (RSS) ---\ntry {\n  const xml = String(await helpers.httpRequest({ url: META_RSS, timeout:10000 }));\n  const items = [...xml.matchAll(/<item>([\\s\\S]*?)<\\/item>/g)].map(m => {\n    const seg=m[1];\n    const title=unesc((seg.match(/<title>([\\s\\S]*?)<\\/title>/)||[])[1]);\n    const date =unesc((seg.match(/<pubDate>([\\s\\S]*?)<\\/pubDate>/)||[])[1]);\n    const mt=title.match(/^\\[([^\\]]+)\\]:\\s*(.+)$/);\n    return { prefix:mt?mt[1].trim():'', comp:mt?mt[2].trim():title, ts:Math.floor((Date.parse(date)||0)/1000) };\n  });\n  const cutoff = nowSec - META_WINDOW_HOURS*3600;\n  const latest = {};\n  for (const it of items){ if(it.ts && it.ts<cutoff) continue; if(!latest[it.comp] || it.ts>latest[it.comp].ts) latest[it.comp]=it; }\n  const active = Object.values(latest).filter(x => !/resolv/i.test(x.prefix));\n  let state = 'ok';\n  if (active.length) state = active.some(x=>/high|major|outage/i.test(x.prefix)) ? 'major' : 'degraded';\n  else if (Object.values(latest).some(x=>/resolv/i.test(x.prefix))) state = 'recovered';\n  services.push({ service:'Meta (WhatsApp)', state, incidents: active.slice(0,4).map(x => ({ level:x.prefix, component:x.comp })) });\n} catch (e) {\n  services.push({ service:'Meta (WhatsApp)', state:'unknown', error:'sem resposta' });\n}\n\n// --- Tasks (seu projeto Lovable / Lovable Cloud via edge function healthz) ---\nif (TASKS_HEALTH_URL) {\n  try {\n    const r = await helpers.httpRequest({ url: TASKS_HEALTH_URL, timeout: 10000, json: true, returnFullResponse: true });\n    const b = r.body || {};\n    services.push({ service:'Tasks', state: b.state || (r.statusCode < 300 ? 'ok' : 'down'), checks: b.checks || [], http: r.statusCode });\n  } catch (e) {\n    services.push({ service:'Tasks', state:'down', error:'inacessível' });\n  }\n}\n\n// --- Saída: JSON CRU para a IA interpretar ---\nconst data = new Date().toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo' });\nconst payload = { data, services };\n\nreturn [{\n  json: {\n    status_json: JSON.stringify(payload),   // <- a IA lê isto\n    payload,                                  // versão objeto (debug)\n    from: $('Parse do comando').first().json.from\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        -160
+      ],
+      "id": "4b8ee141-a82d-47c3-b5ad-dba204ccdf3e",
+      "name": "Coletar status"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Gere a mensagem de status a partir deste JSON:\n\n{{ $json.status_json }}",
+        "options": {
+          "systemMessage": "=Você formata status de serviços para UMA mensagem de WhatsApp em português-BR.\nRecebe um JSON com { data, services:[...] } e devolve APENAS a mensagem final (sem blocos de código).\nRegras:\n- Traduza tudo para PT-BR, inclusive nomes e descrições de incidentes.\n- Primeira linha: \"📊 *Status dos serviços* — \" seguida do valor do campo data.\n- Um serviço por bloco, na ordem em que aparecem no JSON.\n- Emoji conforme o campo state: ok=🟢, degraded=🟡, major=🟠, down=🔴, maintenance=🔧, recovered=🟢, unknown=⚪.\n- Serviço com state ok/recovered = UMA linha só (emoji + nome + 'operacional' ou 'recuperado').\n- Com incidente: mostre o resumo traduzido e inclua o link (campo link) quando houver.\n- Se o serviço tiver 'checks', liste os que estão com ok:false (ex.: '↳ edge:whatsapp-command fora').\n- Use *negrito* do WhatsApp apenas no cabeçalho e nos nomes de serviços com problema.\n- NÃO invente informação: use somente o que está no JSON. Seja conciso."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        464,
+        -176
+      ],
+      "id": "a285f83b-36e5-41f8-affb-94722d867430",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        464,
+        -16
+      ],
+      "id": "1f5cf5e6-b9b0-488c-9359-de21ba7c9ee4",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "m1",
+              "name": "mensagem_resposta",
+              "type": "string",
+              "value": "={{ $json.output }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        832,
+        -160
+      ],
+      "id": "6457fe1d-8a5c-4d19-bc4c-74e6772d20f8",
+      "name": "Preparar envio"
     }
   ],
   "connections": {
@@ -351,7 +456,7 @@
       "main": [
         [
           {
-            "node": "Validar comando",
+            "node": "É /status?",
             "type": "main",
             "index": 0
           }
@@ -420,6 +525,68 @@
           }
         ]
       ]
+    },
+    "É /status?": {
+      "main": [
+        [
+          {
+            "node": "Coletar status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Validar comando",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Coletar status": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Preparar envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar envio": {
+      "main": [
+        [
+          {
+            "node": "Responder no WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -433,8 +600,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "affb4b4a-4c01-4f33-90df-cf691654380f",
-  "activeVersionId": "affb4b4a-4c01-4f33-90df-cf691654380f",
+  "versionId": "3813fb9a-405b-4d5d-9f0e-6834bbc3dfdc",
+  "activeVersionId": "3813fb9a-405b-4d5d-9f0e-6834bbc3dfdc",
   "triggerCount": 1,
   "shared": [
     {
@@ -446,9 +613,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-07-21T22:46:35.388Z",
-    "createdAt": "2026-07-21T22:46:35.388Z",
-    "versionId": "affb4b4a-4c01-4f33-90df-cf691654380f",
+    "updatedAt": "2026-07-27T20:20:22.976Z",
+    "createdAt": "2026-07-27T20:20:22.976Z",
+    "versionId": "3813fb9a-405b-4d5d-9f0e-6834bbc3dfdc",
     "workflowId": "VJtRZqd6ebNasdU5",
     "nodes": [
       {
@@ -460,8 +627,8 @@
         "type": "n8n-nodes-base.webhook",
         "typeVersion": 2.1,
         "position": [
-          -656,
-          160
+          -944,
+          144
         ],
         "id": "5a9d4b3d-68fe-4611-90ba-e7609055018b",
         "name": "Webhook Evolution",
@@ -514,8 +681,8 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.2,
         "position": [
-          -448,
-          160
+          -736,
+          128
         ],
         "id": "3f056cdb-cdd9-416c-86ca-5de068a838ae",
         "name": "É mensagem de texto recebida?"
@@ -527,7 +694,7 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -224,
+          -384,
           112
         ],
         "id": "2d4e1e61-8026-4141-a945-cf8fdbfc0d9f",
@@ -762,11 +929,116 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.2,
         "position": [
-          288,
-          240
+          304,
+          320
         ],
         "id": "d055bf4b-482b-4f57-aef3-c98de0cd2c3b",
         "name": "Comando válido?1"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "s1",
+                "leftValue": "={{ $json.command }}",
+                "rightValue": "/status",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -240,
+          112
+        ],
+        "id": "1fe90b4b-ca36-45bd-9fd2-007a9b04a8a4",
+        "name": "É /status?"
+      },
+      {
+        "parameters": {
+          "jsCode": "// ==== /status: coleta DADOS CRUS -> monta body p/ OpenAI (a IA traduz e formata) ====\nconst helpers = this.helpers;\nconst nowSec  = Math.floor(Date.now() / 1000);\n\n// ===================== CONFIG =====================\nconst N8N_HEALTH_URL    = 'https://webhook.miabuilder.com/healthz'; // CONFIRME. '' para pular.\nconst AWS_ONLY_REGIONS  = ['us-east-1'];   // [] = todas\nconst AWS_SERVICES      = [];              // [] = todos\nconst AWS_WINDOW_HOURS   = 72;\nconst META_RSS          = 'https://metastatus.com/outage-events-feed-whatsapp-business-api.rss';\nconst META_WINDOW_HOURS = 48;\nconst TASKS_HEALTH_URL  = 'https://tyreqzwkazvdkfqipkme.supabase.co/functions/v1/healthz'; // seu projeto Lovable (Cloud). '' p/ pular.\nconst OPENAI_MODEL      = 'gpt-4o-mini';\n// ==================================================\n\nconst clip  = (s, n = 220) => (s && s.length > n) ? s.slice(0, n - 1).trim() + '…' : (s || '');\nconst unesc = s => String(s||'').replace(/<!\\[CDATA\\[|\\]\\]>/g,'').replace(/&amp;/g,'&')\n  .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'\"').replace(/&#39;|&apos;/g,\"'\").trim();\n\nconst services = [];\n\n// --- Statuspage.io ---\n// --- Statuspage.io ---\nasync function statuspage(name, base) {\n  try {\n    const d = await helpers.httpRequest({\n      url: base + '/api/v2/summary.json',\n      json: true,\n      timeout: 10000\n    });\n\n    const ind = (d.status && d.status.indicator) || 'unknown';\n\n    // Regiões que você quer monitorar\n    const REGION_REGEX = /\\b(sa-east-\\d+|us-east-\\d+|us-west-\\d+)\\b/i;\n\n    // Incidentes ativos apenas das regiões SA e US\n    const incidents = (d.incidents || [])\n      .filter(i => !['resolved', 'completed', 'postmortem'].includes(i.status))\n      .filter(i => {\n        const text = JSON.stringify(i);\n        return REGION_REGEX.test(text);\n      })\n      .slice(0, 2)\n      .map(i => ({\n        impact: i.impact,\n        name: i.name,\n        status: i.status,\n        update: clip(\n          (i.incident_updates && i.incident_updates[0])\n            ? i.incident_updates[0].body\n            : ''\n        ),\n        link: i.shortlink || ''\n      }));\n\n    // Componentes afetados apenas das regiões SA e US\n    const affected = (d.components || [])\n      .filter(c => !c.group && c.status && c.status !== 'operational')\n      .filter(c => {\n        const text = JSON.stringify(c);\n        return REGION_REGEX.test(text);\n      })\n      .map(c => ({\n        name: c.name,\n        status: c.status\n      }))\n      .slice(0, 6);\n\n    const maintenance = (d.scheduled_maintenances || [])\n      .filter(m => m.status === 'in_progress')\n      .map(m => m.name)\n      .slice(0, 1);\n\n    // Estado padrão da StatusPage\n    let state = {\n      none: 'ok',\n      minor: 'degraded',\n      major: 'major',\n      critical: 'down',\n      maintenance: 'maintenance'\n    }[ind] || 'unknown';\n\n    // Se houver incidente relevante, ele prevalece\n    if (incidents.length) {\n      if (incidents.some(i => i.impact === 'critical')) {\n        state = 'down';\n      } else if (incidents.some(i => i.impact === 'major')) {\n        state = 'major';\n      } else {\n        state = 'degraded';\n      }\n    }\n\n    return {\n      service: name,\n      state,\n      summary: (d.status && d.status.description) || '',\n      incidents,\n      affected,\n      maintenance\n    };\n\n  } catch (e) {\n    return {\n      service: name,\n      state: 'unknown',\n      error: 'sem resposta'\n    };\n  }\n}\n\nconst sp = await Promise.all([\n  statuspage('Lovable',  'https://status.lovable.dev'),\n  statuspage('Supabase', 'https://status.supabase.com'),\n  statuspage('Resend',   'https://resend-status.com'),\n]);\nservices.push(...sp);\n\n// --- n8n ---\nif (N8N_HEALTH_URL) {\n  try {\n    const r  = await helpers.httpRequest({ url: N8N_HEALTH_URL, timeout: 8000, returnFullResponse: true });\n    const ok = r.statusCode >= 200 && r.statusCode < 300;\n    services.push({ service:'n8n', state: ok ? 'ok' : 'down', http:r.statusCode });\n  } catch (e) {\n    services.push({ service:'n8n', state:'down', error:'inacessível' });\n  }\n} else {\n  services.push({ service:'n8n', state:'unknown', error:'não configurado' });\n}\n\n// --- AWS Health (UTF-16) ---\ntry {\n  const rawResp = await helpers.httpRequest({ url:'https://health.aws.amazon.com/public/currentevents', timeout:12000, encoding:'arraybuffer', json:false });\n  const b = Buffer.isBuffer(rawResp) ? rawResp : Buffer.from(rawResp);\n  let txt;\n  if (b.length >= 2 && b[0] === 0xFF && b[1] === 0xFE) txt = b.toString('utf16le');\n  else if (b.length >= 2 && b[0] === 0xFE && b[1] === 0xFF) { const c = Buffer.from(b); c.swap16(); txt = c.toString('utf16le'); }\n  else { let z=0; for (let k=1;k<Math.min(b.length,200);k+=2) if (b[k]===0) z++; txt = z>50 ? b.toString('utf16le') : b.toString('utf8'); }\n  txt = txt.replace(/^﻿/, '');\n  const events = JSON.parse(txt.slice(txt.indexOf('[')));\n  const lastUpdate = ev => { let mx=parseInt(ev.date,10)||0; for (const l of (ev.event_log||[])){ const t=parseInt(l.timestamp,10)||0; if(t>mx) mx=t; } return mx; };\n  const regionMatch  = ev => !AWS_ONLY_REGIONS.length || AWS_ONLY_REGIONS.some(r => (ev.arn||'').includes(r) || (ev.service||'').includes(r));\n  const serviceMatch = ev => { if(!AWS_SERVICES.length) return true; const h=((ev.service||'')+' '+(ev.service_name||'')+' '+(ev.arn||'')).toLowerCase(); return AWS_SERVICES.some(s=>h.includes(s.toLowerCase())); };\n  const cutoff = nowSec - AWS_WINDOW_HOURS*3600;\n  const recent = (events||[]).filter(ev => lastUpdate(ev) >= cutoff && regionMatch(ev) && serviceMatch(ev));\n  const scope = (AWS_SERVICES.length ? AWS_SERVICES.join('/') : 'todos os serviços') + (AWS_ONLY_REGIONS.length ? ' @ '+AWS_ONLY_REGIONS.join(',') : '');\n  services.push({\n    service:'AWS', scope,\n    state: recent.length ? 'degraded' : 'ok',\n    incidents: recent.slice(0,3).map(ev => ({\n      name: ev.service_name || ev.service, region: ev.region_name || '',\n      summary: ev.summary || '',\n      update: clip((ev.event_log && ev.event_log.length) ? ev.event_log[ev.event_log.length-1].message : '')\n    }))\n  });\n} catch (e) {\n  services.push({ service:'AWS', state:'unknown', error:'sem resposta' });\n}\n\n// --- Meta / WhatsApp Business (RSS) ---\ntry {\n  const xml = String(await helpers.httpRequest({ url: META_RSS, timeout:10000 }));\n  const items = [...xml.matchAll(/<item>([\\s\\S]*?)<\\/item>/g)].map(m => {\n    const seg=m[1];\n    const title=unesc((seg.match(/<title>([\\s\\S]*?)<\\/title>/)||[])[1]);\n    const date =unesc((seg.match(/<pubDate>([\\s\\S]*?)<\\/pubDate>/)||[])[1]);\n    const mt=title.match(/^\\[([^\\]]+)\\]:\\s*(.+)$/);\n    return { prefix:mt?mt[1].trim():'', comp:mt?mt[2].trim():title, ts:Math.floor((Date.parse(date)||0)/1000) };\n  });\n  const cutoff = nowSec - META_WINDOW_HOURS*3600;\n  const latest = {};\n  for (const it of items){ if(it.ts && it.ts<cutoff) continue; if(!latest[it.comp] || it.ts>latest[it.comp].ts) latest[it.comp]=it; }\n  const active = Object.values(latest).filter(x => !/resolv/i.test(x.prefix));\n  let state = 'ok';\n  if (active.length) state = active.some(x=>/high|major|outage/i.test(x.prefix)) ? 'major' : 'degraded';\n  else if (Object.values(latest).some(x=>/resolv/i.test(x.prefix))) state = 'recovered';\n  services.push({ service:'Meta (WhatsApp)', state, incidents: active.slice(0,4).map(x => ({ level:x.prefix, component:x.comp })) });\n} catch (e) {\n  services.push({ service:'Meta (WhatsApp)', state:'unknown', error:'sem resposta' });\n}\n\n// --- Tasks (seu projeto Lovable / Lovable Cloud via edge function healthz) ---\nif (TASKS_HEALTH_URL) {\n  try {\n    const r = await helpers.httpRequest({ url: TASKS_HEALTH_URL, timeout: 10000, json: true, returnFullResponse: true });\n    const b = r.body || {};\n    services.push({ service:'Tasks', state: b.state || (r.statusCode < 300 ? 'ok' : 'down'), checks: b.checks || [], http: r.statusCode });\n  } catch (e) {\n    services.push({ service:'Tasks', state:'down', error:'inacessível' });\n  }\n}\n\n// --- Saída: JSON CRU para a IA interpretar ---\nconst data = new Date().toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo' });\nconst payload = { data, services };\n\nreturn [{\n  json: {\n    status_json: JSON.stringify(payload),   // <- a IA lê isto\n    payload,                                  // versão objeto (debug)\n    from: $('Parse do comando').first().json.from\n  }\n}];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          128,
+          -160
+        ],
+        "id": "4b8ee141-a82d-47c3-b5ad-dba204ccdf3e",
+        "name": "Coletar status"
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=Gere a mensagem de status a partir deste JSON:\n\n{{ $json.status_json }}",
+          "options": {
+            "systemMessage": "=Você formata status de serviços para UMA mensagem de WhatsApp em português-BR.\nRecebe um JSON com { data, services:[...] } e devolve APENAS a mensagem final (sem blocos de código).\nRegras:\n- Traduza tudo para PT-BR, inclusive nomes e descrições de incidentes.\n- Primeira linha: \"📊 *Status dos serviços* — \" seguida do valor do campo data.\n- Um serviço por bloco, na ordem em que aparecem no JSON.\n- Emoji conforme o campo state: ok=🟢, degraded=🟡, major=🟠, down=🔴, maintenance=🔧, recovered=🟢, unknown=⚪.\n- Serviço com state ok/recovered = UMA linha só (emoji + nome + 'operacional' ou 'recuperado').\n- Com incidente: mostre o resumo traduzido e inclua o link (campo link) quando houver.\n- Se o serviço tiver 'checks', liste os que estão com ok:false (ex.: '↳ edge:whatsapp-command fora').\n- Use *negrito* do WhatsApp apenas no cabeçalho e nos nomes de serviços com problema.\n- NÃO invente informação: use somente o que está no JSON. Seja conciso."
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 3,
+        "position": [
+          464,
+          -176
+        ],
+        "id": "a285f83b-36e5-41f8-affb-94722d867430",
+        "name": "AI Agent"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          464,
+          -16
+        ],
+        "id": "1f5cf5e6-b9b0-488c-9359-de21ba7c9ee4",
+        "name": "OpenRouter Chat Model",
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "m1",
+                "name": "mensagem_resposta",
+                "type": "string",
+                "value": "={{ $json.output }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          832,
+          -160
+        ],
+        "id": "6457fe1d-8a5c-4d19-bc4c-74e6772d20f8",
+        "name": "Preparar envio"
       }
     ],
     "connections": {
@@ -796,7 +1068,7 @@
         "main": [
           [
             {
-              "node": "Validar comando",
+              "node": "É /status?",
               "type": "main",
               "index": 0
             }
@@ -860,6 +1132,68 @@
           [
             {
               "node": "Enviar ajuda",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "É /status?": {
+        "main": [
+          [
+            {
+              "node": "Coletar status",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Validar comando",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Coletar status": {
+        "main": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenRouter Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent": {
+        "main": [
+          [
+            {
+              "node": "Preparar envio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Preparar envio": {
+        "main": [
+          [
+            {
+              "node": "Responder no WhatsApp",
               "type": "main",
               "index": 0
             }
