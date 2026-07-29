@@ -1,0 +1,805 @@
+{
+  "updatedAt": "2026-07-28T18:04:52.430Z",
+  "createdAt": "2026-07-28T13:51:42.784Z",
+  "id": "vMgEjKPbGCx2JSHa",
+  "name": "BMS - 8.04 - Recálculo D5 e Score Final",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bms-cred-score-d5",
+        "authentication": "***REMOVIDO***",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -144,
+        1008
+      ],
+      "id": "4dad7367-afa6-4ca3-8a1e-a87cac9d0b57",
+      "name": "Webhook",
+      "webhookId": "d5-recalculo-cred-score",
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      },
+      "notes": "Precisa de um trigger novo no Supabase (mesmo padrão pg_net do outro): AFTER INSERT OR UPDATE ON credscore.questionario_respostas → POST pra esta URL. Peça pra eu criar esse trigger quando este workflow estiver importado e a URL de produção estiver definida."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT a.id AS analise_id, a.fornecedor_id, a.status, a.preliminar,\n       a.s1_fiscal, a.s2_financeira, a.s3_regime, a.s4_dependencia,\n       a.completude_pct, a.detalhes_calculo\nFROM credscore.analises a\nWHERE a.fornecedor_id = '{{ $json.body.record.fornecedor_id }}'\n  AND a.status IN ('concluido','analise_manual')\nORDER BY a.created_at DESC\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        96,
+        1008
+      ],
+      "id": "2c30b2c8-930f-4180-a012-3014c06b8c8a",
+      "name": "Buscar Última Análise Concluída",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d5-if-existe-analise",
+              "leftValue": "={{ $json.analise_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        336,
+        1008
+      ],
+      "id": "9e575db0-fb7d-4667-be25-88ff6b46b51c",
+      "name": "Já existe análise D1-D4?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*) FILTER (WHERE qr.resposta = qp.resposta_que_pontua) AS pontuando,\n       count(*) AS total_ativas\nFROM credscore.questionario_perguntas qp\nLEFT JOIN credscore.questionario_respostas qr\n  ON qr.pergunta_id = qp.id AND qr.fornecedor_id = '{{ $json.fornecedor_id }}'\nWHERE qp.ativo = true;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        624,
+        1056
+      ],
+      "id": "eba1de9b-63fd-45cc-be31-5b009b8bc016",
+      "name": "Contar Respostas Ativas",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cont = $('Contar Respostas Ativas').item.json;\nconst totalAtivas = Number(cont.total_ativas || 0);\nconst pontuando = Number(cont.pontuando || 0);\nconst s5 = totalAtivas > 0 ? Math.round((100 * pontuando / totalAtivas) * 100) / 100 : 0;\n\nreturn [{ json: { s5_maturidade: s5, y: pontuando, total_perguntas_ativas: totalAtivas } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        1056
+      ],
+      "id": "60c2e09c-76d3-47a7-868b-3b2be9869873",
+      "name": "Montar S5"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "o2QJUraN5YsNQuSt",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/o2QJUraN5YsNQuSt",
+          "cachedResultName": "BMS - 8.99 - Calcular Score"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "s1_fiscal": "={{ $('Buscar Última Análise Concluída').item.json.s1_fiscal }}",
+            "s2_financeira": "={{ $('Buscar Última Análise Concluída').item.json.s2_financeira }}",
+            "s3_regime": "={{ $('Buscar Última Análise Concluída').item.json.s3_regime }}",
+            "s4_dependencia": "={{ $('Buscar Última Análise Concluída').item.json.s4_dependencia }}",
+            "s5_maturidade": "={{ $('Montar S5').item.json.s5_maturidade }}",
+            "completude_pct": "={{ $('Buscar Última Análise Concluída').item.json.completude_pct }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "s1_fiscal",
+              "displayName": "s1_fiscal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "s2_financeira",
+              "displayName": "s2_financeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "s3_regime",
+              "displayName": "s3_regime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "s4_dependencia",
+              "displayName": "s4_dependencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "s5_maturidade",
+              "displayName": "s5_maturidade",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "completude_pct",
+              "displayName": "completude_pct",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1104,
+        1056
+      ],
+      "id": "91847680-b060-473e-bab9-f26f6cfb12cb",
+      "name": "Executar Calcular Score",
+      "notes": "Mesmo sub-workflow usado pelo Orquestrador — reaproveita a lógica de pesos/redistribuição/thresholds sem duplicar código. Reselecionar o workflow no dropdown depois de importar 'BMS - 8.99 - Calcular Score'."
+    },
+    {
+      "parameters": {
+        "jsCode": "const analise = $('Buscar Última Análise Concluída').item.json;\nconst s5info = $('Montar S5').item.json;\nconst score = $('Executar Calcular Score').item.json;\n\nconst detalhesAnterior = analise.detalhes_calculo || {};\ndetalhesAnterior.d5 = { y: s5info.y, total: s5info.total_perguntas_ativas, s5: s5info.s5_maturidade };\ndetalhesAnterior.pesos_usados = score.pesos_usados;\n\nreturn [{ json: {\n  analise_id: analise.analise_id,\n  s5_maturidade: s5info.s5_maturidade,\n  score_total: score.score_total,\n  decisao: score.decisao,\n  status: score.status,\n  preliminar: score.preliminar,\n  versao_pesos_id: score.versao_pesos_id,\n  versao_thresholds_id: score.versao_thresholds_id,\n  detalhes_calculo: detalhesAnterior\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        1056
+      ],
+      "id": "abc8d6e0-b09b-43a7-9895-cd703ae64470",
+      "name": "Montar Resultado Final"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET s5_maturidade = {{ $json.s5_maturidade }},\n    score_total = {{ $json.score_total }},\n    decisao = {{ $json.decisao ? `'${$json.decisao}'` : 'null' }},\n    status = '{{ $json.status }}',\n    preliminar = {{ $json.preliminar }},\n    versao_pesos_id = '{{ $json.versao_pesos_id }}',\n    versao_thresholds_id = '{{ $json.versao_thresholds_id }}',\n    detalhes_calculo = '{{ JSON.stringify($json.detalhes_calculo) }}'::jsonb\nWHERE id = '{{ $json.analise_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1584,
+        1056
+      ],
+      "id": "f5ce0f9c-09ae-4c90-967e-60b70ecf6eb8",
+      "name": "Salvar Score Final Atualizado",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        336,
+        1168
+      ],
+      "id": "50435ee7-7e60-485e-af2f-e8473e544ba0",
+      "name": "Nada a fazer ainda (D1-D4 não concluídos)"
+    },
+    {
+      "parameters": {
+        "content": "## ENTRADA — dispara quando o FORNECEDOR (não o usuário do sistema)\nresponde ou atualiza o questionário público, via trigger pg_net em\ncredscore.questionario_respostas (AFTER INSERT OR UPDATE).\n⚠️ Esse trigger no Supabase ainda precisa ser criado — pendente.\n\nBusca a análise mais recente já concluída/em análise manual desse\nfornecedor. Se não existir nenhuma ainda (D1-D4 não rodou), o\nworkflow não faz nada — quem vai pegar o D5 depois é o próprio\nOrquestrador, na Fase 5, quando D1-D4 terminarem.",
+        "height": 624,
+        "width": 768,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        704
+      ],
+      "id": "bacc398b-4b53-4182-b2f5-470bc63d9547",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## CÁLCULO DE S5\nConta quantas perguntas ATIVAS o fornecedor já respondeu de forma\nque \"pontua\" (resposta = resposta_que_pontua de cada pergunta) vs.\no total de perguntas ativas no momento.\n\nS5 = 100 × y / total_perguntas_ativas\n\nNão depende de nenhuma API externa — é só leitura do banco. Por\nisso pode ser recalculado a cada resposta salva, sem custo de\nrate-limit.",
+        "height": 624,
+        "width": 464,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        544,
+        704
+      ],
+      "id": "97db2d6f-0d34-4281-aee6-0e7641c16b68",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## RECÁLCULO FINAL\nReaproveita s1_fiscal..s4_dependencia que já estavam salvos na\nanálise (D1-D4 não mudam aqui) + o s5 novo, chama o MESMO sub-workflow\n\"BMS - 8.99 - Calcular Score\" que o Orquestrador usa.\n\nComo agora s5_maturidade não é mais null, o sub-workflow usa os\npesos CHEIOS (sem redistribuição) — preliminar passa a false.\n\n\"Montar Resultado Final\" mescla o novo bloco \"d5\" dentro do\ndetalhes_calculo que já existia (preservando d1/d2 registrados antes).\n\nUPDATE acontece na MESMA linha de analises (não cria uma segunda\nanálise) — é a mesma análise sendo completada, não uma nova.",
+        "height": 624,
+        "width": 784,
+        "color": 2
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        704
+      ],
+      "id": "45206abf-fdf6-44cf-898b-a966f6ecde6b",
+      "name": "Sticky Note2"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Buscar Última Análise Concluída",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Última Análise Concluída": {
+      "main": [
+        [
+          {
+            "node": "Já existe análise D1-D4?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Já existe análise D1-D4?": {
+      "main": [
+        [
+          {
+            "node": "Contar Respostas Ativas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nada a fazer ainda (D1-D4 não concluídos)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contar Respostas Ativas": {
+      "main": [
+        [
+          {
+            "node": "Montar S5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar S5": {
+      "main": [
+        [
+          {
+            "node": "Executar Calcular Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar Calcular Score": {
+      "main": [
+        [
+          {
+            "node": "Montar Resultado Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Resultado Final": {
+      "main": [
+        [
+          {
+            "node": "Salvar Score Final Atualizado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "a97763d1-d4af-48ac-ab70-54fe93e68e37",
+  "activeVersionId": "a97763d1-d4af-48ac-ab70-54fe93e68e37",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-07-28T13:51:42.784Z",
+      "createdAt": "2026-07-28T13:51:42.784Z",
+      "role": "workflow:owner",
+      "workflowId": "vMgEjKPbGCx2JSHa",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-07-28T18:04:52.493Z",
+    "createdAt": "2026-07-28T18:04:52.493Z",
+    "versionId": "a97763d1-d4af-48ac-ab70-54fe93e68e37",
+    "workflowId": "vMgEjKPbGCx2JSHa",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "bms-cred-score-d5",
+          "authentication": "***REMOVIDO***",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -144,
+          1008
+        ],
+        "id": "4dad7367-afa6-4ca3-8a1e-a87cac9d0b57",
+        "name": "Webhook",
+        "webhookId": "d5-recalculo-cred-score",
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        },
+        "notes": "Precisa de um trigger novo no Supabase (mesmo padrão pg_net do outro): AFTER INSERT OR UPDATE ON credscore.questionario_respostas → POST pra esta URL. Peça pra eu criar esse trigger quando este workflow estiver importado e a URL de produção estiver definida."
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT a.id AS analise_id, a.fornecedor_id, a.status, a.preliminar,\n       a.s1_fiscal, a.s2_financeira, a.s3_regime, a.s4_dependencia,\n       a.completude_pct, a.detalhes_calculo\nFROM credscore.analises a\nWHERE a.fornecedor_id = '{{ $json.body.record.fornecedor_id }}'\n  AND a.status IN ('concluido','analise_manual')\nORDER BY a.created_at DESC\nLIMIT 1;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          96,
+          1008
+        ],
+        "id": "2c30b2c8-930f-4180-a012-3014c06b8c8a",
+        "name": "Buscar Última Análise Concluída",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "d5-if-existe-analise",
+                "leftValue": "={{ $json.analise_id }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          336,
+          1008
+        ],
+        "id": "9e575db0-fb7d-4667-be25-88ff6b46b51c",
+        "name": "Já existe análise D1-D4?"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT count(*) FILTER (WHERE qr.resposta = qp.resposta_que_pontua) AS pontuando,\n       count(*) AS total_ativas\nFROM credscore.questionario_perguntas qp\nLEFT JOIN credscore.questionario_respostas qr\n  ON qr.pergunta_id = qp.id AND qr.fornecedor_id = '{{ $json.fornecedor_id }}'\nWHERE qp.ativo = true;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          624,
+          1056
+        ],
+        "id": "eba1de9b-63fd-45cc-be31-5b009b8bc016",
+        "name": "Contar Respostas Ativas",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const cont = $('Contar Respostas Ativas').item.json;\nconst totalAtivas = Number(cont.total_ativas || 0);\nconst pontuando = Number(cont.pontuando || 0);\nconst s5 = totalAtivas > 0 ? Math.round((100 * pontuando / totalAtivas) * 100) / 100 : 0;\n\nreturn [{ json: { s5_maturidade: s5, y: pontuando, total_perguntas_ativas: totalAtivas } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          864,
+          1056
+        ],
+        "id": "60c2e09c-76d3-47a7-868b-3b2be9869873",
+        "name": "Montar S5"
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "o2QJUraN5YsNQuSt",
+            "mode": "list",
+            "cachedResultUrl": "/workflow/o2QJUraN5YsNQuSt",
+            "cachedResultName": "BMS - 8.99 - Calcular Score"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "s1_fiscal": "={{ $('Buscar Última Análise Concluída').item.json.s1_fiscal }}",
+              "s2_financeira": "={{ $('Buscar Última Análise Concluída').item.json.s2_financeira }}",
+              "s3_regime": "={{ $('Buscar Última Análise Concluída').item.json.s3_regime }}",
+              "s4_dependencia": "={{ $('Buscar Última Análise Concluída').item.json.s4_dependencia }}",
+              "s5_maturidade": "={{ $('Montar S5').item.json.s5_maturidade }}",
+              "completude_pct": "={{ $('Buscar Última Análise Concluída').item.json.completude_pct }}"
+            },
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "s1_fiscal",
+                "displayName": "s1_fiscal",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string"
+              },
+              {
+                "id": "s2_financeira",
+                "displayName": "s2_financeira",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string"
+              },
+              {
+                "id": "s3_regime",
+                "displayName": "s3_regime",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string"
+              },
+              {
+                "id": "s4_dependencia",
+                "displayName": "s4_dependencia",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string"
+              },
+              {
+                "id": "s5_maturidade",
+                "displayName": "s5_maturidade",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string"
+              },
+              {
+                "id": "completude_pct",
+                "displayName": "completude_pct",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string"
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          1104,
+          1056
+        ],
+        "id": "91847680-b060-473e-bab9-f26f6cfb12cb",
+        "name": "Executar Calcular Score",
+        "notes": "Mesmo sub-workflow usado pelo Orquestrador — reaproveita a lógica de pesos/redistribuição/thresholds sem duplicar código. Reselecionar o workflow no dropdown depois de importar 'BMS - 8.99 - Calcular Score'."
+      },
+      {
+        "parameters": {
+          "jsCode": "const analise = $('Buscar Última Análise Concluída').item.json;\nconst s5info = $('Montar S5').item.json;\nconst score = $('Executar Calcular Score').item.json;\n\nconst detalhesAnterior = analise.detalhes_calculo || {};\ndetalhesAnterior.d5 = { y: s5info.y, total: s5info.total_perguntas_ativas, s5: s5info.s5_maturidade };\ndetalhesAnterior.pesos_usados = score.pesos_usados;\n\nreturn [{ json: {\n  analise_id: analise.analise_id,\n  s5_maturidade: s5info.s5_maturidade,\n  score_total: score.score_total,\n  decisao: score.decisao,\n  status: score.status,\n  preliminar: score.preliminar,\n  versao_pesos_id: score.versao_pesos_id,\n  versao_thresholds_id: score.versao_thresholds_id,\n  detalhes_calculo: detalhesAnterior\n} }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1344,
+          1056
+        ],
+        "id": "abc8d6e0-b09b-43a7-9895-cd703ae64470",
+        "name": "Montar Resultado Final"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE credscore.analises\nSET s5_maturidade = {{ $json.s5_maturidade }},\n    score_total = {{ $json.score_total }},\n    decisao = {{ $json.decisao ? `'${$json.decisao}'` : 'null' }},\n    status = '{{ $json.status }}',\n    preliminar = {{ $json.preliminar }},\n    versao_pesos_id = '{{ $json.versao_pesos_id }}',\n    versao_thresholds_id = '{{ $json.versao_thresholds_id }}',\n    detalhes_calculo = '{{ JSON.stringify($json.detalhes_calculo) }}'::jsonb\nWHERE id = '{{ $json.analise_id }}';",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1584,
+          1056
+        ],
+        "id": "f5ce0f9c-09ae-4c90-967e-60b70ecf6eb8",
+        "name": "Salvar Score Final Atualizado",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          336,
+          1168
+        ],
+        "id": "50435ee7-7e60-485e-af2f-e8473e544ba0",
+        "name": "Nada a fazer ainda (D1-D4 não concluídos)"
+      },
+      {
+        "parameters": {
+          "content": "## ENTRADA — dispara quando o FORNECEDOR (não o usuário do sistema)\nresponde ou atualiza o questionário público, via trigger pg_net em\ncredscore.questionario_respostas (AFTER INSERT OR UPDATE).\n⚠️ Esse trigger no Supabase ainda precisa ser criado — pendente.\n\nBusca a análise mais recente já concluída/em análise manual desse\nfornecedor. Se não existir nenhuma ainda (D1-D4 não rodou), o\nworkflow não faz nada — quem vai pegar o D5 depois é o próprio\nOrquestrador, na Fase 5, quando D1-D4 terminarem.",
+          "height": 624,
+          "width": 768,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -240,
+          704
+        ],
+        "id": "bacc398b-4b53-4182-b2f5-470bc63d9547",
+        "name": "Sticky Note"
+      },
+      {
+        "parameters": {
+          "content": "## CÁLCULO DE S5\nConta quantas perguntas ATIVAS o fornecedor já respondeu de forma\nque \"pontua\" (resposta = resposta_que_pontua de cada pergunta) vs.\no total de perguntas ativas no momento.\n\nS5 = 100 × y / total_perguntas_ativas\n\nNão depende de nenhuma API externa — é só leitura do banco. Por\nisso pode ser recalculado a cada resposta salva, sem custo de\nrate-limit.",
+          "height": 624,
+          "width": 464,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          544,
+          704
+        ],
+        "id": "97db2d6f-0d34-4281-aee6-0e7641c16b68",
+        "name": "Sticky Note1"
+      },
+      {
+        "parameters": {
+          "content": "## RECÁLCULO FINAL\nReaproveita s1_fiscal..s4_dependencia que já estavam salvos na\nanálise (D1-D4 não mudam aqui) + o s5 novo, chama o MESMO sub-workflow\n\"BMS - 8.99 - Calcular Score\" que o Orquestrador usa.\n\nComo agora s5_maturidade não é mais null, o sub-workflow usa os\npesos CHEIOS (sem redistribuição) — preliminar passa a false.\n\n\"Montar Resultado Final\" mescla o novo bloco \"d5\" dentro do\ndetalhes_calculo que já existia (preservando d1/d2 registrados antes).\n\nUPDATE acontece na MESMA linha de analises (não cria uma segunda\nanálise) — é a mesma análise sendo completada, não uma nova.",
+          "height": 624,
+          "width": 784,
+          "color": 2
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1024,
+          704
+        ],
+        "id": "45206abf-fdf6-44cf-898b-a966f6ecde6b",
+        "name": "Sticky Note2"
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Buscar Última Análise Concluída",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar Última Análise Concluída": {
+        "main": [
+          [
+            {
+              "node": "Já existe análise D1-D4?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Já existe análise D1-D4?": {
+        "main": [
+          [
+            {
+              "node": "Contar Respostas Ativas",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Nada a fazer ainda (D1-D4 não concluídos)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Contar Respostas Ativas": {
+        "main": [
+          [
+            {
+              "node": "Montar S5",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar S5": {
+        "main": [
+          [
+            {
+              "node": "Executar Calcular Score",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Executar Calcular Score": {
+        "main": [
+          [
+            {
+              "node": "Montar Resultado Final",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar Resultado Final": {
+        "main": [
+          [
+            {
+              "node": "Salvar Score Final Atualizado",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
