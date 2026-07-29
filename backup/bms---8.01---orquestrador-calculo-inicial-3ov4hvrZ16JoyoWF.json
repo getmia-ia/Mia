@@ -1,0 +1,1667 @@
+{
+  "updatedAt": "2026-07-28T19:42:22.779Z",
+  "createdAt": "2026-07-28T11:53:19.042Z",
+  "id": "3ov4hvrZ16JoyoWF",
+  "name": "BMS - 8.01 - Orquestrador (Cálculo Inicial)",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bms-cred-score",
+        "authentication": "***REMOVIDO***",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1488,
+        912
+      ],
+      "id": "39e9f175-62c0-4678-87c8-0b3676418305",
+      "name": "Webhook",
+      "webhookId": "e6977154-7c31-48b7-8815-a898a70ebc83",
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "content": "## ENTRADA\nDisparado pelo trigger pg_net do Supabase sempre que uma linha nova\né criada em credscore.analises (status='aguardando') — o que acontece\nautomaticamente quando qualquer fornecedor novo é cadastrado (upload\núnico, em lote, portal do cliente ou mia-bms).\n\nAutenticação via Header Auth (x-webhook-secret) — configurada no\npróprio node, rejeita chamadas sem o header antes de qualquer execução.\n\n\"Buscar Fornecedor\" resolve o fornecedor_id do payload em CNPJ,\ncliente_id, uf, cidade, razão social etc.",
+        "height": 608,
+        "width": 480,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1552,
+        528
+      ],
+      "id": "34a21200-a9bb-4cbb-99e0-7283c8bf72ed",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## FASE 0 · ENRIQUECIMENTO CADASTRAL\nO usuário sobe só o CNPJ — todo o resto (razão social, nome fantasia,\nUF, cidade, regime tributário, porte) vem daqui.\n\nAPI: Direct Data · Cadastro Pessoa Jurídica Plus\nGET https://apiv3.directd.com.br/api/CadastroPessoaJuridicaPlus?CNPJ=...&Token=...\n\n\"Normalizar Dados Cadastrais\" combina opcaoMEI + opcaoSimples +\ntributacao num único regime_tributario (função classificarRegime).\nvalores reais desses 3 campos ainda não confirmados com teste real —\najustar a função depois do primeiro CNPJ de verdade.\n\n\"Salvar Dados Cadastrais\" grava tudo em credscore.fornecedores via\nUPDATE ... coalesce(novo, valor_atual) — nunca sobrescreve com null.",
+        "height": 608,
+        "width": 960,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1056,
+        528
+      ],
+      "id": "390282a0-af79-4fb0-8173-4fb9238750aa",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## FASE 1 · D1 FISCAL (peso 30%)\nChama o sub-workflow \"BMS - 8.01 - D1 (Coleta Fiscal)\" via Execute\nWorkflow — CND Federal (Infosimples) + CND Estadual (Direct Data),\nclassificadas em t_cnd / t_pgfn / t_est.\n\nGATE G3: se t_cnd=\"Positiva\" E t_pgfn=\"Irregular\", o fornecedor é\neliminado aqui mesmo (decisao='nao_elegivel_gate') — o fluxo PARA,\nnunca chega a rodar D2/D3/D4/D5, porque já é reprovação automática.",
+        "height": 608,
+        "width": 976,
+        "color": 2
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        528
+      ],
+      "id": "f9326a68-1dac-4841-af24-e63f15f414cd",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "## FASE 2 · D2 FINANCEIRA (peso 20%) — AINDA É PLACEHOLDER\nAinda não temos o payload real da Serasa (Concentre/Relato) validado\nnesta conversa. Por enquanto devolve tudo ND, gate_disparado=null,\nsó pra não travar o fluxo.\n\nGATE G2 (recuperação judicial/falência) vai disparar aqui quando o\nsub-workflow real de D2 existir — hoje nunca dispara.\n\nSUBSTITUIR este node por um Execute Workflow chamando o sub-workflow\nD2 de verdade quando estiver pronto.",
+        "height": 608,
+        "width": 960,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        912,
+        528
+      ],
+      "id": "09b9322e-97df-4bf2-9249-5365c1722cd4",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "## FASE 3 e 4 · REGIME (D3) E DEPENDÊNCIA (D4) — sem API externa\nD3: lê fornecedores.regime_tributario (já populado na Fase 0) e\nclassifica direto pela tabela de pontos (T.regime).\n\nD4: p = valor_compras_anual do fornecedor / soma de todos os\nfornecedores do mesmo cliente. Curva linear com pisos (p0=2%, pmax=20%).\n\n\"Buscar Dados para o Cálculo\" é 1 query só com subqueries escalares:\ntabelas de pontos ativas (jsonb_object_agg), total de compras do\ncliente, e se já existe alguma resposta de D5 (edge case raro de\nD5 chegar antes do D1-D4 terminar).\n\n\"Montar S1-S4 e Completude\" soma os pontos de cada subcritério\n(usando as tabelas ativas, nunca hardcoded) e calcula completude_pct\ncom base em quantos campos vieram ND.",
+        "height": 608,
+        "width": 496
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1888,
+        528
+      ],
+      "id": "a8761c29-63a6-479e-ac69-732c5ad7818e",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "## FASE 5 · SCORE FINAL (COM OU SEM D5)\nChama o sub-workflow compartilhado \"BMS - 8.99 - Calcular Score\"\n(mesmo usado pelo recálculo de D5) — ele decide sozinho se redistribui\nos pesos entre D1-D4 (quando ainda não há D5) ou usa os pesos cheios.\n\n\"Montar Resultado Final\" junta s1-s4 + resultado do sub-workflow +\ndetalhes de D1/D2, formando o jsonb final de detalhes_calculo.\n\n\"Salvar Resultado da Análise\" grava tudo em credscore.analises:\nscore_total, decisao, status (concluido/analise_manual), preliminar,\nversao_pesos_id, versao_thresholds_id.\n\npreliminar=true significa \"sem D5 ainda\" — o workflow\n\"BMS - 9.00 - Recálculo D5\" é quem vira isso pra false depois.",
+        "height": 608,
+        "width": 672,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        528
+      ],
+      "id": "8f322e23-44c1-45c7-a17c-a7036992caa4",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT f.id AS fornecedor_id, f.cnpj, f.cliente_id, f.uf, f.cidade, f.razao_social, f.regime_tributario, f.valor_compras_anual\nFROM credscore.fornecedores f\nWHERE f.id = '{{ $json.body.record.fornecedor_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1232,
+        912
+      ],
+      "id": "99015df5-69a0-4a21-b025-cfb0b9e5d272",
+      "name": "Buscar Fornecedor",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET etapa_atual = 0, etapa_label = 'Enriquecimento cadastral', fonte_atual = 'econodata_cadastral'\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -992,
+        912
+      ],
+      "id": "53dcf7e4-4c03-4947-b988-1437e95a758d",
+      "name": "Etapa 0 · Enriquecimento",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://apiv3.directd.com.br/api/CadastroPessoaJuridicaPlus",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "CNPJ",
+              "value": "={{ $('Buscar Fornecedor').item.json.cnpj }}"
+            },
+            {
+              "name": "Token",
+              "value": "69CF4210-A64F-44BE-96A4-0E4B5FBA9C90"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -752,
+        912
+      ],
+      "id": "89f35eb9-4713-41cd-820c-4e5d7d580ac6",
+      "name": "Direct Data · Cadastro PJ Plus",
+      "notes": "Trocar o Token direto no node por credencial. Ao testar a 1a vez, colar aqui o JSON real de retorno pra confirmar os valores exatos de opcaoSimples/opcaoMEI/tributacao (o schema oficial só mostra tipos genéricos, não os valores reais)."
+    },
+    {
+      "parameters": {
+        "jsCode": "const dd = $('Direct Data · Cadastro PJ Plus').item.json.retorno ?? {};\nconst f = $('Buscar Fornecedor').item.json;\nconst end = (dd.enderecos && dd.enderecos[0]) || {};\n\nfunction classificarRegime(r) {\n  const mei = (r.opcaoMEI || '').toString().toUpperCase();\n  const simples = (r.opcaoSimples || '').toString().toUpperCase();\n  if (mei === 'SIM' || mei === 'S' || r.opcaoMEI === true) return 'MEI';\n  if (simples === 'SIM' || simples === 'S' || r.opcaoSimples === true) return 'Simples Nacional (padrão)';\n  const trib = (r.tributacao || '').toLowerCase();\n  if (trib.includes('real')) return 'Lucro Real (regime regular IBS/CBS)';\n  if (trib.includes('presumido')) return 'Lucro Presumido';\n  if (trib.includes('imune') || trib.includes('isento')) return 'Imune/Isento/Não contribuinte';\n  return 'ND';\n}\n\nfunction extrairFaturamento(r) {\n  const raw = r.faturamentoPresumido;\n  if (!raw) return null;\n  let s = String(raw).replace(/[^\\d,.-]/g, '');\n  if (s.includes(',')) {\n    s = s.replace(/\\./g, '').replace(',', '.');\n  }\n  const valor = parseFloat(s);\n  return Number.isFinite(valor) ? valor : null;\n}\n\nreturn [{\n  json: {\n    fornecedor_id: f.fornecedor_id,\n    razao_social: dd.razaoSocial ?? f.razao_social ?? null,\n    nome_fantasia: dd.nomeFantasia ?? null,\n    uf: end.uf ?? f.uf ?? null,\n    cidade: end.cidade ?? f.cidade ?? null,\n    regime_tributario: classificarRegime(dd),\n    porte: dd.porte ?? null,\n    faturamento_estimado: extrairFaturamento(dd)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -512,
+        912
+      ],
+      "id": "b6008a25-c9f4-40be-87ef-07aa465eac67",
+      "name": "Normalizar Dados Cadastrais"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.fornecedores\nSET razao_social = coalesce('{{ $json.razao_social }}', razao_social),\n    nome_fantasia = coalesce('{{ $json.nome_fantasia }}', nome_fantasia),\n    uf = coalesce('{{ $json.uf }}', uf),\n    cidade = coalesce('{{ $json.cidade }}', cidade),\n    regime_tributario = coalesce('{{ $json.regime_tributario }}', regime_tributario),\n    porte = coalesce('{{ $json.porte }}', porte),\n    faturamento_estimado = coalesce({{ $json.faturamento_estimado ?? 'null' }}, faturamento_estimado)\nWHERE id = '{{ $json.fornecedor_id }}'\nRETURNING *;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -272,
+        912
+      ],
+      "id": "e5393f50-89f8-4a78-836f-1523169e3821",
+      "name": "Salvar Dados Cadastrais",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET etapa_atual = 1, etapa_label = 'Fiscal (D1)', fonte_atual = 'directd_infosimples'\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -32,
+        912
+      ],
+      "id": "6d2424b1-84e2-46d2-aa23-5179511dbb4e",
+      "name": "Etapa 1 · Fiscal",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "vMZ5DOEK5HzwP9df",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/vMZ5DOEK5HzwP9df",
+          "cachedResultName": "BMS - 8.02 - D1 (Coleta Fiscal)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fornecedor_id": "={{ $('Buscar Fornecedor').item.json.fornecedor_id }}",
+            "analise_id": "={{ $('Webhook').item.json.body.record.id }}",
+            "cnpj": "={{ $('Buscar Fornecedor').item.json.cnpj }}",
+            "uf": "={{ $('Buscar Fornecedor').item.json.uf }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "fornecedor_id",
+              "displayName": "fornecedor_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "analise_id",
+              "displayName": "analise_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "cnpj",
+              "displayName": "cnpj",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "uf",
+              "displayName": "uf",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        912
+      ],
+      "id": "cbc8e9e7-44fc-4b7b-8a90-fa064c547c12",
+      "name": "Executar D1 (Coleta Fiscal)",
+      "notes": "IMPORTANTE: depois de importar o workflow D1 separadamente, abra este node e reselecione o workflow no campo 'workflowId' — o ID muda a cada import."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "orq-if-gate-d1",
+              "leftValue": "={{ $json.gate_disparado }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        912
+      ],
+      "id": "f7bb9264-dd0f-4c79-929c-ce9fbab4ea67",
+      "name": "D1 disparou gate?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET status = 'concluido', decisao = 'nao_elegivel_gate',\n    gate_disparado = '{{ $json.gate_disparado }}',\n    concluido_em = now()\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        688,
+        752
+      ],
+      "id": "9a428b09-d85a-4d3d-a18c-9ef98747f5dd",
+      "name": "Finalizar (Gate disparado no D1)",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET etapa_atual = 2, etapa_label = 'Financeira (D2)', fonte_atual = 'serasa_concentre'\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        960,
+        928
+      ],
+      "id": "a1abff44-70c6-4ae3-bb43-093edb74bc8e",
+      "name": "Etapa 2 · Financeira",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// PLACEHOLDER — sub-workflow D2 (Serasa Concentre) ainda não construído.\n// Endpoint/payload real da Serasa (RELATORIO_INTERMEDIARIO_PJ) ainda não foi validado nesta conversa.\n// Por enquanto devolve tudo como ND, sem disparar o Gate G2, pra não travar o fluxo.\nreturn [{ json: {\n  t_score: 'ND', t_protestos: 'ND', t_execucoes: 'ND', t_spc: 'ND', gate_disparado: null\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        928
+      ],
+      "id": "0f36f524-d517-4874-a88f-606a488cd686",
+      "name": "D2 (PLACEHOLDER — substituir por sub-workflow real)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "orq-if-gate-d2",
+              "leftValue": "={{ $json.gate_disparado }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1440,
+        928
+      ],
+      "id": "6b323422-58cb-433d-bdb4-f3cf00f0c240",
+      "name": "D2 disparou gate?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET status = 'concluido', decisao = 'nao_elegivel_gate',\n    gate_disparado = '{{ $json.gate_disparado }}',\n    concluido_em = now()\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1680,
+        768
+      ],
+      "id": "176350b2-c6a2-4559-8775-9ee768c26929",
+      "name": "Finalizar (Gate disparado no D2)",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d1 = $('Executar D1 (Coleta Fiscal)').item.json;\nconst d2 = $('D2 (PLACEHOLDER — substituir por sub-workflow real)').item.json;\nconst fornecedorAtualizado = $('Salvar Dados Cadastrais').item.json;\nconst dados = $('Buscar Tabelas de Pontos').item.json;\nconst tabelas = dados.tabelas_pontos || {};\nconst temD5 = Number(dados.respostas_existentes || 0) > 0;\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\n\n// ---------- D1 (com breakdown) ----------\nconst d1_subcriterios = [\n  { criterio: 'cnd_federal', label: 'CND/CPEN Federal', categoria: d1.t_cnd, pontos: pontosOpcao('cnd_federal', d1.t_cnd) },\n  { criterio: 'pgfn', label: 'Dívida ativa PGFN', categoria: d1.t_pgfn, pontos: pontosOpcao('pgfn', d1.t_pgfn) },\n  { criterio: 'sintonia', label: 'Receita Sintonia', categoria: 'ND', pontos: pontosOpcao('sintonia', 'ND') },\n  { criterio: 'regularidade_estadual_municipal', label: 'Regularidade estadual/municipal', categoria: d1.t_est, pontos: pontosOpcao('regularidade_estadual_municipal', d1.t_est) },\n  { criterio: 'obrigacoes_acessorias', label: 'Obrigações acessórias', categoria: 'ND', pontos: pontosOpcao('obrigacoes_acessorias', 'ND') },\n];\nconst s1 = d1_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D2 (com breakdown) ----------\nconst d2_subcriterios = [\n  { criterio: 'serasa_score', label: 'Serasa Score', categoria: d2.t_score, pontos: pontosBanda('serasa_score', d2.t_score) },\n  { criterio: 'protestos', label: 'Protestos', categoria: d2.t_protestos, pontos: pontosBanda('protestos', d2.t_protestos) },\n  { criterio: 'execucoes_relevantes', label: 'Execuções relevantes', categoria: d2.t_execucoes, pontos: pontosBanda('execucoes_relevantes', d2.t_execucoes) },\n  { criterio: 'spc', label: 'Negativação SPC', categoria: d2.t_spc, pontos: pontosOpcao('spc', d2.t_spc) },\n];\nconst s2 = d2_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D3 ----------\nconst regime = fornecedorAtualizado.regime_tributario || 'ND';\nconst s3 = pontosOpcao('regime_tributario', regime);\nconst d3_subcriterios = [\n  { criterio: 'regime_tributario', label: 'Regime tributário', categoria: regime, pontos: s3 },\n];\n\n// ---------- D4 ----------\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(fornecedorAtualizado.valor_compras_anual || 0);\nconst faturamentoFornecedor = Number(fornecedorAtualizado.faturamento_estimado || 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamentoFornecedor > 0) {\n  p_pct = (valorPago / faturamentoFornecedor) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = 100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0)));\n  s4 = Math.round(s4 * 100) / 100;\n} else {\n  s4 = 50;\n  d4_nd = true;\n}\nconst d4_detalhe = {\n  valor_compras_anual: valorPago,\n  faturamento_estimado_fornecedor: faturamentoFornecedor || null,\n  participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n  nd: d4_nd,\n  pontos: s4,\n};\n\n// ---------- Completude ----------\nconst camposND = [];\nif (d1.t_cnd === 'Não obtida') camposND.push('cnd_federal');\nif (d1.t_pgfn === 'Não verificado') camposND.push('pgfn');\ncamposND.push('sintonia', 'obrigacoes_acessorias');\nif (d1.t_est === 'ND') camposND.push('regularidade_estadual_municipal');\nif (d2.t_score === 'ND') camposND.push('serasa_score');\nif (d2.t_protestos === 'ND') camposND.push('protestos');\nif (d2.t_execucoes === 'ND') camposND.push('execucoes_relevantes');\nif (d2.t_spc === 'ND') camposND.push('spc');\nif (d4_nd) camposND.push('dependencia_faturamento');\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  s1_fiscal: s1, s2_financeira: s2, s3_regime: s3, s4_dependencia: s4,\n  s5_maturidade: null,\n  completude_pct, campos_nd: camposND,\n  breakdown: {\n    d1: { subcriterios: d1_subcriterios, total: s1, gate_disparado: d1.gate_disparado },\n    d2: { subcriterios: d2_subcriterios, total: s2, gate_disparado: d2.gate_disparado },\n    d3: { subcriterios: d3_subcriterios, total: s3 },\n    d4: d4_detalhe,\n  }\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2208,
+        944
+      ],
+      "id": "5b43b9c3-ce75-4f2d-a74a-0c216ea0f674",
+      "name": "Montar S1-S4 e Completude"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "o2QJUraN5YsNQuSt",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/o2QJUraN5YsNQuSt",
+          "cachedResultName": "BMS - 8.99 - Calcular Score"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "s1_fiscal": "={{ $json.s1_fiscal }}",
+            "s2_financeira": "={{ $json.s2_financeira }}",
+            "s3_regime": "={{ $json.s3_regime }}",
+            "s4_dependencia": "={{ $json.s4_dependencia }}",
+            "s5_maturidade": "={{ $json.s5_maturidade }}",
+            "completude_pct": "={{ $json.completude_pct }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "s1_fiscal",
+              "displayName": "s1_fiscal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s2_financeira",
+              "displayName": "s2_financeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s3_regime",
+              "displayName": "s3_regime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s4_dependencia",
+              "displayName": "s4_dependencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s5_maturidade",
+              "displayName": "s5_maturidade",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "completude_pct",
+              "displayName": "completude_pct",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2448,
+        944
+      ],
+      "id": "e51efa16-eedc-4e24-bbc9-6d443806d48e",
+      "name": "Executar Calcular Score",
+      "notes": "Reselecionar o workflow no dropdown depois de importar 'BMS - 8.99 - Calcular Score' — o ID muda a cada import."
+    },
+    {
+      "parameters": {
+        "jsCode": "const dims = $('Montar S1-S4 e Completude').item.json;\nconst score = $('Executar Calcular Score').item.json;\n\nreturn [{ json: {\n  s1_fiscal: dims.s1_fiscal, s2_financeira: dims.s2_financeira,\n  s3_regime: dims.s3_regime, s4_dependencia: dims.s4_dependencia,\n  s5_maturidade: dims.s5_maturidade,\n  completude_pct: dims.completude_pct, campos_nd: dims.campos_nd,\n  score_total: score.score_total, decisao: score.decisao, status: score.status,\n  preliminar: score.preliminar,\n  versao_pesos_id: score.versao_pesos_id, versao_thresholds_id: score.versao_thresholds_id,\n  detalhes_calculo: { ...dims.breakdown, pesos_usados: score.pesos_usados }\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2688,
+        944
+      ],
+      "id": "17d64382-dc63-4f73-8284-a4af8b4d1248",
+      "name": "Montar Resultado Final"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET status = '{{ $json.status }}',\n    decisao = {{ $json.decisao ? `'${$json.decisao}'` : 'null' }},\n    score_total = {{ $json.score_total }},\n    completude_pct = {{ $json.completude_pct }},\n    s1_fiscal = {{ $json.s1_fiscal }}, s2_financeira = {{ $json.s2_financeira }},\n    s3_regime = {{ $json.s3_regime }}, s4_dependencia = {{ $json.s4_dependencia }},\n    s5_maturidade = {{ $json.s5_maturidade ?? 'null' }},\n    campos_nd = '{{ JSON.stringify($json.campos_nd) }}'::jsonb,\n    preliminar = {{ $json.preliminar }},\n    versao_pesos_id = '{{ $json.versao_pesos_id }}',\n    versao_thresholds_id = '{{ $json.versao_thresholds_id }}',\n    detalhes_calculo = '{{ JSON.stringify($json.detalhes_calculo) }}'::jsonb,\n    etapa_atual = 5, etapa_label = 'Concluído',\n    concluido_em = now()\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2912,
+        944
+      ],
+      "id": "ca9b273a-f0a8-47af-b4f6-5b60a4b14daf",
+      "name": "Salvar Resultado da Análise",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT jsonb_object_agg(criterio, tabela_pontos) FROM credscore.parametros_tabelas WHERE ativo = true) AS tabelas_pontos,\n  (SELECT count(*) FROM credscore.questionario_respostas WHERE fornecedor_id = '{{ $('Buscar Fornecedor').item.json.fornecedor_id }}') AS respostas_existentes;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1968,
+        944
+      ],
+      "id": "6423e4c0-b470-419b-a50b-5aea048bfebf",
+      "name": "Buscar Tabelas de Pontos",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      },
+      "notes": "1 query só, com subqueries escalares. tabelas_pontos, pesos e thresholds vêm como jsonb (row_to_json / jsonb_object_agg), então o Code node de cálculo já recebe tudo estruturado sem precisar combinar vários nodes."
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Buscar Fornecedor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Fornecedor": {
+      "main": [
+        [
+          {
+            "node": "Etapa 0 · Enriquecimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Etapa 0 · Enriquecimento": {
+      "main": [
+        [
+          {
+            "node": "Direct Data · Cadastro PJ Plus",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Direct Data · Cadastro PJ Plus": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Dados Cadastrais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Dados Cadastrais": {
+      "main": [
+        [
+          {
+            "node": "Salvar Dados Cadastrais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar Dados Cadastrais": {
+      "main": [
+        [
+          {
+            "node": "Etapa 1 · Fiscal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Etapa 1 · Fiscal": {
+      "main": [
+        [
+          {
+            "node": "Executar D1 (Coleta Fiscal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar D1 (Coleta Fiscal)": {
+      "main": [
+        [
+          {
+            "node": "D1 disparou gate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "D1 disparou gate?": {
+      "main": [
+        [
+          {
+            "node": "Finalizar (Gate disparado no D1)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Etapa 2 · Financeira",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Etapa 2 · Financeira": {
+      "main": [
+        [
+          {
+            "node": "D2 (PLACEHOLDER — substituir por sub-workflow real)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "D2 (PLACEHOLDER — substituir por sub-workflow real)": {
+      "main": [
+        [
+          {
+            "node": "D2 disparou gate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "D2 disparou gate?": {
+      "main": [
+        [
+          {
+            "node": "Finalizar (Gate disparado no D2)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Buscar Tabelas de Pontos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar S1-S4 e Completude": {
+      "main": [
+        [
+          {
+            "node": "Executar Calcular Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar Calcular Score": {
+      "main": [
+        [
+          {
+            "node": "Montar Resultado Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Resultado Final": {
+      "main": [
+        [
+          {
+            "node": "Salvar Resultado da Análise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Tabelas de Pontos": {
+      "main": [
+        [
+          {
+            "node": "Montar S1-S4 e Completude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "bfa069f8-bf56-484a-9b2f-2c240d5a5c1f",
+  "activeVersionId": "bfa069f8-bf56-484a-9b2f-2c240d5a5c1f",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-07-28T11:53:19.042Z",
+      "createdAt": "2026-07-28T11:53:19.042Z",
+      "role": "workflow:owner",
+      "workflowId": "3ov4hvrZ16JoyoWF",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-07-28T19:42:22.781Z",
+    "createdAt": "2026-07-28T19:42:22.781Z",
+    "versionId": "bfa069f8-bf56-484a-9b2f-2c240d5a5c1f",
+    "workflowId": "3ov4hvrZ16JoyoWF",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "bms-cred-score",
+          "authentication": "***REMOVIDO***",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -1488,
+          912
+        ],
+        "id": "39e9f175-62c0-4678-87c8-0b3676418305",
+        "name": "Webhook",
+        "webhookId": "e6977154-7c31-48b7-8815-a898a70ebc83",
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "content": "## ENTRADA\nDisparado pelo trigger pg_net do Supabase sempre que uma linha nova\né criada em credscore.analises (status='aguardando') — o que acontece\nautomaticamente quando qualquer fornecedor novo é cadastrado (upload\núnico, em lote, portal do cliente ou mia-bms).\n\nAutenticação via Header Auth (x-webhook-secret) — configurada no\npróprio node, rejeita chamadas sem o header antes de qualquer execução.\n\n\"Buscar Fornecedor\" resolve o fornecedor_id do payload em CNPJ,\ncliente_id, uf, cidade, razão social etc.",
+          "height": 608,
+          "width": 480,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -1552,
+          528
+        ],
+        "id": "34a21200-a9bb-4cbb-99e0-7283c8bf72ed",
+        "name": "Sticky Note"
+      },
+      {
+        "parameters": {
+          "content": "## FASE 0 · ENRIQUECIMENTO CADASTRAL\nO usuário sobe só o CNPJ — todo o resto (razão social, nome fantasia,\nUF, cidade, regime tributário, porte) vem daqui.\n\nAPI: Direct Data · Cadastro Pessoa Jurídica Plus\nGET https://apiv3.directd.com.br/api/CadastroPessoaJuridicaPlus?CNPJ=...&Token=...\n\n\"Normalizar Dados Cadastrais\" combina opcaoMEI + opcaoSimples +\ntributacao num único regime_tributario (função classificarRegime).\nvalores reais desses 3 campos ainda não confirmados com teste real —\najustar a função depois do primeiro CNPJ de verdade.\n\n\"Salvar Dados Cadastrais\" grava tudo em credscore.fornecedores via\nUPDATE ... coalesce(novo, valor_atual) — nunca sobrescreve com null.",
+          "height": 608,
+          "width": 960,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -1056,
+          528
+        ],
+        "id": "390282a0-af79-4fb0-8173-4fb9238750aa",
+        "name": "Sticky Note1"
+      },
+      {
+        "parameters": {
+          "content": "## FASE 1 · D1 FISCAL (peso 30%)\nChama o sub-workflow \"BMS - 8.01 - D1 (Coleta Fiscal)\" via Execute\nWorkflow — CND Federal (Infosimples) + CND Estadual (Direct Data),\nclassificadas em t_cnd / t_pgfn / t_est.\n\nGATE G3: se t_cnd=\"Positiva\" E t_pgfn=\"Irregular\", o fornecedor é\neliminado aqui mesmo (decisao='nao_elegivel_gate') — o fluxo PARA,\nnunca chega a rodar D2/D3/D4/D5, porque já é reprovação automática.",
+          "height": 608,
+          "width": 976,
+          "color": 2
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -80,
+          528
+        ],
+        "id": "f9326a68-1dac-4841-af24-e63f15f414cd",
+        "name": "Sticky Note2"
+      },
+      {
+        "parameters": {
+          "content": "## FASE 2 · D2 FINANCEIRA (peso 20%) — AINDA É PLACEHOLDER\nAinda não temos o payload real da Serasa (Concentre/Relato) validado\nnesta conversa. Por enquanto devolve tudo ND, gate_disparado=null,\nsó pra não travar o fluxo.\n\nGATE G2 (recuperação judicial/falência) vai disparar aqui quando o\nsub-workflow real de D2 existir — hoje nunca dispara.\n\nSUBSTITUIR este node por um Execute Workflow chamando o sub-workflow\nD2 de verdade quando estiver pronto.",
+          "height": 608,
+          "width": 960,
+          "color": 3
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          912,
+          528
+        ],
+        "id": "09b9322e-97df-4bf2-9249-5365c1722cd4",
+        "name": "Sticky Note3"
+      },
+      {
+        "parameters": {
+          "content": "## FASE 3 e 4 · REGIME (D3) E DEPENDÊNCIA (D4) — sem API externa\nD3: lê fornecedores.regime_tributario (já populado na Fase 0) e\nclassifica direto pela tabela de pontos (T.regime).\n\nD4: p = valor_compras_anual do fornecedor / soma de todos os\nfornecedores do mesmo cliente. Curva linear com pisos (p0=2%, pmax=20%).\n\n\"Buscar Dados para o Cálculo\" é 1 query só com subqueries escalares:\ntabelas de pontos ativas (jsonb_object_agg), total de compras do\ncliente, e se já existe alguma resposta de D5 (edge case raro de\nD5 chegar antes do D1-D4 terminar).\n\n\"Montar S1-S4 e Completude\" soma os pontos de cada subcritério\n(usando as tabelas ativas, nunca hardcoded) e calcula completude_pct\ncom base em quantos campos vieram ND.",
+          "height": 608,
+          "width": 496
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1888,
+          528
+        ],
+        "id": "a8761c29-63a6-479e-ac69-732c5ad7818e",
+        "name": "Sticky Note4"
+      },
+      {
+        "parameters": {
+          "content": "## FASE 5 · SCORE FINAL (COM OU SEM D5)\nChama o sub-workflow compartilhado \"BMS - 8.99 - Calcular Score\"\n(mesmo usado pelo recálculo de D5) — ele decide sozinho se redistribui\nos pesos entre D1-D4 (quando ainda não há D5) ou usa os pesos cheios.\n\n\"Montar Resultado Final\" junta s1-s4 + resultado do sub-workflow +\ndetalhes de D1/D2, formando o jsonb final de detalhes_calculo.\n\n\"Salvar Resultado da Análise\" grava tudo em credscore.analises:\nscore_total, decisao, status (concluido/analise_manual), preliminar,\nversao_pesos_id, versao_thresholds_id.\n\npreliminar=true significa \"sem D5 ainda\" — o workflow\n\"BMS - 9.00 - Recálculo D5\" é quem vira isso pra false depois.",
+          "height": 608,
+          "width": 672,
+          "color": 5
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          2400,
+          528
+        ],
+        "id": "8f322e23-44c1-45c7-a17c-a7036992caa4",
+        "name": "Sticky Note5"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT f.id AS fornecedor_id, f.cnpj, f.cliente_id, f.uf, f.cidade, f.razao_social, f.regime_tributario, f.valor_compras_anual\nFROM credscore.fornecedores f\nWHERE f.id = '{{ $json.body.record.fornecedor_id }}';",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -1232,
+          912
+        ],
+        "id": "99015df5-69a0-4a21-b025-cfb0b9e5d272",
+        "name": "Buscar Fornecedor",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE credscore.analises\nSET etapa_atual = 0, etapa_label = 'Enriquecimento cadastral', fonte_atual = 'econodata_cadastral'\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -992,
+          912
+        ],
+        "id": "53dcf7e4-4c03-4947-b988-1437e95a758d",
+        "name": "Etapa 0 · Enriquecimento",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "https://apiv3.directd.com.br/api/CadastroPessoaJuridicaPlus",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "CNPJ",
+                "value": "={{ $('Buscar Fornecedor').item.json.cnpj }}"
+              },
+              {
+                "name": "Token",
+                "value": "69CF4210-A64F-44BE-96A4-0E4B5FBA9C90"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          -752,
+          912
+        ],
+        "id": "89f35eb9-4713-41cd-820c-4e5d7d580ac6",
+        "name": "Direct Data · Cadastro PJ Plus",
+        "notes": "Trocar o Token direto no node por credencial. Ao testar a 1a vez, colar aqui o JSON real de retorno pra confirmar os valores exatos de opcaoSimples/opcaoMEI/tributacao (o schema oficial só mostra tipos genéricos, não os valores reais)."
+      },
+      {
+        "parameters": {
+          "jsCode": "const dd = $('Direct Data · Cadastro PJ Plus').item.json.retorno ?? {};\nconst f = $('Buscar Fornecedor').item.json;\nconst end = (dd.enderecos && dd.enderecos[0]) || {};\n\nfunction classificarRegime(r) {\n  const mei = (r.opcaoMEI || '').toString().toUpperCase();\n  const simples = (r.opcaoSimples || '').toString().toUpperCase();\n  if (mei === 'SIM' || mei === 'S' || r.opcaoMEI === true) return 'MEI';\n  if (simples === 'SIM' || simples === 'S' || r.opcaoSimples === true) return 'Simples Nacional (padrão)';\n  const trib = (r.tributacao || '').toLowerCase();\n  if (trib.includes('real')) return 'Lucro Real (regime regular IBS/CBS)';\n  if (trib.includes('presumido')) return 'Lucro Presumido';\n  if (trib.includes('imune') || trib.includes('isento')) return 'Imune/Isento/Não contribuinte';\n  return 'ND';\n}\n\nfunction extrairFaturamento(r) {\n  const raw = r.faturamentoPresumido;\n  if (!raw) return null;\n  let s = String(raw).replace(/[^\\d,.-]/g, '');\n  if (s.includes(',')) {\n    s = s.replace(/\\./g, '').replace(',', '.');\n  }\n  const valor = parseFloat(s);\n  return Number.isFinite(valor) ? valor : null;\n}\n\nreturn [{\n  json: {\n    fornecedor_id: f.fornecedor_id,\n    razao_social: dd.razaoSocial ?? f.razao_social ?? null,\n    nome_fantasia: dd.nomeFantasia ?? null,\n    uf: end.uf ?? f.uf ?? null,\n    cidade: end.cidade ?? f.cidade ?? null,\n    regime_tributario: classificarRegime(dd),\n    porte: dd.porte ?? null,\n    faturamento_estimado: extrairFaturamento(dd)\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -512,
+          912
+        ],
+        "id": "b6008a25-c9f4-40be-87ef-07aa465eac67",
+        "name": "Normalizar Dados Cadastrais"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE credscore.fornecedores\nSET razao_social = coalesce('{{ $json.razao_social }}', razao_social),\n    nome_fantasia = coalesce('{{ $json.nome_fantasia }}', nome_fantasia),\n    uf = coalesce('{{ $json.uf }}', uf),\n    cidade = coalesce('{{ $json.cidade }}', cidade),\n    regime_tributario = coalesce('{{ $json.regime_tributario }}', regime_tributario),\n    porte = coalesce('{{ $json.porte }}', porte),\n    faturamento_estimado = coalesce({{ $json.faturamento_estimado ?? 'null' }}, faturamento_estimado)\nWHERE id = '{{ $json.fornecedor_id }}'\nRETURNING *;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -272,
+          912
+        ],
+        "id": "e5393f50-89f8-4a78-836f-1523169e3821",
+        "name": "Salvar Dados Cadastrais",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE credscore.analises\nSET etapa_atual = 1, etapa_label = 'Fiscal (D1)', fonte_atual = 'directd_infosimples'\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -32,
+          912
+        ],
+        "id": "6d2424b1-84e2-46d2-aa23-5179511dbb4e",
+        "name": "Etapa 1 · Fiscal",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "vMZ5DOEK5HzwP9df",
+            "mode": "list",
+            "cachedResultUrl": "/workflow/vMZ5DOEK5HzwP9df",
+            "cachedResultName": "BMS - 8.02 - D1 (Coleta Fiscal)"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "fornecedor_id": "={{ $('Buscar Fornecedor').item.json.fornecedor_id }}",
+              "analise_id": "={{ $('Webhook').item.json.body.record.id }}",
+              "cnpj": "={{ $('Buscar Fornecedor').item.json.cnpj }}",
+              "uf": "={{ $('Buscar Fornecedor').item.json.uf }}"
+            },
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "fornecedor_id",
+                "displayName": "fornecedor_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "analise_id",
+                "displayName": "analise_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "cnpj",
+                "displayName": "cnpj",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "uf",
+                "displayName": "uf",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          208,
+          912
+        ],
+        "id": "cbc8e9e7-44fc-4b7b-8a90-fa064c547c12",
+        "name": "Executar D1 (Coleta Fiscal)",
+        "notes": "IMPORTANTE: depois de importar o workflow D1 separadamente, abra este node e reselecione o workflow no campo 'workflowId' — o ID muda a cada import."
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "orq-if-gate-d1",
+                "leftValue": "={{ $json.gate_disparado }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          448,
+          912
+        ],
+        "id": "f7bb9264-dd0f-4c79-929c-ce9fbab4ea67",
+        "name": "D1 disparou gate?"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE credscore.analises\nSET status = 'concluido', decisao = 'nao_elegivel_gate',\n    gate_disparado = '{{ $json.gate_disparado }}',\n    concluido_em = now()\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          688,
+          752
+        ],
+        "id": "9a428b09-d85a-4d3d-a18c-9ef98747f5dd",
+        "name": "Finalizar (Gate disparado no D1)",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE credscore.analises\nSET etapa_atual = 2, etapa_label = 'Financeira (D2)', fonte_atual = 'serasa_concentre'\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          960,
+          928
+        ],
+        "id": "a1abff44-70c6-4ae3-bb43-093edb74bc8e",
+        "name": "Etapa 2 · Financeira",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// PLACEHOLDER — sub-workflow D2 (Serasa Concentre) ainda não construído.\n// Endpoint/payload real da Serasa (RELATORIO_INTERMEDIARIO_PJ) ainda não foi validado nesta conversa.\n// Por enquanto devolve tudo como ND, sem disparar o Gate G2, pra não travar o fluxo.\nreturn [{ json: {\n  t_score: 'ND', t_protestos: 'ND', t_execucoes: 'ND', t_spc: 'ND', gate_disparado: null\n} }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1200,
+          928
+        ],
+        "id": "0f36f524-d517-4874-a88f-606a488cd686",
+        "name": "D2 (PLACEHOLDER — substituir por sub-workflow real)"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "orq-if-gate-d2",
+                "leftValue": "={{ $json.gate_disparado }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          1440,
+          928
+        ],
+        "id": "6b323422-58cb-433d-bdb4-f3cf00f0c240",
+        "name": "D2 disparou gate?"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE credscore.analises\nSET status = 'concluido', decisao = 'nao_elegivel_gate',\n    gate_disparado = '{{ $json.gate_disparado }}',\n    concluido_em = now()\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1680,
+          768
+        ],
+        "id": "176350b2-c6a2-4559-8775-9ee768c26929",
+        "name": "Finalizar (Gate disparado no D2)",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const d1 = $('Executar D1 (Coleta Fiscal)').item.json;\nconst d2 = $('D2 (PLACEHOLDER — substituir por sub-workflow real)').item.json;\nconst fornecedorAtualizado = $('Salvar Dados Cadastrais').item.json;\nconst dados = $('Buscar Tabelas de Pontos').item.json;\nconst tabelas = dados.tabelas_pontos || {};\nconst temD5 = Number(dados.respostas_existentes || 0) > 0;\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\n\n// ---------- D1 (com breakdown) ----------\nconst d1_subcriterios = [\n  { criterio: 'cnd_federal', label: 'CND/CPEN Federal', categoria: d1.t_cnd, pontos: pontosOpcao('cnd_federal', d1.t_cnd) },\n  { criterio: 'pgfn', label: 'Dívida ativa PGFN', categoria: d1.t_pgfn, pontos: pontosOpcao('pgfn', d1.t_pgfn) },\n  { criterio: 'sintonia', label: 'Receita Sintonia', categoria: 'ND', pontos: pontosOpcao('sintonia', 'ND') },\n  { criterio: 'regularidade_estadual_municipal', label: 'Regularidade estadual/municipal', categoria: d1.t_est, pontos: pontosOpcao('regularidade_estadual_municipal', d1.t_est) },\n  { criterio: 'obrigacoes_acessorias', label: 'Obrigações acessórias', categoria: 'ND', pontos: pontosOpcao('obrigacoes_acessorias', 'ND') },\n];\nconst s1 = d1_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D2 (com breakdown) ----------\nconst d2_subcriterios = [\n  { criterio: 'serasa_score', label: 'Serasa Score', categoria: d2.t_score, pontos: pontosBanda('serasa_score', d2.t_score) },\n  { criterio: 'protestos', label: 'Protestos', categoria: d2.t_protestos, pontos: pontosBanda('protestos', d2.t_protestos) },\n  { criterio: 'execucoes_relevantes', label: 'Execuções relevantes', categoria: d2.t_execucoes, pontos: pontosBanda('execucoes_relevantes', d2.t_execucoes) },\n  { criterio: 'spc', label: 'Negativação SPC', categoria: d2.t_spc, pontos: pontosOpcao('spc', d2.t_spc) },\n];\nconst s2 = d2_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D3 ----------\nconst regime = fornecedorAtualizado.regime_tributario || 'ND';\nconst s3 = pontosOpcao('regime_tributario', regime);\nconst d3_subcriterios = [\n  { criterio: 'regime_tributario', label: 'Regime tributário', categoria: regime, pontos: s3 },\n];\n\n// ---------- D4 ----------\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(fornecedorAtualizado.valor_compras_anual || 0);\nconst faturamentoFornecedor = Number(fornecedorAtualizado.faturamento_estimado || 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamentoFornecedor > 0) {\n  p_pct = (valorPago / faturamentoFornecedor) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = 100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0)));\n  s4 = Math.round(s4 * 100) / 100;\n} else {\n  s4 = 50;\n  d4_nd = true;\n}\nconst d4_detalhe = {\n  valor_compras_anual: valorPago,\n  faturamento_estimado_fornecedor: faturamentoFornecedor || null,\n  participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n  nd: d4_nd,\n  pontos: s4,\n};\n\n// ---------- Completude ----------\nconst camposND = [];\nif (d1.t_cnd === 'Não obtida') camposND.push('cnd_federal');\nif (d1.t_pgfn === 'Não verificado') camposND.push('pgfn');\ncamposND.push('sintonia', 'obrigacoes_acessorias');\nif (d1.t_est === 'ND') camposND.push('regularidade_estadual_municipal');\nif (d2.t_score === 'ND') camposND.push('serasa_score');\nif (d2.t_protestos === 'ND') camposND.push('protestos');\nif (d2.t_execucoes === 'ND') camposND.push('execucoes_relevantes');\nif (d2.t_spc === 'ND') camposND.push('spc');\nif (d4_nd) camposND.push('dependencia_faturamento');\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  s1_fiscal: s1, s2_financeira: s2, s3_regime: s3, s4_dependencia: s4,\n  s5_maturidade: null,\n  completude_pct, campos_nd: camposND,\n  breakdown: {\n    d1: { subcriterios: d1_subcriterios, total: s1, gate_disparado: d1.gate_disparado },\n    d2: { subcriterios: d2_subcriterios, total: s2, gate_disparado: d2.gate_disparado },\n    d3: { subcriterios: d3_subcriterios, total: s3 },\n    d4: d4_detalhe,\n  }\n} }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2208,
+          944
+        ],
+        "id": "5b43b9c3-ce75-4f2d-a74a-0c216ea0f674",
+        "name": "Montar S1-S4 e Completude"
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "o2QJUraN5YsNQuSt",
+            "mode": "list",
+            "cachedResultUrl": "/workflow/o2QJUraN5YsNQuSt",
+            "cachedResultName": "BMS - 8.99 - Calcular Score"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "s1_fiscal": "={{ $json.s1_fiscal }}",
+              "s2_financeira": "={{ $json.s2_financeira }}",
+              "s3_regime": "={{ $json.s3_regime }}",
+              "s4_dependencia": "={{ $json.s4_dependencia }}",
+              "s5_maturidade": "={{ $json.s5_maturidade }}",
+              "completude_pct": "={{ $json.completude_pct }}"
+            },
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "s1_fiscal",
+                "displayName": "s1_fiscal",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              },
+              {
+                "id": "s2_financeira",
+                "displayName": "s2_financeira",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              },
+              {
+                "id": "s3_regime",
+                "displayName": "s3_regime",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              },
+              {
+                "id": "s4_dependencia",
+                "displayName": "s4_dependencia",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              },
+              {
+                "id": "s5_maturidade",
+                "displayName": "s5_maturidade",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              },
+              {
+                "id": "completude_pct",
+                "displayName": "completude_pct",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          2448,
+          944
+        ],
+        "id": "e51efa16-eedc-4e24-bbc9-6d443806d48e",
+        "name": "Executar Calcular Score",
+        "notes": "Reselecionar o workflow no dropdown depois de importar 'BMS - 8.99 - Calcular Score' — o ID muda a cada import."
+      },
+      {
+        "parameters": {
+          "jsCode": "const dims = $('Montar S1-S4 e Completude').item.json;\nconst score = $('Executar Calcular Score').item.json;\n\nreturn [{ json: {\n  s1_fiscal: dims.s1_fiscal, s2_financeira: dims.s2_financeira,\n  s3_regime: dims.s3_regime, s4_dependencia: dims.s4_dependencia,\n  s5_maturidade: dims.s5_maturidade,\n  completude_pct: dims.completude_pct, campos_nd: dims.campos_nd,\n  score_total: score.score_total, decisao: score.decisao, status: score.status,\n  preliminar: score.preliminar,\n  versao_pesos_id: score.versao_pesos_id, versao_thresholds_id: score.versao_thresholds_id,\n  detalhes_calculo: { ...dims.breakdown, pesos_usados: score.pesos_usados }\n} }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2688,
+          944
+        ],
+        "id": "17d64382-dc63-4f73-8284-a4af8b4d1248",
+        "name": "Montar Resultado Final"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE credscore.analises\nSET status = '{{ $json.status }}',\n    decisao = {{ $json.decisao ? `'${$json.decisao}'` : 'null' }},\n    score_total = {{ $json.score_total }},\n    completude_pct = {{ $json.completude_pct }},\n    s1_fiscal = {{ $json.s1_fiscal }}, s2_financeira = {{ $json.s2_financeira }},\n    s3_regime = {{ $json.s3_regime }}, s4_dependencia = {{ $json.s4_dependencia }},\n    s5_maturidade = {{ $json.s5_maturidade ?? 'null' }},\n    campos_nd = '{{ JSON.stringify($json.campos_nd) }}'::jsonb,\n    preliminar = {{ $json.preliminar }},\n    versao_pesos_id = '{{ $json.versao_pesos_id }}',\n    versao_thresholds_id = '{{ $json.versao_thresholds_id }}',\n    detalhes_calculo = '{{ JSON.stringify($json.detalhes_calculo) }}'::jsonb,\n    etapa_atual = 5, etapa_label = 'Concluído',\n    concluido_em = now()\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          2912,
+          944
+        ],
+        "id": "ca9b273a-f0a8-47af-b4f6-5b60a4b14daf",
+        "name": "Salvar Resultado da Análise",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT\n  (SELECT jsonb_object_agg(criterio, tabela_pontos) FROM credscore.parametros_tabelas WHERE ativo = true) AS tabelas_pontos,\n  (SELECT count(*) FROM credscore.questionario_respostas WHERE fornecedor_id = '{{ $('Buscar Fornecedor').item.json.fornecedor_id }}') AS respostas_existentes;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1968,
+          944
+        ],
+        "id": "6423e4c0-b470-419b-a50b-5aea048bfebf",
+        "name": "Buscar Tabelas de Pontos",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        },
+        "notes": "1 query só, com subqueries escalares. tabelas_pontos, pesos e thresholds vêm como jsonb (row_to_json / jsonb_object_agg), então o Code node de cálculo já recebe tudo estruturado sem precisar combinar vários nodes."
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Buscar Fornecedor",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar Fornecedor": {
+        "main": [
+          [
+            {
+              "node": "Etapa 0 · Enriquecimento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Etapa 0 · Enriquecimento": {
+        "main": [
+          [
+            {
+              "node": "Direct Data · Cadastro PJ Plus",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Direct Data · Cadastro PJ Plus": {
+        "main": [
+          [
+            {
+              "node": "Normalizar Dados Cadastrais",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalizar Dados Cadastrais": {
+        "main": [
+          [
+            {
+              "node": "Salvar Dados Cadastrais",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Salvar Dados Cadastrais": {
+        "main": [
+          [
+            {
+              "node": "Etapa 1 · Fiscal",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Etapa 1 · Fiscal": {
+        "main": [
+          [
+            {
+              "node": "Executar D1 (Coleta Fiscal)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Executar D1 (Coleta Fiscal)": {
+        "main": [
+          [
+            {
+              "node": "D1 disparou gate?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "D1 disparou gate?": {
+        "main": [
+          [
+            {
+              "node": "Finalizar (Gate disparado no D1)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Etapa 2 · Financeira",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Etapa 2 · Financeira": {
+        "main": [
+          [
+            {
+              "node": "D2 (PLACEHOLDER — substituir por sub-workflow real)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "D2 (PLACEHOLDER — substituir por sub-workflow real)": {
+        "main": [
+          [
+            {
+              "node": "D2 disparou gate?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "D2 disparou gate?": {
+        "main": [
+          [
+            {
+              "node": "Finalizar (Gate disparado no D2)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Buscar Tabelas de Pontos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar S1-S4 e Completude": {
+        "main": [
+          [
+            {
+              "node": "Executar Calcular Score",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Executar Calcular Score": {
+        "main": [
+          [
+            {
+              "node": "Montar Resultado Final",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar Resultado Final": {
+        "main": [
+          [
+            {
+              "node": "Salvar Resultado da Análise",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar Tabelas de Pontos": {
+        "main": [
+          [
+            {
+              "node": "Montar S1-S4 e Completude",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
