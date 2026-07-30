@@ -1,11 +1,39 @@
 {
-  "updatedAt": "2026-07-28T19:10:17.061Z",
+  "updatedAt": "2026-07-29T13:49:11.759Z",
   "createdAt": "2026-07-28T13:43:53.110Z",
   "id": "vMZ5DOEK5HzwP9df",
   "name": "BMS - 8.02 - D1 (Coleta Fiscal)",
   "active": false,
-  "isArchived": false,
+  "isArchived": true,
   "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "fornecedor_id"
+            },
+            {
+              "name": "analise_id"
+            },
+            {
+              "name": "cnpj"
+            },
+            {
+              "name": "uf"
+            }
+          ]
+        }
+      },
+      "id": "8fc41a31-6847-4196-94eb-add78c4d26f9",
+      "typeVersion": 1.1,
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        -416,
+        1168
+      ]
+    },
     {
       "parameters": {
         "url": "https://apiv3.directd.com.br/api/CertidaoNegativaDebitos",
@@ -31,12 +59,12 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        272,
-        672
+        -128,
+        1024
       ],
-      "id": "30a187ba-4f3c-4ce0-90cf-27977793bced",
+      "id": "40b8e467-602d-4e25-a85b-f04c3765548b",
       "name": "Direct Data · CND Estadual",
-      "notes": "Trocar o TOKEN direto no node por uma credencial (Header Auth ou Query Auth) — não deixar chave em texto puro."
+      "notes": "Trocar o TOKEN direto no node por uma credencial — não deixar chave em texto puro."
     },
     {
       "parameters": {
@@ -70,33 +98,164 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        272,
-        912
+        -128,
+        1232
       ],
-      "id": "17afaf4f-9a22-4102-b38e-b17a2b0587e8",
+      "id": "219c4a5c-7b50-46f0-b37d-8118a20d571d",
       "name": "Infosimples · CND Federal",
       "notes": "Trocar o token direto no node por uma credencial."
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d1-if-infosimples-ok",
+              "leftValue": "={{ $json.data_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        48,
+        1232
+      ],
+      "id": "38a20aa1-1901-40ae-8884-84e1b913110e",
+      "name": "Infosimples conseguiu emitir?",
+      "notes": "data_count > 0 = certidão emitida com sucesso. data_count = 0 (ex: code 611, cadastro incompleto na RFB) = precisa do fallback."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Infosimples emitiu a certidão normalmente — não precisa consultar a Direct Data PGFN, então nem gastamos essa chamada.\nreturn [{ json: { pgfn_fallback_payload: null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        1152
+      ],
+      "id": "4074b743-9814-4b26-99f8-fffb4e78575c",
+      "name": "Sem Fallback PGFN"
+    },
+    {
+      "parameters": {
+        "url": "https://apiv3.directd.com.br/api/PGFNListaDevedoresUniao",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "CNPJ",
+              "value": "={{ $('When Executed by Another Workflow').item.json.cnpj }}"
+            },
+            {
+              "name": "GERARCOMPROVANTE",
+              "value": "Desabilitar"
+            },
+            {
+              "name": "TOKEN",
+              "value": "69CF4210-A64F-44BE-96A4-0E4B5FBA9C90"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        288,
+        1296
+      ],
+      "id": "caad34c5-3fbd-4e04-a22d-2628a9396e2a",
+      "name": "Direct Data · PGFN Lista de Devedores",
+      "notes": "Só é chamado quando a Infosimples NÃO conseguiu emitir a certidão. Não emite certidão, só consulta o cadastro público de devedores (por isso não trava quando a emissão oficial falha) — cobre só o subcritério PGFN, nunca o t_cnd. Trocar o TOKEN por credencial."
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { pgfn_fallback_payload: $json } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        1296
+      ],
+      "id": "59af6016-ec7a-42cd-848a-18c09a0753bf",
+      "name": "Com Fallback PGFN"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        768,
+        1040
+      ],
+      "id": "85e5603e-81c3-47a5-bc95-e6a708762795",
+      "name": "Merge",
+      "notes": "Barreira de sincronização: espera a CND Estadual (input 0) E o resultado do PGFN — com ou sem fallback (input 1) — antes de seguir. Não usamos o item mesclado em si; a consolidação de verdade acontece no próximo node."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega o pgfn_fallback_payload de qualquer um dos dois branches que rodou\n// (só um dos dois sempre roda, nunca os dois — usa try/catch porque referenciar\n// um node que não executou nesta run lança erro).\nlet pgfnFallbackPayload = null;\ntry {\n  pgfnFallbackPayload = $('Com Fallback PGFN').first().json.pgfn_fallback_payload;\n} catch (e) {\n  try {\n    pgfnFallbackPayload = $('Sem Fallback PGFN').first().json.pgfn_fallback_payload;\n  } catch (e2) {\n    pgfnFallbackPayload = null;\n  }\n}\nreturn [{ json: { pgfn_fallback_payload: pgfnFallbackPayload } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        1040
+      ],
+      "id": "6b389c4f-54f2-4997-b98d-cab6abd51b88",
+      "name": "Consolidar PGFN Fallback"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cnd = $('Infosimples · CND Federal').first().json.data?.[0] ?? null;\nconst est = $('Direct Data · CND Estadual').first().json.retorno ?? null;\nconst pgfnFallback = $('Consolidar PGFN Fallback').first().json.pgfn_fallback_payload;\nconst pgfnLista = pgfnFallback ? pgfnFallback.retorno ?? null : null;\n\nlet t_cnd = \"Não obtida\";\nlet t_pgfn = \"Não verificado\";\n\nif (cnd) {\n  const tipo = cnd.tipo || \"\";\n  if (tipo.includes(\"efeitos de negativa\")) t_cnd = \"Positiva c/ efeitos de negativa\";\n  else if (tipo === \"Positiva\") t_cnd = \"Positiva\";\n  else if (tipo === \"Negativa\") t_cnd = \"Negativa\";\n\n  t_pgfn = \"Não\";\n  if (cnd.debitos_pgfn === true) {\n    t_pgfn = tipo.includes(\"efeitos de negativa\") ? \"Parcelada/garantida\" : \"Irregular\";\n  }\n} else if (pgfnLista) {\n  // Fallback: Infosimples não emitiu a certidão (ex: code 611), mas a Direct Data\n  // confirma via cadastro público de devedores. t_cnd continua \"Não obtida\"\n  // (nenhuma fonte alternativa emite a certidão em si), só t_pgfn é recuperado.\n  t_pgfn = pgfnLista.possuiDivida === false ? \"Não\" : \"Irregular\";\n}\n\nlet t_est = \"ND\";\nif (est) {\n  t_est = (!est.possuiDebito || est.efeitoNegativa) ? \"Regular\" : \"Irregular\";\n}\n\nconst gateDisparado = (t_cnd === \"Positiva\" && t_pgfn === \"Irregular\")\n  ? \"G3: CND federal positiva + PGFN irregular\"\n  : null;\n\nreturn [{ json: { t_cnd, t_pgfn, t_est, gate_disparado: gateDisparado } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        1040
+      ],
+      "id": "171921d0-0ae1-4f4a-a091-81fed54b0435",
+      "name": "Classificar D1"
+    },
+    {
+      "parameters": {
         "operation": "executeQuery",
-        "query": "WITH ins1 AS (\n  INSERT INTO credscore.fornecedor_dados_brutos (fornecedor_id, fonte, payload)\n  VALUES ('{{ $('When Executed by Another Workflow').first().json.fornecedor_id }}', 'infosimples_cnd_pgfn', '{{ JSON.stringify($('Infosimples · CND Federal').first().json) }}'::jsonb)\n),\nins2 AS (\n  INSERT INTO credscore.fornecedor_dados_brutos (fornecedor_id, fonte, payload)\n  VALUES ('{{ $('When Executed by Another Workflow').first().json.fornecedor_id }}', 'directd_cnd_estadual', '{{ JSON.stringify($('Direct Data · CND Estadual').first().json) }}'::jsonb)\n)\nSELECT 1;",
+        "query": "WITH ins1 AS (\n  INSERT INTO credscore.fornecedor_dados_brutos (fornecedor_id, fonte, payload)\n  VALUES ('{{ $('When Executed by Another Workflow').first().json.fornecedor_id }}', 'infosimples_cnd_pgfn', '{{ JSON.stringify($('Infosimples · CND Federal').first().json) }}'::jsonb)\n),\nins2 AS (\n  INSERT INTO credscore.fornecedor_dados_brutos (fornecedor_id, fonte, payload)\n  VALUES ('{{ $('When Executed by Another Workflow').first().json.fornecedor_id }}', 'directd_cnd_estadual', '{{ JSON.stringify($('Direct Data · CND Estadual').first().json) }}'::jsonb)\n),\nins3 AS (\n  INSERT INTO credscore.fornecedor_dados_brutos (fornecedor_id, fonte, payload)\n  SELECT '{{ $('When Executed by Another Workflow').first().json.fornecedor_id }}', 'directd_pgfn_lista_devedores', payload_val::jsonb\n  FROM (SELECT '{{ JSON.stringify($('Consolidar PGFN Fallback').first().json.pgfn_fallback_payload) }}' AS payload_val) x\n  WHERE payload_val <> 'null'\n)\nSELECT 1;",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        976,
-        800
+        1424,
+        1040
       ],
-      "id": "e6684b34-279b-4799-ac95-d70ccbf20171",
+      "id": "690930dc-1b5d-41e5-803f-39b0777f6334",
       "name": "Salvar Dados Brutos",
       "credentials": {
         "postgres": {
           "id": "F5GuYkVQ5eWZE44i",
           "name": "BMS-Postgres"
         }
-      }
+      },
+      "notes": "O 3º insert (directd_pgfn_lista_devedores) só acontece se o fallback foi realmente usado (payload_val diferente de 'null') — não grava um registro vazio quando a Infosimples funcionou normalmente."
     },
     {
       "parameters": {
@@ -129,129 +288,110 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1184,
-        800
+        1664,
+        1040
       ],
-      "id": "56461222-83e5-4a64-9942-62a1d3408f2e",
+      "id": "4015db36-b40a-43a9-90a3-eba6fb75c5d2",
       "name": "Retorno pro Orquestrador"
     },
     {
       "parameters": {
-        "workflowInputs": {
-          "values": [
-            {
-              "name": "fornecedor_id"
-            },
-            {
-              "name": "analise_id"
-            },
-            {
-              "name": "cnpj"
-            },
-            {
-              "name": "uf"
-            }
-          ]
-        }
-      },
-      "id": "0f675f1b-c0ff-4deb-9a43-a5ef2ddeb362",
-      "typeVersion": 1.1,
-      "name": "When Executed by Another Workflow",
-      "type": "n8n-nodes-base.executeWorkflowTrigger",
-      "position": [
-        -80,
-        784
-      ]
-    },
-    {
-      "parameters": {
-        "content": "## ENTRADA\nSUB-WORKFLOW — só roda quando chamado pelo Orquestrador (Execute\nWorkflow), nunca é disparado direto por webhook.\nRecebe: fornecedor_id, analise_id, cnpj.",
-        "height": 736,
-        "width": 192,
+        "content": "## ENTRADA\nSUB-WORKFLOW — só roda quando chamado pelo Orquestrador.\nRecebe: fornecedor_id, analise_id, cnpj, uf.",
+        "height": 784,
+        "width": 176,
         "color": 4
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -128,
-        352
+        -448,
+        720
       ],
-      "id": "2d4c335c-94ab-42ca-9f30-163b906e58ec",
-      "name": "Sticky Note"
+      "id": "733d0423-bcd4-4dae-822c-7e4ab71929f7",
+      "name": "Sticky Note Entrada"
     },
     {
       "parameters": {
-        "content": "## DUAS CONSULTAS EM PARALELO, provedores diferentes:\n\nDirect Data · CND Estadual\nGET https://apiv3.directd.com.br/api/CertidaoNegativaDebitos?CNPJ=...&TOKEN=...\nCampos-chave: possuiDebito (bool), efeitoNegativa (bool)\n\nInfosimples · CND Federal (Receita Federal + PGFN, é o MESMO documento,\n\"PGFN\" é só uma das duas partes que compõem a certidão)\nPOST https://api.infosimples.com/api/v2/consultas/receita-federal/pgfn\nCampos-chave: tipo (Negativa/Positiva/Positiva c/ efeitos), debitos_pgfn (bool)\n",
-        "height": 736,
-        "width": 496,
+        "content": "## CND ESTADUAL + CND FEDERAL, em paralelo\n\nDirect Data · CND Estadual — sempre roda.\nGET .../api/CertidaoNegativaDebitos?CNPJ=...&UF=...&TOKEN=...\nCampos-chave: possuiDebito (bool), efeitoNegativa (bool)\n\nInfosimples · CND Federal — sempre roda (é a fonte principal do PGFN).\nPOST .../receita-federal/pgfn\nCampos-chave: data_count (0 = falhou em emitir), data[0].tipo, data[0].debitos_pgfn",
+        "height": 784,
+        "width": 464,
         "color": 6
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        80,
-        352
+        -256,
+        720
       ],
-      "id": "fc6e9ad8-ab90-41ae-a7a5-02f7940d3bd9",
-      "name": "Sticky Note1"
+      "id": "ac0ede51-185d-4871-95d4-7e3f2f223034",
+      "name": "Sticky Note Parte 1"
     },
     {
       "parameters": {
-        "content": "## NORMALIZAÇÃO\nTraduz as duas respostas brutas em 3 categorias limpas, que batem\nexatamente com as chaves da tabela de pontos (parametros_tabelas):\n\nt_cnd  → Negativa / Positiva c/ efeitos de negativa / Positiva / Não obtida\nt_pgfn → Não / Parcelada/garantida / Irregular / Não verificado\nt_est  → Regular / Irregular / ND\n\nTambém calcula gate_disparado (G3) aqui: t_cnd=\"Positiva\" E\nt_pgfn=\"Irregular\" → \"G3: CND federal positiva + PGFN irregular\".\n\nNunca hardcoda pontos — só classifica em categoria. Quem traduz\ncategoria→pontos é o Orquestrador, lendo parametros_tabelas.",
-        "height": 736,
-        "width": 288,
+        "content": "## FALLBACK CONDICIONAL DO PGFN\nSó dispara a chamada da Direct Data (PGFN Lista de Devedores) quando\na Infosimples REALMENTE falhar em emitir a certidão (data_count=0) —\nnão gasta essa consulta à toa nos casos normais (maioria dos casos).\n\n\"Infosimples conseguiu emitir?\" (IF) decide:\n  TRUE  → \"Sem Fallback PGFN\" (Code) — não chama nada a mais.\n  FALSE → \"Direct Data · PGFN Lista de Devedores\" (HTTP) → \"Com Fallback PGFN\" (Code)\n\nOs dois caminhos convergem no mesmo lugar (Merge, input 1) — só um\ndos dois roda por execução, nunca os dois.",
+        "height": 784,
+        "width": 400,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        224,
+        720
+      ],
+      "id": "17abf7cf-1b80-43c5-8b0f-ee893b9192df",
+      "name": "Sticky Note Fallback"
+    },
+    {
+      "parameters": {
+        "content": "## SINCRONIZAÇÃO + CLASSIFICAÇÃO\n\"Merge\" espera a CND Estadual e o resultado do PGFN (com ou sem\nfallback) antes de seguir.\n\n\"Consolidar PGFN Fallback\" usa try/catch pra pegar o resultado de\nqual dos dois branches rodou, sem quebrar quando o outro não executou.\n\n\"Classificar D1\" traduz tudo em t_cnd/t_pgfn/t_est + calcula o Gate G3.\nNunca hardcoda pontos — só classifica em categoria.",
+        "height": 784,
+        "width": 480,
         "color": 2
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        592,
-        352
+        640,
+        720
       ],
-      "id": "d3d16e3b-1d78-402d-b609-d8e187d595de",
-      "name": "Sticky Note2"
+      "id": "5ca63580-7885-4168-8ae2-48c65cabc0c5",
+      "name": "Sticky Note Classificação"
     },
     {
       "parameters": {
-        "jsCode": "const cnd = $('Infosimples · CND Federal').first().json.data?.[0] ?? null;\nconst est = $('Direct Data · CND Estadual').first().json.retorno ?? null;\n\nlet t_cnd = \"Não obtida\";\nlet t_pgfn = \"Não verificado\";\nif (cnd) {\n  const tipo = cnd.tipo || \"\";\n  if (tipo.includes(\"efeitos de negativa\")) t_cnd = \"Positiva c/ efeitos de negativa\";\n  else if (tipo === \"Positiva\") t_cnd = \"Positiva\";\n  else if (tipo === \"Negativa\") t_cnd = \"Negativa\";\n\n  t_pgfn = \"Não\";\n  if (cnd.debitos_pgfn === true) {\n    t_pgfn = tipo.includes(\"efeitos de negativa\") ? \"Parcelada/garantida\" : \"Irregular\";\n  }\n}\n\nlet t_est = \"ND\";\nif (est) {\n  t_est = (!est.possuiDebito || est.efeitoNegativa) ? \"Regular\" : \"Irregular\";\n}\n\nconst gateDisparado = (t_cnd === \"Positiva\" && t_pgfn === \"Irregular\")\n  ? \"G3: CND federal positiva + PGFN irregular\"\n  : null;\n\nreturn [{ json: { t_cnd, t_pgfn, t_est, gate_disparado: gateDisparado } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        672,
-        800
-      ],
-      "id": "4f762512-7cda-48d1-90dc-68c72e0e7211",
-      "name": "Classificar D1"
-    },
-    {
-      "parameters": {
-        "content": "## AUDITORIA + RETORNO\nSalva os 2 payloads crus em credscore.fornecedor_dados_brutos\n(fonte: infosimples_cnd_pgfn / directd_cnd_estadual) — se um dia\nprecisar provar de onde veio um dado, está aqui.\n\n\"Retorno pro Orquestrador\" é um Set node — garante que o Execute\nWorkflow do Orquestrador recebe um contrato limpo:\n{ t_cnd, t_pgfn, t_est, gate_disparado }",
-        "height": 736,
-        "width": 464
+        "content": "## AUDITORIA + RETORNO\nSalva os payloads crus em fornecedor_dados_brutos — o 3º (fallback)\nsó é gravado quando realmente foi usado.\n\n\"Retorno pro Orquestrador\" devolve o contrato limpo:\n{ t_cnd, t_pgfn, t_est, gate_disparado }",
+        "height": 784,
+        "width": 736,
+        "color": 5
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        896,
-        352
+        1136,
+        720
       ],
-      "id": "ca7ff007-d2b0-44b3-ac8d-a01bd603c202",
-      "name": "Sticky Note4"
-    },
-    {
-      "parameters": {},
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3.2,
-      "position": [
-        464,
-        800
-      ],
-      "id": "ac6c16e0-df8a-4292-92a6-a8e89e0a6a36",
-      "name": "Merge"
+      "id": "39da9327-382a-4e52-bccd-a95984b92d39",
+      "name": "Sticky Note Retorno"
     }
   ],
   "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Direct Data · CND Estadual",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Infosimples · CND Federal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Direct Data · CND Estadual": {
       "main": [
         [
@@ -267,6 +407,35 @@
       "main": [
         [
           {
+            "node": "Infosimples conseguiu emitir?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Infosimples conseguiu emitir?": {
+      "main": [
+        [
+          {
+            "node": "Sem Fallback PGFN",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Direct Data · PGFN Lista de Devedores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sem Fallback PGFN": {
+      "main": [
+        [
+          {
             "node": "Merge",
             "type": "main",
             "index": 1
@@ -274,27 +443,44 @@
         ]
       ]
     },
-    "Salvar Dados Brutos": {
+    "Direct Data · PGFN Lista de Devedores": {
       "main": [
         [
           {
-            "node": "Retorno pro Orquestrador",
+            "node": "Com Fallback PGFN",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "When Executed by Another Workflow": {
+    "Com Fallback PGFN": {
       "main": [
         [
           {
-            "node": "Direct Data · CND Estadual",
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Consolidar PGFN Fallback",
             "type": "main",
             "index": 0
-          },
+          }
+        ]
+      ]
+    },
+    "Consolidar PGFN Fallback": {
+      "main": [
+        [
           {
-            "node": "Infosimples · CND Federal",
+            "node": "Classificar D1",
             "type": "main",
             "index": 0
           }
@@ -312,11 +498,11 @@
         ]
       ]
     },
-    "Merge": {
+    "Salvar Dados Brutos": {
       "main": [
         [
           {
-            "node": "Classificar D1",
+            "node": "Retorno pro Orquestrador",
             "type": "main",
             "index": 0
           }
@@ -333,7 +519,7 @@
   },
   "staticData": null,
   "meta": null,
-  "versionId": "40b4e04f-7a83-408c-a7c1-99900330f510",
+  "versionId": "d3b70247-7e40-4630-9445-a36981df86c4",
   "activeVersionId": null,
   "triggerCount": 0,
   "shared": [
