@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-28T19:42:22.779Z",
+  "updatedAt": "2026-07-29T14:25:24.659Z",
   "createdAt": "2026-07-28T11:53:19.042Z",
   "id": "3ov4hvrZ16JoyoWF",
   "name": "BMS - 8.01 - Orquestrador (Cálculo Inicial)",
@@ -145,7 +145,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE credscore.analises\nSET etapa_atual = 0, etapa_label = 'Enriquecimento cadastral', fonte_atual = 'econodata_cadastral'\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+        "query": "UPDATE credscore.analises\nSET etapa_atual = 0, etapa_label = 'Enriquecimento cadastral', fonte_atual = 'directd_cadastro_pj'\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -189,6 +189,8 @@
       ],
       "id": "89f35eb9-4713-41cd-820c-4e5d7d580ac6",
       "name": "Direct Data · Cadastro PJ Plus",
+      "retryOnFail": true,
+      "waitBetweenTries": 3000,
       "notes": "Trocar o Token direto no node por credencial. Ao testar a 1a vez, colar aqui o JSON real de retorno pra confirmar os valores exatos de opcaoSimples/opcaoMEI/tributacao (o schema oficial só mostra tipos genéricos, não os valores reais)."
     },
     {
@@ -250,9 +252,9 @@
       "parameters": {
         "workflowId": {
           "__rl": true,
-          "value": "vMZ5DOEK5HzwP9df",
+          "value": "nBc4w2O4dwp8OtTk",
           "mode": "list",
-          "cachedResultUrl": "/workflow/vMZ5DOEK5HzwP9df",
+          "cachedResultUrl": "/workflow/nBc4w2O4dwp8OtTk",
           "cachedResultName": "BMS - 8.02 - D1 (Coleta Fiscal)"
         },
         "workflowInputs": {
@@ -272,8 +274,7 @@
               "defaultMatch": false,
               "display": true,
               "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
+              "type": "string"
             },
             {
               "id": "analise_id",
@@ -282,8 +283,7 @@
               "defaultMatch": false,
               "display": true,
               "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
+              "type": "string"
             },
             {
               "id": "cnpj",
@@ -292,8 +292,7 @@
               "defaultMatch": false,
               "display": true,
               "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
+              "type": "string"
             },
             {
               "id": "uf",
@@ -302,8 +301,7 @@
               "defaultMatch": false,
               "display": true,
               "canBeUsedToMatch": true,
-              "type": "string",
-              "removed": false
+              "type": "string"
             }
           ],
           "attemptToConvertTypes": false,
@@ -467,7 +465,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const d1 = $('Executar D1 (Coleta Fiscal)').item.json;\nconst d2 = $('D2 (PLACEHOLDER — substituir por sub-workflow real)').item.json;\nconst fornecedorAtualizado = $('Salvar Dados Cadastrais').item.json;\nconst dados = $('Buscar Tabelas de Pontos').item.json;\nconst tabelas = dados.tabelas_pontos || {};\nconst temD5 = Number(dados.respostas_existentes || 0) > 0;\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\n\n// ---------- D1 (com breakdown) ----------\nconst d1_subcriterios = [\n  { criterio: 'cnd_federal', label: 'CND/CPEN Federal', categoria: d1.t_cnd, pontos: pontosOpcao('cnd_federal', d1.t_cnd) },\n  { criterio: 'pgfn', label: 'Dívida ativa PGFN', categoria: d1.t_pgfn, pontos: pontosOpcao('pgfn', d1.t_pgfn) },\n  { criterio: 'sintonia', label: 'Receita Sintonia', categoria: 'ND', pontos: pontosOpcao('sintonia', 'ND') },\n  { criterio: 'regularidade_estadual_municipal', label: 'Regularidade estadual/municipal', categoria: d1.t_est, pontos: pontosOpcao('regularidade_estadual_municipal', d1.t_est) },\n  { criterio: 'obrigacoes_acessorias', label: 'Obrigações acessórias', categoria: 'ND', pontos: pontosOpcao('obrigacoes_acessorias', 'ND') },\n];\nconst s1 = d1_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D2 (com breakdown) ----------\nconst d2_subcriterios = [\n  { criterio: 'serasa_score', label: 'Serasa Score', categoria: d2.t_score, pontos: pontosBanda('serasa_score', d2.t_score) },\n  { criterio: 'protestos', label: 'Protestos', categoria: d2.t_protestos, pontos: pontosBanda('protestos', d2.t_protestos) },\n  { criterio: 'execucoes_relevantes', label: 'Execuções relevantes', categoria: d2.t_execucoes, pontos: pontosBanda('execucoes_relevantes', d2.t_execucoes) },\n  { criterio: 'spc', label: 'Negativação SPC', categoria: d2.t_spc, pontos: pontosOpcao('spc', d2.t_spc) },\n];\nconst s2 = d2_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D3 ----------\nconst regime = fornecedorAtualizado.regime_tributario || 'ND';\nconst s3 = pontosOpcao('regime_tributario', regime);\nconst d3_subcriterios = [\n  { criterio: 'regime_tributario', label: 'Regime tributário', categoria: regime, pontos: s3 },\n];\n\n// ---------- D4 ----------\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(fornecedorAtualizado.valor_compras_anual || 0);\nconst faturamentoFornecedor = Number(fornecedorAtualizado.faturamento_estimado || 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamentoFornecedor > 0) {\n  p_pct = (valorPago / faturamentoFornecedor) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = 100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0)));\n  s4 = Math.round(s4 * 100) / 100;\n} else {\n  s4 = 50;\n  d4_nd = true;\n}\nconst d4_detalhe = {\n  valor_compras_anual: valorPago,\n  faturamento_estimado_fornecedor: faturamentoFornecedor || null,\n  participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n  nd: d4_nd,\n  pontos: s4,\n};\n\n// ---------- Completude ----------\nconst camposND = [];\nif (d1.t_cnd === 'Não obtida') camposND.push('cnd_federal');\nif (d1.t_pgfn === 'Não verificado') camposND.push('pgfn');\ncamposND.push('sintonia', 'obrigacoes_acessorias');\nif (d1.t_est === 'ND') camposND.push('regularidade_estadual_municipal');\nif (d2.t_score === 'ND') camposND.push('serasa_score');\nif (d2.t_protestos === 'ND') camposND.push('protestos');\nif (d2.t_execucoes === 'ND') camposND.push('execucoes_relevantes');\nif (d2.t_spc === 'ND') camposND.push('spc');\nif (d4_nd) camposND.push('dependencia_faturamento');\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  s1_fiscal: s1, s2_financeira: s2, s3_regime: s3, s4_dependencia: s4,\n  s5_maturidade: null,\n  completude_pct, campos_nd: camposND,\n  breakdown: {\n    d1: { subcriterios: d1_subcriterios, total: s1, gate_disparado: d1.gate_disparado },\n    d2: { subcriterios: d2_subcriterios, total: s2, gate_disparado: d2.gate_disparado },\n    d3: { subcriterios: d3_subcriterios, total: s3 },\n    d4: d4_detalhe,\n  }\n} }];"
+        "jsCode": "const d1 = $('Executar D1 (Coleta Fiscal)').item.json;\nconst d2 = $('D2 (PLACEHOLDER — substituir por sub-workflow real)').item.json;\nconst fornecedorAtualizado = $('Salvar Dados Cadastrais').item.json;\nconst dados = $('Buscar Tabelas de Pontos').item.json;\nconst tabelas = dados.tabelas_pontos || {};\nconst temD5 = Number(dados.respostas_existentes || 0) > 0;\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\n\n// ---------- D1 (com breakdown) ----------\nconst d1_subcriterios = [\n  { criterio: 'cnd_federal', label: 'CND/CPEN Federal', categoria: d1.t_cnd, pontos: pontosOpcao('cnd_federal', d1.t_cnd) },\n  { criterio: 'pgfn', label: 'Dívida ativa PGFN', categoria: d1.t_pgfn, pontos: pontosOpcao('pgfn', d1.t_pgfn) },\n  { criterio: 'sintonia', label: 'Receita Sintonia', categoria: d1.t_sintonia, pontos: pontosOpcao('sintonia', d1.t_sintonia) },\n  { criterio: 'regularidade_estadual_municipal', label: 'Regularidade estadual/municipal', categoria: d1.t_est, pontos: pontosOpcao('regularidade_estadual_municipal', d1.t_est) },\n  { criterio: 'obrigacoes_acessorias', label: 'Obrigações acessórias', categoria: 'ND', pontos: pontosOpcao('obrigacoes_acessorias', 'ND') },\n];\nconst s1 = d1_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D2 (com breakdown) ----------\nconst d2_subcriterios = [\n  { criterio: 'serasa_score', label: 'Serasa Score', categoria: d2.t_score, pontos: pontosBanda('serasa_score', d2.t_score) },\n  { criterio: 'protestos', label: 'Protestos', categoria: d2.t_protestos, pontos: pontosBanda('protestos', d2.t_protestos) },\n  { criterio: 'execucoes_relevantes', label: 'Execuções relevantes', categoria: d2.t_execucoes, pontos: pontosBanda('execucoes_relevantes', d2.t_execucoes) },\n  { criterio: 'spc', label: 'Negativação SPC', categoria: d2.t_spc, pontos: pontosOpcao('spc', d2.t_spc) },\n];\nconst s2 = d2_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D3 ----------\nconst regime = fornecedorAtualizado.regime_tributario || 'ND';\nconst s3 = pontosOpcao('regime_tributario', regime);\nconst d3_subcriterios = [\n  { criterio: 'regime_tributario', label: 'Regime tributário', categoria: regime, pontos: s3 },\n];\n\n// ---------- D4 ----------\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(fornecedorAtualizado.valor_compras_anual || 0);\nconst faturamentoFornecedor = Number(fornecedorAtualizado.faturamento_estimado || 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamentoFornecedor > 0) {\n  p_pct = (valorPago / faturamentoFornecedor) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = 100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0)));\n  s4 = Math.round(s4 * 100) / 100;\n} else {\n  s4 = 50;\n  d4_nd = true;\n}\nconst d4_detalhe = {\n  valor_compras_anual: valorPago,\n  faturamento_estimado_fornecedor: faturamentoFornecedor || null,\n  participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n  nd: d4_nd,\n  pontos: s4,\n};\n\n// ---------- Completude ----------\nconst camposND = [];\nif (d1.t_cnd === 'Não obtida') camposND.push('cnd_federal');\nif (d1.t_pgfn === 'Não verificado') camposND.push('pgfn');\nif (d1.t_sintonia === 'ND') camposND.push('sintonia');\ncamposND.push('obrigacoes_acessorias');\nif (d1.t_est === 'ND') camposND.push('regularidade_estadual_municipal');\nif (d2.t_score === 'ND') camposND.push('serasa_score');\nif (d2.t_protestos === 'ND') camposND.push('protestos');\nif (d2.t_execucoes === 'ND') camposND.push('execucoes_relevantes');\nif (d2.t_spc === 'ND') camposND.push('spc');\nif (d4_nd) camposND.push('dependencia_faturamento');\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  s1_fiscal: s1, s2_financeira: s2, s3_regime: s3, s4_dependencia: s4,\n  s5_maturidade: null,\n  completude_pct, campos_nd: camposND,\n  breakdown: {\n    d1: { subcriterios: d1_subcriterios, total: s1, gate_disparado: d1.gate_disparado },\n    d2: { subcriterios: d2_subcriterios, total: s2, gate_disparado: d2.gate_disparado },\n    d3: { subcriterios: d3_subcriterios, total: s3 },\n    d4: d4_detalhe,\n  }\n} }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -829,8 +827,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "bfa069f8-bf56-484a-9b2f-2c240d5a5c1f",
-  "activeVersionId": "bfa069f8-bf56-484a-9b2f-2c240d5a5c1f",
+  "versionId": "a95289e3-a49f-490d-a5e5-e02b668700cc",
+  "activeVersionId": "a95289e3-a49f-490d-a5e5-e02b668700cc",
   "triggerCount": 1,
   "shared": [
     {
@@ -842,9 +840,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-07-28T19:42:22.781Z",
-    "createdAt": "2026-07-28T19:42:22.781Z",
-    "versionId": "bfa069f8-bf56-484a-9b2f-2c240d5a5c1f",
+    "updatedAt": "2026-07-29T14:25:24.662Z",
+    "createdAt": "2026-07-29T14:25:24.662Z",
+    "versionId": "a95289e3-a49f-490d-a5e5-e02b668700cc",
     "workflowId": "3ov4hvrZ16JoyoWF",
     "nodes": [
       {
@@ -986,7 +984,7 @@
       {
         "parameters": {
           "operation": "executeQuery",
-          "query": "UPDATE credscore.analises\nSET etapa_atual = 0, etapa_label = 'Enriquecimento cadastral', fonte_atual = 'econodata_cadastral'\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+          "query": "UPDATE credscore.analises\nSET etapa_atual = 0, etapa_label = 'Enriquecimento cadastral', fonte_atual = 'directd_cadastro_pj'\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
           "options": {}
         },
         "type": "n8n-nodes-base.postgres",
@@ -1030,6 +1028,8 @@
         ],
         "id": "89f35eb9-4713-41cd-820c-4e5d7d580ac6",
         "name": "Direct Data · Cadastro PJ Plus",
+        "retryOnFail": true,
+        "waitBetweenTries": 3000,
         "notes": "Trocar o Token direto no node por credencial. Ao testar a 1a vez, colar aqui o JSON real de retorno pra confirmar os valores exatos de opcaoSimples/opcaoMEI/tributacao (o schema oficial só mostra tipos genéricos, não os valores reais)."
       },
       {
@@ -1091,9 +1091,9 @@
         "parameters": {
           "workflowId": {
             "__rl": true,
-            "value": "vMZ5DOEK5HzwP9df",
+            "value": "nBc4w2O4dwp8OtTk",
             "mode": "list",
-            "cachedResultUrl": "/workflow/vMZ5DOEK5HzwP9df",
+            "cachedResultUrl": "/workflow/nBc4w2O4dwp8OtTk",
             "cachedResultName": "BMS - 8.02 - D1 (Coleta Fiscal)"
           },
           "workflowInputs": {
@@ -1113,8 +1113,7 @@
                 "defaultMatch": false,
                 "display": true,
                 "canBeUsedToMatch": true,
-                "type": "string",
-                "removed": false
+                "type": "string"
               },
               {
                 "id": "analise_id",
@@ -1123,8 +1122,7 @@
                 "defaultMatch": false,
                 "display": true,
                 "canBeUsedToMatch": true,
-                "type": "string",
-                "removed": false
+                "type": "string"
               },
               {
                 "id": "cnpj",
@@ -1133,8 +1131,7 @@
                 "defaultMatch": false,
                 "display": true,
                 "canBeUsedToMatch": true,
-                "type": "string",
-                "removed": false
+                "type": "string"
               },
               {
                 "id": "uf",
@@ -1143,8 +1140,7 @@
                 "defaultMatch": false,
                 "display": true,
                 "canBeUsedToMatch": true,
-                "type": "string",
-                "removed": false
+                "type": "string"
               }
             ],
             "attemptToConvertTypes": false,
@@ -1308,7 +1304,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const d1 = $('Executar D1 (Coleta Fiscal)').item.json;\nconst d2 = $('D2 (PLACEHOLDER — substituir por sub-workflow real)').item.json;\nconst fornecedorAtualizado = $('Salvar Dados Cadastrais').item.json;\nconst dados = $('Buscar Tabelas de Pontos').item.json;\nconst tabelas = dados.tabelas_pontos || {};\nconst temD5 = Number(dados.respostas_existentes || 0) > 0;\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\n\n// ---------- D1 (com breakdown) ----------\nconst d1_subcriterios = [\n  { criterio: 'cnd_federal', label: 'CND/CPEN Federal', categoria: d1.t_cnd, pontos: pontosOpcao('cnd_federal', d1.t_cnd) },\n  { criterio: 'pgfn', label: 'Dívida ativa PGFN', categoria: d1.t_pgfn, pontos: pontosOpcao('pgfn', d1.t_pgfn) },\n  { criterio: 'sintonia', label: 'Receita Sintonia', categoria: 'ND', pontos: pontosOpcao('sintonia', 'ND') },\n  { criterio: 'regularidade_estadual_municipal', label: 'Regularidade estadual/municipal', categoria: d1.t_est, pontos: pontosOpcao('regularidade_estadual_municipal', d1.t_est) },\n  { criterio: 'obrigacoes_acessorias', label: 'Obrigações acessórias', categoria: 'ND', pontos: pontosOpcao('obrigacoes_acessorias', 'ND') },\n];\nconst s1 = d1_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D2 (com breakdown) ----------\nconst d2_subcriterios = [\n  { criterio: 'serasa_score', label: 'Serasa Score', categoria: d2.t_score, pontos: pontosBanda('serasa_score', d2.t_score) },\n  { criterio: 'protestos', label: 'Protestos', categoria: d2.t_protestos, pontos: pontosBanda('protestos', d2.t_protestos) },\n  { criterio: 'execucoes_relevantes', label: 'Execuções relevantes', categoria: d2.t_execucoes, pontos: pontosBanda('execucoes_relevantes', d2.t_execucoes) },\n  { criterio: 'spc', label: 'Negativação SPC', categoria: d2.t_spc, pontos: pontosOpcao('spc', d2.t_spc) },\n];\nconst s2 = d2_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D3 ----------\nconst regime = fornecedorAtualizado.regime_tributario || 'ND';\nconst s3 = pontosOpcao('regime_tributario', regime);\nconst d3_subcriterios = [\n  { criterio: 'regime_tributario', label: 'Regime tributário', categoria: regime, pontos: s3 },\n];\n\n// ---------- D4 ----------\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(fornecedorAtualizado.valor_compras_anual || 0);\nconst faturamentoFornecedor = Number(fornecedorAtualizado.faturamento_estimado || 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamentoFornecedor > 0) {\n  p_pct = (valorPago / faturamentoFornecedor) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = 100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0)));\n  s4 = Math.round(s4 * 100) / 100;\n} else {\n  s4 = 50;\n  d4_nd = true;\n}\nconst d4_detalhe = {\n  valor_compras_anual: valorPago,\n  faturamento_estimado_fornecedor: faturamentoFornecedor || null,\n  participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n  nd: d4_nd,\n  pontos: s4,\n};\n\n// ---------- Completude ----------\nconst camposND = [];\nif (d1.t_cnd === 'Não obtida') camposND.push('cnd_federal');\nif (d1.t_pgfn === 'Não verificado') camposND.push('pgfn');\ncamposND.push('sintonia', 'obrigacoes_acessorias');\nif (d1.t_est === 'ND') camposND.push('regularidade_estadual_municipal');\nif (d2.t_score === 'ND') camposND.push('serasa_score');\nif (d2.t_protestos === 'ND') camposND.push('protestos');\nif (d2.t_execucoes === 'ND') camposND.push('execucoes_relevantes');\nif (d2.t_spc === 'ND') camposND.push('spc');\nif (d4_nd) camposND.push('dependencia_faturamento');\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  s1_fiscal: s1, s2_financeira: s2, s3_regime: s3, s4_dependencia: s4,\n  s5_maturidade: null,\n  completude_pct, campos_nd: camposND,\n  breakdown: {\n    d1: { subcriterios: d1_subcriterios, total: s1, gate_disparado: d1.gate_disparado },\n    d2: { subcriterios: d2_subcriterios, total: s2, gate_disparado: d2.gate_disparado },\n    d3: { subcriterios: d3_subcriterios, total: s3 },\n    d4: d4_detalhe,\n  }\n} }];"
+          "jsCode": "const d1 = $('Executar D1 (Coleta Fiscal)').item.json;\nconst d2 = $('D2 (PLACEHOLDER — substituir por sub-workflow real)').item.json;\nconst fornecedorAtualizado = $('Salvar Dados Cadastrais').item.json;\nconst dados = $('Buscar Tabelas de Pontos').item.json;\nconst tabelas = dados.tabelas_pontos || {};\nconst temD5 = Number(dados.respostas_existentes || 0) > 0;\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\n\n// ---------- D1 (com breakdown) ----------\nconst d1_subcriterios = [\n  { criterio: 'cnd_federal', label: 'CND/CPEN Federal', categoria: d1.t_cnd, pontos: pontosOpcao('cnd_federal', d1.t_cnd) },\n  { criterio: 'pgfn', label: 'Dívida ativa PGFN', categoria: d1.t_pgfn, pontos: pontosOpcao('pgfn', d1.t_pgfn) },\n  { criterio: 'sintonia', label: 'Receita Sintonia', categoria: d1.t_sintonia, pontos: pontosOpcao('sintonia', d1.t_sintonia) },\n  { criterio: 'regularidade_estadual_municipal', label: 'Regularidade estadual/municipal', categoria: d1.t_est, pontos: pontosOpcao('regularidade_estadual_municipal', d1.t_est) },\n  { criterio: 'obrigacoes_acessorias', label: 'Obrigações acessórias', categoria: 'ND', pontos: pontosOpcao('obrigacoes_acessorias', 'ND') },\n];\nconst s1 = d1_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D2 (com breakdown) ----------\nconst d2_subcriterios = [\n  { criterio: 'serasa_score', label: 'Serasa Score', categoria: d2.t_score, pontos: pontosBanda('serasa_score', d2.t_score) },\n  { criterio: 'protestos', label: 'Protestos', categoria: d2.t_protestos, pontos: pontosBanda('protestos', d2.t_protestos) },\n  { criterio: 'execucoes_relevantes', label: 'Execuções relevantes', categoria: d2.t_execucoes, pontos: pontosBanda('execucoes_relevantes', d2.t_execucoes) },\n  { criterio: 'spc', label: 'Negativação SPC', categoria: d2.t_spc, pontos: pontosOpcao('spc', d2.t_spc) },\n];\nconst s2 = d2_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n// ---------- D3 ----------\nconst regime = fornecedorAtualizado.regime_tributario || 'ND';\nconst s3 = pontosOpcao('regime_tributario', regime);\nconst d3_subcriterios = [\n  { criterio: 'regime_tributario', label: 'Regime tributário', categoria: regime, pontos: s3 },\n];\n\n// ---------- D4 ----------\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(fornecedorAtualizado.valor_compras_anual || 0);\nconst faturamentoFornecedor = Number(fornecedorAtualizado.faturamento_estimado || 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamentoFornecedor > 0) {\n  p_pct = (valorPago / faturamentoFornecedor) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = 100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0)));\n  s4 = Math.round(s4 * 100) / 100;\n} else {\n  s4 = 50;\n  d4_nd = true;\n}\nconst d4_detalhe = {\n  valor_compras_anual: valorPago,\n  faturamento_estimado_fornecedor: faturamentoFornecedor || null,\n  participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n  nd: d4_nd,\n  pontos: s4,\n};\n\n// ---------- Completude ----------\nconst camposND = [];\nif (d1.t_cnd === 'Não obtida') camposND.push('cnd_federal');\nif (d1.t_pgfn === 'Não verificado') camposND.push('pgfn');\nif (d1.t_sintonia === 'ND') camposND.push('sintonia');\ncamposND.push('obrigacoes_acessorias');\nif (d1.t_est === 'ND') camposND.push('regularidade_estadual_municipal');\nif (d2.t_score === 'ND') camposND.push('serasa_score');\nif (d2.t_protestos === 'ND') camposND.push('protestos');\nif (d2.t_execucoes === 'ND') camposND.push('execucoes_relevantes');\nif (d2.t_spc === 'ND') camposND.push('spc');\nif (d4_nd) camposND.push('dependencia_faturamento');\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  s1_fiscal: s1, s2_financeira: s2, s3_regime: s3, s4_dependencia: s4,\n  s5_maturidade: null,\n  completude_pct, campos_nd: camposND,\n  breakdown: {\n    d1: { subcriterios: d1_subcriterios, total: s1, gate_disparado: d1.gate_disparado },\n    d2: { subcriterios: d2_subcriterios, total: s2, gate_disparado: d2.gate_disparado },\n    d3: { subcriterios: d3_subcriterios, total: s3 },\n    d4: d4_detalhe,\n  }\n} }];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
