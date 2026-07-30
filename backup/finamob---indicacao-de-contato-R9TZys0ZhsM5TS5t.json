@@ -1,0 +1,310 @@
+{
+  "updatedAt": "2026-07-29T21:51:58.417Z",
+  "createdAt": "2026-07-29T21:18:50.476Z",
+  "id": "R9TZys0ZhsM5TS5t",
+  "name": "Finamob - Indicação de Contato",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.body.data.message.contactMessage !== undefined || $json.body.data.message.contactsArrayMessage !== undefined }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6bd0dff4-15e9-4cb5-bd0d-25a609102822",
+      "name": "É contato?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body.data;\nconst msg = body.message;\nlet vcards = [];\n\nif (msg.contactMessage) {\n  vcards = [msg.contactMessage.vcard];\n} else if (msg.contactsArrayMessage) {\n  vcards = msg.contactsArrayMessage.contacts.map(c => c.vcard);\n}\n\nfunction parseVcard(vcard) {\n  const fnMatch = vcard.match(/FN:(.+)/);\n  const waidMatch = vcard.match(/waid=(\\d+)/);\n  const telMatch = vcard.match(/TEL[^:]*:(.+)/);\n  const nome = fnMatch ? fnMatch[1].trim() : null;\n  const telefone = waidMatch ? waidMatch[1] : (telMatch ? telMatch[1].replace(/\\D/g, '') : null);\n  return { nome, telefone };\n}\n\nconst indicador = {\n  nome_indicador: body.pushName || 'Não identificado',\n  telefone_indicador: body.key.remoteJid.replace('@s.whatsapp.net', '')\n};\n\nreturn vcards\n  .map(parseVcard)\n  .filter(c => c.nome && c.telefone)\n  .map(c => ({\n    json: {\n      nome_indicado: c.nome,\n      telefone_indicado: c.telefone,\n      ...indicador,\n      data_hora: new Date().toISOString()\n    }\n  }));"
+      },
+      "id": "0fa1ef19-dbdb-4e69-9b10-7423cb3a5321",
+      "name": "Parse vCard + Indicador",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "readOrSearch",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "COLE_AQUI_O_ID_DA_PLANILHA"
+        }
+      },
+      "id": "9ca52463-c1a4-420f-acc6-1912d5f1269b",
+      "name": "Google Sheets - Get Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond2",
+              "leftValue": "={{ $json.telefone_indicado }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3584b87f-54fc-49c0-beb2-5ed0dd2e1533",
+      "name": "Já foi indicado antes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "COLE_AQUI_O_ID_DA_PLANILHA"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "indicacoes"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "data_hora": "={{ $('Parse vCard + Indicador').item.json.data_hora }}",
+            "nome_indicado": "={{ $('Parse vCard + Indicador').item.json.nome_indicado }}",
+            "telefone_indicado": "={{ $('Parse vCard + Indicador').item.json.telefone_indicado }}",
+            "nome_indicador": "={{ $('Parse vCard + Indicador').item.json.nome_indicador }}",
+            "telefone_indicador": "={{ $('Parse vCard + Indicador').item.json.telefone_indicador }}",
+            "status_template": "enviado"
+          }
+        },
+        "options": {}
+      },
+      "id": "4c404c6f-acba-4057-84ac-6e507f01dfc8",
+      "name": "Google Sheets - Append Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/COLE_AQUI_O_PHONE_NUMBER_ID/messages",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "whatsAppApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"messaging_product\": \"whatsapp\",\n  \"to\": $('Parse vCard + Indicador').item.json.telefone_indicado,\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"indicacao_contato_finamob\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": [\n          { \"type\": \"text\", \"text\": $('Parse vCard + Indicador').item.json.nome_indicado },\n          { \"type\": \"text\", \"text\": $('Parse vCard + Indicador').item.json.nome_indicador }\n        ]\n      }\n    ]\n  }\n} }}",
+        "options": {}
+      },
+      "id": "90009001-f967-46da-bf64-590d7e64faba",
+      "name": "Meta - Enviar Template",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://SUA_INSTANCIA_EVOLUTION/message/sendText/SUA_INSTANCIA",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "COLE_AQUI_SUA_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"number\": $('Parse vCard + Indicador').item.json.telefone_indicador,\n  \"text\": \"Show! Vou entrar em contato com \" + $('Parse vCard + Indicador').item.json.nome_indicado + \" 🙌\"\n} }}",
+        "options": {}
+      },
+      "id": "8e4d7abb-9e81-4f44-b85c-bbb3c983d767",
+      "name": "Evolution - Confirmação Indicador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        80
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ae0d9a3a-7b5b-4f3c-a2b6-8e7f9de03584",
+      "name": "Ignora - Já Indicado",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        304
+      ]
+    }
+  ],
+  "connections": {
+    "É contato?": {
+      "main": [
+        [
+          {
+            "node": "Parse vCard + Indicador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse vCard + Indicador": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Get Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Get Rows": {
+      "main": [
+        [
+          {
+            "node": "Já foi indicado antes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Já foi indicado antes?": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Append Row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignora - Já Indicado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Append Row": {
+      "main": [
+        [
+          {
+            "node": "Meta - Enviar Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta - Enviar Template": {
+      "main": [
+        [
+          {
+            "node": "Evolution - Confirmação Indicador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "executionTimeout": -1
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    },
+    "node:A cada 10 minutos": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "79de8efa-2071-4388-a777-0050428eb3ae",
+  "activeVersionId": null,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-07-29T21:18:50.476Z",
+      "createdAt": "2026-07-29T21:18:50.476Z",
+      "role": "workflow:owner",
+      "workflowId": "R9TZys0ZhsM5TS5t",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
