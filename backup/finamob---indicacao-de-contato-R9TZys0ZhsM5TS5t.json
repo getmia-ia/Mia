@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-29T21:51:58.417Z",
+  "updatedAt": "2026-07-30T20:27:15.167Z",
   "createdAt": "2026-07-29T21:18:50.476Z",
   "id": "R9TZys0ZhsM5TS5t",
   "name": "Finamob - Indicação de Contato",
@@ -8,133 +8,47 @@
   "nodes": [
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose"
-          },
-          "conditions": [
+        "workflowInputs": {
+          "values": [
             {
-              "id": "cond1",
-              "leftValue": "={{ $json.body.data.message.contactMessage !== undefined || $json.body.data.message.contactsArrayMessage !== undefined }}",
-              "rightValue": true,
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
+              "name": "vcard_indicado"
+            },
+            {
+              "name": "nome_indicado"
+            },
+            {
+              "name": "telefone_indicado"
+            },
+            {
+              "name": "nome_indicador"
+            },
+            {
+              "name": "telefone_indicador"
             }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
+          ]
+        }
       },
-      "id": "6bd0dff4-15e9-4cb5-bd0d-25a609102822",
-      "name": "É contato?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
+      "id": "f565dcc6-6460-4c9d-80dd-298a32d2febd",
+      "name": "Quando chamado como Tool",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
       "position": [
-        -880,
-        192
-      ]
+        560,
+        -272
+      ],
+      "notes": "Tool chamada pelo SDR. Se o lead compartilhou o CONTATO do WhatsApp (card nativo), o SDR passa o vcard cru em vcard_indicado (o LLM não extrai nome/telefone de dentro de um vCard de forma confiável, então isso é parseado por código). Se o lead só digitou nome e telefone por escrito, o SDR passa direto em nome_indicado/telefone_indicado e deixa vcard_indicado vazio."
     },
     {
       "parameters": {
-        "jsCode": "const body = $input.first().json.body.data;\nconst msg = body.message;\nlet vcards = [];\n\nif (msg.contactMessage) {\n  vcards = [msg.contactMessage.vcard];\n} else if (msg.contactsArrayMessage) {\n  vcards = msg.contactsArrayMessage.contacts.map(c => c.vcard);\n}\n\nfunction parseVcard(vcard) {\n  const fnMatch = vcard.match(/FN:(.+)/);\n  const waidMatch = vcard.match(/waid=(\\d+)/);\n  const telMatch = vcard.match(/TEL[^:]*:(.+)/);\n  const nome = fnMatch ? fnMatch[1].trim() : null;\n  const telefone = waidMatch ? waidMatch[1] : (telMatch ? telMatch[1].replace(/\\D/g, '') : null);\n  return { nome, telefone };\n}\n\nconst indicador = {\n  nome_indicador: body.pushName || 'Não identificado',\n  telefone_indicador: body.key.remoteJid.replace('@s.whatsapp.net', '')\n};\n\nreturn vcards\n  .map(parseVcard)\n  .filter(c => c.nome && c.telefone)\n  .map(c => ({\n    json: {\n      nome_indicado: c.nome,\n      telefone_indicado: c.telefone,\n      ...indicador,\n      data_hora: new Date().toISOString()\n    }\n  }));"
+        "jsCode": "// Normaliza telefone pro formato que a Meta espera: só dígitos, com 55 na frente (ex: 5511999998888)\nfunction normalizaTelefone(raw) {\n  if (!raw) return '';\n  let digitos = String(raw).replace(/\\D/g, '');\n  digitos = digitos.replace(/^0+/, '');\n\n  // já tem código do país (55) e tamanho compatível (DDD + 8 ou 9 dígitos) -> mantém\n  if (digitos.startsWith('55') && (digitos.length === 12 || digitos.length === 13)) {\n    return digitos;\n  }\n  // não tem código do país (só DDD + número) -> adiciona 55 na frente\n  if (digitos.length === 10 || digitos.length === 11) {\n    return '55' + digitos;\n  }\n  return digitos;\n}\n\n// Parseia um vCard cru (formato do contato nativo do WhatsApp) pra extrair nome e telefone.\n// O LLM não consegue extrair isso de forma confiável direto do texto do vCard (campos tipo\n// FN:, TEL:, waid= não são linguagem natural), então isso precisa ser feito por código.\nfunction parseVcard(vcard) {\n  const fnMatch = vcard.match(/FN:(.+)/);\n  const waidMatch = vcard.match(/waid=(\\d+)/);\n  const telMatch = vcard.match(/TEL[^:]*:(.+)/);\n  const nome = fnMatch ? fnMatch[1].trim() : null;\n  const telefone = waidMatch ? waidMatch[1] : (telMatch ? telMatch[1].replace(/\\D/g, '') : null);\n  return { nome, telefone };\n}\n\nconst input = $input.first().json;\n\nlet nomeIndicado = input.nome_indicado;\nlet telefoneIndicado = input.telefone_indicado;\n\n// Se veio vcard_indicado preenchido, ele manda - o lead compartilhou o contato nativo do WhatsApp\nif (input.vcard_indicado && String(input.vcard_indicado).trim() !== '') {\n  const parsed = parseVcard(input.vcard_indicado);\n  if (parsed.nome) nomeIndicado = parsed.nome;\n  if (parsed.telefone) telefoneIndicado = parsed.telefone;\n}\n\nif (!nomeIndicado || !telefoneIndicado) {\n  throw new Error('Não foi possível identificar nome e/ou telefone do indicado. Verifique o vcard_indicado ou nome_indicado/telefone_indicado recebidos.');\n}\n\nreturn [{\n  json: {\n    nome_indicado: nomeIndicado,\n    telefone_indicado: normalizaTelefone(telefoneIndicado),\n    nome_indicador: input.nome_indicador || 'Não identificado',\n    telefone_indicador: normalizaTelefone(input.telefone_indicador),\n    data_hora: new Date().toISOString()\n  }\n}];"
       },
-      "id": "0fa1ef19-dbdb-4e69-9b10-7423cb3a5321",
-      "name": "Parse vCard + Indicador",
+      "id": "6ac958d4-9f47-40a1-9dc0-7ef17ea96325",
+      "name": "Normaliza Telefones",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -656,
-        192
-      ]
-    },
-    {
-      "parameters": {
-        "operation": "readOrSearch",
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "COLE_AQUI_O_ID_DA_PLANILHA"
-        }
-      },
-      "id": "9ca52463-c1a4-420f-acc6-1912d5f1269b",
-      "name": "Google Sheets - Get Rows",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [
-        -448,
-        192
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose"
-          },
-          "conditions": [
-            {
-              "id": "cond2",
-              "leftValue": "={{ $json.telefone_indicado }}",
-              "rightValue": "",
-              "operator": {
-                "type": "string",
-                "operation": "isEmpty"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "3584b87f-54fc-49c0-beb2-5ed0dd2e1533",
-      "name": "Já foi indicado antes?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        -224,
-        192
-      ]
-    },
-    {
-      "parameters": {
-        "operation": "append",
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "COLE_AQUI_O_ID_DA_PLANILHA"
-        },
-        "sheetName": {
-          "__rl": true,
-          "mode": "name",
-          "value": "indicacoes"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "data_hora": "={{ $('Parse vCard + Indicador').item.json.data_hora }}",
-            "nome_indicado": "={{ $('Parse vCard + Indicador').item.json.nome_indicado }}",
-            "telefone_indicado": "={{ $('Parse vCard + Indicador').item.json.telefone_indicado }}",
-            "nome_indicador": "={{ $('Parse vCard + Indicador').item.json.nome_indicador }}",
-            "telefone_indicador": "={{ $('Parse vCard + Indicador').item.json.telefone_indicador }}",
-            "status_template": "enviado"
-          }
-        },
-        "options": {}
-      },
-      "id": "4c404c6f-acba-4057-84ac-6e507f01dfc8",
-      "name": "Google Sheets - Append Row",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [
-        0,
-        80
+        784,
+        -272
       ]
     },
     {
@@ -145,16 +59,45 @@
         "nodeCredentialType": "whatsAppApi",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ {\n  \"messaging_product\": \"whatsapp\",\n  \"to\": $('Parse vCard + Indicador').item.json.telefone_indicado,\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"indicacao_contato_finamob\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": [\n          { \"type\": \"text\", \"text\": $('Parse vCard + Indicador').item.json.nome_indicado },\n          { \"type\": \"text\", \"text\": $('Parse vCard + Indicador').item.json.nome_indicador }\n        ]\n      }\n    ]\n  }\n} }}",
+        "jsonBody": "={{ {\n  \"messaging_product\": \"whatsapp\",\n  \"to\": $json.telefone_indicado,\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"indicacao_contato_finamob\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": [\n          { \"type\": \"text\", \"text\": $json.nome_indicado },\n          { \"type\": \"text\", \"text\": $json.nome_indicador }\n        ]\n      }\n    ]\n  }\n} }}",
         "options": {}
       },
-      "id": "90009001-f967-46da-bf64-590d7e64faba",
+      "id": "583bebfb-01e6-4498-bb3a-b73f80b36fe9",
       "name": "Meta - Enviar Template",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        224,
-        80
+        1008,
+        -272
+      ],
+      "credentials": {
+        "whatsAppApi": {
+          "id": "8d8aeFUqMnAG4JUN",
+          "name": "EMI-LUANA"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1a2b3c4-0001-0000-0000-000000000001",
+              "name": "resultado",
+              "value": "={{ 'Indicação de ' + $('Normaliza Telefones').item.json.nome_indicado + ' (' + $('Normaliza Telefones').item.json.telefone_indicado + ') enviada. ' + $('Normaliza Telefones').item.json.nome_indicador + ' foi avisado por WhatsApp.' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "08f720dc-ec72-406e-be3d-560a0525f286",
+      "name": "Resultado pra Tool",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1456,
+        -272
       ]
     },
     {
@@ -172,83 +115,47 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ {\n  \"number\": $('Parse vCard + Indicador').item.json.telefone_indicador,\n  \"text\": \"Show! Vou entrar em contato com \" + $('Parse vCard + Indicador').item.json.nome_indicado + \" 🙌\"\n} }}",
+        "jsonBody": "={{ {\n  \"number\": $('Normaliza Telefones').item.json.telefone_indicador,\n  \"text\": \"Show! Vou entrar em contato com \" + $('Normaliza Telefones').item.json.nome_indicado + \" 🙌\"\n} }}",
         "options": {}
       },
-      "id": "8e4d7abb-9e81-4f44-b85c-bbb3c983d767",
-      "name": "Evolution - Confirmação Indicador",
+      "id": "071a750b-8e0f-4fa5-9a04-965d6ba3191e",
+      "name": "Registro Finamob",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        448,
-        80
+        1232,
+        -272
       ]
     },
     {
-      "parameters": {},
-      "id": "ae0d9a3a-7b5b-4f3c-a2b6-8e7f9de03584",
-      "name": "Ignora - Já Indicado",
-      "type": "n8n-nodes-base.noOp",
+      "parameters": {
+        "content": "",
+        "height": 384,
+        "width": 1184
+      },
+      "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        0,
-        304
-      ]
+        528,
+        -384
+      ],
+      "id": "1af30c04-df0d-4f6e-b7fe-ae8467e827ed",
+      "name": "Sticky Note"
     }
   ],
   "connections": {
-    "É contato?": {
+    "Quando chamado como Tool": {
       "main": [
         [
           {
-            "node": "Parse vCard + Indicador",
+            "node": "Normaliza Telefones",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Parse vCard + Indicador": {
-      "main": [
-        [
-          {
-            "node": "Google Sheets - Get Rows",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Google Sheets - Get Rows": {
-      "main": [
-        [
-          {
-            "node": "Já foi indicado antes?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Já foi indicado antes?": {
-      "main": [
-        [
-          {
-            "node": "Google Sheets - Append Row",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Ignora - Já Indicado",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Google Sheets - Append Row": {
+    "Normaliza Telefones": {
       "main": [
         [
           {
@@ -263,7 +170,18 @@
       "main": [
         [
           {
-            "node": "Evolution - Confirmação Indicador",
+            "node": "Registro Finamob",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registro Finamob": {
+      "main": [
+        [
+          {
+            "node": "Resultado pra Tool",
             "type": "main",
             "index": 0
           }
@@ -293,7 +211,7 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "79de8efa-2071-4388-a777-0050428eb3ae",
+  "versionId": "fc2bc4ab-609f-474e-84c5-621ca5863152",
   "activeVersionId": null,
   "triggerCount": 1,
   "shared": [
