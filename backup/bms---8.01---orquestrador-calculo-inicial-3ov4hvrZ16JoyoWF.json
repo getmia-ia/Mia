@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-30T17:16:43.200Z",
+  "updatedAt": "2026-07-31T14:40:17.075Z",
   "createdAt": "2026-07-28T11:53:19.042Z",
   "id": "3ov4hvrZ16JoyoWF",
   "name": "BMS - 8.01 - Orquestrador (Cálculo Inicial)",
@@ -29,7 +29,7 @@
     {
       "parameters": {
         "content": "## ENTRADA\nDisparado pelo trigger pg_net do Supabase sempre que uma linha nova\né criada em credscore.analises (status='aguardando') — o que acontece\nautomaticamente quando qualquer fornecedor novo é cadastrado (upload\núnico, em lote, portal do cliente ou mia-bms).\n\nAutenticação via Header Auth (x-webhook-secret) — configurada no\npróprio node, rejeita chamadas sem o header antes de qualquer execução.\n\n\"Buscar Fornecedor\" resolve o fornecedor_id do payload em CNPJ,\ncliente_id, uf, cidade, razão social etc.",
-        "height": 1248,
+        "height": 1136,
         "width": 1072,
         "color": 4
       },
@@ -37,7 +37,7 @@
       "typeVersion": 1,
       "position": [
         -2144,
-        -112
+        0
       ],
       "id": "34a21200-a9bb-4cbb-99e0-7283c8bf72ed",
       "name": "Sticky Note"
@@ -45,7 +45,7 @@
     {
       "parameters": {
         "content": "## FASE 0 · ENRIQUECIMENTO CADASTRAL\nO usuário sobe só o CNPJ — todo o resto (razão social, nome fantasia,\nUF, cidade, regime tributário, porte) vem daqui.\n\nAPI: Direct Data · Cadastro Pessoa Jurídica Plus\nGET https://apiv3.directd.com.br/api/CadastroPessoaJuridicaPlus?CNPJ=...&Token=...\n\n\"Normalizar Dados Cadastrais\" combina opcaoMEI + opcaoSimples +\ntributacao num único regime_tributario (função classificarRegime).\nvalores reais desses 3 campos ainda não confirmados com teste real —\najustar a função depois do primeiro CNPJ de verdade.\n\n\"Salvar Dados Cadastrais\" grava tudo em credscore.fornecedores via\nUPDATE ... coalesce(novo, valor_atual) — nunca sobrescreve com null.",
-        "height": 1248,
+        "height": 1136,
         "width": 960,
         "color": 6
       },
@@ -53,7 +53,7 @@
       "typeVersion": 1,
       "position": [
         -1056,
-        -112
+        0
       ],
       "id": "390282a0-af79-4fb0-8173-4fb9238750aa",
       "name": "Sticky Note1"
@@ -61,7 +61,7 @@
     {
       "parameters": {
         "content": "## FASE 1 · D1 FISCAL (peso 30%)\nChama o sub-workflow \"BMS - 8.01 - D1 (Coleta Fiscal)\" via Execute\nWorkflow — CND Federal (Infosimples) + CND Estadual (Direct Data),\nclassificadas em t_cnd / t_pgfn / t_est.\n\nGATE G3: se t_cnd=\"Positiva\" E t_pgfn=\"Irregular\", o fornecedor é\neliminado aqui mesmo (decisao='nao_elegivel_gate') — o fluxo PARA,\nnunca chega a rodar D2/D3/D4/D5, porque já é reprovação automática.",
-        "height": 1248,
+        "height": 1136,
         "width": 976,
         "color": 2
       },
@@ -69,7 +69,7 @@
       "typeVersion": 1,
       "position": [
         -80,
-        -112
+        0
       ],
       "id": "f9326a68-1dac-4841-af24-e63f15f414cd",
       "name": "Sticky Note2"
@@ -397,19 +397,6 @@
     },
     {
       "parameters": {
-        "jsCode": "// PLACEHOLDER — sub-workflow D2 (Serasa Concentre) ainda não construído.\n// Endpoint/payload real da Serasa (RELATORIO_INTERMEDIARIO_PJ) ainda não foi validado nesta conversa.\n// Por enquanto devolve tudo como ND, sem disparar o Gate G2, pra não travar o fluxo.\nreturn [{ json: {\n  t_score: 'ND', t_protestos: 'ND', t_execucoes: 'ND', t_spc: 'ND', gate_disparado: null\n} }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1200,
-        928
-      ],
-      "id": "0f36f524-d517-4874-a88f-606a488cd686",
-      "name": "D2 (PLACEHOLDER — substituir por sub-workflow real)"
-    },
-    {
-      "parameters": {
         "conditions": {
           "options": {
             "caseSensitive": true,
@@ -465,7 +452,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const dados = $('Buscar Tabelas de Pontos').item.json;\nconst tabelas = dados.tabelas_pontos || {};\nconst fonte = $('Buscar Fonte de Reaproveitamento').item.json.fonte;\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\n\nlet s1, s2, s3, s5;\nlet d1_block, d2_block, d3_block;\nlet camposND = [];\n\nif (fonte) {\n  // ---------- REAPROVEITADO: D1/D2/D3 vêm da análise de origem ----------\n  s1 = Number(fonte.s1_fiscal ?? 0);\n  s2 = Number(fonte.s2_financeira ?? 0);\n  s3 = Number(fonte.s3_regime ?? 0);\n\n  const detOrigem = fonte.detalhes_calculo || {};\n  d1_block = detOrigem.d1 ?? { subcriterios: [], total: s1, gate_disparado: null };\n  d2_block = detOrigem.d2 ?? { subcriterios: [], total: s2, gate_disparado: null };\n  d3_block = detOrigem.d3 ?? { subcriterios: [], total: s3 };\n\n  camposND = Array.isArray(fonte.campos_nd)\n    ? fonte.campos_nd.filter((c) => c !== 'dependencia_faturamento')\n    : [];\n\n  // S5 recalculado com as respostas recém-copiadas (não confia no s5 antigo,\n  // porque o conjunto de perguntas ativas pode ter mudado desde a análise de origem).\n  const contS5 = $('Contar Respostas Ativas (Reaproveitamento)').item.json;\n  const totalAtivas = Number(contS5.total_ativas || 0);\n  const pontuando = Number(contS5.pontuando || 0);\n  s5 = totalAtivas > 0 ? Math.round((100 * pontuando / totalAtivas) * 100) / 100 : null;\n} else {\n  // ---------- FLUXO NORMAL: D1/D2 vêm da coleta de API, D3 do regime recém-normalizado ----------\n  const d1 = $('Executar D1 (Coleta Fiscal)').item.json;\n  const d2 = $('D2 (PLACEHOLDER — substituir por sub-workflow real)').item.json;\n\n  const d1_subcriterios = [\n    { criterio: 'cnd_federal', label: 'CND/CPEN Federal', categoria: d1.t_cnd, pontos: pontosOpcao('cnd_federal', d1.t_cnd) },\n    { criterio: 'pgfn', label: 'Dívida ativa PGFN', categoria: d1.t_pgfn, pontos: pontosOpcao('pgfn', d1.t_pgfn) },\n    { criterio: 'sintonia', label: 'Receita Sintonia', categoria: d1.t_sintonia, pontos: pontosOpcao('sintonia', d1.t_sintonia) },\n    { criterio: 'regularidade_estadual_municipal', label: 'Regularidade estadual/municipal', categoria: d1.t_est, pontos: pontosOpcao('regularidade_estadual_municipal', d1.t_est) },\n    { criterio: 'obrigacoes_acessorias', label: 'Obrigações acessórias', categoria: 'ND', pontos: pontosOpcao('obrigacoes_acessorias', 'ND') },\n  ];\n  s1 = d1_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n  const d2_subcriterios = [\n    { criterio: 'serasa_score', label: 'Serasa Score', categoria: d2.t_score, pontos: pontosBanda('serasa_score', d2.t_score) },\n    { criterio: 'protestos', label: 'Protestos', categoria: d2.t_protestos, pontos: pontosBanda('protestos', d2.t_protestos) },\n    { criterio: 'execucoes_relevantes', label: 'Execuções relevantes', categoria: d2.t_execucoes, pontos: pontosBanda('execucoes_relevantes', d2.t_execucoes) },\n    { criterio: 'spc', label: 'Negativação SPC', categoria: d2.t_spc, pontos: pontosOpcao('spc', d2.t_spc) },\n  ];\n  s2 = d2_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n  const regime = dados.regime_tributario || 'ND';\n  s3 = pontosOpcao('regime_tributario', regime);\n\n  d1_block = { subcriterios: d1_subcriterios, total: s1, gate_disparado: d1.gate_disparado };\n  d2_block = { subcriterios: d2_subcriterios, total: s2, gate_disparado: d2.gate_disparado };\n  d3_block = { subcriterios: [{ criterio: 'regime_tributario', label: 'Regime tributário', categoria: regime, pontos: s3 }], total: s3 };\n\n  s5 = null; // D5 continua sendo calculado depois pelo workflow de recálculo\n\n  if (d1.t_cnd === 'Não obtida') camposND.push('cnd_federal');\n  if (d1.t_pgfn === 'Não verificado') camposND.push('pgfn');\n  if (d1.t_sintonia === 'ND') camposND.push('sintonia');\n  camposND.push('obrigacoes_acessorias');\n  if (d1.t_est === 'ND') camposND.push('regularidade_estadual_municipal');\n  if (d2.t_score === 'ND') camposND.push('serasa_score');\n  if (d2.t_protestos === 'ND') camposND.push('protestos');\n  if (d2.t_execucoes === 'ND') camposND.push('execucoes_relevantes');\n  if (d2.t_spc === 'ND') camposND.push('spc');\n}\n\n// ---------- D4 — SEMPRE recalculado com o valor deste cliente ----------\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(dados.valor_compras_anual || 0);\nconst faturamentoFornecedor = Number(dados.faturamento_estimado || 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamentoFornecedor > 0) {\n  p_pct = (valorPago / faturamentoFornecedor) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = 100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0)));\n  s4 = Math.round(s4 * 100) / 100;\n} else {\n  s4 = 50;\n  d4_nd = true;\n}\nconst d4_detalhe = {\n  valor_compras_anual: valorPago,\n  faturamento_estimado_fornecedor: faturamentoFornecedor || null,\n  participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n  nd: d4_nd,\n  pontos: s4,\n};\nif (d4_nd) camposND.push('dependencia_faturamento');\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  s1_fiscal: s1, s2_financeira: s2, s3_regime: s3, s4_dependencia: s4,\n  s5_maturidade: s5,\n  completude_pct, campos_nd: camposND,\n  breakdown: { d1: d1_block, d2: d2_block, d3: d3_block, d4: d4_detalhe },\n  reaproveitado: !!fonte,\n  fonte_reaproveitamento: fonte ? {\n    analise_origem_id: fonte.analise_origem_id,\n    fornecedor_origem_id: fonte.fornecedor_origem_id,\n    cliente_origem_id: fonte.cliente_origem_id,\n    concluido_em: fonte.concluido_em,\n  } : null,\n} }];"
+        "jsCode": "const dados = $('Buscar Tabelas de Pontos').item.json;\nconst tabelas = dados.tabelas_pontos || {};\nconst fonte = $('Buscar Fonte de Reaproveitamento').item.json.fonte;\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\n\nlet s1, s2, s3, s5;\nlet d1_block, d2_block, d3_block;\nlet camposND = [];\n\nif (fonte) {\n  // ---------- REAPROVEITADO: D1/D2/D3 vêm da análise de origem ----------\n  s1 = Number(fonte.s1_fiscal ?? 0);\n  s2 = Number(fonte.s2_financeira ?? 0);\n  s3 = Number(fonte.s3_regime ?? 0);\n\n  const detOrigem = fonte.detalhes_calculo || {};\n  d1_block = detOrigem.d1 ?? { subcriterios: [], total: s1, gate_disparado: null };\n  d2_block = detOrigem.d2 ?? { subcriterios: [], total: s2, gate_disparado: null };\n  d3_block = detOrigem.d3 ?? { subcriterios: [], total: s3 };\n\n  camposND = Array.isArray(fonte.campos_nd)\n    ? fonte.campos_nd.filter((c) => c !== 'dependencia_faturamento')\n    : [];\n\n  // S5 recalculado com as respostas recém-copiadas (não confia no s5 antigo,\n  // porque o conjunto de perguntas ativas pode ter mudado desde a análise de origem).\n  const contS5 = $('Contar Respostas Ativas (Reaproveitamento)').item.json;\n  const totalAtivas = Number(contS5.total_ativas || 0);\n  const respondidas = Number(contS5.respondidas || 0);\n  const pontuando = Number(contS5.pontuando || 0);\n  s5 = respondidas > 0 ? Math.round((100 * pontuando / totalAtivas) * 100) / 100 : null;\n} else {\n  // ---------- FLUXO NORMAL: D1/D2 vêm da coleta de API, D3 do regime recém-normalizado ----------\n  const d1 = $('Executar D1 (Coleta Fiscal)').item.json;\n  const d2 = $('Executar D2 (Coleta Financeira)').item.json;\n\n  const d1_subcriterios = [\n    { criterio: 'cnd_federal', label: 'CND/CPEN Federal', categoria: d1.t_cnd, pontos: pontosOpcao('cnd_federal', d1.t_cnd) },\n    { criterio: 'pgfn', label: 'Dívida ativa PGFN', categoria: d1.t_pgfn, pontos: pontosOpcao('pgfn', d1.t_pgfn) },\n    { criterio: 'sintonia', label: 'Receita Sintonia', categoria: d1.t_sintonia, pontos: pontosOpcao('sintonia', d1.t_sintonia) },\n    { criterio: 'regularidade_estadual_municipal', label: 'Regularidade estadual/municipal', categoria: d1.t_est, pontos: pontosOpcao('regularidade_estadual_municipal', d1.t_est) },\n    { criterio: 'obrigacoes_acessorias', label: 'Obrigações acessórias', categoria: 'ND', pontos: pontosOpcao('obrigacoes_acessorias', 'ND') },\n  ];\n  s1 = d1_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n  const d2_subcriterios = [\n    { criterio: 'serasa_score', label: 'Serasa Score', categoria: d2.t_score, pontos: pontosBanda('serasa_score', d2.t_score) },\n    { criterio: 'protestos', label: 'Protestos', categoria: d2.t_protestos, pontos: pontosBanda('protestos', d2.t_protestos) },\n    { criterio: 'execucoes_relevantes', label: 'Execuções relevantes', categoria: d2.t_execucoes, pontos: pontosBanda('execucoes_relevantes', d2.t_execucoes) },\n    { criterio: 'spc', label: 'Negativação SPC', categoria: d2.t_spc, pontos: pontosOpcao('spc', d2.t_spc) },\n  ];\n  s2 = d2_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n  const regime = dados.regime_tributario || 'ND';\n  s3 = pontosOpcao('regime_tributario', regime);\n\n  d1_block = { subcriterios: d1_subcriterios, total: s1, gate_disparado: d1.gate_disparado };\n  d2_block = { subcriterios: d2_subcriterios, total: s2, gate_disparado: d2.gate_disparado };\n  d3_block = { subcriterios: [{ criterio: 'regime_tributario', label: 'Regime tributário', categoria: regime, pontos: s3 }], total: s3 };\n\n  s5 = null; // D5 continua sendo calculado depois pelo workflow de recálculo\n\n  if (d1.t_cnd === 'Não obtida') camposND.push('cnd_federal');\n  if (d1.t_pgfn === 'Não verificado') camposND.push('pgfn');\n  if (d1.t_sintonia === 'ND') camposND.push('sintonia');\n  camposND.push('obrigacoes_acessorias');\n  if (d1.t_est === 'ND') camposND.push('regularidade_estadual_municipal');\n  if (d2.t_score === 'ND') camposND.push('serasa_score');\n  if (d2.t_protestos === 'ND') camposND.push('protestos');\n  if (d2.t_execucoes === 'ND') camposND.push('execucoes_relevantes');\n  if (d2.t_spc === 'ND') camposND.push('spc');\n}\n\n// ---------- D4 — SEMPRE recalculado com o valor deste cliente ----------\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(dados.valor_compras_anual || 0);\nconst faturamentoFornecedor = Number(dados.faturamento_estimado || 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamentoFornecedor > 0) {\n  p_pct = (valorPago / faturamentoFornecedor) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = 100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0)));\n  s4 = Math.round(s4 * 100) / 100;\n} else {\n  s4 = 50;\n  d4_nd = true;\n}\nconst d4_detalhe = {\n  valor_compras_anual: valorPago,\n  faturamento_estimado_fornecedor: faturamentoFornecedor || null,\n  participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n  nd: d4_nd,\n  pontos: s4,\n};\nif (d4_nd) camposND.push('dependencia_faturamento');\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  s1_fiscal: s1, s2_financeira: s2, s3_regime: s3, s4_dependencia: s4,\n  s5_maturidade: s5,\n  completude_pct, campos_nd: camposND,\n  breakdown: { d1: d1_block, d2: d2_block, d3: d3_block, d4: d4_detalhe },\n  reaproveitado: !!fonte,\n  fonte_reaproveitamento: fonte ? {\n    analise_origem_id: fonte.analise_origem_id,\n    fornecedor_origem_id: fonte.fornecedor_origem_id,\n    cliente_origem_id: fonte.cliente_origem_id,\n    concluido_em: fonte.concluido_em,\n  } : null,\n} }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -778,7 +765,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT count(*) FILTER (WHERE qr.resposta = qp.resposta_que_pontua) AS pontuando,\n       count(*) AS total_ativas\nFROM credscore.questionario_perguntas qp\nLEFT JOIN credscore.questionario_respostas qr\n  ON qr.pergunta_id = qp.id AND qr.fornecedor_id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}'\nWHERE qp.ativo = true;",
+        "query": "SELECT count(*) FILTER (WHERE qr.resposta = qp.resposta_que_pontua) AS pontuando,\n       count(qr.id) AS respondidas,\n       count(*) AS total_ativas\nFROM credscore.questionario_perguntas qp\nLEFT JOIN credscore.questionario_respostas qr\n  ON qr.pergunta_id = qp.id AND qr.fornecedor_id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}'\nWHERE qp.ativo = true;",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -795,6 +782,66 @@
           "name": "BMS-Postgres"
         }
       }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Oab8CFwqDMSXErEJ",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/Oab8CFwqDMSXErEJ",
+          "cachedResultName": "BMS - 8.04 - D2 (Coleta Financeira)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fornecedor_id": "={{ $('Buscar Fornecedor').first().json.fornecedor_id }}",
+            "analise_id": "={{ $('Webhook').item.json.body.record.id }}",
+            "cnpj": "={{ $('Buscar Fornecedor').first().json.cnpj }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "fornecedor_id",
+              "displayName": "fornecedor_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "analise_id",
+              "displayName": "analise_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "cnpj",
+              "displayName": "cnpj",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1184,
+        928
+      ],
+      "id": "682a0d1e-cf3f-446d-a7b9-c773f6ab1c37",
+      "name": "Executar D2 (Coleta Financeira)"
     }
   ],
   "connections": {
@@ -908,18 +955,7 @@
       "main": [
         [
           {
-            "node": "D2 (PLACEHOLDER — substituir por sub-workflow real)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "D2 (PLACEHOLDER — substituir por sub-workflow real)": {
-      "main": [
-        [
-          {
-            "node": "D2 disparou gate?",
+            "node": "Executar D2 (Coleta Financeira)",
             "type": "main",
             "index": 0
           }
@@ -1067,6 +1103,17 @@
           }
         ]
       ]
+    },
+    "Executar D2 (Coleta Financeira)": {
+      "main": [
+        [
+          {
+            "node": "D2 disparou gate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -1080,8 +1127,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "1f02ec42-5ef9-426a-b04c-7c76f2c3b55a",
-  "activeVersionId": "1f02ec42-5ef9-426a-b04c-7c76f2c3b55a",
+  "versionId": "99ba0a4c-bb03-4744-8879-02686587751d",
+  "activeVersionId": "99ba0a4c-bb03-4744-8879-02686587751d",
   "triggerCount": 1,
   "shared": [
     {
@@ -1093,9 +1140,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-07-30T17:16:43.202Z",
-    "createdAt": "2026-07-30T17:16:43.202Z",
-    "versionId": "1f02ec42-5ef9-426a-b04c-7c76f2c3b55a",
+    "updatedAt": "2026-07-31T14:40:17.077Z",
+    "createdAt": "2026-07-31T14:40:17.077Z",
+    "versionId": "99ba0a4c-bb03-4744-8879-02686587751d",
     "workflowId": "3ov4hvrZ16JoyoWF",
     "nodes": [
       {
@@ -1121,7 +1168,7 @@
       {
         "parameters": {
           "content": "## ENTRADA\nDisparado pelo trigger pg_net do Supabase sempre que uma linha nova\né criada em credscore.analises (status='aguardando') — o que acontece\nautomaticamente quando qualquer fornecedor novo é cadastrado (upload\núnico, em lote, portal do cliente ou mia-bms).\n\nAutenticação via Header Auth (x-webhook-secret) — configurada no\npróprio node, rejeita chamadas sem o header antes de qualquer execução.\n\n\"Buscar Fornecedor\" resolve o fornecedor_id do payload em CNPJ,\ncliente_id, uf, cidade, razão social etc.",
-          "height": 1248,
+          "height": 1136,
           "width": 1072,
           "color": 4
         },
@@ -1129,7 +1176,7 @@
         "typeVersion": 1,
         "position": [
           -2144,
-          -112
+          0
         ],
         "id": "34a21200-a9bb-4cbb-99e0-7283c8bf72ed",
         "name": "Sticky Note"
@@ -1137,7 +1184,7 @@
       {
         "parameters": {
           "content": "## FASE 0 · ENRIQUECIMENTO CADASTRAL\nO usuário sobe só o CNPJ — todo o resto (razão social, nome fantasia,\nUF, cidade, regime tributário, porte) vem daqui.\n\nAPI: Direct Data · Cadastro Pessoa Jurídica Plus\nGET https://apiv3.directd.com.br/api/CadastroPessoaJuridicaPlus?CNPJ=...&Token=...\n\n\"Normalizar Dados Cadastrais\" combina opcaoMEI + opcaoSimples +\ntributacao num único regime_tributario (função classificarRegime).\nvalores reais desses 3 campos ainda não confirmados com teste real —\najustar a função depois do primeiro CNPJ de verdade.\n\n\"Salvar Dados Cadastrais\" grava tudo em credscore.fornecedores via\nUPDATE ... coalesce(novo, valor_atual) — nunca sobrescreve com null.",
-          "height": 1248,
+          "height": 1136,
           "width": 960,
           "color": 6
         },
@@ -1145,7 +1192,7 @@
         "typeVersion": 1,
         "position": [
           -1056,
-          -112
+          0
         ],
         "id": "390282a0-af79-4fb0-8173-4fb9238750aa",
         "name": "Sticky Note1"
@@ -1153,7 +1200,7 @@
       {
         "parameters": {
           "content": "## FASE 1 · D1 FISCAL (peso 30%)\nChama o sub-workflow \"BMS - 8.01 - D1 (Coleta Fiscal)\" via Execute\nWorkflow — CND Federal (Infosimples) + CND Estadual (Direct Data),\nclassificadas em t_cnd / t_pgfn / t_est.\n\nGATE G3: se t_cnd=\"Positiva\" E t_pgfn=\"Irregular\", o fornecedor é\neliminado aqui mesmo (decisao='nao_elegivel_gate') — o fluxo PARA,\nnunca chega a rodar D2/D3/D4/D5, porque já é reprovação automática.",
-          "height": 1248,
+          "height": 1136,
           "width": 976,
           "color": 2
         },
@@ -1161,7 +1208,7 @@
         "typeVersion": 1,
         "position": [
           -80,
-          -112
+          0
         ],
         "id": "f9326a68-1dac-4841-af24-e63f15f414cd",
         "name": "Sticky Note2"
@@ -1489,19 +1536,6 @@
       },
       {
         "parameters": {
-          "jsCode": "// PLACEHOLDER — sub-workflow D2 (Serasa Concentre) ainda não construído.\n// Endpoint/payload real da Serasa (RELATORIO_INTERMEDIARIO_PJ) ainda não foi validado nesta conversa.\n// Por enquanto devolve tudo como ND, sem disparar o Gate G2, pra não travar o fluxo.\nreturn [{ json: {\n  t_score: 'ND', t_protestos: 'ND', t_execucoes: 'ND', t_spc: 'ND', gate_disparado: null\n} }];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          1200,
-          928
-        ],
-        "id": "0f36f524-d517-4874-a88f-606a488cd686",
-        "name": "D2 (PLACEHOLDER — substituir por sub-workflow real)"
-      },
-      {
-        "parameters": {
           "conditions": {
             "options": {
               "caseSensitive": true,
@@ -1557,7 +1591,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const dados = $('Buscar Tabelas de Pontos').item.json;\nconst tabelas = dados.tabelas_pontos || {};\nconst fonte = $('Buscar Fonte de Reaproveitamento').item.json.fonte;\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\n\nlet s1, s2, s3, s5;\nlet d1_block, d2_block, d3_block;\nlet camposND = [];\n\nif (fonte) {\n  // ---------- REAPROVEITADO: D1/D2/D3 vêm da análise de origem ----------\n  s1 = Number(fonte.s1_fiscal ?? 0);\n  s2 = Number(fonte.s2_financeira ?? 0);\n  s3 = Number(fonte.s3_regime ?? 0);\n\n  const detOrigem = fonte.detalhes_calculo || {};\n  d1_block = detOrigem.d1 ?? { subcriterios: [], total: s1, gate_disparado: null };\n  d2_block = detOrigem.d2 ?? { subcriterios: [], total: s2, gate_disparado: null };\n  d3_block = detOrigem.d3 ?? { subcriterios: [], total: s3 };\n\n  camposND = Array.isArray(fonte.campos_nd)\n    ? fonte.campos_nd.filter((c) => c !== 'dependencia_faturamento')\n    : [];\n\n  // S5 recalculado com as respostas recém-copiadas (não confia no s5 antigo,\n  // porque o conjunto de perguntas ativas pode ter mudado desde a análise de origem).\n  const contS5 = $('Contar Respostas Ativas (Reaproveitamento)').item.json;\n  const totalAtivas = Number(contS5.total_ativas || 0);\n  const pontuando = Number(contS5.pontuando || 0);\n  s5 = totalAtivas > 0 ? Math.round((100 * pontuando / totalAtivas) * 100) / 100 : null;\n} else {\n  // ---------- FLUXO NORMAL: D1/D2 vêm da coleta de API, D3 do regime recém-normalizado ----------\n  const d1 = $('Executar D1 (Coleta Fiscal)').item.json;\n  const d2 = $('D2 (PLACEHOLDER — substituir por sub-workflow real)').item.json;\n\n  const d1_subcriterios = [\n    { criterio: 'cnd_federal', label: 'CND/CPEN Federal', categoria: d1.t_cnd, pontos: pontosOpcao('cnd_federal', d1.t_cnd) },\n    { criterio: 'pgfn', label: 'Dívida ativa PGFN', categoria: d1.t_pgfn, pontos: pontosOpcao('pgfn', d1.t_pgfn) },\n    { criterio: 'sintonia', label: 'Receita Sintonia', categoria: d1.t_sintonia, pontos: pontosOpcao('sintonia', d1.t_sintonia) },\n    { criterio: 'regularidade_estadual_municipal', label: 'Regularidade estadual/municipal', categoria: d1.t_est, pontos: pontosOpcao('regularidade_estadual_municipal', d1.t_est) },\n    { criterio: 'obrigacoes_acessorias', label: 'Obrigações acessórias', categoria: 'ND', pontos: pontosOpcao('obrigacoes_acessorias', 'ND') },\n  ];\n  s1 = d1_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n  const d2_subcriterios = [\n    { criterio: 'serasa_score', label: 'Serasa Score', categoria: d2.t_score, pontos: pontosBanda('serasa_score', d2.t_score) },\n    { criterio: 'protestos', label: 'Protestos', categoria: d2.t_protestos, pontos: pontosBanda('protestos', d2.t_protestos) },\n    { criterio: 'execucoes_relevantes', label: 'Execuções relevantes', categoria: d2.t_execucoes, pontos: pontosBanda('execucoes_relevantes', d2.t_execucoes) },\n    { criterio: 'spc', label: 'Negativação SPC', categoria: d2.t_spc, pontos: pontosOpcao('spc', d2.t_spc) },\n  ];\n  s2 = d2_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n  const regime = dados.regime_tributario || 'ND';\n  s3 = pontosOpcao('regime_tributario', regime);\n\n  d1_block = { subcriterios: d1_subcriterios, total: s1, gate_disparado: d1.gate_disparado };\n  d2_block = { subcriterios: d2_subcriterios, total: s2, gate_disparado: d2.gate_disparado };\n  d3_block = { subcriterios: [{ criterio: 'regime_tributario', label: 'Regime tributário', categoria: regime, pontos: s3 }], total: s3 };\n\n  s5 = null; // D5 continua sendo calculado depois pelo workflow de recálculo\n\n  if (d1.t_cnd === 'Não obtida') camposND.push('cnd_federal');\n  if (d1.t_pgfn === 'Não verificado') camposND.push('pgfn');\n  if (d1.t_sintonia === 'ND') camposND.push('sintonia');\n  camposND.push('obrigacoes_acessorias');\n  if (d1.t_est === 'ND') camposND.push('regularidade_estadual_municipal');\n  if (d2.t_score === 'ND') camposND.push('serasa_score');\n  if (d2.t_protestos === 'ND') camposND.push('protestos');\n  if (d2.t_execucoes === 'ND') camposND.push('execucoes_relevantes');\n  if (d2.t_spc === 'ND') camposND.push('spc');\n}\n\n// ---------- D4 — SEMPRE recalculado com o valor deste cliente ----------\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(dados.valor_compras_anual || 0);\nconst faturamentoFornecedor = Number(dados.faturamento_estimado || 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamentoFornecedor > 0) {\n  p_pct = (valorPago / faturamentoFornecedor) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = 100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0)));\n  s4 = Math.round(s4 * 100) / 100;\n} else {\n  s4 = 50;\n  d4_nd = true;\n}\nconst d4_detalhe = {\n  valor_compras_anual: valorPago,\n  faturamento_estimado_fornecedor: faturamentoFornecedor || null,\n  participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n  nd: d4_nd,\n  pontos: s4,\n};\nif (d4_nd) camposND.push('dependencia_faturamento');\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  s1_fiscal: s1, s2_financeira: s2, s3_regime: s3, s4_dependencia: s4,\n  s5_maturidade: s5,\n  completude_pct, campos_nd: camposND,\n  breakdown: { d1: d1_block, d2: d2_block, d3: d3_block, d4: d4_detalhe },\n  reaproveitado: !!fonte,\n  fonte_reaproveitamento: fonte ? {\n    analise_origem_id: fonte.analise_origem_id,\n    fornecedor_origem_id: fonte.fornecedor_origem_id,\n    cliente_origem_id: fonte.cliente_origem_id,\n    concluido_em: fonte.concluido_em,\n  } : null,\n} }];"
+          "jsCode": "const dados = $('Buscar Tabelas de Pontos').item.json;\nconst tabelas = dados.tabelas_pontos || {};\nconst fonte = $('Buscar Fonte de Reaproveitamento').item.json.fonte;\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\n\nlet s1, s2, s3, s5;\nlet d1_block, d2_block, d3_block;\nlet camposND = [];\n\nif (fonte) {\n  // ---------- REAPROVEITADO: D1/D2/D3 vêm da análise de origem ----------\n  s1 = Number(fonte.s1_fiscal ?? 0);\n  s2 = Number(fonte.s2_financeira ?? 0);\n  s3 = Number(fonte.s3_regime ?? 0);\n\n  const detOrigem = fonte.detalhes_calculo || {};\n  d1_block = detOrigem.d1 ?? { subcriterios: [], total: s1, gate_disparado: null };\n  d2_block = detOrigem.d2 ?? { subcriterios: [], total: s2, gate_disparado: null };\n  d3_block = detOrigem.d3 ?? { subcriterios: [], total: s3 };\n\n  camposND = Array.isArray(fonte.campos_nd)\n    ? fonte.campos_nd.filter((c) => c !== 'dependencia_faturamento')\n    : [];\n\n  // S5 recalculado com as respostas recém-copiadas (não confia no s5 antigo,\n  // porque o conjunto de perguntas ativas pode ter mudado desde a análise de origem).\n  const contS5 = $('Contar Respostas Ativas (Reaproveitamento)').item.json;\n  const totalAtivas = Number(contS5.total_ativas || 0);\n  const respondidas = Number(contS5.respondidas || 0);\n  const pontuando = Number(contS5.pontuando || 0);\n  s5 = respondidas > 0 ? Math.round((100 * pontuando / totalAtivas) * 100) / 100 : null;\n} else {\n  // ---------- FLUXO NORMAL: D1/D2 vêm da coleta de API, D3 do regime recém-normalizado ----------\n  const d1 = $('Executar D1 (Coleta Fiscal)').item.json;\n  const d2 = $('Executar D2 (Coleta Financeira)').item.json;\n\n  const d1_subcriterios = [\n    { criterio: 'cnd_federal', label: 'CND/CPEN Federal', categoria: d1.t_cnd, pontos: pontosOpcao('cnd_federal', d1.t_cnd) },\n    { criterio: 'pgfn', label: 'Dívida ativa PGFN', categoria: d1.t_pgfn, pontos: pontosOpcao('pgfn', d1.t_pgfn) },\n    { criterio: 'sintonia', label: 'Receita Sintonia', categoria: d1.t_sintonia, pontos: pontosOpcao('sintonia', d1.t_sintonia) },\n    { criterio: 'regularidade_estadual_municipal', label: 'Regularidade estadual/municipal', categoria: d1.t_est, pontos: pontosOpcao('regularidade_estadual_municipal', d1.t_est) },\n    { criterio: 'obrigacoes_acessorias', label: 'Obrigações acessórias', categoria: 'ND', pontos: pontosOpcao('obrigacoes_acessorias', 'ND') },\n  ];\n  s1 = d1_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n  const d2_subcriterios = [\n    { criterio: 'serasa_score', label: 'Serasa Score', categoria: d2.t_score, pontos: pontosBanda('serasa_score', d2.t_score) },\n    { criterio: 'protestos', label: 'Protestos', categoria: d2.t_protestos, pontos: pontosBanda('protestos', d2.t_protestos) },\n    { criterio: 'execucoes_relevantes', label: 'Execuções relevantes', categoria: d2.t_execucoes, pontos: pontosBanda('execucoes_relevantes', d2.t_execucoes) },\n    { criterio: 'spc', label: 'Negativação SPC', categoria: d2.t_spc, pontos: pontosOpcao('spc', d2.t_spc) },\n  ];\n  s2 = d2_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n  const regime = dados.regime_tributario || 'ND';\n  s3 = pontosOpcao('regime_tributario', regime);\n\n  d1_block = { subcriterios: d1_subcriterios, total: s1, gate_disparado: d1.gate_disparado };\n  d2_block = { subcriterios: d2_subcriterios, total: s2, gate_disparado: d2.gate_disparado };\n  d3_block = { subcriterios: [{ criterio: 'regime_tributario', label: 'Regime tributário', categoria: regime, pontos: s3 }], total: s3 };\n\n  s5 = null; // D5 continua sendo calculado depois pelo workflow de recálculo\n\n  if (d1.t_cnd === 'Não obtida') camposND.push('cnd_federal');\n  if (d1.t_pgfn === 'Não verificado') camposND.push('pgfn');\n  if (d1.t_sintonia === 'ND') camposND.push('sintonia');\n  camposND.push('obrigacoes_acessorias');\n  if (d1.t_est === 'ND') camposND.push('regularidade_estadual_municipal');\n  if (d2.t_score === 'ND') camposND.push('serasa_score');\n  if (d2.t_protestos === 'ND') camposND.push('protestos');\n  if (d2.t_execucoes === 'ND') camposND.push('execucoes_relevantes');\n  if (d2.t_spc === 'ND') camposND.push('spc');\n}\n\n// ---------- D4 — SEMPRE recalculado com o valor deste cliente ----------\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(dados.valor_compras_anual || 0);\nconst faturamentoFornecedor = Number(dados.faturamento_estimado || 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamentoFornecedor > 0) {\n  p_pct = (valorPago / faturamentoFornecedor) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = 100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0)));\n  s4 = Math.round(s4 * 100) / 100;\n} else {\n  s4 = 50;\n  d4_nd = true;\n}\nconst d4_detalhe = {\n  valor_compras_anual: valorPago,\n  faturamento_estimado_fornecedor: faturamentoFornecedor || null,\n  participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n  nd: d4_nd,\n  pontos: s4,\n};\nif (d4_nd) camposND.push('dependencia_faturamento');\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  s1_fiscal: s1, s2_financeira: s2, s3_regime: s3, s4_dependencia: s4,\n  s5_maturidade: s5,\n  completude_pct, campos_nd: camposND,\n  breakdown: { d1: d1_block, d2: d2_block, d3: d3_block, d4: d4_detalhe },\n  reaproveitado: !!fonte,\n  fonte_reaproveitamento: fonte ? {\n    analise_origem_id: fonte.analise_origem_id,\n    fornecedor_origem_id: fonte.fornecedor_origem_id,\n    cliente_origem_id: fonte.cliente_origem_id,\n    concluido_em: fonte.concluido_em,\n  } : null,\n} }];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -1870,7 +1904,7 @@
       {
         "parameters": {
           "operation": "executeQuery",
-          "query": "SELECT count(*) FILTER (WHERE qr.resposta = qp.resposta_que_pontua) AS pontuando,\n       count(*) AS total_ativas\nFROM credscore.questionario_perguntas qp\nLEFT JOIN credscore.questionario_respostas qr\n  ON qr.pergunta_id = qp.id AND qr.fornecedor_id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}'\nWHERE qp.ativo = true;",
+          "query": "SELECT count(*) FILTER (WHERE qr.resposta = qp.resposta_que_pontua) AS pontuando,\n       count(qr.id) AS respondidas,\n       count(*) AS total_ativas\nFROM credscore.questionario_perguntas qp\nLEFT JOIN credscore.questionario_respostas qr\n  ON qr.pergunta_id = qp.id AND qr.fornecedor_id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}'\nWHERE qp.ativo = true;",
           "options": {}
         },
         "type": "n8n-nodes-base.postgres",
@@ -1887,6 +1921,66 @@
             "name": "BMS-Postgres"
           }
         }
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "Oab8CFwqDMSXErEJ",
+            "mode": "list",
+            "cachedResultUrl": "/workflow/Oab8CFwqDMSXErEJ",
+            "cachedResultName": "BMS - 8.04 - D2 (Coleta Financeira)"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "fornecedor_id": "={{ $('Buscar Fornecedor').first().json.fornecedor_id }}",
+              "analise_id": "={{ $('Webhook').item.json.body.record.id }}",
+              "cnpj": "={{ $('Buscar Fornecedor').first().json.cnpj }}"
+            },
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "fornecedor_id",
+                "displayName": "fornecedor_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string"
+              },
+              {
+                "id": "analise_id",
+                "displayName": "analise_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string"
+              },
+              {
+                "id": "cnpj",
+                "displayName": "cnpj",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string"
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          1184,
+          928
+        ],
+        "id": "682a0d1e-cf3f-446d-a7b9-c773f6ab1c37",
+        "name": "Executar D2 (Coleta Financeira)"
       }
     ],
     "connections": {
@@ -2000,18 +2094,7 @@
         "main": [
           [
             {
-              "node": "D2 (PLACEHOLDER — substituir por sub-workflow real)",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "D2 (PLACEHOLDER — substituir por sub-workflow real)": {
-        "main": [
-          [
-            {
-              "node": "D2 disparou gate?",
+              "node": "Executar D2 (Coleta Financeira)",
               "type": "main",
               "index": 0
             }
@@ -2154,6 +2237,17 @@
           [
             {
               "node": "Buscar Tabelas de Pontos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Executar D2 (Coleta Financeira)": {
+        "main": [
+          [
+            {
+              "node": "D2 disparou gate?",
               "type": "main",
               "index": 0
             }
