@@ -1,0 +1,285 @@
+{
+  "updatedAt": "2026-07-31T19:54:26.300Z",
+  "createdAt": "2026-07-31T14:51:33.600Z",
+  "id": "eQ2PiEPoAG5oYQsi",
+  "name": "05 - Alertas para Clientes",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alertas-contas-clientes",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        1504,
+        544
+      ],
+      "id": "8a00090e-35eb-404f-8af1-73e6cefa1650",
+      "name": "Webhook",
+      "webhookId": "d6ff4fee-3f54-43e0-839c-043cef8e1b4f"
+    },
+    {
+      "parameters": {
+        "jsCode": "function normalizarTelefone(raw) {\n  if (!raw) return null;\n  let digits = String(raw).replace(/\\D/g, '');\n\n  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {\n    digits = digits.slice(2);\n  }\n\n  const ddd = digits.slice(0, 2);\n  let numero = digits.slice(2);\n\n  if (numero.length === 8) {\n    numero = '9' + numero;\n  }\n\n  return `55${ddd}${numero}`;\n}\n\nconst body = $input.first().json.body;\nconst contas = body.contas || [];\n\nconst grupos = {};\n\nfor (const item of contas) {\n  const telefoneNormalizado = normalizarTelefone(item.cliente.telefone);\n  if (!telefoneNormalizado) continue;\n\n  if (!grupos[telefoneNormalizado]) {\n    grupos[telefoneNormalizado] = {\n      telefone: telefoneNormalizado,\n      nome: (item.cliente.nome || '').trim(),\n      contas: []\n    };\n  }\n\n  grupos[telefoneNormalizado].contas.push({\n    descricao: item.conta.descricao,\n    valor: item.conta.valor,\n    data_vencimento: item.conta.data_vencimento\n  });\n}\n\nreturn Object.values(grupos).map(g => ({ json: g }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        544
+      ],
+      "id": "842c4cd3-783b-4d7d-bea0-a403969385ee",
+      "name": "Organizar e Agrupar por Cliente"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1968,
+        544
+      ],
+      "id": "a061fb36-665e-4033-a135-152332c4459b",
+      "name": "Loop - Enviar Mensagens"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2176,
+        384
+      ],
+      "id": "1466627f-a51e-4675-8fcb-e46a1524bc56",
+      "name": "Fim do Loop"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $json;\n\nconst partes = item.contas.map(c => {\n  const descricaoSegura = String(c.descricao || '').replace(/\\*/g, '');\n  const valorFormatado = Number(c.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });\n  const dataFormatada = new Date(c.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR');\n  return `*${descricaoSegura}* – *${valorFormatado}* (vence *${dataFormatada}*)`;\n});\n\nconst listaContas = partes.join(' | ') + '.';\n\nreturn {\n  json: {\n    telefone: item.telefone,\n    nome: item.nome,\n    template_name: \"lembrete_contas_recorrentes\",\n    param_0: listaContas\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2176,
+        624
+      ],
+      "id": "7fb52039-bfd5-4a26-9405-65f0c8e48ec8",
+      "name": "Montar Mensagem Consolidada"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v22.0/928381500368600/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $json.telefone }}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"{{ $json.template_name }}\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": {{ \n          JSON.stringify(\n            [\n              { \"type\": \"text\", \"text\": $json.param_0}\n            ].filter(p => p.text && p.text.trim() !== \"\")\n          )\n        }}\n      }\n    ]\n  }\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        624
+      ],
+      "id": "9d7c13ad-e28d-410b-837e-fd9edd2c7133",
+      "name": "Enviar Mensagem via Meta API",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "tableId": "historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "=Olá! Você tem as seguintes contas recorrentes vencendo nos próximos dias: {{ $('Montar Mensagem Consolidada').item.json.param_0 }} Fique atento para evitar juros ou atraso no pagamento."
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Montar Mensagem Consolidada').item.json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Montar Mensagem Consolidada').item.json.nome }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "=text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "=ELEVA-IA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        624
+      ],
+      "id": "0e8066ac-a955-4092-96d3-5c0bc9f54c3d",
+      "name": "Cria Mensagem no Supabase",
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "kajlEDhCYmeLcxgQ",
+          "name": "ELEVA - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Alertas de contas recorrentes (3 dias antes do vencimento) — 1 mensagem consolidada por cliente\n",
+        "height": 708,
+        "width": 1408,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1440,
+        224
+      ],
+      "typeVersion": 1,
+      "id": "a1c8f115-33e1-4287-a753-9555165526d1",
+      "name": "Sticky Note1"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Organizar e Agrupar por Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Organizar e Agrupar por Cliente": {
+      "main": [
+        [
+          {
+            "node": "Loop - Enviar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop - Enviar Mensagens": {
+      "main": [
+        [
+          {
+            "node": "Fim do Loop",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Montar Mensagem Consolidada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Mensagem Consolidada": {
+      "main": [
+        [
+          {
+            "node": "Enviar Mensagem via Meta API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Mensagem via Meta API": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop - Enviar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase": {
+      "main": [
+        [
+          {
+            "node": "Loop - Enviar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "650f5df6-f361-4e37-805d-aa85c68f4e5e",
+  "activeVersionId": null,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-07-31T14:51:33.600Z",
+      "createdAt": "2026-07-31T14:51:33.600Z",
+      "role": "workflow:owner",
+      "workflowId": "eQ2PiEPoAG5oYQsi",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
