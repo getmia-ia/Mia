@@ -1,0 +1,617 @@
+{
+  "updatedAt": "2026-07-31T19:56:43.281Z",
+  "createdAt": "2026-07-31T19:54:44.686Z",
+  "id": "SFPkaoK0Zs8bAyhO",
+  "name": "BMS - 8.07 - Recálculo com Correções Manuais",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## ENTRADA\nDisparado pela RPC credscore.recalcular_com_overrides(analise_id),\nchamada pelo botão \"Recalcular com correções\" no painel de revisão\nmanual do mia-bms (visão da equipe BMS).\n\nAutenticação via Header Auth (x-webhook-secret) — mesma credencial\ndos outros workflows do Cred Score.\n\nBody recebido: { \"analise_id\": \"<uuid>\" }\n\nNENHUMA API externa é chamada aqui. As categorias originais de\nD1/D2/D3 já estão persistidas em analises.detalhes_calculo, então o recálculo só repontua o que já foi coletado, aplicando por cima as correções manuais salvas em credscore.analise_overrides.",
+        "height": 640,
+        "width": 452,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -96
+      ],
+      "id": "cc08d0f0-0217-4c8d-93fd-a1f36f13042f",
+      "name": "Sticky Note Entrada"
+    },
+    {
+      "parameters": {
+        "content": "## REPONTUAÇÃO\n\"Buscar Análise e Overrides\" traz numa query só: a linha da análise\n(com detalhes_calculo e campos_nd), os dados do fornecedor que\nalimentam D4, as tabelas de pontos ativas e todos os overrides\nagregados em jsonb.\n\n\"Repontuar com Overrides\" percorre os subcriterios de d1/d2/d3, troca\na categoria dos critérios que têm override e repontua usando as\nMESMAS tabelas ativas (pontosOpcao / pontosBanda). D4 é recalculado\ncom o faturamento corrigido, se houver. Os campos corrigidos saem de\ncampos_nd, o que sobe a completude_pct — e é isso que pode fazer a\nanálise sair de 'analise_manual' sozinha pela régua normal.",
+        "height": 640,
+        "width": 536,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        304,
+        -96
+      ],
+      "id": "5c354a81-fa34-446d-8a40-e370a6eacd14",
+      "name": "Sticky Note Repontuacao"
+    },
+    {
+      "parameters": {
+        "content": "## SCORE FINAL E GRAVAÇÃO\nChama o MESMO sub-workflow \"BMS - 8.05 - Calcular Score\" usado pelo\norquestrador e pelo recálculo de D5 — sem nenhuma alteração nele.\nEle continua sendo a única fonte de verdade de pesos, redistribuição\ne thresholds.\n\n\"Montar Resultado da Revisão\" respeita uma decisão que já tenha sido\nsobrescrita manualmente (decisao_sobrescrita = true): nesse caso a\ndecisão humana prevalece sobre o que o 8.99 devolveu, e o status é\nforçado para 'concluido'.\n\n⚠️ \"Salvar Revisão\" NÃO toca em concluido_em de propósito — essa data\né a que o filtro de período dos dashboards usa. Se virasse now(), a\nanálise mudaria de mês retroativamente nos relatórios.",
+        "height": 640,
+        "width": 700,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        848,
+        -96
+      ],
+      "id": "de70c384-a8bc-4094-8763-11b0329ddf98",
+      "name": "Sticky Note Score"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bms-cred-score-revisao",
+        "authentication": "***REMOVIDO***",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        16,
+        320
+      ],
+      "id": "88f3b571-3f1e-4733-bd3e-8444572a727b",
+      "name": "Webhook",
+      "webhookId": "revisao-manual-cred-score",
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT a.id AS analise_id, a.fornecedor_id, a.detalhes_calculo, a.campos_nd,\n       a.decisao, a.decisao_sobrescrita, a.s5_maturidade,\n       f.valor_compras_anual, f.faturamento_estimado, f.regime_tributario,\n       (SELECT jsonb_object_agg(criterio, tabela_pontos)\n          FROM credscore.parametros_tabelas WHERE ativo = true) AS tabelas_pontos,\n       (SELECT coalesce(jsonb_object_agg(o.campo, to_jsonb(o)), '{}'::jsonb)\n          FROM credscore.analise_overrides o WHERE o.analise_id = a.id) AS overrides\nFROM credscore.analises a\nJOIN credscore.fornecedores f ON f.id = a.fornecedor_id\nWHERE a.id = '{{ $json.body.analise_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        400,
+        320
+      ],
+      "id": "77e9d5e1-e146-4f7d-96fa-b75b3ef8390a",
+      "name": "Buscar Análise e Overrides",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      },
+      "notes": "1 query só: análise + fornecedor + tabelas de pontos ativas + overrides agregados por campo."
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Buscar Análise e Overrides').item.json;\nconst tabelas = d.tabelas_pontos || {};\nconst ov = d.overrides || {};\nconst det = d.detalhes_calculo || {};\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\nconst TIPO_BANDA = new Set(['serasa_score', 'protestos', 'execucoes_relevantes']);\n\n// aplica override na categoria e repontua um bloco (d1/d2/d3)\nfunction repontuar(bloco) {\n  const subs = Array.isArray(bloco?.subcriterios) ? bloco.subcriterios : [];\n  const novos = subs.map((s) => {\n    const o = ov[s.criterio];\n    if (!o) return { ...s };\n    const cat = TIPO_BANDA.has(s.criterio) ? Number(o.valor_numerico) : o.valor_texto;\n    const pontos = TIPO_BANDA.has(s.criterio)\n      ? pontosBanda(s.criterio, cat)\n      : pontosOpcao(s.criterio, cat);\n    return { ...s, categoria: cat, pontos, corrigido_manualmente: true };\n  });\n  const total = novos.reduce((sum, s) => sum + Number(s.pontos || 0), 0);\n  return { bloco: { ...bloco, subcriterios: novos, total }, total };\n}\n\nconst r1 = repontuar(det.d1);\nconst r2 = repontuar(det.d2);\nconst r3 = repontuar(det.d3);\n\n// D4 — usa faturamento corrigido se houver override\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(d.valor_compras_anual || 0);\nconst fatOverride = ov['faturamento_estimado'] ? Number(ov['faturamento_estimado'].valor_numerico) : null;\nconst faturamento = Number(fatOverride ?? d.faturamento_estimado ?? 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamento > 0) {\n  p_pct = (valorPago / faturamento) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = Math.round(100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0))) * 100) / 100;\n} else {\n  s4 = 50; d4_nd = true;\n}\n\n// campos_nd: remove o que foi corrigido\nconst ndAntes = Array.isArray(d.campos_nd) ? d.campos_nd : [];\nconst camposND = ndAntes.filter((c) => {\n  if (c === 'dependencia_faturamento') return d4_nd;\n  return !ov[c];\n});\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  analise_id: d.analise_id,\n  s1_fiscal: r1.total, s2_financeira: r2.total, s3_regime: r3.total, s4_dependencia: s4,\n  s5_maturidade: d.s5_maturidade,\n  completude_pct, campos_nd: camposND,\n  decisao_sobrescrita: d.decisao_sobrescrita === true,\n  decisao_atual: d.decisao,\n  breakdown: {\n    d1: r1.bloco, d2: r2.bloco, d3: r3.bloco,\n    d4: {\n      valor_compras_anual: valorPago,\n      faturamento_estimado_fornecedor: faturamento || null,\n      participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n      nd: d4_nd, pontos: s4,\n      corrigido_manualmente: fatOverride != null,\n    },\n  },\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        320
+      ],
+      "id": "82f1d44d-2124-4b97-af1a-b0348240b634",
+      "name": "Repontuar com Overrides",
+      "notes": "Não chama API externa. Reaproveita as categorias já salvas em detalhes_calculo e aplica os overrides por cima, repontuando com as tabelas ativas."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "o2QJUraN5YsNQuSt",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/o2QJUraN5YsNQuSt",
+          "cachedResultName": "BMS - 8.05 - Calcular Score"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "s1_fiscal": "={{ $json.s1_fiscal }}",
+            "s2_financeira": "={{ $json.s2_financeira }}",
+            "s3_regime": "={{ $json.s3_regime }}",
+            "s4_dependencia": "={{ $json.s4_dependencia }}",
+            "s5_maturidade": "={{ $json.s5_maturidade }}",
+            "completude_pct": "={{ $json.completude_pct }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "s1_fiscal",
+              "displayName": "s1_fiscal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s2_financeira",
+              "displayName": "s2_financeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s3_regime",
+              "displayName": "s3_regime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s4_dependencia",
+              "displayName": "s4_dependencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s5_maturidade",
+              "displayName": "s5_maturidade",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "completude_pct",
+              "displayName": "completude_pct",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        944,
+        320
+      ],
+      "id": "29041a0b-3ce4-46f3-a96a-3d52f43136e2",
+      "name": "Executar Calcular Score",
+      "notes": "IMPORTANTE: depois de importar, reabra este node e reselecione 'BMS - 8.99 - Calcular Score' no dropdown — o ID muda a cada import."
+    },
+    {
+      "parameters": {
+        "jsCode": "const dims = $('Repontuar com Overrides').item.json;\nconst score = $('Executar Calcular Score').item.json;\n\n// se a decisão já foi definida manualmente, ela prevalece sobre o recálculo\nconst sobrescrita = dims.decisao_sobrescrita === true;\n\nreturn [{ json: {\n  analise_id: dims.analise_id,\n  s1_fiscal: dims.s1_fiscal, s2_financeira: dims.s2_financeira,\n  s3_regime: dims.s3_regime, s4_dependencia: dims.s4_dependencia,\n  s5_maturidade: dims.s5_maturidade,\n  completude_pct: dims.completude_pct, campos_nd: dims.campos_nd,\n  score_total: score.score_total,\n  decisao: sobrescrita ? dims.decisao_atual : score.decisao,\n  status: sobrescrita ? 'concluido' : score.status,\n  preliminar: score.preliminar,\n  versao_pesos_id: score.versao_pesos_id, versao_thresholds_id: score.versao_thresholds_id,\n  detalhes_calculo: { ...dims.breakdown, pesos_usados: score.pesos_usados },\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        320
+      ],
+      "id": "ca4e9a87-cc07-49f5-ae4f-d57d660112cb",
+      "name": "Montar Resultado da Revisão"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET status = '{{ $json.status }}',\n    decisao = {{ $json.decisao ? `'${$json.decisao}'` : 'null' }},\n    score_total = {{ $json.score_total }},\n    completude_pct = {{ $json.completude_pct }},\n    s1_fiscal = {{ $json.s1_fiscal }}, s2_financeira = {{ $json.s2_financeira }},\n    s3_regime = {{ $json.s3_regime }}, s4_dependencia = {{ $json.s4_dependencia }},\n    s5_maturidade = {{ $json.s5_maturidade ?? 'null' }},\n    campos_nd = '{{ JSON.stringify($json.campos_nd) }}'::jsonb,\n    preliminar = {{ $json.preliminar }},\n    versao_pesos_id = '{{ $json.versao_pesos_id }}',\n    versao_thresholds_id = '{{ $json.versao_thresholds_id }}',\n    detalhes_calculo = '{{ JSON.stringify($json.detalhes_calculo) }}'::jsonb,\n    etapa_atual = 5, etapa_label = 'Concluído'\nWHERE id = '{{ $json.analise_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1376,
+        320
+      ],
+      "id": "8f4f5efb-dd79-432e-b9aa-522442f16f70",
+      "name": "Salvar Revisão",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      },
+      "notes": "NÃO inclui concluido_em = now() de propósito: essa data alimenta o filtro de período dos dashboards."
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Buscar Análise e Overrides",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Análise e Overrides": {
+      "main": [
+        [
+          {
+            "node": "Repontuar com Overrides",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repontuar com Overrides": {
+      "main": [
+        [
+          {
+            "node": "Executar Calcular Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar Calcular Score": {
+      "main": [
+        [
+          {
+            "node": "Montar Resultado da Revisão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Resultado da Revisão": {
+      "main": [
+        [
+          {
+            "node": "Salvar Revisão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "21e81505-9ffa-4a01-891f-bb545072f8ae",
+  "activeVersionId": "21e81505-9ffa-4a01-891f-bb545072f8ae",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-07-31T19:54:44.686Z",
+      "createdAt": "2026-07-31T19:54:44.686Z",
+      "role": "workflow:owner",
+      "workflowId": "SFPkaoK0Zs8bAyhO",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-07-31T19:56:43.283Z",
+    "createdAt": "2026-07-31T19:56:43.283Z",
+    "versionId": "21e81505-9ffa-4a01-891f-bb545072f8ae",
+    "workflowId": "SFPkaoK0Zs8bAyhO",
+    "nodes": [
+      {
+        "parameters": {
+          "content": "## ENTRADA\nDisparado pela RPC credscore.recalcular_com_overrides(analise_id),\nchamada pelo botão \"Recalcular com correções\" no painel de revisão\nmanual do mia-bms (visão da equipe BMS).\n\nAutenticação via Header Auth (x-webhook-secret) — mesma credencial\ndos outros workflows do Cred Score.\n\nBody recebido: { \"analise_id\": \"<uuid>\" }\n\nNENHUMA API externa é chamada aqui. As categorias originais de\nD1/D2/D3 já estão persistidas em analises.detalhes_calculo, então o recálculo só repontua o que já foi coletado, aplicando por cima as correções manuais salvas em credscore.analise_overrides.",
+          "height": 640,
+          "width": 452,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -160,
+          -96
+        ],
+        "id": "cc08d0f0-0217-4c8d-93fd-a1f36f13042f",
+        "name": "Sticky Note Entrada"
+      },
+      {
+        "parameters": {
+          "content": "## REPONTUAÇÃO\n\"Buscar Análise e Overrides\" traz numa query só: a linha da análise\n(com detalhes_calculo e campos_nd), os dados do fornecedor que\nalimentam D4, as tabelas de pontos ativas e todos os overrides\nagregados em jsonb.\n\n\"Repontuar com Overrides\" percorre os subcriterios de d1/d2/d3, troca\na categoria dos critérios que têm override e repontua usando as\nMESMAS tabelas ativas (pontosOpcao / pontosBanda). D4 é recalculado\ncom o faturamento corrigido, se houver. Os campos corrigidos saem de\ncampos_nd, o que sobe a completude_pct — e é isso que pode fazer a\nanálise sair de 'analise_manual' sozinha pela régua normal.",
+          "height": 640,
+          "width": 536,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          304,
+          -96
+        ],
+        "id": "5c354a81-fa34-446d-8a40-e370a6eacd14",
+        "name": "Sticky Note Repontuacao"
+      },
+      {
+        "parameters": {
+          "content": "## SCORE FINAL E GRAVAÇÃO\nChama o MESMO sub-workflow \"BMS - 8.05 - Calcular Score\" usado pelo\norquestrador e pelo recálculo de D5 — sem nenhuma alteração nele.\nEle continua sendo a única fonte de verdade de pesos, redistribuição\ne thresholds.\n\n\"Montar Resultado da Revisão\" respeita uma decisão que já tenha sido\nsobrescrita manualmente (decisao_sobrescrita = true): nesse caso a\ndecisão humana prevalece sobre o que o 8.99 devolveu, e o status é\nforçado para 'concluido'.\n\n⚠️ \"Salvar Revisão\" NÃO toca em concluido_em de propósito — essa data\né a que o filtro de período dos dashboards usa. Se virasse now(), a\nanálise mudaria de mês retroativamente nos relatórios.",
+          "height": 640,
+          "width": 700,
+          "color": 5
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          848,
+          -96
+        ],
+        "id": "de70c384-a8bc-4094-8763-11b0329ddf98",
+        "name": "Sticky Note Score"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "bms-cred-score-revisao",
+          "authentication": "***REMOVIDO***",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          16,
+          320
+        ],
+        "id": "88f3b571-3f1e-4733-bd3e-8444572a727b",
+        "name": "Webhook",
+        "webhookId": "revisao-manual-cred-score",
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT a.id AS analise_id, a.fornecedor_id, a.detalhes_calculo, a.campos_nd,\n       a.decisao, a.decisao_sobrescrita, a.s5_maturidade,\n       f.valor_compras_anual, f.faturamento_estimado, f.regime_tributario,\n       (SELECT jsonb_object_agg(criterio, tabela_pontos)\n          FROM credscore.parametros_tabelas WHERE ativo = true) AS tabelas_pontos,\n       (SELECT coalesce(jsonb_object_agg(o.campo, to_jsonb(o)), '{}'::jsonb)\n          FROM credscore.analise_overrides o WHERE o.analise_id = a.id) AS overrides\nFROM credscore.analises a\nJOIN credscore.fornecedores f ON f.id = a.fornecedor_id\nWHERE a.id = '{{ $json.body.analise_id }}';",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          400,
+          320
+        ],
+        "id": "77e9d5e1-e146-4f7d-96fa-b75b3ef8390a",
+        "name": "Buscar Análise e Overrides",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        },
+        "notes": "1 query só: análise + fornecedor + tabelas de pontos ativas + overrides agregados por campo."
+      },
+      {
+        "parameters": {
+          "jsCode": "const d = $('Buscar Análise e Overrides').item.json;\nconst tabelas = d.tabelas_pontos || {};\nconst ov = d.overrides || {};\nconst det = d.detalhes_calculo || {};\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n  for (const b of t.bands) {\n    if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n  }\n  return Number(t.nd_pontos ?? 0);\n}\nconst TIPO_BANDA = new Set(['serasa_score', 'protestos', 'execucoes_relevantes']);\n\n// aplica override na categoria e repontua um bloco (d1/d2/d3)\nfunction repontuar(bloco) {\n  const subs = Array.isArray(bloco?.subcriterios) ? bloco.subcriterios : [];\n  const novos = subs.map((s) => {\n    const o = ov[s.criterio];\n    if (!o) return { ...s };\n    const cat = TIPO_BANDA.has(s.criterio) ? Number(o.valor_numerico) : o.valor_texto;\n    const pontos = TIPO_BANDA.has(s.criterio)\n      ? pontosBanda(s.criterio, cat)\n      : pontosOpcao(s.criterio, cat);\n    return { ...s, categoria: cat, pontos, corrigido_manualmente: true };\n  });\n  const total = novos.reduce((sum, s) => sum + Number(s.pontos || 0), 0);\n  return { bloco: { ...bloco, subcriterios: novos, total }, total };\n}\n\nconst r1 = repontuar(det.d1);\nconst r2 = repontuar(det.d2);\nconst r3 = repontuar(det.d3);\n\n// D4 — usa faturamento corrigido se houver override\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(d.valor_compras_anual || 0);\nconst fatOverride = ov['faturamento_estimado'] ? Number(ov['faturamento_estimado'].valor_numerico) : null;\nconst faturamento = Number(fatOverride ?? d.faturamento_estimado ?? 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamento > 0) {\n  p_pct = (valorPago / faturamento) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = Math.round(100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0))) * 100) / 100;\n} else {\n  s4 = 50; d4_nd = true;\n}\n\n// campos_nd: remove o que foi corrigido\nconst ndAntes = Array.isArray(d.campos_nd) ? d.campos_nd : [];\nconst camposND = ndAntes.filter((c) => {\n  if (c === 'dependencia_faturamento') return d4_nd;\n  return !ov[c];\n});\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  analise_id: d.analise_id,\n  s1_fiscal: r1.total, s2_financeira: r2.total, s3_regime: r3.total, s4_dependencia: s4,\n  s5_maturidade: d.s5_maturidade,\n  completude_pct, campos_nd: camposND,\n  decisao_sobrescrita: d.decisao_sobrescrita === true,\n  decisao_atual: d.decisao,\n  breakdown: {\n    d1: r1.bloco, d2: r2.bloco, d3: r3.bloco,\n    d4: {\n      valor_compras_anual: valorPago,\n      faturamento_estimado_fornecedor: faturamento || null,\n      participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n      nd: d4_nd, pontos: s4,\n      corrigido_manualmente: fatOverride != null,\n    },\n  },\n} }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          624,
+          320
+        ],
+        "id": "82f1d44d-2124-4b97-af1a-b0348240b634",
+        "name": "Repontuar com Overrides",
+        "notes": "Não chama API externa. Reaproveita as categorias já salvas em detalhes_calculo e aplica os overrides por cima, repontuando com as tabelas ativas."
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "o2QJUraN5YsNQuSt",
+            "mode": "list",
+            "cachedResultUrl": "/workflow/o2QJUraN5YsNQuSt",
+            "cachedResultName": "BMS - 8.05 - Calcular Score"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "s1_fiscal": "={{ $json.s1_fiscal }}",
+              "s2_financeira": "={{ $json.s2_financeira }}",
+              "s3_regime": "={{ $json.s3_regime }}",
+              "s4_dependencia": "={{ $json.s4_dependencia }}",
+              "s5_maturidade": "={{ $json.s5_maturidade }}",
+              "completude_pct": "={{ $json.completude_pct }}"
+            },
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "s1_fiscal",
+                "displayName": "s1_fiscal",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              },
+              {
+                "id": "s2_financeira",
+                "displayName": "s2_financeira",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              },
+              {
+                "id": "s3_regime",
+                "displayName": "s3_regime",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              },
+              {
+                "id": "s4_dependencia",
+                "displayName": "s4_dependencia",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              },
+              {
+                "id": "s5_maturidade",
+                "displayName": "s5_maturidade",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              },
+              {
+                "id": "completude_pct",
+                "displayName": "completude_pct",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "number"
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          944,
+          320
+        ],
+        "id": "29041a0b-3ce4-46f3-a96a-3d52f43136e2",
+        "name": "Executar Calcular Score",
+        "notes": "IMPORTANTE: depois de importar, reabra este node e reselecione 'BMS - 8.99 - Calcular Score' no dropdown — o ID muda a cada import."
+      },
+      {
+        "parameters": {
+          "jsCode": "const dims = $('Repontuar com Overrides').item.json;\nconst score = $('Executar Calcular Score').item.json;\n\n// se a decisão já foi definida manualmente, ela prevalece sobre o recálculo\nconst sobrescrita = dims.decisao_sobrescrita === true;\n\nreturn [{ json: {\n  analise_id: dims.analise_id,\n  s1_fiscal: dims.s1_fiscal, s2_financeira: dims.s2_financeira,\n  s3_regime: dims.s3_regime, s4_dependencia: dims.s4_dependencia,\n  s5_maturidade: dims.s5_maturidade,\n  completude_pct: dims.completude_pct, campos_nd: dims.campos_nd,\n  score_total: score.score_total,\n  decisao: sobrescrita ? dims.decisao_atual : score.decisao,\n  status: sobrescrita ? 'concluido' : score.status,\n  preliminar: score.preliminar,\n  versao_pesos_id: score.versao_pesos_id, versao_thresholds_id: score.versao_thresholds_id,\n  detalhes_calculo: { ...dims.breakdown, pesos_usados: score.pesos_usados },\n} }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1168,
+          320
+        ],
+        "id": "ca4e9a87-cc07-49f5-ae4f-d57d660112cb",
+        "name": "Montar Resultado da Revisão"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE credscore.analises\nSET status = '{{ $json.status }}',\n    decisao = {{ $json.decisao ? `'${$json.decisao}'` : 'null' }},\n    score_total = {{ $json.score_total }},\n    completude_pct = {{ $json.completude_pct }},\n    s1_fiscal = {{ $json.s1_fiscal }}, s2_financeira = {{ $json.s2_financeira }},\n    s3_regime = {{ $json.s3_regime }}, s4_dependencia = {{ $json.s4_dependencia }},\n    s5_maturidade = {{ $json.s5_maturidade ?? 'null' }},\n    campos_nd = '{{ JSON.stringify($json.campos_nd) }}'::jsonb,\n    preliminar = {{ $json.preliminar }},\n    versao_pesos_id = '{{ $json.versao_pesos_id }}',\n    versao_thresholds_id = '{{ $json.versao_thresholds_id }}',\n    detalhes_calculo = '{{ JSON.stringify($json.detalhes_calculo) }}'::jsonb,\n    etapa_atual = 5, etapa_label = 'Concluído'\nWHERE id = '{{ $json.analise_id }}';",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1376,
+          320
+        ],
+        "id": "8f4f5efb-dd79-432e-b9aa-522442f16f70",
+        "name": "Salvar Revisão",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        },
+        "notes": "NÃO inclui concluido_em = now() de propósito: essa data alimenta o filtro de período dos dashboards."
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Buscar Análise e Overrides",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar Análise e Overrides": {
+        "main": [
+          [
+            {
+              "node": "Repontuar com Overrides",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Repontuar com Overrides": {
+        "main": [
+          [
+            {
+              "node": "Executar Calcular Score",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Executar Calcular Score": {
+        "main": [
+          [
+            {
+              "node": "Montar Resultado da Revisão",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar Resultado da Revisão": {
+        "main": [
+          [
+            {
+              "node": "Salvar Revisão",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
