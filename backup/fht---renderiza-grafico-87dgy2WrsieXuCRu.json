@@ -1,0 +1,144 @@
+{
+  "updatedAt": "2026-08-01T14:48:49.014Z",
+  "createdAt": "2026-06-29T14:15:12.045Z",
+  "id": "87dgy2WrsieXuCRu",
+  "name": "fht - Renderiza grafico",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "jsonExample",
+        "jsonExample": "{\n  \"dados_grafico\": null\n}"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        752,
+        0
+      ],
+      "id": "1ab76851-31a5-44c2-ae28-d22eb2634e8b",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === MONTA A URL DO GRÁFICO (Image-Charts / Chart.js 2.8) ===\n// Este workflow NAO calcula nada. Ele recebe a especificacao pronta do agente\n// (que ja tem os numeros da Consulta Financeira) e só desenha.\n\nlet chart = $json;\n\n// --- 1. Parse robusto do que o agente mandou ---\n// Aceita: string JSON, string com ```json, ou objeto direto.\nconst bruto = chart.dados_grafico ?? chart.grafico ?? chart.output;\n\nif (typeof bruto === 'string') {\n  try {\n    const jsonMatch = bruto.match(/\\{[\\s\\S]*\\}/); // ignora texto antes/depois\n    const jsonString = jsonMatch ? jsonMatch[0] : bruto;\n    const jsonClean = jsonString\n      .replace(/```json/g, '')\n      .replace(/```/g, '')\n      .replace(/\\/\\/.*$/gm, '')\n      .replace(/\\/\\*[\\s\\S]*?\\*\\//g, '');\n    chart = JSON.parse(jsonClean);\n  } catch (e) {\n    return [{ json: { url: null, erro: 'JSON invalido vindo do agente: ' + e.message, bruto: bruto } }];\n  }\n} else if (bruto && typeof bruto === 'object') {\n  chart = bruto;\n}\n\n// --- 2. Validação ---\nif (!chart || !chart.labels || !chart.values) {\n  return [{ json: { url: null, erro: 'Configuracao de grafico invalida', bruto: chart } }];\n}\n\nlet tipo = String(chart.tipo || 'barras').toLowerCase();\nif (['linha', 'barras', 'pizza'].indexOf(tipo) === -1) tipo = 'barras'; // fallback seguro\n\n// Pizza aceita no maximo 7 fatias — acima disso vira ilegivel\nconst MAX_FATIAS = 7;\n\n// --- 3. Estilo ---\nconst baseUrl = 'https://image-charts.com/chart.js/2.8.0';\nconst background = 'white';\nconst width = 900;\nconst height = 500;\nconst colors = [\n  'rgba(46,134,171,1)',   // azul\n  'rgba(231,111,81,1)',   // coral\n  'rgba(42,157,143,1)',   // verde\n  'rgba(233,196,106,1)',  // amarelo\n  'rgba(138,107,161,1)',  // roxo\n  'rgba(244,162,97,1)',   // laranja\n  'rgba(108,117,125,1)'   // cinza\n];\n\n// Evita URL gigante / eixo ilegível\nconst cortaLabel = (l) => {\n  const s = String(l);\n  return s.length > 18 ? s.slice(0, 17) + '…' : s;\n};\nconst labels = (chart.labels || []).slice(0, 12).map(cortaLabel);\n\n// 1234.5 -> \"1.235\"  |  12.34 -> \"12,34\"\nconst fmtBR = (n) => {\n  const v = Number(n) || 0;\n  if (Math.abs(v) >= 1000) {\n    return Math.round(v).toString().replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.');\n  }\n  return v.toFixed(2).replace('.', ',');\n};\n\n// --- 4. Datasets (série única = array | múltiplas séries = objeto) ---\nconst alinha = (arr) => {\n  const a = Array.isArray(arr) ? arr.slice(0, labels.length) : [];\n  while (a.length < labels.length) a.push(0); // completa lacunas\n  return a;\n};\n\nconst buildDatasets = (values) => {\n  const multi = !Array.isArray(values) && typeof values === 'object' && values !== null;\n\n  if (multi) {\n    return Object.entries(values).slice(0, 6).map(([nome, dados], i) => ({\n      label: nome,\n      data: alinha(dados),\n      fill: false,\n      borderColor: colors[i % colors.length],\n      backgroundColor: tipo === 'linha'\n        ? colors[i % colors.length]\n        : colors[i % colors.length].replace('1)', '0.85)'),\n      borderWidth: tipo === 'linha' ? 3 : 1,\n      tension: 0.3,\n      pointRadius: 4\n    }));\n  }\n\n  return [{\n    label: chart.descricao || 'Valores',\n    data: alinha(values),\n    fill: false,\n    borderColor: colors[0],\n    backgroundColor: tipo === 'linha' ? colors[0] : colors[0].replace('1)', '0.85)'),\n    borderWidth: tipo === 'linha' ? 3 : 1,\n    tension: 0.3,\n    pointRadius: 4\n  }];\n};\n\n// --- 5. Config ---\nlet config;\n\nif (tipo === 'pizza') {\n  // Pizza aceita uma serie só. Se vier objeto, usa a primeira.\n  let dados = Array.isArray(chart.values)\n    ? chart.values.slice()\n    : (Object.values(chart.values)[0] || []).slice();\n\n  let fatias = labels.map((l, i) => ({ label: l, valor: Math.abs(Number(dados[i]) || 0) }))\n    .filter((f) => f.valor > 0)\n    .sort((a, b) => b.valor - a.valor);\n\n  // Agrupa a cauda em \"Outros\" para nao virar um confete ilegivel\n  if (fatias.length > MAX_FATIAS) {\n    const principais = fatias.slice(0, MAX_FATIAS - 1);\n    const resto = fatias.slice(MAX_FATIAS - 1).reduce((a, f) => a + f.valor, 0);\n    fatias = principais.concat([{ label: 'Outros', valor: resto }]);\n  }\n\n  const total = fatias.reduce((a, f) => a + f.valor, 0);\n\n  // Legenda rica: \"Moradia: 13.100 (57,9%)\"\n  const richLabels = fatias.map((f) => {\n    const pct = total > 0 ? ((f.valor / total) * 100).toFixed(1).replace('.', ',') : '0,0';\n    return f.label + ': ' + fmtBR(f.valor) + ' (' + pct + '%)';\n  });\n\n  config = {\n    type: 'pie',\n    data: {\n      labels: richLabels,\n      datasets: [{\n        data: fatias.map((f) => f.valor),\n        backgroundColor: fatias.map((f, i) => colors[i % colors.length]),\n        borderColor: 'white',\n        borderWidth: 2\n      }]\n    },\n    options: {\n      responsive: true,\n      title: { display: true, text: chart.titulo || 'Composição', fontSize: 16 },\n      legend: {\n        position: 'right',\n        labels: { boxWidth: 12, fontSize: 11, padding: 12 }\n      },\n      plugins: {\n        datalabels: {\n          display: true,\n          color: 'white',\n          font: { weight: 'bold', size: 13 },\n          anchor: 'center',\n          align: 'center'\n        }\n      }\n    }\n  };\n} else {\n  const datasets = buildDatasets(chart.values);\n\n  config = {\n    type: tipo === 'linha' ? 'line' : 'bar',\n    data: { labels, datasets },\n    options: {\n      responsive: true,\n      title: { display: true, text: chart.titulo || 'Transações', fontSize: 16 },\n      legend: { position: 'top', display: datasets.length > 1 },\n      scales: {\n        yAxes: [{\n          ticks: { beginAtZero: true },\n          scaleLabel: { display: !!chart.descricao, labelString: (chart.descricao || '').slice(0, 35) }\n        }],\n        xAxes: [{ ticks: { autoSkip: false } }]\n      }\n    }\n  };\n}\n\n// --- 6. URL ---\nconst jsonConfig = encodeURIComponent(JSON.stringify(config));\nconst url = baseUrl + '?bkg=' + background + '&width=' + width + '&height=' + height + '&c=' + jsonConfig;\n\nreturn [{\n  json: {\n    url,\n    url_muito_longa: url.length > 8000, // Image-Charts pode recusar URLs enormes\n    tipo,\n    chart\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        976,
+        0
+      ],
+      "id": "7bb3e73d-18c9-462b-ac0e-17306766cc40",
+      "name": "Prepara a URL do grafico"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "responseFormat": "file",
+        "options": {}
+      },
+      "name": "Valida no Image-Charts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        0
+      ],
+      "id": "6c6a74f6-8a1f-41f7-bb58-a72a964830ac",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "u1",
+              "name": "url_img",
+              "value": "={{ $('Prepara a URL do grafico').item.json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "u2",
+              "name": "tipo_grafico",
+              "value": "={{ $('Prepara a URL do grafico').item.json.tipo }}",
+              "type": "string"
+            },
+            {
+              "id": "u3",
+              "name": "erro",
+              "value": "={{ $('Prepara a URL do grafico').item.json.erro || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1424,
+        0
+      ],
+      "id": "111f36ec-e0b9-46c3-8e1d-23ca1a5747ce",
+      "name": "Retorna a url da img"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Prepara a URL do grafico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara a URL do grafico": {
+      "main": [
+        [
+          {
+            "node": "Valida no Image-Charts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valida no Image-Charts": {
+      "main": [
+        [
+          {
+            "node": "Retorna a url da img",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "6e6d57e5-4dd3-4dd2-82e1-845c0894bb34",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-06-29T14:15:12.045Z",
+      "createdAt": "2026-06-29T14:15:12.045Z",
+      "role": "workflow:owner",
+      "workflowId": "87dgy2WrsieXuCRu",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
