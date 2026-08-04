@@ -1,0 +1,1047 @@
+{
+  "updatedAt": "2026-08-03T21:54:44.372Z",
+  "createdAt": "2026-08-03T21:39:43.280Z",
+  "id": "Ygf37j9yqjdgJv2x",
+  "name": "Meta - Criar Templates a partir da Planilha (com re-upload de midia)",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "48e222e9-f961-4b2d-ab5d-d3a30c3b235f",
+      "name": "Executar manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2688,
+        1664
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "wabaId",
+              "value": "1795839838511442",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "apiVersion",
+              "value": "v26.0",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "sheetName",
+              "value": "Comunidade BMS",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "esperaSegundos",
+              "value": 3,
+              "type": "number"
+            },
+            {
+              "id": "a34ea93f-103b-45c3-a329-4edfca6eafbe",
+              "name": "appId",
+              "value": "2225028007650227",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "07e73524-a841-42ac-bdb4-71cdd7f7db99",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2480,
+        1664
+      ],
+      "notes": "Troque sheetName e rode de novo para a outra aba"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/1NfmQtHH4BGR3IxWNyxQw4KxEaDsTjOtvjC4Wx6scpJU/edit?usp=sharing",
+          "__regex": "https:\\/\\/(?:drive|docs)\\.google\\.com(?:\\/.*|)\\/d\\/([0-9a-zA-Z\\-_]+)(?:\\/.*|)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.sheetName }}",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "a102c1a4-2d33-4288-beef-785464ea768d",
+      "name": "Ler Planilha",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -2272,
+        1664
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Monta o payload da Meta a partir das colunas da planilha.\n// Descarta: id, status, sub_category (nao sao aceitos na criacao)\n// Marca templates com header de midia como _midia = true (nao serao criados)\nconst MEDIA = ['IMAGE', 'VIDEO', 'DOCUMENT', 'LOCATION'];\nconst out = [];\nconst seen = new Set();\n\nfor (const item of $input.all()) {\n  const r = item.json;\n  const name = String(r.name || '').trim();\n  if (!name) continue;\n  const language = String(r.language || 'pt_BR').trim();\n\n  const key = name + '|' + language;\n  if (seen.has(key)) continue;   // evita nome+idioma duplicado (ex: hello_world nas 2 abas)\n  seen.add(key);\n\n  let comps = [];\n  try {\n    comps = typeof r.components_json === 'string'\n      ? JSON.parse(r.components_json)\n      : (r.components_json || []);\n  } catch (e) {\n    comps = [];\n  }\n\n  const headerFormat = String(r.header_format || '').toUpperCase();\n  const temMidia = MEDIA.includes(headerFormat)\n    || comps.some(c => c.type === 'HEADER' && MEDIA.includes(String(c.format || '').toUpperCase()));\n\n  const clean = [];\n  for (const c of comps) {\n    const t = String(c.type || '').toUpperCase();\n\n    if (t === 'HEADER') {\n      if (MEDIA.includes(String(c.format || '').toUpperCase())) continue;\n      const h = { type: 'HEADER', format: 'TEXT', text: c.text };\n      if (c.example) h.example = c.example;\n      clean.push(h);\n\n    } else if (t === 'BODY') {\n      const b = { type: 'BODY', text: c.text };\n      const vars = [...new Set(String(c.text || '').match(/\\{\\{\\s*[\\w.]+\\s*\\}\\}/g) || [])];\n      if (c.example && (c.example.body_text || c.example.body_text_named_params)) {\n        b.example = c.example;\n      } else if (vars.length) {\n        // Meta exige exemplo quando ha variavel no corpo\n        b.example = { body_text: [vars.map((_, i) => 'exemplo' + (i + 1))] };\n      }\n      clean.push(b);\n\n    } else if (t === 'FOOTER') {\n      clean.push({ type: 'FOOTER', text: c.text });\n\n    } else if (t === 'BUTTONS') {\n      const btns = (c.buttons || []).map(b => {\n        const bt = { type: b.type, text: b.text };\n        if (b.type === 'URL') { bt.url = b.url; if (b.example) bt.example = b.example; }\n        if (b.type === 'PHONE_NUMBER') bt.phone_number = b.phone_number;\n        if (b.type === 'COPY_CODE' && b.example) bt.example = b.example;\n        if (b.type === 'FLOW') { bt.flow_id = b.flow_id; bt.flow_action = b.flow_action; bt.navigate_screen = b.navigate_screen; }\n        return bt;\n      }).filter(b => b.text || b.type === 'COPY_CODE');\n      if (btns.length) clean.push({ type: 'BUTTONS', buttons: btns });\n    }\n  }\n\n  const payload = {\n    name: name,\n    language: language,\n    category: String(r.category || 'MARKETING').toUpperCase(),\n    components: clean,\n  };\n  const pf = String(r.parameter_format || '').toUpperCase();\n  if (pf === 'POSITIONAL' || pf === 'NAMED') payload.parameter_format = pf;\n\n  out.push({\n    json: {\n      _midia: temMidia,\n      nome: name,\n      language: language,\n      header_format: headerFormat || null,\n      id_antigo: r.id || null,\n      payload: payload,\n    }\n  });\n}\n\nreturn out;\n"
+      },
+      "id": "d9f1296f-08d3-4304-8176-21ac2d4bc340",
+      "name": "Preparar Templates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json._midia }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "2c86056d-e66e-480c-8f2f-1536d027ff54",
+      "name": "Tem header de midia?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -672,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Templates com header de midia: nao podem ser recriados so com a planilha,\n// porque o handle da imagem/video pertence ao BM antigo. Ficam listados aqui.\nreturn $input.all().map(i => ({\n  json: {\n    nome: i.json.nome,\n    language: i.json.language,\n    id_antigo: i.json.id_antigo,\n    id_novo: '',\n    status: 'PENDENTE_MIDIA',\n    categoria_atribuida: '',\n    status_meta: '',\n    erro: 'Header ' + i.json.header_format + ': precisa reupload da midia no novo BM (Resumable Upload API) antes de criar.',\n    executado_em: new Date().toISOString(),\n  }\n}));\n"
+      },
+      "id": "76bcdc78-b028-466c-9bc2-3322d0b48405",
+      "name": "Listar Pendentes (midia)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/1NfmQtHH4BGR3IxWNyxQw4KxEaDsTjOtvjC4Wx6scpJU/edit?usp=sharing",
+          "__regex": "https:\\/\\/(?:drive|docs)\\.google\\.com(?:\\/.*|)\\/d\\/([0-9a-zA-Z\\-_]+)(?:\\/.*|)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 650628013,
+          "mode": "list",
+          "cachedResultName": "Migracao_Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1NfmQtHH4BGR3IxWNyxQw4KxEaDsTjOtvjC4Wx6scpJU/edit#gid=650628013"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "2be2baab-6f6e-404f-8327-5fa26178a980",
+      "name": "Gravar Pendentes",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -208,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "f269240f-5a62-426e-bbef-485b075ca229",
+      "name": "Loop de Templates",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -432,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $('Config').first().json.apiVersion }}/{{ $('Config').first().json.wabaId }}/message_templates",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "480bdaab-b6a6-4028-849e-f37051320243",
+      "name": "Criar Template na Meta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16,
+        448
+      ],
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\n// Loop com batchSize = 1 -> o item atual do loop e o request correspondente\nconst req = $('Loop de Templates').first().json;\nconst res = $json || {};\nconst criado = !!res.id;\n\nlet erro = '';\nif (!criado) {\n  if (res.error) erro = res.error.error_user_msg || res.error.error_user_title || res.error.message || JSON.stringify(res.error);\n  else erro = JSON.stringify(res).slice(0, 500);\n}\n\nreturn {\n  json: {\n    nome: req.nome,\n    language: req.language,\n    id_antigo: req.id_antigo,\n    id_novo: res.id || '',\n    status: criado ? 'CRIADO' : 'ERRO',\n    categoria_atribuida: res.category || '',\n    status_meta: res.status || '',\n    erro: erro,\n    executado_em: new Date().toISOString(),\n  }\n};\n"
+      },
+      "id": "d0a32f53-db05-491d-9d78-32adf2d12280",
+      "name": "Registrar Resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $('Config').first().json.esperaSegundos }}"
+      },
+      "id": "02335a7d-d7ae-4dbf-8384-be0208c618c6",
+      "name": "Aguardar (rate limit)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "webhookId": "aguardar-rate-limit",
+      "position": [
+        448,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1NfmQtHH4BGR3IxWNyxQw4KxEaDsTjOtvjC4Wx6scpJU/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 650628013,
+          "mode": "list",
+          "cachedResultName": "Migracao_Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1NfmQtHH4BGR3IxWNyxQw4KxEaDsTjOtvjC4Wx6scpJU/edit#gid=650628013"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a091bfdd-7f31-4b8d-9f6b-8d01e91581a1",
+      "name": "Gravar Log Final",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        16,
+        224
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "c462a667-8c45-4aa6-86aa-e484c4705a7d",
+      "name": "Loop de Midia",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1616,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.media_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "8de7b508-3ca9-4464-a48c-f823c4012f39",
+      "name": "Baixar Midia",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1168,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Le o binario baixado e descobre tamanho + mime type (o /uploads exige os dois)\nconst MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', mp4: 'video/mp4', pdf: 'application/pdf', webp: 'image/webp' };\nconst ctx = $('Loop de Midia').first().json;\nconst items = $input.all();\nconst out = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const bin = items[i].binary && items[i].binary.data;\n  if (!bin) {\n    throw new Error('Nao foi possivel baixar a midia de ' + ctx.nome + ' (URL do scontent provavelmente expirou): ' + ctx.media_url);\n  }\n  const buf = await this.helpers.getBinaryDataBuffer(i, 'data');\n\n  const url = String(ctx.media_url || '');\n  const ext = (url.split('?')[0].split('.').pop() || '').toLowerCase();\n  let mime = bin.mimeType && bin.mimeType !== 'application/octet-stream' ? bin.mimeType : (MIME[ext] || 'image/jpeg');\n  if (mime === 'image/jpg') mime = 'image/jpeg';\n\n  out.push({\n    json: { nome: ctx.nome, file_length: buf.length, file_type: mime, tamanho_kb: Math.round(buf.length / 1024) },\n    binary: items[i].binary,\n  });\n}\n\nreturn out;\n"
+      },
+      "id": "1550e7ea-f824-4d47-940c-c1e9318ec0b6",
+      "name": "Preparar Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -944,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $('Config').first().json.apiVersion }}/{{ $('Config').first().json.appId }}/uploads",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "file_length",
+              "value": "={{ $json.file_length }}"
+            },
+            {
+              "name": "file_type",
+              "value": "={{ $json.file_type }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f5be05bf-e19d-45c7-b057-13fe6f724a03",
+      "name": "Criar Sessao de Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -704,
+        1520
+      ],
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***",
+        "httpBearerAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Junta o upload_session_id (json) com o binario baixado (que o node HTTP anterior nao propaga)\nconst src = $('Preparar Upload').first();\nconst sessionId = $json.id;   // formato: upload:MTk...\nif (!sessionId) throw new Error('A Meta nao devolveu upload session id: ' + JSON.stringify($json).slice(0, 300));\n\nreturn [{\n  json: { upload_session: sessionId, file_length: src.json.file_length, file_type: src.json.file_type },\n  binary: src.binary,\n}];\n"
+      },
+      "id": "1ae020c0-bd11-4662-beeb-0e7fe67c69f1",
+      "name": "Anexar Binario",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -496,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $('Config').first().json.apiVersion }}/{{ $json.upload_session }}",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "file_offset",
+              "value": "0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "16b368fd-2bf7-4af0-b8e7-c543084c7a2e",
+      "name": "Enviar Binario (upload)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -288,
+        1520
+      ],
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***",
+        "httpBearerAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Injeta o header_handle novo (retornado pelo upload) no payload do template\nconst ctx = $('Loop de Midia').first().json;\nconst handle = $json.h;\nif (!handle) throw new Error('Upload nao retornou handle para ' + ctx.nome + ': ' + JSON.stringify($json).slice(0, 300));\n\nconst payload = JSON.parse(JSON.stringify(ctx.payload));\nfor (const c of payload.components) {\n  if (String(c.type).toUpperCase() === 'HEADER' && c.example && c.example.header_handle) {\n    c.example.header_handle = [handle];\n  }\n}\n\nreturn [{ json: { ...ctx, handle_novo: handle, payload: payload } }];\n"
+      },
+      "id": "a6b585dd-3a40-4c6e-99e6-5c2227b8ddbe",
+      "name": "Montar Payload com Handle",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -64,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $('Config').first().json.apiVersion }}/{{ $('Config').first().json.wabaId }}/message_templates",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "5fbc2233-a2a0-4afd-8e5c-54a2bcf510bb",
+      "name": "Criar Template com Midia",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        160,
+        1520
+      ],
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***",
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\n// Loop com batchSize = 1 -> o item atual do loop e o request correspondente\nconst req = $('Loop de Midia').first().json;\nconst res = $json || {};\nconst criado = !!res.id;\n\nlet erro = '';\nif (!criado) {\n  if (res.error) erro = res.error.error_user_msg || res.error.error_user_title || res.error.message || JSON.stringify(res.error);\n  else erro = JSON.stringify(res).slice(0, 500);\n}\n\nreturn {\n  json: {\n    nome: req.nome,\n    language: req.language,\n    id_antigo: req.id_antigo,\n    id_novo: res.id || '',\n    status: criado ? 'CRIADO' : 'ERRO',\n    categoria_atribuida: res.category || '',\n    status_meta: res.status || '',\n    erro: erro,\n    executado_em: new Date().toISOString(),\n    handle_novo: req.handle_novo || '',\n  }\n};\n"
+      },
+      "id": "74d831fb-fa22-4e4f-89f5-5e10bfd5bfed",
+      "name": "Registrar Resultado (midia)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $('Config1').first().json.esperaSegundos }}"
+      },
+      "id": "51f39abf-f49d-41cc-8a81-fafb0d6437e2",
+      "name": "Aguardar (midia)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "webhookId": "aguardar-midia",
+      "position": [
+        592,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1NfmQtHH4BGR3IxWNyxQw4KxEaDsTjOtvjC4Wx6scpJU/edit?gid=1335069993#gid=1335069993",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 650628013,
+          "mode": "list",
+          "cachedResultName": "Migracao_Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1NfmQtHH4BGR3IxWNyxQw4KxEaDsTjOtvjC4Wx6scpJU/edit#gid=650628013"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "378f3721-31f1-4f89-9d7b-9859a9bd45fd",
+      "name": "Gravar Log Midia",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1168,
+        1280
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "0f317de1-81ef-4e1f-8c2f-4cbe019faf07",
+      "name": "Loop de Texto",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1616,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $('Config').first().json.apiVersion }}/{{ $('Config').first().json.wabaId }}/message_templates",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "0d4e8eab-6b9d-47bd-aa52-0479be99c6a7",
+      "name": "Criar Template de Texto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1168,
+        1984
+      ],
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***",
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\n// Loop com batchSize = 1 -> o item atual do loop e o request correspondente\nconst req = $('Loop de Texto').first().json;\nconst res = $json || {};\nconst criado = !!res.id;\n\nlet erro = '';\nif (!criado) {\n  if (res.error) erro = res.error.error_user_msg || res.error.error_user_title || res.error.message || JSON.stringify(res.error);\n  else erro = JSON.stringify(res).slice(0, 500);\n}\n\nreturn {\n  json: {\n    nome: req.nome,\n    language: req.language,\n    id_antigo: req.id_antigo,\n    id_novo: res.id || '',\n    status: criado ? 'CRIADO' : 'ERRO',\n    categoria_atribuida: res.category || '',\n    status_meta: res.status || '',\n    erro: erro,\n    executado_em: new Date().toISOString(),\n  }\n};\n"
+      },
+      "id": "daa5a824-0dd2-4cd2-9fc5-671f068b3eca",
+      "name": "Registrar Resultado (texto)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -944,
+        1984
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $('Config1').first().json.esperaSegundos }}"
+      },
+      "id": "c84bab94-16b9-49cf-aada-9b04d8b51864",
+      "name": "Aguardar (texto)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "webhookId": "aguardar-texto",
+      "position": [
+        -736,
+        1984
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/1NfmQtHH4BGR3IxWNyxQw4KxEaDsTjOtvjC4Wx6scpJU/edit?gid=1335069993#gid=1335069993",
+          "__regex": "https:\\/\\/(?:drive|docs)\\.google\\.com(?:\\/.*|)\\/d\\/([0-9a-zA-Z\\-_]+)(?:\\/.*|)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 650628013,
+          "mode": "list",
+          "cachedResultName": "Migracao_Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1NfmQtHH4BGR3IxWNyxQw4KxEaDsTjOtvjC4Wx6scpJU/edit#gid=650628013"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "132f3a41-b428-4eae-944a-cab68e40e4bc",
+      "name": "Gravar Log Texto",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1168,
+        1792
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Monta o payload da Meta a partir das colunas da planilha.\n// Descarta: id, status, sub_category (nao sao aceitos na criacao)\n// Templates com header de midia vao para a trilha de re-upload (_midia = true)\nconst MEDIA = ['IMAGE', 'VIDEO', 'DOCUMENT'];\nconst out = [];\nconst seen = new Set();\n\nfor (const item of $input.all()) {\n  const r = item.json;\n  const name = String(r.name || '').trim();\n  if (!name) continue;\n  const language = String(r.language || 'pt_BR').trim();\n\n  const key = name + '|' + language;\n  if (seen.has(key)) continue;   // evita nome+idioma duplicado (ex: hello_world nas 2 abas)\n  seen.add(key);\n\n  let comps = [];\n  try {\n    comps = typeof r.components_json === 'string'\n      ? JSON.parse(r.components_json)\n      : (r.components_json || []);\n  } catch (e) {\n    comps = [];\n  }\n\n  let headerFormat = String(r.header_format || '').toUpperCase();\n  const hComp = comps.find(c => String(c.type).toUpperCase() === 'HEADER');\n  if (!headerFormat && hComp) headerFormat = String(hComp.format || '').toUpperCase();\n  const temMidia = MEDIA.includes(headerFormat);\n\n  // URL da midia salva pelo fluxo anterior\n  let mediaUrl = r.header_media_url || null;\n  if (temMidia && !mediaUrl && hComp && hComp.example && hComp.example.header_handle) {\n    mediaUrl = hComp.example.header_handle[0];\n  }\n\n  const clean = [];\n  for (const c of comps) {\n    const t = String(c.type || '').toUpperCase();\n\n    if (t === 'HEADER') {\n      const fmt = String(c.format || '').toUpperCase();\n      if (MEDIA.includes(fmt)) {\n        // placeholder: o header_handle real e injetado depois do upload\n        clean.push({ type: 'HEADER', format: fmt, example: { header_handle: ['__HANDLE__'] } });\n      } else {\n        const h = { type: 'HEADER', format: 'TEXT', text: c.text };\n        if (c.example) h.example = c.example;\n        clean.push(h);\n      }\n\n    } else if (t === 'BODY') {\n      const b = { type: 'BODY', text: c.text };\n      const vars = [...new Set(String(c.text || '').match(/\\{\\{\\s*[\\w.]+\\s*\\}\\}/g) || [])];\n      if (c.example && (c.example.body_text || c.example.body_text_named_params)) {\n        b.example = c.example;\n      } else if (vars.length) {\n        // Meta exige exemplo quando ha variavel no corpo\n        b.example = { body_text: [vars.map((_, i) => 'exemplo' + (i + 1))] };\n      }\n      clean.push(b);\n\n    } else if (t === 'FOOTER') {\n      clean.push({ type: 'FOOTER', text: c.text });\n\n    } else if (t === 'BUTTONS') {\n      const btns = (c.buttons || []).map(b => {\n        const bt = { type: b.type, text: b.text };\n        if (b.type === 'URL') { bt.url = b.url; if (b.example) bt.example = b.example; }\n        if (b.type === 'PHONE_NUMBER') bt.phone_number = b.phone_number;\n        if (b.type === 'COPY_CODE' && b.example) bt.example = b.example;\n        if (b.type === 'FLOW') { bt.flow_id = b.flow_id; bt.flow_action = b.flow_action; bt.navigate_screen = b.navigate_screen; }\n        return bt;\n      }).filter(b => b.text || b.type === 'COPY_CODE');\n      if (btns.length) clean.push({ type: 'BUTTONS', buttons: btns });\n    }\n  }\n\n  const payload = {\n    name: name,\n    language: language,\n    category: String(r.category || 'MARKETING').toUpperCase(),\n    components: clean,\n  };\n  const pf = String(r.parameter_format || '').toUpperCase();\n  if (pf === 'POSITIONAL' || pf === 'NAMED') payload.parameter_format = pf;\n\n  out.push({\n    json: {\n      _midia: temMidia,\n      nome: name,\n      language: language,\n      header_format: headerFormat || null,\n      media_url: mediaUrl,\n      id_antigo: r.id || null,\n      payload: payload,\n    }\n  });\n}\n\nreturn out;\n"
+      },
+      "id": "e0d9ef1d-6136-40a1-a774-5c942ec2192c",
+      "name": "Preparar Templates1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2064,
+        1664
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json._midia }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "1535a6d4-a396-4182-8b19-447e651d5dca",
+      "name": "Tem header de midia?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1856,
+        1664
+      ]
+    }
+  ],
+  "connections": {
+    "Executar manualmente": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Ler Planilha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Planilha": {
+      "main": [
+        [
+          {
+            "node": "Preparar Templates1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Templates": {
+      "main": [
+        [
+          {
+            "node": "Tem header de midia?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem header de midia?": {
+      "main": [
+        [
+          {
+            "node": "Listar Pendentes (midia)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop de Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Listar Pendentes (midia)": {
+      "main": [
+        [
+          {
+            "node": "Gravar Pendentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop de Templates": {
+      "main": [
+        [
+          {
+            "node": "Gravar Log Final",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Criar Template na Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Template na Meta": {
+      "main": [
+        [
+          {
+            "node": "Registrar Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Resultado": {
+      "main": [
+        [
+          {
+            "node": "Aguardar (rate limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar (rate limit)": {
+      "main": [
+        [
+          {
+            "node": "Loop de Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop de Midia": {
+      "main": [
+        [
+          {
+            "node": "Gravar Log Midia",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Baixar Midia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixar Midia": {
+      "main": [
+        [
+          {
+            "node": "Preparar Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Upload": {
+      "main": [
+        [
+          {
+            "node": "Criar Sessao de Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Sessao de Upload": {
+      "main": [
+        [
+          {
+            "node": "Anexar Binario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anexar Binario": {
+      "main": [
+        [
+          {
+            "node": "Enviar Binario (upload)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Binario (upload)": {
+      "main": [
+        [
+          {
+            "node": "Montar Payload com Handle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Payload com Handle": {
+      "main": [
+        [
+          {
+            "node": "Criar Template com Midia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Template com Midia": {
+      "main": [
+        [
+          {
+            "node": "Registrar Resultado (midia)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Resultado (midia)": {
+      "main": [
+        [
+          {
+            "node": "Aguardar (midia)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar (midia)": {
+      "main": [
+        [
+          {
+            "node": "Loop de Midia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop de Texto": {
+      "main": [
+        [
+          {
+            "node": "Gravar Log Texto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Criar Template de Texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Template de Texto": {
+      "main": [
+        [
+          {
+            "node": "Registrar Resultado (texto)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Resultado (texto)": {
+      "main": [
+        [
+          {
+            "node": "Aguardar (texto)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar (texto)": {
+      "main": [
+        [
+          {
+            "node": "Loop de Texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Templates1": {
+      "main": [
+        [
+          {
+            "node": "Tem header de midia?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem header de midia?1": {
+      "main": [
+        [
+          {
+            "node": "Loop de Midia",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop de Texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "e9208e87-ab1f-4a53-8746-d69c80b315ec",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-08-03T21:39:43.280Z",
+      "createdAt": "2026-08-03T21:39:43.280Z",
+      "role": "workflow:owner",
+      "workflowId": "Ygf37j9yqjdgJv2x",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
