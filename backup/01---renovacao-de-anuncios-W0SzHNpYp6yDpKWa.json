@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-29T21:07:13.422Z",
+  "updatedAt": "2026-08-05T20:54:02.743Z",
   "createdAt": "2026-03-10T18:56:13.634Z",
   "id": "W0SzHNpYp6yDpKWa",
   "name": "01 - Renovação de Anúncios",
@@ -20,25 +20,25 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.3,
       "position": [
-        -3264,
-        6336
+        -528,
+        7632
       ],
-      "id": "6fef1c8a-96ad-4db0-9a9d-e23bdd8138e6",
+      "id": "4f21598f-4522-42d5-9767-7d33fc385ca8",
       "name": "Schedule Trigger"
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO \"public\".renovacao_anuncios \n    (user_id, bid_id, nome_produto, email, telefone, tipo, sent, expire, created_at, ultimo_anuncio)\nSELECT DISTINCT ON (b.creator_id) \n    b.creator_id,\n    b.id,\n    p.name,\n    u.email,\n    f.telefone_limpo,\n    CASE \n        WHEN b.status_id IN (2, 3) THEN 'expirado'\n        WHEN b.status_id = 1\n             AND b.created <= now()::timestamp - interval '8 days'\n          THEN '8dias'\n        ELSE 'ativo'\n    END AS tipo,\n    false AS sent, \n    b.expire,\n    b.created,\n    b.created AS ultimo_anuncio\nFROM an_prod_cbc.bids b\nLEFT JOIN an_prod_types.products p ON p.id = b.product_id\nLEFT JOIN an_prod_cbc.users u ON u.id = b.creator_id\nLEFT JOIN an_prod_cbc.user_profiles up ON up.user_id = u.id\nLEFT JOIN an_prod_cbc.profile_phones pp ON pp.profile_id = up.id\nLEFT JOIN an_prod_cbc.phones phones ON phones.id = pp.phone_id\nCROSS JOIN LATERAL (\n    SELECT \n        CASE \n            WHEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') LIKE '55%' \n                THEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n            ELSE '55' || ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n        END AS telefone_limpo\n) f\nWHERE b.deleted = false \n  AND b.created >= '2022-01-01' \n  AND phones.number IS NOT NULL \n  AND length(f.telefone_limpo) >= 10 \nORDER BY b.creator_id, b.created DESC, phones.id DESC\nON CONFLICT (user_id) \nDO UPDATE SET\n    bid_id          = EXCLUDED.bid_id,\n    nome_produto    = EXCLUDED.nome_produto,\n    telefone        = EXCLUDED.telefone,\n    tipo            = EXCLUDED.tipo,\n    expire          = EXCLUDED.expire,\n    created_at      = EXCLUDED.created_at,\n    ultimo_anuncio  = EXCLUDED.created_at,\n    sent = CASE \n                WHEN \"public\".renovacao_anuncios.created_at != EXCLUDED.created_at \n                  OR EXCLUDED.tipo = 'ativo'\n                THEN false \n                ELSE \"public\".renovacao_anuncios.sent \n           END,\n    sent_at = CASE \n                WHEN \"public\".renovacao_anuncios.created_at != EXCLUDED.created_at\n                  OR EXCLUDED.tipo = 'ativo'\n                THEN NULL \n                ELSE \"public\".renovacao_anuncios.sent_at \n              END;",
+        "query": "INSERT INTO \"public\".renovacao_anuncios\n    (user_id, bid_id, nome_produto, email, telefone, tipo, sent, expire, created_at, ultimo_anuncio)\nSELECT DISTINCT ON (b.creator_id)\n    b.creator_id,\n    b.id,\n    p.name,\n    u.email,\n    f.telefone_limpo,\n    -- CLASSIFICACAO baseada na DATA DE EXPIRACAO real (b.expire), nunca em status ativo:\n    CASE\n        -- acabou de vencer (ultimos 8 dias) -> template_renovacao\n        WHEN b.status_id IN (2, 3)\n             AND b.expire <  now()::timestamp\n             AND b.expire >= now()::timestamp - interval '8 days'\n          THEN 'expirado'\n        -- venceu ha ~8 a 15 dias (1a cobranca pos-expiracao) -> template_renovacoes2\n        WHEN b.status_id IN (2, 3)\n             AND b.expire <  now()::timestamp - interval '8 days'\n             AND b.expire >= now()::timestamp - interval '15 days'\n          THEN '8dias'\n        -- status ativo (status_id = 1) ou expirado ha muito tempo (>15d): NAO envia\n        ELSE 'ativo'\n    END AS tipo,\n    false AS sent,\n    b.expire,\n    b.created,\n    b.created AS ultimo_anuncio\nFROM an_prod_cbc.bids b\nLEFT JOIN an_prod_types.products p ON p.id = b.product_id\nLEFT JOIN an_prod_cbc.users u ON u.id = b.creator_id\nLEFT JOIN an_prod_cbc.user_profiles up ON up.user_id = u.id\nLEFT JOIN an_prod_cbc.profile_phones pp ON pp.profile_id = up.id\nLEFT JOIN an_prod_cbc.phones phones ON phones.id = pp.phone_id\nCROSS JOIN LATERAL (\n    SELECT\n        CASE\n            WHEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') LIKE '55%'\n                THEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0')\n            ELSE '55' || ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0')\n        END AS telefone_limpo\n) f\nWHERE b.deleted = false\n  AND b.created >= '2022-01-01'\n  AND phones.number IS NOT NULL\n  AND length(f.telefone_limpo) >= 10\nORDER BY b.creator_id, b.created DESC, phones.id DESC\nON CONFLICT (user_id)\nDO UPDATE SET\n    bid_id          = EXCLUDED.bid_id,\n    nome_produto    = EXCLUDED.nome_produto,\n    telefone        = EXCLUDED.telefone,\n    tipo            = EXCLUDED.tipo,\n    expire          = EXCLUDED.expire,\n    created_at      = EXCLUDED.created_at,\n    ultimo_anuncio  = EXCLUDED.created_at,\n    -- reseta o envio quando eh um anuncio novo OU quando muda de fase (ex: expirado -> 8dias),\n    -- assim cada onda (template) dispara uma vez conforme o anuncio avanca no funil\n    sent = CASE\n                WHEN \"public\".renovacao_anuncios.created_at != EXCLUDED.created_at\n                  OR \"public\".renovacao_anuncios.tipo IS DISTINCT FROM EXCLUDED.tipo\n                THEN false\n                ELSE \"public\".renovacao_anuncios.sent\n           END,\n    sent_at = CASE\n                WHEN \"public\".renovacao_anuncios.created_at != EXCLUDED.created_at\n                  OR \"public\".renovacao_anuncios.tipo IS DISTINCT FROM EXCLUDED.tipo\n                THEN NULL\n                ELSE \"public\".renovacao_anuncios.sent_at\n              END;",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        -2944,
-        6336
+        -208,
+        7632
       ],
-      "id": "01fd6e57-0019-4959-b94f-46d59707321b",
+      "id": "181f500d-155e-476e-bae8-6500c5bac3ec",
       "name": "Atualiza Tabela Renovação",
       "alwaysOutputData": true,
       "credentials": {
@@ -57,10 +57,10 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        -2640,
-        5984
+        96,
+        7280
       ],
-      "id": "c3b1d08d-9d73-4843-aba2-521ca4a6c409",
+      "id": "12b14029-dcc5-43c3-b3d7-5dbe0cecb4c6",
       "name": "Busca Expirados",
       "credentials": {
         "postgres": {
@@ -76,10 +76,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2432,
-        5984
+        304,
+        7280
       ],
-      "id": "a63cecb0-73a6-4051-b563-95bf22a8406f",
+      "id": "3e1495f5-960c-4c3c-b91e-75ef767c2dc5",
       "name": "Monta números (Expirados)"
     },
     {
@@ -91,10 +91,10 @@
       "type": "n8n-nodes-evolution-api.evolutionApi",
       "typeVersion": 1,
       "position": [
-        -2208,
-        5984
+        528,
+        7280
       ],
-      "id": "41fe3fd5-dba3-4856-9fb4-b415ecb67ee8",
+      "id": "33a5a4dc-9c5a-46c7-9495-ae4a51c85a66",
       "name": "Check WA lote (Expirados)",
       "credentials": {
         "evolutionApi": {
@@ -112,10 +112,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1984,
-        5984
+        752,
+        7280
       ],
-      "id": "405913cf-db00-4cb8-8555-2bf66f6b5ebd",
+      "id": "7beabdce-1c48-4fd9-915f-67acae747611",
       "name": "Filtra WA + variantes (Expirados)"
     },
     {
@@ -125,10 +125,10 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        -1760,
-        5984
+        976,
+        7280
       ],
-      "id": "28c749c8-e171-450f-be97-058c5056d182",
+      "id": "034bba85-c6e9-4a0a-9341-0e475acaba39",
       "name": "Loop Expirados"
     },
     {
@@ -145,10 +145,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        -1552,
-        5984
+        1184,
+        7280
       ],
-      "id": "7302a0af-6f9f-4b23-bc49-81d9cfca9309",
+      "id": "5b124e94-cb66-40a7-8280-0ddc6f5baa4b",
       "name": "Tem WhatsApp? (Expirados)"
     },
     {
@@ -158,10 +158,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1328,
-        5952
+        1408,
+        7248
       ],
-      "id": "cb12c01f-84e2-4eca-bf03-eba749544795",
+      "id": "33e9b93f-b1a3-4d2b-9866-c2e9f81550c9",
       "name": "Montar Body (Expirados)"
     },
     {
@@ -187,10 +187,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1104,
-        5952
+        1632,
+        7248
       ],
-      "id": "5bdf317c-19aa-41ca-a269-9d2bee9954cd",
+      "id": "f628f3fa-a9d9-4a0c-93d8-3e13f29aa1c5",
       "name": "Enviar Template (Expirados)",
       "retryOnFail": true,
       "waitBetweenTries": 5000,
@@ -208,10 +208,10 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        -880,
-        5952
+        1856,
+        7248
       ],
-      "id": "ffd44546-c942-4068-8dcc-e309a2d12346",
+      "id": "1c3d6c3a-67c6-4a66-87fc-0053f8583f4b",
       "name": "Update com WA (Expirados)",
       "credentials": {
         "postgres": {
@@ -272,10 +272,10 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        -672,
-        5952
+        2064,
+        7248
       ],
-      "id": "c33bb69c-351f-449b-b111-c2ee46ab7eb5",
+      "id": "3cda944e-04d5-47b9-a939-4ee2492c4640",
       "name": "Cria Mensagem Supabase (Expirados)",
       "credentials": {
         "supabaseApi": {
@@ -292,10 +292,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        -448,
-        5984
+        2288,
+        7280
       ],
-      "id": "84b7093a-2227-4c15-9fc3-3fe1ffb9b0e8",
+      "id": "7110598a-0d42-4ea6-be39-5aa617be22b8",
       "name": "Wait (Expirados)",
       "webhookId": "f91ceef6-e81d-4982-914f-c6473b264762"
     },
@@ -308,10 +308,10 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        -1328,
-        6112
+        1408,
+        7408
       ],
-      "id": "2926bacc-dcda-4f89-9362-2d8d401d2b93",
+      "id": "b8d939f3-372b-4a1e-9608-16a19f0d328f",
       "name": "Update Sem WA (Expirados)",
       "credentials": {
         "postgres": {
@@ -330,10 +330,10 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        -2640,
-        6592
+        96,
+        7888
       ],
-      "id": "a2e444d2-5707-41d7-a1cd-d5965ce8fe3a",
+      "id": "0bf0d306-74ae-4a2e-9b8c-4cf87863ce56",
       "name": "Busca 8 Dias",
       "credentials": {
         "postgres": {
@@ -349,10 +349,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2432,
-        6592
+        304,
+        7888
       ],
-      "id": "ae104944-d518-41a7-b4d1-4d2558da57cc",
+      "id": "a1344979-1e4c-4d99-a6fe-f80ce2609001",
       "name": "Monta números (8 Dias)"
     },
     {
@@ -364,10 +364,10 @@
       "type": "n8n-nodes-evolution-api.evolutionApi",
       "typeVersion": 1,
       "position": [
-        -2208,
-        6592
+        528,
+        7888
       ],
-      "id": "7dd8d388-3f10-43e6-bb7d-1dd7503d81a7",
+      "id": "59895601-e8c0-4b2d-9e95-5aab1b8eb137",
       "name": "Check WA lote (8 Dias)",
       "credentials": {
         "evolutionApi": {
@@ -385,10 +385,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1984,
-        6592
+        752,
+        7888
       ],
-      "id": "1ed6f677-a17f-418a-a972-943543406cd9",
+      "id": "455b988a-317d-41b7-a481-92c6706c2552",
       "name": "Filtra WA + variantes (8 Dias)"
     },
     {
@@ -398,10 +398,10 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        -1760,
-        6592
+        976,
+        7888
       ],
-      "id": "4946327a-e7ea-43b2-9990-fe4a856b2ada",
+      "id": "4ced3a29-bb7d-483f-855d-453bf2f34fb7",
       "name": "Loop 8 Dias"
     },
     {
@@ -418,10 +418,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        -1552,
-        6592
+        1184,
+        7888
       ],
-      "id": "205acab8-dbff-4808-8cf0-c2ded810c497",
+      "id": "5aa47b1b-1408-4772-9151-3e338a54fa45",
       "name": "Tem WhatsApp? (8 Dias)"
     },
     {
@@ -431,10 +431,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1328,
-        6544
+        1408,
+        7840
       ],
-      "id": "6acdaab8-69d4-445d-acd3-a043e03f980b",
+      "id": "33c2de82-c0c3-419e-9e69-f46f0ce333f3",
       "name": "Montar Body (8 Dias)"
     },
     {
@@ -460,10 +460,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1104,
-        6544
+        1632,
+        7840
       ],
-      "id": "fc0ea5bf-b4f2-4d84-b501-8f3209a50d9a",
+      "id": "c2333408-3c81-4152-aa5e-8d3c7fa8cf1e",
       "name": "Enviar Template (8 Dias)",
       "retryOnFail": true,
       "waitBetweenTries": 5000,
@@ -481,10 +481,10 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        -880,
-        6544
+        1856,
+        7840
       ],
-      "id": "445a43dd-718b-421b-9819-86a78988044e",
+      "id": "1a2cd8c0-e04d-4ba8-84ea-47fec3d410e4",
       "name": "Update com WA (8 Dias)",
       "credentials": {
         "postgres": {
@@ -545,10 +545,10 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        -672,
-        6544
+        2064,
+        7840
       ],
-      "id": "36485230-c716-436d-9d3e-18ab2a4dbe4c",
+      "id": "f59d9475-ed50-4c62-b561-8e61a3a19533",
       "name": "Cria Mensagem Supabase (8 Dias)",
       "credentials": {
         "supabaseApi": {
@@ -565,10 +565,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        -448,
-        6592
+        2288,
+        7888
       ],
-      "id": "8b54497b-5f6a-474d-86fd-338354848a55",
+      "id": "3ebb6ed3-8aa7-4d52-bc93-86c0a384b678",
       "name": "Wait (8 Dias)",
       "webhookId": "387cf828-e3e1-43b1-ac31-36c7db34597b"
     },
@@ -581,10 +581,10 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        -1328,
-        6704
+        1408,
+        8000
       ],
-      "id": "4b8e09b4-16bc-4a49-a1ba-789161184131",
+      "id": "795b95b5-c229-4f66-b1e0-6ce8b4ea501a",
       "name": "Update Sem WA (8 Dias)",
       "credentials": {
         "postgres": {
@@ -604,10 +604,10 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -3328,
-        6240
+        -592,
+        7536
       ],
-      "id": "65e93caa-fc4a-4896-a9a3-54b2ee7dfd80",
+      "id": "efe5ba34-5ace-40bb-8440-989944ceae8f",
       "name": "Sticky Note7"
     },
     {
@@ -620,10 +620,10 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -2704,
-        5840
+        32,
+        7136
       ],
-      "id": "0efc7674-e3b4-4ead-829d-c354a09ef20a",
+      "id": "41f41ce5-b816-4c7b-9687-55ed6e0c83d3",
       "name": "Sticky Note"
     },
     {
@@ -636,10 +636,10 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -2704,
-        6464
+        32,
+        7760
       ],
-      "id": "c6620f49-771f-4821-8c35-e952a1158cf7",
+      "id": "5abd542d-0bab-4b68-8c0f-e1ab01543d90",
       "name": "Sticky Note6"
     }
   ],
@@ -971,8 +971,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "ad614409-fbef-45dc-a292-c7dbea849464",
-  "activeVersionId": "ad614409-fbef-45dc-a292-c7dbea849464",
+  "versionId": "ff17ea8d-baf9-42aa-bb56-52995b33c610",
+  "activeVersionId": "ff17ea8d-baf9-42aa-bb56-52995b33c610",
   "triggerCount": 1,
   "shared": [
     {
@@ -984,9 +984,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-07-29T21:07:13.425Z",
-    "createdAt": "2026-07-29T21:07:13.425Z",
-    "versionId": "ad614409-fbef-45dc-a292-c7dbea849464",
+    "updatedAt": "2026-08-05T20:54:02.747Z",
+    "createdAt": "2026-08-05T20:54:02.747Z",
+    "versionId": "ff17ea8d-baf9-42aa-bb56-52995b33c610",
     "workflowId": "W0SzHNpYp6yDpKWa",
     "nodes": [
       {
@@ -1003,25 +1003,25 @@
         "type": "n8n-nodes-base.scheduleTrigger",
         "typeVersion": 1.3,
         "position": [
-          -3264,
-          6336
+          -528,
+          7632
         ],
-        "id": "6fef1c8a-96ad-4db0-9a9d-e23bdd8138e6",
+        "id": "4f21598f-4522-42d5-9767-7d33fc385ca8",
         "name": "Schedule Trigger"
       },
       {
         "parameters": {
           "operation": "executeQuery",
-          "query": "INSERT INTO \"public\".renovacao_anuncios \n    (user_id, bid_id, nome_produto, email, telefone, tipo, sent, expire, created_at, ultimo_anuncio)\nSELECT DISTINCT ON (b.creator_id) \n    b.creator_id,\n    b.id,\n    p.name,\n    u.email,\n    f.telefone_limpo,\n    CASE \n        WHEN b.status_id IN (2, 3) THEN 'expirado'\n        WHEN b.status_id = 1\n             AND b.created <= now()::timestamp - interval '8 days'\n          THEN '8dias'\n        ELSE 'ativo'\n    END AS tipo,\n    false AS sent, \n    b.expire,\n    b.created,\n    b.created AS ultimo_anuncio\nFROM an_prod_cbc.bids b\nLEFT JOIN an_prod_types.products p ON p.id = b.product_id\nLEFT JOIN an_prod_cbc.users u ON u.id = b.creator_id\nLEFT JOIN an_prod_cbc.user_profiles up ON up.user_id = u.id\nLEFT JOIN an_prod_cbc.profile_phones pp ON pp.profile_id = up.id\nLEFT JOIN an_prod_cbc.phones phones ON phones.id = pp.phone_id\nCROSS JOIN LATERAL (\n    SELECT \n        CASE \n            WHEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') LIKE '55%' \n                THEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n            ELSE '55' || ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') \n        END AS telefone_limpo\n) f\nWHERE b.deleted = false \n  AND b.created >= '2022-01-01' \n  AND phones.number IS NOT NULL \n  AND length(f.telefone_limpo) >= 10 \nORDER BY b.creator_id, b.created DESC, phones.id DESC\nON CONFLICT (user_id) \nDO UPDATE SET\n    bid_id          = EXCLUDED.bid_id,\n    nome_produto    = EXCLUDED.nome_produto,\n    telefone        = EXCLUDED.telefone,\n    tipo            = EXCLUDED.tipo,\n    expire          = EXCLUDED.expire,\n    created_at      = EXCLUDED.created_at,\n    ultimo_anuncio  = EXCLUDED.created_at,\n    sent = CASE \n                WHEN \"public\".renovacao_anuncios.created_at != EXCLUDED.created_at \n                  OR EXCLUDED.tipo = 'ativo'\n                THEN false \n                ELSE \"public\".renovacao_anuncios.sent \n           END,\n    sent_at = CASE \n                WHEN \"public\".renovacao_anuncios.created_at != EXCLUDED.created_at\n                  OR EXCLUDED.tipo = 'ativo'\n                THEN NULL \n                ELSE \"public\".renovacao_anuncios.sent_at \n              END;",
+          "query": "INSERT INTO \"public\".renovacao_anuncios\n    (user_id, bid_id, nome_produto, email, telefone, tipo, sent, expire, created_at, ultimo_anuncio)\nSELECT DISTINCT ON (b.creator_id)\n    b.creator_id,\n    b.id,\n    p.name,\n    u.email,\n    f.telefone_limpo,\n    -- CLASSIFICACAO baseada na DATA DE EXPIRACAO real (b.expire), nunca em status ativo:\n    CASE\n        -- acabou de vencer (ultimos 8 dias) -> template_renovacao\n        WHEN b.status_id IN (2, 3)\n             AND b.expire <  now()::timestamp\n             AND b.expire >= now()::timestamp - interval '8 days'\n          THEN 'expirado'\n        -- venceu ha ~8 a 15 dias (1a cobranca pos-expiracao) -> template_renovacoes2\n        WHEN b.status_id IN (2, 3)\n             AND b.expire <  now()::timestamp - interval '8 days'\n             AND b.expire >= now()::timestamp - interval '15 days'\n          THEN '8dias'\n        -- status ativo (status_id = 1) ou expirado ha muito tempo (>15d): NAO envia\n        ELSE 'ativo'\n    END AS tipo,\n    false AS sent,\n    b.expire,\n    b.created,\n    b.created AS ultimo_anuncio\nFROM an_prod_cbc.bids b\nLEFT JOIN an_prod_types.products p ON p.id = b.product_id\nLEFT JOIN an_prod_cbc.users u ON u.id = b.creator_id\nLEFT JOIN an_prod_cbc.user_profiles up ON up.user_id = u.id\nLEFT JOIN an_prod_cbc.profile_phones pp ON pp.profile_id = up.id\nLEFT JOIN an_prod_cbc.phones phones ON phones.id = pp.phone_id\nCROSS JOIN LATERAL (\n    SELECT\n        CASE\n            WHEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0') LIKE '55%'\n                THEN ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0')\n            ELSE '55' || ltrim(regexp_replace(phones.number, '\\D', '', 'g'), '0')\n        END AS telefone_limpo\n) f\nWHERE b.deleted = false\n  AND b.created >= '2022-01-01'\n  AND phones.number IS NOT NULL\n  AND length(f.telefone_limpo) >= 10\nORDER BY b.creator_id, b.created DESC, phones.id DESC\nON CONFLICT (user_id)\nDO UPDATE SET\n    bid_id          = EXCLUDED.bid_id,\n    nome_produto    = EXCLUDED.nome_produto,\n    telefone        = EXCLUDED.telefone,\n    tipo            = EXCLUDED.tipo,\n    expire          = EXCLUDED.expire,\n    created_at      = EXCLUDED.created_at,\n    ultimo_anuncio  = EXCLUDED.created_at,\n    -- reseta o envio quando eh um anuncio novo OU quando muda de fase (ex: expirado -> 8dias),\n    -- assim cada onda (template) dispara uma vez conforme o anuncio avanca no funil\n    sent = CASE\n                WHEN \"public\".renovacao_anuncios.created_at != EXCLUDED.created_at\n                  OR \"public\".renovacao_anuncios.tipo IS DISTINCT FROM EXCLUDED.tipo\n                THEN false\n                ELSE \"public\".renovacao_anuncios.sent\n           END,\n    sent_at = CASE\n                WHEN \"public\".renovacao_anuncios.created_at != EXCLUDED.created_at\n                  OR \"public\".renovacao_anuncios.tipo IS DISTINCT FROM EXCLUDED.tipo\n                THEN NULL\n                ELSE \"public\".renovacao_anuncios.sent_at\n              END;",
           "options": {}
         },
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.6,
         "position": [
-          -2944,
-          6336
+          -208,
+          7632
         ],
-        "id": "01fd6e57-0019-4959-b94f-46d59707321b",
+        "id": "181f500d-155e-476e-bae8-6500c5bac3ec",
         "name": "Atualiza Tabela Renovação",
         "alwaysOutputData": true,
         "credentials": {
@@ -1040,10 +1040,10 @@
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.6,
         "position": [
-          -2640,
-          5984
+          96,
+          7280
         ],
-        "id": "c3b1d08d-9d73-4843-aba2-521ca4a6c409",
+        "id": "12b14029-dcc5-43c3-b3d7-5dbe0cecb4c6",
         "name": "Busca Expirados",
         "credentials": {
           "postgres": {
@@ -1059,10 +1059,10 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -2432,
-          5984
+          304,
+          7280
         ],
-        "id": "a63cecb0-73a6-4051-b563-95bf22a8406f",
+        "id": "3e1495f5-960c-4c3c-b91e-75ef767c2dc5",
         "name": "Monta números (Expirados)"
       },
       {
@@ -1074,10 +1074,10 @@
         "type": "n8n-nodes-evolution-api.evolutionApi",
         "typeVersion": 1,
         "position": [
-          -2208,
-          5984
+          528,
+          7280
         ],
-        "id": "41fe3fd5-dba3-4856-9fb4-b415ecb67ee8",
+        "id": "33a5a4dc-9c5a-46c7-9495-ae4a51c85a66",
         "name": "Check WA lote (Expirados)",
         "credentials": {
           "evolutionApi": {
@@ -1095,10 +1095,10 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -1984,
-          5984
+          752,
+          7280
         ],
-        "id": "405913cf-db00-4cb8-8555-2bf66f6b5ebd",
+        "id": "7beabdce-1c48-4fd9-915f-67acae747611",
         "name": "Filtra WA + variantes (Expirados)"
       },
       {
@@ -1108,10 +1108,10 @@
         "type": "n8n-nodes-base.splitInBatches",
         "typeVersion": 3,
         "position": [
-          -1760,
-          5984
+          976,
+          7280
         ],
-        "id": "28c749c8-e171-450f-be97-058c5056d182",
+        "id": "034bba85-c6e9-4a0a-9341-0e475acaba39",
         "name": "Loop Expirados"
       },
       {
@@ -1128,10 +1128,10 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 1,
         "position": [
-          -1552,
-          5984
+          1184,
+          7280
         ],
-        "id": "7302a0af-6f9f-4b23-bc49-81d9cfca9309",
+        "id": "5b124e94-cb66-40a7-8280-0ddc6f5baa4b",
         "name": "Tem WhatsApp? (Expirados)"
       },
       {
@@ -1141,10 +1141,10 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -1328,
-          5952
+          1408,
+          7248
         ],
-        "id": "cb12c01f-84e2-4eca-bf03-eba749544795",
+        "id": "33e9b93f-b1a3-4d2b-9866-c2e9f81550c9",
         "name": "Montar Body (Expirados)"
       },
       {
@@ -1170,10 +1170,10 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          -1104,
-          5952
+          1632,
+          7248
         ],
-        "id": "5bdf317c-19aa-41ca-a269-9d2bee9954cd",
+        "id": "f628f3fa-a9d9-4a0c-93d8-3e13f29aa1c5",
         "name": "Enviar Template (Expirados)",
         "retryOnFail": true,
         "waitBetweenTries": 5000,
@@ -1191,10 +1191,10 @@
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.6,
         "position": [
-          -880,
-          5952
+          1856,
+          7248
         ],
-        "id": "ffd44546-c942-4068-8dcc-e309a2d12346",
+        "id": "1c3d6c3a-67c6-4a66-87fc-0053f8583f4b",
         "name": "Update com WA (Expirados)",
         "credentials": {
           "postgres": {
@@ -1255,10 +1255,10 @@
         "type": "n8n-nodes-base.supabase",
         "typeVersion": 1,
         "position": [
-          -672,
-          5952
+          2064,
+          7248
         ],
-        "id": "c33bb69c-351f-449b-b111-c2ee46ab7eb5",
+        "id": "3cda944e-04d5-47b9-a939-4ee2492c4640",
         "name": "Cria Mensagem Supabase (Expirados)",
         "credentials": {
           "supabaseApi": {
@@ -1275,10 +1275,10 @@
         "type": "n8n-nodes-base.wait",
         "typeVersion": 1.1,
         "position": [
-          -448,
-          5984
+          2288,
+          7280
         ],
-        "id": "84b7093a-2227-4c15-9fc3-3fe1ffb9b0e8",
+        "id": "7110598a-0d42-4ea6-be39-5aa617be22b8",
         "name": "Wait (Expirados)",
         "webhookId": "f91ceef6-e81d-4982-914f-c6473b264762"
       },
@@ -1291,10 +1291,10 @@
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.6,
         "position": [
-          -1328,
-          6112
+          1408,
+          7408
         ],
-        "id": "2926bacc-dcda-4f89-9362-2d8d401d2b93",
+        "id": "b8d939f3-372b-4a1e-9608-16a19f0d328f",
         "name": "Update Sem WA (Expirados)",
         "credentials": {
           "postgres": {
@@ -1313,10 +1313,10 @@
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.6,
         "position": [
-          -2640,
-          6592
+          96,
+          7888
         ],
-        "id": "a2e444d2-5707-41d7-a1cd-d5965ce8fe3a",
+        "id": "0bf0d306-74ae-4a2e-9b8c-4cf87863ce56",
         "name": "Busca 8 Dias",
         "credentials": {
           "postgres": {
@@ -1332,10 +1332,10 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -2432,
-          6592
+          304,
+          7888
         ],
-        "id": "ae104944-d518-41a7-b4d1-4d2558da57cc",
+        "id": "a1344979-1e4c-4d99-a6fe-f80ce2609001",
         "name": "Monta números (8 Dias)"
       },
       {
@@ -1347,10 +1347,10 @@
         "type": "n8n-nodes-evolution-api.evolutionApi",
         "typeVersion": 1,
         "position": [
-          -2208,
-          6592
+          528,
+          7888
         ],
-        "id": "7dd8d388-3f10-43e6-bb7d-1dd7503d81a7",
+        "id": "59895601-e8c0-4b2d-9e95-5aab1b8eb137",
         "name": "Check WA lote (8 Dias)",
         "credentials": {
           "evolutionApi": {
@@ -1368,10 +1368,10 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -1984,
-          6592
+          752,
+          7888
         ],
-        "id": "1ed6f677-a17f-418a-a972-943543406cd9",
+        "id": "455b988a-317d-41b7-a481-92c6706c2552",
         "name": "Filtra WA + variantes (8 Dias)"
       },
       {
@@ -1381,10 +1381,10 @@
         "type": "n8n-nodes-base.splitInBatches",
         "typeVersion": 3,
         "position": [
-          -1760,
-          6592
+          976,
+          7888
         ],
-        "id": "4946327a-e7ea-43b2-9990-fe4a856b2ada",
+        "id": "4ced3a29-bb7d-483f-855d-453bf2f34fb7",
         "name": "Loop 8 Dias"
       },
       {
@@ -1401,10 +1401,10 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 1,
         "position": [
-          -1552,
-          6592
+          1184,
+          7888
         ],
-        "id": "205acab8-dbff-4808-8cf0-c2ded810c497",
+        "id": "5aa47b1b-1408-4772-9151-3e338a54fa45",
         "name": "Tem WhatsApp? (8 Dias)"
       },
       {
@@ -1414,10 +1414,10 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -1328,
-          6544
+          1408,
+          7840
         ],
-        "id": "6acdaab8-69d4-445d-acd3-a043e03f980b",
+        "id": "33c2de82-c0c3-419e-9e69-f46f0ce333f3",
         "name": "Montar Body (8 Dias)"
       },
       {
@@ -1443,10 +1443,10 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          -1104,
-          6544
+          1632,
+          7840
         ],
-        "id": "fc0ea5bf-b4f2-4d84-b501-8f3209a50d9a",
+        "id": "c2333408-3c81-4152-aa5e-8d3c7fa8cf1e",
         "name": "Enviar Template (8 Dias)",
         "retryOnFail": true,
         "waitBetweenTries": 5000,
@@ -1464,10 +1464,10 @@
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.6,
         "position": [
-          -880,
-          6544
+          1856,
+          7840
         ],
-        "id": "445a43dd-718b-421b-9819-86a78988044e",
+        "id": "1a2cd8c0-e04d-4ba8-84ea-47fec3d410e4",
         "name": "Update com WA (8 Dias)",
         "credentials": {
           "postgres": {
@@ -1528,10 +1528,10 @@
         "type": "n8n-nodes-base.supabase",
         "typeVersion": 1,
         "position": [
-          -672,
-          6544
+          2064,
+          7840
         ],
-        "id": "36485230-c716-436d-9d3e-18ab2a4dbe4c",
+        "id": "f59d9475-ed50-4c62-b561-8e61a3a19533",
         "name": "Cria Mensagem Supabase (8 Dias)",
         "credentials": {
           "supabaseApi": {
@@ -1548,10 +1548,10 @@
         "type": "n8n-nodes-base.wait",
         "typeVersion": 1.1,
         "position": [
-          -448,
-          6592
+          2288,
+          7888
         ],
-        "id": "8b54497b-5f6a-474d-86fd-338354848a55",
+        "id": "3ebb6ed3-8aa7-4d52-bc93-86c0a384b678",
         "name": "Wait (8 Dias)",
         "webhookId": "387cf828-e3e1-43b1-ac31-36c7db34597b"
       },
@@ -1564,10 +1564,10 @@
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.6,
         "position": [
-          -1328,
-          6704
+          1408,
+          8000
         ],
-        "id": "4b8e09b4-16bc-4a49-a1ba-789161184131",
+        "id": "795b95b5-c229-4f66-b1e0-6ce8b4ea501a",
         "name": "Update Sem WA (8 Dias)",
         "credentials": {
           "postgres": {
@@ -1587,10 +1587,10 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -3328,
-          6240
+          -592,
+          7536
         ],
-        "id": "65e93caa-fc4a-4896-a9a3-54b2ee7dfd80",
+        "id": "efe5ba34-5ace-40bb-8440-989944ceae8f",
         "name": "Sticky Note7"
       },
       {
@@ -1603,10 +1603,10 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -2704,
-          5840
+          32,
+          7136
         ],
-        "id": "0efc7674-e3b4-4ead-829d-c354a09ef20a",
+        "id": "41f41ce5-b816-4c7b-9687-55ed6e0c83d3",
         "name": "Sticky Note"
       },
       {
@@ -1619,10 +1619,10 @@
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          -2704,
-          6464
+          32,
+          7760
         ],
-        "id": "c6620f49-771f-4821-8c35-e952a1158cf7",
+        "id": "5abd542d-0bab-4b68-8c0f-e1ab01543d90",
         "name": "Sticky Note6"
       }
     ],
