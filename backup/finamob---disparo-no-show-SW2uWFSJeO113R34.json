@@ -1,0 +1,266 @@
+{
+  "updatedAt": "2026-08-05T18:38:32.783Z",
+  "createdAt": "2026-08-05T14:10:29.050Z",
+  "id": "SW2uWFSJeO113R34",
+  "name": "Finamob - Disparo No Show",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 8-19 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "1d503d85-37cb-4103-8e87-1c78f280d636",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        5328,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normaliza telefone pro formato que a Meta espera: só dígitos, com 55 na frente (ex: 5511999998888)\nfunction normalizaTelefone(raw) {\n  if (!raw) return '';\n  let digitos = String(raw).replace(/\\D/g, '');\n  digitos = digitos.replace(/^0+/, '');\n\n  if (digitos.startsWith('55') && (digitos.length === 12 || digitos.length === 13)) {\n    return digitos;\n  }\n  if (digitos.length === 10 || digitos.length === 11) {\n    return '55' + digitos;\n  }\n  return digitos;\n}\n\nconst out = [];\n\nfor (const item of $input.all()) {\n  const d = item.json;\n\n  // só quem está em no_show\n  if (String(d.status).trim() !== 'no_show') continue;\n\n  // já recebeu o disparo antes? pula (coluna criada na planilha)\n  const jaDisparou = d.disparo_no_show === true || String(d.disparo_no_show).toLowerCase() === 'true';\n  if (jaDisparou) continue;\n\n  const telefone = normalizaTelefone(d.whatsapp || d.telefone);\n  const nome = (d.cliente_nome || 'Cliente').trim();\n  if (!telefone) continue;\n\n  // formata a data/hora da call pra ficar legível no template (ex: 31/07 às 15h00)\n  let dtFormatada = '';\n  if (d.dt_call) {\n    const dt = new Date(d.dt_call);\n    if (!isNaN(dt)) {\n      const dia = String(dt.getDate()).padStart(2, '0');\n      const mes = String(dt.getMonth() + 1).padStart(2, '0');\n      const hora = String(dt.getHours()).padStart(2, '0');\n      const min = String(dt.getMinutes()).padStart(2, '0');\n      dtFormatada = `${dia}/${mes} às ${hora}h${min}`;\n    }\n  }\n\n  out.push({\n    json: {\n      row_number: d.row_number, // usado depois pra bater na linha certa na hora de atualizar\n      id: d.id,\n      nome_cliente: nome,\n      dt_call_formatada: dtFormatada,\n      telefone,\n      mailing_id: d.mailing_id,\n      dono_do_lead: d.dono_do_lead,\n      dt_call: d.dt_call\n    }\n  });\n}\n\nreturn out;"
+      },
+      "id": "814c559a-0a31-4250-922c-68e3b30d662e",
+      "name": "Normaliza Telefones e Filtra",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5808,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v22.0/1202871396233612/messages",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"messaging_product\": \"whatsapp\",\n  \"to\": $json.telefone,\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"no_show_reagendamento_finamob\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": [\n          { \"type\": \"text\", \"text\": $json.nome_cliente },\n          { \"type\": \"text\", \"text\": $json.dt_call_formatada }\n        ]\n      }\n    ]\n  }\n} }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          }
+        }
+      },
+      "id": "152770f1-8e4d-4ace-a328-eea0473ce7ef",
+      "name": "Meta - Enviar Template No Show",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6048,
+        1312
+      ],
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Erro ao marcar disparo\nSe cair aqui, o WhatsApp foi enviado mas o UPDATE falhou (ex: RLS, conexão).\nSem isso registrado, o lead pode receber o disparo de novo no próximo run.\nAjustar: logar em tabela de erros / alerta no Slack antes de seguir o loop.",
+        "height": 180,
+        "width": 300,
+        "color": 4
+      },
+      "id": "9c1b6206-ec9c-42f5-825e-b8962febd434",
+      "name": "Sticky Note - Erro",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        6720,
+        1280
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "f4af3c41-dc3a-4a57-8628-687e74a7a2ad",
+      "name": "Registrar Erro Disparo",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        6512,
+        1328
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1xEEd4wJOk379AaZR4cZ2mpBk7tJR8TKIy3PWowRT9Xs",
+          "mode": "list",
+          "cachedResultName": "Database - Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1xEEd4wJOk379AaZR4cZ2mpBk7tJR8TKIy3PWowRT9Xs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "calls_pipeline",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        5568,
+        1312
+      ],
+      "id": "5e520675-807c-4aab-9ae8-e27852d2fba5",
+      "name": "Ler Leads No Show",
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1xEEd4wJOk379AaZR4cZ2mpBk7tJR8TKIy3PWowRT9Xs",
+          "mode": "list",
+          "cachedResultName": "Database - Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1xEEd4wJOk379AaZR4cZ2mpBk7tJR8TKIy3PWowRT9Xs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "calls_pipeline",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "value": {
+            "row_number": "={{ $json.row_number }}",
+            "disparo_no_show": "true",
+            "disparo_no_show_em": "={{ $now.toISO() }}"
+          },
+          "schema": []
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        6288,
+        1312
+      ],
+      "id": "7dc820ac-1eed-410d-bd6b-790537799295",
+      "name": "Atualizar Disparo Enviado",
+      "executeOnce": false,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "content": "## No show \n**",
+        "height": 272,
+        "width": 1536
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        5312,
+        1216
+      ],
+      "id": "a08b22c0-a14b-463f-98c5-c46a1ead62fd",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Ler Leads No Show",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Leads No Show": {
+      "main": [
+        [
+          {
+            "node": "Normaliza Telefones e Filtra",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliza Telefones e Filtra": {
+      "main": [
+        [
+          {
+            "node": "Meta - Enviar Template No Show",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta - Enviar Template No Show": {
+      "main": [
+        [
+          {
+            "node": "Atualizar Disparo Enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualizar Disparo Enviado": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Registrar Erro Disparo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "9497dc9b-fe87-41fd-8677-5036b50fed6c",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-08-05T14:10:29.050Z",
+      "createdAt": "2026-08-05T14:10:29.050Z",
+      "role": "workflow:owner",
+      "workflowId": "SW2uWFSJeO113R34",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
