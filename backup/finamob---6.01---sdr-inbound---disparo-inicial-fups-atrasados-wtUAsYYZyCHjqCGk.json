@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-04T17:01:24.424Z",
+  "updatedAt": "2026-08-06T23:55:29.802Z",
   "createdAt": "2026-06-09T03:20:25.080Z",
   "id": "wtUAsYYZyCHjqCGk",
   "name": "Finamob - 6.01 - SDR Inbound - Disparo Inicial + FUPs Atrasados",
@@ -28,7 +28,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT *\nFROM (\n  SELECT\n    m.*,\n    CASE\n      WHEN EXISTS (\n        SELECT 1\n        FROM operacao o\n        WHERE o.mailing_id = m.id\n      )\n      OR EXISTS (\n        SELECT 1\n        FROM incorporadoras i\n        JOIN operacao o2 ON o2.cnpj_digits = i.cnpj_digits\n        WHERE i.id = m.idincorporadora\n          AND i.cnpj_digits IS NOT NULL\n      )\n      OR EXISTS (\n        SELECT 1\n        FROM operacao o3\n        WHERE o3.cnpj_digits = m.cnpj_empresa\n          AND m.cnpj_empresa IS NOT NULL\n          AND m.cnpj_empresa <> ''\n      )\n      THEN 'Sim'\n      ELSE 'Não'\n    END AS tem_operacao\n  FROM mailing m\n) AS mailing_com_operacao\nWHERE\n  lixeira = 0\n  AND tem_operacao = 'Não'\n  AND fup IS NOT NULL\n  AND fup <> ''\n  AND DATE(fup) < CURDATE()\n  AND whatsapp IS NOT NULL\n  AND whatsapp <> ''\n  AND (\n    status_plano_acao IS NULL\n    OR status_plano_acao = ''\n    OR status_plano_acao NOT IN (\n      'ptentativaderreativaçãor',\n      'stentativadereativaçãor',\n      'ttentativadereativaçãor',\n      'encaminhar advisor',\n      'naoeoICP'\n    )\n  )\nORDER BY DATE(fup) ASC\nLIMIT 100;",
+        "query": "/* ============================================================================\n   QUERY: Fila de leads para follow-up via WhatsApp\n   ----------------------------------------------------------------------------\n   Objetivo geral:\n   Selecionar até 100 leads da tabela `mailing` que precisam de contato via\n   WhatsApp, evitando trazer leads que:\n     - já viraram operação (negócio) por qualquer um dos caminhos de vínculo\n       existentes no banco;\n     - estão na lixeira;\n     - não têm WhatsApp válido (vazio, com poucos dígitos, número placeholder\n       tipo \"0000000000\", ou DDD inexistente);\n     - já foram marcados com um status de plano de ação que indica que o lead\n       já foi tratado/descartado;\n     - têm o mesmo telefone de outro mailing ativo (duplicidade), porque a API\n       de atualização (update_mailing_api.php) bloqueia esse caso com erro\n       \"multiple_mailings_found\".\n\n   Observação sobre repetição de código:\n   Esse banco não suporta REGEXP_REPLACE (função só existe a partir do MySQL\n   8.0.4) nem CTEs / WITH (também só a partir do MySQL 8.0), então a limpeza\n   do telefone precisa ser feita com REPLACE() encadeado, e como não dá pra\n   declarar essa expressão uma vez e reaproveitar, ela aparece repetida vária\n   vezes ao longo da query. Isso é feio, mas necessário nessa versão do banco.\n   Se no futuro migrarem pra MySQL 8+, essa query pode ficar bem mais limpa\n   usando WITH + REGEXP_REPLACE. Outra alternativa mais definitiva seria\n   centralizar essa validação numa VIEW ou coluna calculada no banco.\n   ============================================================================ */\n\nSELECT *\nFROM (\n\n  /* --------------------------------------------------------------------\n     SUBCONSULTA INTERNA\n     Pra cada lead do mailing, calcula a coluna `tem_operacao` (\"Sim\"/\"Não\"),\n     verificando 5 caminhos diferentes de vínculo entre o mailing e uma\n     operação (negócio) já existente. Um lead com operação vinculada nunca\n     deve ser puxado pra fila de reengajamento nem atualizado via API.\n     -------------------------------------------------------------------- */\n  SELECT\n    m.*,\n    CASE\n      -- (1) Vínculo direto: a operação foi criada apontando pro próprio mailing.\n      WHEN EXISTS (\n        SELECT 1\n        FROM operacao o\n        WHERE o.mailing_id = m.id\n      )\n\n      -- (2) Vínculo via incorporadora: o lead está associado a uma\n      --     incorporadora (m.idincorporadora) cujo CNPJ bate com o CNPJ de\n      --     alguma operação.\n      OR EXISTS (\n        SELECT 1\n        FROM incorporadoras i\n        JOIN operacao o2 ON o2.cnpj_digits = i.cnpj_digits\n        WHERE i.id = m.idincorporadora\n          AND i.cnpj_digits IS NOT NULL\n      )\n\n      -- (3) Vínculo via CNPJ do próprio lead: o CNPJ salvo no mailing\n      --     (m.cnpj_empresa) bate com o CNPJ de alguma operação.\n      OR EXISTS (\n        SELECT 1\n        FROM operacao o3\n        WHERE o3.cnpj_digits = m.cnpj_empresa\n          AND m.cnpj_empresa IS NOT NULL\n          AND m.cnpj_empresa <> ''\n      )\n\n      -- (4) Vínculo via idcliente: descoberto ao investigar o erro\n      --     \"mailing_has_operation\". Um mesmo cliente (tabela `clientes`)\n      --     pode gerar vários registros de mailing ao longo do tempo\n      --     (reincidência, nova campanha etc.), mas a operação fica\n      --     vinculada ao idclientes, não necessariamente ao mailing_id\n      --     mais recente. Aqui comparamos direto pelo idcliente do mailing.\n      OR EXISTS (\n        SELECT 1\n        FROM operacao o4\n        WHERE o4.idclientes = m.idcliente\n          AND m.idcliente IS NOT NULL\n      )\n\n      -- (5) Mesmo vínculo do item (4), mas passando pela tabela `clientes`\n      --     no sentido inverso (clientes.mailing_id -> mailing.id), pro caso\n      --     de o mailing não ter o idcliente preenchido mas existir um\n      --     registro em `clientes` apontando de volta pra ele.\n      OR EXISTS (\n        SELECT 1\n        FROM clientes c\n        JOIN operacao o5 ON o5.idclientes = c.id\n        WHERE c.mailing_id = m.id\n      )\n\n      THEN 'Sim'\n      ELSE 'Não'\n    END AS tem_operacao\n  FROM mailing m\n\n) AS mailing_com_operacao\n\nWHERE\n  -- Não considerar leads que estão na lixeira.\n  lixeira = 0\n\n  -- Não considerar leads que já têm operação vinculada por nenhum dos\n  -- 5 caminhos calculados acima.\n  AND tem_operacao = 'Não'\n\n  -- Follow-up (fup): entra quem nunca teve fup definido (fup vazio/nulo) OU\n  -- quem tem uma data de fup que já venceu (passado em relação a hoje).\n  AND (\n    fup IS NULL\n    OR fup = ''\n    OR DATE(fup) < CURDATE()\n  )\n\n  -- Precisa ter algum valor de WhatsApp cadastrado pra sequência de checagens\n  -- de validade abaixo fazer sentido.\n  AND whatsapp IS NOT NULL\n  AND whatsapp <> ''\n\n  -- --------------------------------------------------------------------\n  -- VALIDAÇÃO DE TELEFONE\n  -- Como não temos REGEXP_REPLACE nessa versão do MySQL, a limpeza do\n  -- número é feita removendo, um a um, os caracteres de formatação mais\n  -- comuns: parênteses, espaço, hífen, ponto e o \"+\" (de \"+55\").\n  -- Se aparecerem outros formatos no futuro (ex: \"_\", \"/\"), é só adicionar\n  -- mais um REPLACE na cadeia.\n  -- --------------------------------------------------------------------\n\n  -- Validação de tamanho: depois de limpo, um telefone BR válido tem:\n  --   - 10 dígitos (DDD + fixo de 8 dígitos), ou\n  --   - 11 dígitos (DDD + celular de 9 dígitos), ou\n  --   - 12/13 dígitos se ainda tiver o código do país \"55\" na frente\n  --     (nesses casos os passos de validação abaixo comparam usando só os\n  --     últimos 11 dígitos, então o \"55\" na frente não quebra a checagem).\n  AND LENGTH(\n        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n          whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', '')\n      ) BETWEEN 10 AND 13\n\n  -- Rejeita números \"placeholder\" onde todos os dígitos são iguais\n  -- (ex: \"0000000000\", \"1111111111\"). Funciona comparando o número limpo\n  -- com uma string do mesmo tamanho feita só repetindo o primeiro dígito —\n  -- se forem idênticas, é sinal de número fake.\n  AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n        whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', '')\n      <>\n      REPEAT(\n        LEFT(\n          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n            whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n          1\n        ),\n        LENGTH(\n          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n            whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', '')\n        )\n      )\n\n  -- Valida o DDD: pega os 2 primeiros dígitos dos últimos 11 dígitos do\n  -- número limpo (isso ignora um eventual \"55\" de código de país na\n  -- frente) e confere se formam um número entre 11 e 99 — DDDs brasileiros\n  -- reais começam em 11, então qualquer coisa abaixo disso (ex: \"00\", \"01\")\n  -- é inválido.\n  AND CAST(\n        LEFT(\n          RIGHT(\n            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n              whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n            11\n          ),\n          2\n        ) AS UNSIGNED\n      ) BETWEEN 11 AND 99\n\n  -- --------------------------------------------------------------------\n  -- STATUS DO PLANO DE AÇÃO\n  -- Não considerar leads cujo status_plano_acao já indica que o lead foi\n  -- tratado ou descartado (tentativas de reativação já feitas, encaminhado\n  -- pro advisor, ou fora do ICP). Aceita nulo/vazio (nunca classificado)\n  -- ou qualquer status que não esteja nessa lista de \"já resolvidos\".\n  -- --------------------------------------------------------------------\n  AND (\n    status_plano_acao IS NULL\n    OR status_plano_acao = ''\n    OR status_plano_acao NOT IN (\n      'ptentativaderreativaçãor',\n      'stentativadereativaçãor',\n      'ttentativadereativaçãor',\n      'encaminhar advisor',\n      'naoeoICP'\n    )\n  )\n\n  -- --------------------------------------------------------------------\n  -- DEDUPLICAÇÃO DE TELEFONE\n  -- A API bloqueia a atualização (erro \"multiple_mailings_found\") quando\n  -- mais de um mailing ATIVO tem o mesmo telefone (considerando variações\n  -- com/sem o \"9\" extra do celular e com/sem código de país). Aqui a gente\n  -- normaliza o telefone pro formato canônico \"DDD + últimos 8 dígitos\" e\n  -- verifica se existe algum OUTRO mailing ativo com o mesmo canônico. Se\n  -- existir, o lead atual é excluído da fila, porque a atualização dele\n  -- via API vai falhar de qualquer forma.\n  -- --------------------------------------------------------------------\n  AND NOT EXISTS (\n    SELECT 1\n    FROM mailing m2\n    WHERE m2.lixeira = 0\n      AND m2.id <> mailing_com_operacao.id\n      AND CONCAT(\n            -- DDD (2 dígitos) do outro mailing\n            LEFT(\n              RIGHT(\n                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n                  m2.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n                11\n              ),\n              2\n            ),\n            -- últimos 8 dígitos (número local, sem o \"9\" extra de celular)\n            RIGHT(\n              RIGHT(\n                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n                  m2.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n                11\n              ),\n              8\n            )\n          )\n        =\n          CONCAT(\n            -- DDD (2 dígitos) do mailing atual\n            LEFT(\n              RIGHT(\n                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n                  mailing_com_operacao.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n                11\n              ),\n              2\n            ),\n            -- últimos 8 dígitos (número local) do mailing atual\n            RIGHT(\n              RIGHT(\n                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n                  mailing_com_operacao.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n                11\n              ),\n              8\n            )\n          )\n  )\n\n-- Ordena os follow-ups vencidos do mais antigo pro mais recente primeiro;\n-- leads sem fup definido (nunca agendados) ficam por último na fila.\nORDER BY\n  CASE WHEN fup IS NULL OR fup = '' THEN 1 ELSE 0 END,\n  DATE(fup) ASC\n\n-- Processa no máximo 100 leads por execução do fluxo do n8n.\nLIMIT 100;",
         "options": {}
       },
       "type": "n8n-nodes-base.mySql",
@@ -1769,8 +1769,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        848,
-        -1040
+        752,
+        -1952
       ],
       "id": "ebc23527-0f98-4580-a494-15ef4f61ec9a",
       "name": "API Finamob4",
@@ -1806,8 +1806,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        384,
-        -1056
+        288,
+        -1968
       ],
       "id": "81d32e81-d495-414a-b477-4c634c751dba",
       "name": "Get row(s) in sheet",
@@ -1822,8 +1822,8 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        592,
-        -1056
+        496,
+        -1968
       ],
       "id": "145765a3-0e08-4103-8403-4fa888b9d938",
       "name": "Loop Over Items"
@@ -1835,8 +1835,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        1344,
-        -976
+        1248,
+        -1888
       ],
       "id": "a04edfdf-27d3-46cb-8aaf-c40a55cf626f",
       "name": "Wait",
@@ -2019,8 +2019,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1152,
-        -976
+        1056,
+        -1888
       ],
       "id": "3fb2d1d7-7ca9-4b63-a72f-eaed8c039b83",
       "name": "Update row in sheet",
@@ -2056,6 +2056,10 @@
             {
               "fieldId": "payload",
               "fieldValue": "={{ JSON.stringify({ template: 'mensagem_1_sem_incorporadora' }) }}"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_1_sem_incorporadora"
             }
           ]
         }
@@ -2154,6 +2158,10 @@
             {
               "fieldId": "payload",
               "fieldValue": "={{ JSON.stringify({ template: 'mensagem_2_sem_incorporadora' }) }}"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_2_sem_incorporadora"
             }
           ]
         }
@@ -2252,6 +2260,10 @@
             {
               "fieldId": "payload",
               "fieldValue": "={{ JSON.stringify({ template: 'mensagem_3_sem_incorporadora' }) }}"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_3_sem_incorporadora"
             }
           ]
         }
@@ -2345,8 +2357,8 @@
       "type": "n8n-nodes-base.mySql",
       "typeVersion": 2.5,
       "position": [
-        368,
-        -240
+        -256,
+        -720
       ],
       "id": "d4d1c7b0-3b77-4eda-a0ce-f77f5abd40c9",
       "name": "Buscar Mailing Criado",
@@ -2360,14 +2372,14 @@
     {
       "parameters": {
         "content": "## Nova Mailing Inboud",
-        "height": 240,
-        "width": 544
+        "height": 608,
+        "width": 2112
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        48,
-        -304
+        -560,
+        -976
       ],
       "id": "cf96aca7-7c63-4f0b-84cf-daac5ef95def",
       "name": "Sticky Note4"
@@ -2381,8 +2393,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        128,
-        -240
+        -496,
+        -720
       ],
       "id": "12ea5f62-3f99-4015-a1ea-224a7ec1929f",
       "name": "Webhook - Novo Mailing",
@@ -2460,8 +2472,8 @@
       "type": "n8n-nodes-base.mySql",
       "typeVersion": 2.5,
       "position": [
-        208,
-        -576
+        64,
+        -2016
       ],
       "id": "ab131701-c7fb-442e-b3d1-f652f067a10e",
       "name": "Execute a SQL query6",
@@ -2471,6 +2483,587 @@
           "name": "Finamob database"
         }
       }
+    },
+    {
+      "parameters": {
+        "tableId": "finamob-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_usuario"
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "=Olá, {{ $('Buscar Mailing Criado').first().json.clientes }}! Tudo bem?\nAqui é a Luiza, da Finamob. Vi que você se inscreveu na nossa campanha sobre Funding Imobiliário.\nVocês têm alguma operação em andamento ou em planejamento para os próximos meses que esteja precisando de funding?\nAbs!"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $json.contacts[0].input }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Buscar Mailing Criado').first().json.clientes }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-INBOUND"
+            },
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Enviar Template').first().json.contacts[0].input }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        208,
+        -544
+      ],
+      "id": "6694baa9-ba65-4f1b-96f8-7ccd77762f8a",
+      "name": "Cria Mensagem no Supabase3",
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://finamob.com.br/api/update_mailing_api.php",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "***REMOVIDO***"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"phone\": \"{{ \n  (() => {\n    let phone = String($json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // Remove prefixo internacional com 00, ex: 005511989342471\n    if (phone.startsWith(\"00\")) {\n      phone = phone.slice(2);\n    }\n\n    // Se vier com 0 antes do DDD, ex: 011989342471\n    if (phone.startsWith(\"0\") && phone.length >= 11) {\n      phone = phone.slice(1);\n    }\n\n    // Se já vier com 55, mantém\n    if (phone.startsWith(\"55\")) {\n      return phone;\n    }\n\n    // Se vier DDD + número celular com 9 dígitos, ex: 11989342471\n    if (phone.length === 11) {\n      return \"55\" + phone;\n    }\n\n    // Se vier DDD + número com 8 dígitos, NÃO adiciona o 9\n    // Ex: 1188888888 vira 551188888888\n    if (phone.length === 10) {\n      return \"55\" + phone;\n    }\n\n    return phone;\n  })()\n}}\",\n    \"ultimo_contato\": \"{{ $now.toFormat('yyyy-MM-dd') }}\",\n    \"fup\": \"{{ $now.plus({ days: 2 }).toFormat('yyyy-MM-dd') }}\",\n    \"status_plano_acao\": \"ptentativaderreativaçãor\",\n    \"midia\": \"15\",\n    \"dono_do_lead\": \"29\"\n  } ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -32,
+        -720
+      ],
+      "id": "59f893c6-d2a2-4053-aa01-080d274eec11",
+      "name": "API Finamob5",
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM",
+          "mode": "list",
+          "cachedResultName": "Disparos SDR Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "disparos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Buscar Mailing Criado').first().json.id }}",
+            "clientes": "={{ $('Buscar Mailing Criado').first().json.clientes }}",
+            "plano_de_acao": "={{ $('Buscar Mailing Criado').first().json.plano_de_acao }}",
+            "whatsapp": "={{ $('Buscar Mailing Criado').first().json.whatsapp }}",
+            "email": "={{ $('Buscar Mailing Criado').first().json.email }}",
+            "ultimo_contato": "={{ $('Buscar Mailing Criado').first().json.ultimo_contato }}",
+            "fup": "={{ $('Buscar Mailing Criado').first().json.fup }}",
+            "datacriacao": "={{ $('Buscar Mailing Criado').first().json.datacriacao }}",
+            "lixeira": "={{ $('Buscar Mailing Criado').first().json.lixeira }}",
+            "observacao": "={{ $('Buscar Mailing Criado').first().json.observacao }}",
+            "status_plano_acao": "={{ $('Buscar Mailing Criado').first().json.status_plano_acao }}",
+            "Template": "disparo_inicial_outbound"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "clientes",
+              "displayName": "clientes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "plano_de_acao",
+              "displayName": "plano_de_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "whatsapp",
+              "displayName": "whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ultimo_contato",
+              "displayName": "ultimo_contato",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fup",
+              "displayName": "fup",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "datacriacao",
+              "displayName": "datacriacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lixeira",
+              "displayName": "lixeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "observacao",
+              "displayName": "observacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_plano_acao",
+              "displayName": "status_plano_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Template",
+              "displayName": "Template",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Obs",
+              "displayName": "Obs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        496,
+        -928
+      ],
+      "id": "d3d7c6a3-615e-4811-a152-91d532f85bff",
+      "name": "Atualiza Controle de Disparos1",
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM",
+          "mode": "list",
+          "cachedResultName": "Disparos SDR Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1419636200,
+          "mode": "list",
+          "cachedResultName": "validar_erros",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit#gid=1419636200"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "clientes": "={{ $json.clientes }}",
+            "plano_de_acao": "={{ $json.plano_de_acao }}",
+            "whatsapp": "={{ $json.whatsapp }}",
+            "email": "={{ $json.email }}",
+            "ultimo_contato": "={{ $json.ultimo_contato }}",
+            "fup": "={{ $json.fup }}",
+            "datacriacao": "={{ $json.datacriacao }}",
+            "lixeira": "={{ $json.lixeira }}",
+            "observacao": "={{ $json.observacao }}",
+            "status_plano_acao": "={{ $json.status_plano_acao }}",
+            "error": "={{ $json.error }}",
+            "Status": "Aguardando Tratativa",
+            "Etapa do Fluxo": "Disparo inicial outbound"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "clientes",
+              "displayName": "clientes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "plano_de_acao",
+              "displayName": "plano_de_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "whatsapp",
+              "displayName": "whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ultimo_contato",
+              "displayName": "ultimo_contato",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fup",
+              "displayName": "fup",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "datacriacao",
+              "displayName": "datacriacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lixeira",
+              "displayName": "lixeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "observacao",
+              "displayName": "observacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_plano_acao",
+              "displayName": "status_plano_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Etapa do Fluxo",
+              "displayName": "Etapa do Fluxo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -32,
+        -528
+      ],
+      "id": "5f98f7b1-15ec-4696-8ea9-71e6c2ec78c2",
+      "name": "Atualiza Controle de Erros1",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "sdr_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mailing_id",
+              "fieldValue": "={{ $('Buscar Mailing Criado').first().json.id }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Enviar Template').first().json.contacts[0].input }}"
+            },
+            {
+              "fieldId": "tipo_evento",
+              "fieldValue": "disparo_enviado"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "6.01-fup-atrasados"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-INBOUND"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ template: 'disparo_inicial_outbound' }) }}"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "disparo_inicial_outbound"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        496,
+        -736
+      ],
+      "id": "36485d1c-19e7-4348-9c99-3b842d85a9b4",
+      "name": "Registra Evento - Disparo Enviado ",
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Instrumentação dashboard SDR — grava evento em sdr_eventos"
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{\n(raw => {\n  let t = (raw || \"\").toString().replace(/\\s+/g, \"\").replace(/\\D/g, \"\");\n  t = t.replace(/^0+/, \"\");\n\n  if (t.length === 8) {\n    // número sem DDD\n    t = \"11\" + \"9\" + t;\n  } else if (t.length === 9) {\n    // celular sem DDD\n    t = \"11\" + t;\n  } else if (t.length === 10) {\n    // DDD + telefone sem 9\n    t = t.replace(/^(\\d{2})(\\d{8})$/, \"$19$2\");\n  } else if (t.length === 11) {\n    // DDD + celular\n    t = \"55\" + t;\n  } else if (t.length === 12) {\n    // 55 + DDD + telefone sem 9\n    t = t.slice(0, 4) + \"9\" + t.slice(4);\n  } else if (t.length > 13) {\n    // mantém apenas os últimos 13 dígitos\n    t = t.slice(-13);\n  }\n\n  return t;\n})($('Buscar Mailing Criado').first().json.whatsapp)\n}}_mem_agent_FINAMOB_SDR",
+        "messageData": "={{\nJSON.stringify({\n  type: \"human\",\n  data: {\n    content: `Olá, ${$('Buscar Mailing Criado').first().json.clientes}! Tudo bem?\nAqui é a Luiza, da Finamob. Vi que você se inscreveu na nossa campanha sobre Funding Imobiliário.\nVocês têm alguma operação em andamento ou em planejamento para os próximos meses que esteja precisando de funding?\nAbs!`,\n    additional_kwargs: {},\n    response_metadata: {}\n  }\n})\n}}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        496,
+        -544
+      ],
+      "id": "449b9010-c7ba-4137-982f-5faa02b7526d",
+      "name": "Adiciona Texto na Memoria3",
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/1202871396233612/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ \n  (() => {\n    let phone = String($('Buscar Mailing Criado').first().json.whatsapp|| \"\").replace(/\\D/g, \"\");\n\n    // Remove prefixo internacional com 00, ex: 005511989342471\n    if (phone.startsWith(\"00\")) {\n      phone = phone.slice(2);\n    }\n\n    // Se vier com 0 antes do DDD, ex: 011989342471\n    if (phone.startsWith(\"0\") && phone.length >= 11) {\n      phone = phone.slice(1);\n    }\n\n    // Se já vier com 55, mantém\n    if (phone.startsWith(\"55\")) {\n      return phone;\n    }\n\n    // Se vier DDD + número celular, ex: 11989342471\n    if (phone.length === 11) {\n      return \"55\" + phone;\n    }\n\n    // Se vier DDD + número com 8 dígitos, adiciona o 9\n    // Ex: 1189342471 vira 5511989342471\n    if (phone.length === 10) {\n      return \"55\" + phone.slice(0, 2) + \"9\" + phone.slice(2);\n    }\n\n    return phone;\n  })()\n}}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"mensagem_1_sem_incorporadora\",\n    \"language\": { \"code\": \"pt_PT\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": {{ JSON.stringify([\n  { \"type\": \"text\", \"text\": String($('Buscar Mailing Criado').first().json.clientes || \"\") }\n]) }}\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        208,
+        -736
+      ],
+      "id": "536099cd-4547-4e65-8e9c-d454328aac37",
+      "name": "Enviar Template",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -2955,7 +3548,7 @@
       "main": [
         [
           {
-            "node": "Iterar envio por lead2",
+            "node": "API Finamob5",
             "type": "main",
             "index": 0
           }
@@ -3005,6 +3598,56 @@
           }
         ]
       ]
+    },
+    "Cria Mensagem no Supabase3": {
+      "main": [
+        [
+          {
+            "node": "Adiciona Texto na Memoria3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Finamob5": {
+      "main": [
+        [
+          {
+            "node": "Enviar Template",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Atualiza Controle de Erros1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Template": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Atualiza Controle de Disparos1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registra Evento - Disparo Enviado ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -3027,8 +3670,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "5f5cba85-f90f-46cc-8b54-87a6356c30b9",
-  "activeVersionId": "5f5cba85-f90f-46cc-8b54-87a6356c30b9",
+  "versionId": "4c42b87a-3d10-4e72-ac32-615d9dd1fd16",
+  "activeVersionId": "4c42b87a-3d10-4e72-ac32-615d9dd1fd16",
   "triggerCount": 2,
   "shared": [
     {
@@ -3040,9 +3683,9 @@
     }
   ],
   "activeVersion": {
-    "updatedAt": "2026-08-04T17:01:24.428Z",
-    "createdAt": "2026-08-04T17:01:24.428Z",
-    "versionId": "5f5cba85-f90f-46cc-8b54-87a6356c30b9",
+    "updatedAt": "2026-08-06T23:55:29.805Z",
+    "createdAt": "2026-08-06T23:55:29.805Z",
+    "versionId": "4c42b87a-3d10-4e72-ac32-615d9dd1fd16",
     "workflowId": "wtUAsYYZyCHjqCGk",
     "nodes": [
       {
@@ -3067,7 +3710,7 @@
       {
         "parameters": {
           "operation": "executeQuery",
-          "query": "SELECT *\nFROM (\n  SELECT\n    m.*,\n    CASE\n      WHEN EXISTS (\n        SELECT 1\n        FROM operacao o\n        WHERE o.mailing_id = m.id\n      )\n      OR EXISTS (\n        SELECT 1\n        FROM incorporadoras i\n        JOIN operacao o2 ON o2.cnpj_digits = i.cnpj_digits\n        WHERE i.id = m.idincorporadora\n          AND i.cnpj_digits IS NOT NULL\n      )\n      OR EXISTS (\n        SELECT 1\n        FROM operacao o3\n        WHERE o3.cnpj_digits = m.cnpj_empresa\n          AND m.cnpj_empresa IS NOT NULL\n          AND m.cnpj_empresa <> ''\n      )\n      THEN 'Sim'\n      ELSE 'Não'\n    END AS tem_operacao\n  FROM mailing m\n) AS mailing_com_operacao\nWHERE\n  lixeira = 0\n  AND tem_operacao = 'Não'\n  AND fup IS NOT NULL\n  AND fup <> ''\n  AND DATE(fup) < CURDATE()\n  AND whatsapp IS NOT NULL\n  AND whatsapp <> ''\n  AND (\n    status_plano_acao IS NULL\n    OR status_plano_acao = ''\n    OR status_plano_acao NOT IN (\n      'ptentativaderreativaçãor',\n      'stentativadereativaçãor',\n      'ttentativadereativaçãor',\n      'encaminhar advisor',\n      'naoeoICP'\n    )\n  )\nORDER BY DATE(fup) ASC\nLIMIT 100;",
+          "query": "/* ============================================================================\n   QUERY: Fila de leads para follow-up via WhatsApp\n   ----------------------------------------------------------------------------\n   Objetivo geral:\n   Selecionar até 100 leads da tabela `mailing` que precisam de contato via\n   WhatsApp, evitando trazer leads que:\n     - já viraram operação (negócio) por qualquer um dos caminhos de vínculo\n       existentes no banco;\n     - estão na lixeira;\n     - não têm WhatsApp válido (vazio, com poucos dígitos, número placeholder\n       tipo \"0000000000\", ou DDD inexistente);\n     - já foram marcados com um status de plano de ação que indica que o lead\n       já foi tratado/descartado;\n     - têm o mesmo telefone de outro mailing ativo (duplicidade), porque a API\n       de atualização (update_mailing_api.php) bloqueia esse caso com erro\n       \"multiple_mailings_found\".\n\n   Observação sobre repetição de código:\n   Esse banco não suporta REGEXP_REPLACE (função só existe a partir do MySQL\n   8.0.4) nem CTEs / WITH (também só a partir do MySQL 8.0), então a limpeza\n   do telefone precisa ser feita com REPLACE() encadeado, e como não dá pra\n   declarar essa expressão uma vez e reaproveitar, ela aparece repetida vária\n   vezes ao longo da query. Isso é feio, mas necessário nessa versão do banco.\n   Se no futuro migrarem pra MySQL 8+, essa query pode ficar bem mais limpa\n   usando WITH + REGEXP_REPLACE. Outra alternativa mais definitiva seria\n   centralizar essa validação numa VIEW ou coluna calculada no banco.\n   ============================================================================ */\n\nSELECT *\nFROM (\n\n  /* --------------------------------------------------------------------\n     SUBCONSULTA INTERNA\n     Pra cada lead do mailing, calcula a coluna `tem_operacao` (\"Sim\"/\"Não\"),\n     verificando 5 caminhos diferentes de vínculo entre o mailing e uma\n     operação (negócio) já existente. Um lead com operação vinculada nunca\n     deve ser puxado pra fila de reengajamento nem atualizado via API.\n     -------------------------------------------------------------------- */\n  SELECT\n    m.*,\n    CASE\n      -- (1) Vínculo direto: a operação foi criada apontando pro próprio mailing.\n      WHEN EXISTS (\n        SELECT 1\n        FROM operacao o\n        WHERE o.mailing_id = m.id\n      )\n\n      -- (2) Vínculo via incorporadora: o lead está associado a uma\n      --     incorporadora (m.idincorporadora) cujo CNPJ bate com o CNPJ de\n      --     alguma operação.\n      OR EXISTS (\n        SELECT 1\n        FROM incorporadoras i\n        JOIN operacao o2 ON o2.cnpj_digits = i.cnpj_digits\n        WHERE i.id = m.idincorporadora\n          AND i.cnpj_digits IS NOT NULL\n      )\n\n      -- (3) Vínculo via CNPJ do próprio lead: o CNPJ salvo no mailing\n      --     (m.cnpj_empresa) bate com o CNPJ de alguma operação.\n      OR EXISTS (\n        SELECT 1\n        FROM operacao o3\n        WHERE o3.cnpj_digits = m.cnpj_empresa\n          AND m.cnpj_empresa IS NOT NULL\n          AND m.cnpj_empresa <> ''\n      )\n\n      -- (4) Vínculo via idcliente: descoberto ao investigar o erro\n      --     \"mailing_has_operation\". Um mesmo cliente (tabela `clientes`)\n      --     pode gerar vários registros de mailing ao longo do tempo\n      --     (reincidência, nova campanha etc.), mas a operação fica\n      --     vinculada ao idclientes, não necessariamente ao mailing_id\n      --     mais recente. Aqui comparamos direto pelo idcliente do mailing.\n      OR EXISTS (\n        SELECT 1\n        FROM operacao o4\n        WHERE o4.idclientes = m.idcliente\n          AND m.idcliente IS NOT NULL\n      )\n\n      -- (5) Mesmo vínculo do item (4), mas passando pela tabela `clientes`\n      --     no sentido inverso (clientes.mailing_id -> mailing.id), pro caso\n      --     de o mailing não ter o idcliente preenchido mas existir um\n      --     registro em `clientes` apontando de volta pra ele.\n      OR EXISTS (\n        SELECT 1\n        FROM clientes c\n        JOIN operacao o5 ON o5.idclientes = c.id\n        WHERE c.mailing_id = m.id\n      )\n\n      THEN 'Sim'\n      ELSE 'Não'\n    END AS tem_operacao\n  FROM mailing m\n\n) AS mailing_com_operacao\n\nWHERE\n  -- Não considerar leads que estão na lixeira.\n  lixeira = 0\n\n  -- Não considerar leads que já têm operação vinculada por nenhum dos\n  -- 5 caminhos calculados acima.\n  AND tem_operacao = 'Não'\n\n  -- Follow-up (fup): entra quem nunca teve fup definido (fup vazio/nulo) OU\n  -- quem tem uma data de fup que já venceu (passado em relação a hoje).\n  AND (\n    fup IS NULL\n    OR fup = ''\n    OR DATE(fup) < CURDATE()\n  )\n\n  -- Precisa ter algum valor de WhatsApp cadastrado pra sequência de checagens\n  -- de validade abaixo fazer sentido.\n  AND whatsapp IS NOT NULL\n  AND whatsapp <> ''\n\n  -- --------------------------------------------------------------------\n  -- VALIDAÇÃO DE TELEFONE\n  -- Como não temos REGEXP_REPLACE nessa versão do MySQL, a limpeza do\n  -- número é feita removendo, um a um, os caracteres de formatação mais\n  -- comuns: parênteses, espaço, hífen, ponto e o \"+\" (de \"+55\").\n  -- Se aparecerem outros formatos no futuro (ex: \"_\", \"/\"), é só adicionar\n  -- mais um REPLACE na cadeia.\n  -- --------------------------------------------------------------------\n\n  -- Validação de tamanho: depois de limpo, um telefone BR válido tem:\n  --   - 10 dígitos (DDD + fixo de 8 dígitos), ou\n  --   - 11 dígitos (DDD + celular de 9 dígitos), ou\n  --   - 12/13 dígitos se ainda tiver o código do país \"55\" na frente\n  --     (nesses casos os passos de validação abaixo comparam usando só os\n  --     últimos 11 dígitos, então o \"55\" na frente não quebra a checagem).\n  AND LENGTH(\n        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n          whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', '')\n      ) BETWEEN 10 AND 13\n\n  -- Rejeita números \"placeholder\" onde todos os dígitos são iguais\n  -- (ex: \"0000000000\", \"1111111111\"). Funciona comparando o número limpo\n  -- com uma string do mesmo tamanho feita só repetindo o primeiro dígito —\n  -- se forem idênticas, é sinal de número fake.\n  AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n        whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', '')\n      <>\n      REPEAT(\n        LEFT(\n          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n            whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n          1\n        ),\n        LENGTH(\n          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n            whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', '')\n        )\n      )\n\n  -- Valida o DDD: pega os 2 primeiros dígitos dos últimos 11 dígitos do\n  -- número limpo (isso ignora um eventual \"55\" de código de país na\n  -- frente) e confere se formam um número entre 11 e 99 — DDDs brasileiros\n  -- reais começam em 11, então qualquer coisa abaixo disso (ex: \"00\", \"01\")\n  -- é inválido.\n  AND CAST(\n        LEFT(\n          RIGHT(\n            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n              whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n            11\n          ),\n          2\n        ) AS UNSIGNED\n      ) BETWEEN 11 AND 99\n\n  -- --------------------------------------------------------------------\n  -- STATUS DO PLANO DE AÇÃO\n  -- Não considerar leads cujo status_plano_acao já indica que o lead foi\n  -- tratado ou descartado (tentativas de reativação já feitas, encaminhado\n  -- pro advisor, ou fora do ICP). Aceita nulo/vazio (nunca classificado)\n  -- ou qualquer status que não esteja nessa lista de \"já resolvidos\".\n  -- --------------------------------------------------------------------\n  AND (\n    status_plano_acao IS NULL\n    OR status_plano_acao = ''\n    OR status_plano_acao NOT IN (\n      'ptentativaderreativaçãor',\n      'stentativadereativaçãor',\n      'ttentativadereativaçãor',\n      'encaminhar advisor',\n      'naoeoICP'\n    )\n  )\n\n  -- --------------------------------------------------------------------\n  -- DEDUPLICAÇÃO DE TELEFONE\n  -- A API bloqueia a atualização (erro \"multiple_mailings_found\") quando\n  -- mais de um mailing ATIVO tem o mesmo telefone (considerando variações\n  -- com/sem o \"9\" extra do celular e com/sem código de país). Aqui a gente\n  -- normaliza o telefone pro formato canônico \"DDD + últimos 8 dígitos\" e\n  -- verifica se existe algum OUTRO mailing ativo com o mesmo canônico. Se\n  -- existir, o lead atual é excluído da fila, porque a atualização dele\n  -- via API vai falhar de qualquer forma.\n  -- --------------------------------------------------------------------\n  AND NOT EXISTS (\n    SELECT 1\n    FROM mailing m2\n    WHERE m2.lixeira = 0\n      AND m2.id <> mailing_com_operacao.id\n      AND CONCAT(\n            -- DDD (2 dígitos) do outro mailing\n            LEFT(\n              RIGHT(\n                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n                  m2.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n                11\n              ),\n              2\n            ),\n            -- últimos 8 dígitos (número local, sem o \"9\" extra de celular)\n            RIGHT(\n              RIGHT(\n                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n                  m2.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n                11\n              ),\n              8\n            )\n          )\n        =\n          CONCAT(\n            -- DDD (2 dígitos) do mailing atual\n            LEFT(\n              RIGHT(\n                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n                  mailing_com_operacao.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n                11\n              ),\n              2\n            ),\n            -- últimos 8 dígitos (número local) do mailing atual\n            RIGHT(\n              RIGHT(\n                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n                  mailing_com_operacao.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''),\n                11\n              ),\n              8\n            )\n          )\n  )\n\n-- Ordena os follow-ups vencidos do mais antigo pro mais recente primeiro;\n-- leads sem fup definido (nunca agendados) ficam por último na fila.\nORDER BY\n  CASE WHEN fup IS NULL OR fup = '' THEN 1 ELSE 0 END,\n  DATE(fup) ASC\n\n-- Processa no máximo 100 leads por execução do fluxo do n8n.\nLIMIT 100;",
           "options": {}
         },
         "type": "n8n-nodes-base.mySql",
@@ -4808,8 +5451,8 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.3,
         "position": [
-          848,
-          -1040
+          752,
+          -1952
         ],
         "id": "ebc23527-0f98-4580-a494-15ef4f61ec9a",
         "name": "API Finamob4",
@@ -4845,8 +5488,8 @@
         "type": "n8n-nodes-base.googleSheets",
         "typeVersion": 4.7,
         "position": [
-          384,
-          -1056
+          288,
+          -1968
         ],
         "id": "81d32e81-d495-414a-b477-4c634c751dba",
         "name": "Get row(s) in sheet",
@@ -4861,8 +5504,8 @@
         "type": "n8n-nodes-base.splitInBatches",
         "typeVersion": 3,
         "position": [
-          592,
-          -1056
+          496,
+          -1968
         ],
         "id": "145765a3-0e08-4103-8403-4fa888b9d938",
         "name": "Loop Over Items"
@@ -4874,8 +5517,8 @@
         "type": "n8n-nodes-base.wait",
         "typeVersion": 1.1,
         "position": [
-          1344,
-          -976
+          1248,
+          -1888
         ],
         "id": "a04edfdf-27d3-46cb-8aaf-c40a55cf626f",
         "name": "Wait",
@@ -5058,8 +5701,8 @@
         "type": "n8n-nodes-base.googleSheets",
         "typeVersion": 4.7,
         "position": [
-          1152,
-          -976
+          1056,
+          -1888
         ],
         "id": "3fb2d1d7-7ca9-4b63-a72f-eaed8c039b83",
         "name": "Update row in sheet",
@@ -5095,6 +5738,10 @@
               {
                 "fieldId": "payload",
                 "fieldValue": "={{ JSON.stringify({ template: 'mensagem_1_sem_incorporadora' }) }}"
+              },
+              {
+                "fieldId": "tipo_disparo",
+                "fieldValue": "mensagem_1_sem_incorporadora"
               }
             ]
           }
@@ -5193,6 +5840,10 @@
               {
                 "fieldId": "payload",
                 "fieldValue": "={{ JSON.stringify({ template: 'mensagem_2_sem_incorporadora' }) }}"
+              },
+              {
+                "fieldId": "tipo_disparo",
+                "fieldValue": "mensagem_2_sem_incorporadora"
               }
             ]
           }
@@ -5291,6 +5942,10 @@
               {
                 "fieldId": "payload",
                 "fieldValue": "={{ JSON.stringify({ template: 'mensagem_3_sem_incorporadora' }) }}"
+              },
+              {
+                "fieldId": "tipo_disparo",
+                "fieldValue": "mensagem_3_sem_incorporadora"
               }
             ]
           }
@@ -5384,8 +6039,8 @@
         "type": "n8n-nodes-base.mySql",
         "typeVersion": 2.5,
         "position": [
-          368,
-          -240
+          -256,
+          -720
         ],
         "id": "d4d1c7b0-3b77-4eda-a0ce-f77f5abd40c9",
         "name": "Buscar Mailing Criado",
@@ -5399,14 +6054,14 @@
       {
         "parameters": {
           "content": "## Nova Mailing Inboud",
-          "height": 240,
-          "width": 544
+          "height": 608,
+          "width": 2112
         },
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
-          48,
-          -304
+          -560,
+          -976
         ],
         "id": "cf96aca7-7c63-4f0b-84cf-daac5ef95def",
         "name": "Sticky Note4"
@@ -5420,8 +6075,8 @@
         "type": "n8n-nodes-base.webhook",
         "typeVersion": 2,
         "position": [
-          128,
-          -240
+          -496,
+          -720
         ],
         "id": "12ea5f62-3f99-4015-a1ea-224a7ec1929f",
         "name": "Webhook - Novo Mailing",
@@ -5499,8 +6154,8 @@
         "type": "n8n-nodes-base.mySql",
         "typeVersion": 2.5,
         "position": [
-          208,
-          -576
+          64,
+          -2016
         ],
         "id": "ab131701-c7fb-442e-b3d1-f652f067a10e",
         "name": "Execute a SQL query6",
@@ -5510,6 +6165,587 @@
             "name": "Finamob database"
           }
         }
+      },
+      {
+        "parameters": {
+          "tableId": "finamob-historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "mensagem_usuario"
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "=Olá, {{ $('Buscar Mailing Criado').first().json.clientes }}! Tudo bem?\nAqui é a Luiza, da Finamob. Vi que você se inscreveu na nossa campanha sobre Funding Imobiliário.\nVocês têm alguma operação em andamento ou em planejamento para os próximos meses que esteja precisando de funding?\nAbs!"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $json.contacts[0].input }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $('Buscar Mailing Criado').first().json.clientes }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "text"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "SDR-INBOUND"
+              },
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $('Enviar Template').first().json.contacts[0].input }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          208,
+          -544
+        ],
+        "id": "6694baa9-ba65-4f1b-96f8-7ccd77762f8a",
+        "name": "Cria Mensagem no Supabase3",
+        "credentials": {
+          "supabaseApi": {
+            "id": "J2ITvTeT2ru3SEdo",
+            "name": "EMI - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://finamob.com.br/api/update_mailing_api.php",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "***REMOVIDO***"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n    \"phone\": \"{{ \n  (() => {\n    let phone = String($json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // Remove prefixo internacional com 00, ex: 005511989342471\n    if (phone.startsWith(\"00\")) {\n      phone = phone.slice(2);\n    }\n\n    // Se vier com 0 antes do DDD, ex: 011989342471\n    if (phone.startsWith(\"0\") && phone.length >= 11) {\n      phone = phone.slice(1);\n    }\n\n    // Se já vier com 55, mantém\n    if (phone.startsWith(\"55\")) {\n      return phone;\n    }\n\n    // Se vier DDD + número celular com 9 dígitos, ex: 11989342471\n    if (phone.length === 11) {\n      return \"55\" + phone;\n    }\n\n    // Se vier DDD + número com 8 dígitos, NÃO adiciona o 9\n    // Ex: 1188888888 vira 551188888888\n    if (phone.length === 10) {\n      return \"55\" + phone;\n    }\n\n    return phone;\n  })()\n}}\",\n    \"ultimo_contato\": \"{{ $now.toFormat('yyyy-MM-dd') }}\",\n    \"fup\": \"{{ $now.plus({ days: 2 }).toFormat('yyyy-MM-dd') }}\",\n    \"status_plano_acao\": \"ptentativaderreativaçãor\",\n    \"midia\": \"15\",\n    \"dono_do_lead\": \"29\"\n  } ",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          -32,
+          -720
+        ],
+        "id": "59f893c6-d2a2-4053-aa01-080d274eec11",
+        "name": "API Finamob5",
+        "retryOnFail": true,
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "operation": "append",
+          "documentId": {
+            "__rl": true,
+            "value": "14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM",
+            "mode": "list",
+            "cachedResultName": "Disparos SDR Finamob",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit?usp=drivesdk"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "gid=0",
+            "mode": "list",
+            "cachedResultName": "disparos",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit#gid=0"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "id": "={{ $('Buscar Mailing Criado').first().json.id }}",
+              "clientes": "={{ $('Buscar Mailing Criado').first().json.clientes }}",
+              "plano_de_acao": "={{ $('Buscar Mailing Criado').first().json.plano_de_acao }}",
+              "whatsapp": "={{ $('Buscar Mailing Criado').first().json.whatsapp }}",
+              "email": "={{ $('Buscar Mailing Criado').first().json.email }}",
+              "ultimo_contato": "={{ $('Buscar Mailing Criado').first().json.ultimo_contato }}",
+              "fup": "={{ $('Buscar Mailing Criado').first().json.fup }}",
+              "datacriacao": "={{ $('Buscar Mailing Criado').first().json.datacriacao }}",
+              "lixeira": "={{ $('Buscar Mailing Criado').first().json.lixeira }}",
+              "observacao": "={{ $('Buscar Mailing Criado').first().json.observacao }}",
+              "status_plano_acao": "={{ $('Buscar Mailing Criado').first().json.status_plano_acao }}",
+              "Template": "disparo_inicial_outbound"
+            },
+            "matchingColumns": [
+              "id"
+            ],
+            "schema": [
+              {
+                "id": "id",
+                "displayName": "id",
+                "required": false,
+                "defaultMatch": true,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "clientes",
+                "displayName": "clientes",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "plano_de_acao",
+                "displayName": "plano_de_acao",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "whatsapp",
+                "displayName": "whatsapp",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "email",
+                "displayName": "email",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "ultimo_contato",
+                "displayName": "ultimo_contato",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "fup",
+                "displayName": "fup",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "datacriacao",
+                "displayName": "datacriacao",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "lixeira",
+                "displayName": "lixeira",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "observacao",
+                "displayName": "observacao",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "status_plano_acao",
+                "displayName": "status_plano_acao",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Template",
+                "displayName": "Template",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Obs",
+                "displayName": "Obs",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": true
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          496,
+          -928
+        ],
+        "id": "d3d7c6a3-615e-4811-a152-91d532f85bff",
+        "name": "Atualiza Controle de Disparos1",
+        "credentials": {
+          "googleSheetsOAuth2Api": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "operation": "append",
+          "documentId": {
+            "__rl": true,
+            "value": "14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM",
+            "mode": "list",
+            "cachedResultName": "Disparos SDR Finamob",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit?usp=drivesdk"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": 1419636200,
+            "mode": "list",
+            "cachedResultName": "validar_erros",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit#gid=1419636200"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "id": "={{ $json.id }}",
+              "clientes": "={{ $json.clientes }}",
+              "plano_de_acao": "={{ $json.plano_de_acao }}",
+              "whatsapp": "={{ $json.whatsapp }}",
+              "email": "={{ $json.email }}",
+              "ultimo_contato": "={{ $json.ultimo_contato }}",
+              "fup": "={{ $json.fup }}",
+              "datacriacao": "={{ $json.datacriacao }}",
+              "lixeira": "={{ $json.lixeira }}",
+              "observacao": "={{ $json.observacao }}",
+              "status_plano_acao": "={{ $json.status_plano_acao }}",
+              "error": "={{ $json.error }}",
+              "Status": "Aguardando Tratativa",
+              "Etapa do Fluxo": "Disparo inicial outbound"
+            },
+            "matchingColumns": [
+              "id"
+            ],
+            "schema": [
+              {
+                "id": "id",
+                "displayName": "id",
+                "required": false,
+                "defaultMatch": true,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "clientes",
+                "displayName": "clientes",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "plano_de_acao",
+                "displayName": "plano_de_acao",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "whatsapp",
+                "displayName": "whatsapp",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "email",
+                "displayName": "email",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "ultimo_contato",
+                "displayName": "ultimo_contato",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "fup",
+                "displayName": "fup",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "datacriacao",
+                "displayName": "datacriacao",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "lixeira",
+                "displayName": "lixeira",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "observacao",
+                "displayName": "observacao",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "status_plano_acao",
+                "displayName": "status_plano_acao",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "error",
+                "displayName": "error",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Etapa do Fluxo",
+                "displayName": "Etapa do Fluxo",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Status",
+                "displayName": "Status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          -32,
+          -528
+        ],
+        "id": "5f98f7b1-15ec-4696-8ea9-71e6c2ec78c2",
+        "name": "Atualiza Controle de Erros1",
+        "retryOnFail": true,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "googleSheetsOAuth2Api": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "tableId": "sdr_eventos",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "mailing_id",
+                "fieldValue": "={{ $('Buscar Mailing Criado').first().json.id }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Enviar Template').first().json.contacts[0].input }}"
+              },
+              {
+                "fieldId": "tipo_evento",
+                "fieldValue": "disparo_enviado"
+              },
+              {
+                "fieldId": "origem",
+                "fieldValue": "6.01-fup-atrasados"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "SDR-INBOUND"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ template: 'disparo_inicial_outbound' }) }}"
+              },
+              {
+                "fieldId": "tipo_disparo",
+                "fieldValue": "disparo_inicial_outbound"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          496,
+          -736
+        ],
+        "id": "36485d1c-19e7-4348-9c99-3b842d85a9b4",
+        "name": "Registra Evento - Disparo Enviado ",
+        "credentials": {
+          "supabaseApi": {
+            "id": "J2ITvTeT2ru3SEdo",
+            "name": "EMI - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Instrumentação dashboard SDR — grava evento em sdr_eventos"
+      },
+      {
+        "parameters": {
+          "operation": "push",
+          "list": "={{\n(raw => {\n  let t = (raw || \"\").toString().replace(/\\s+/g, \"\").replace(/\\D/g, \"\");\n  t = t.replace(/^0+/, \"\");\n\n  if (t.length === 8) {\n    // número sem DDD\n    t = \"11\" + \"9\" + t;\n  } else if (t.length === 9) {\n    // celular sem DDD\n    t = \"11\" + t;\n  } else if (t.length === 10) {\n    // DDD + telefone sem 9\n    t = t.replace(/^(\\d{2})(\\d{8})$/, \"$19$2\");\n  } else if (t.length === 11) {\n    // DDD + celular\n    t = \"55\" + t;\n  } else if (t.length === 12) {\n    // 55 + DDD + telefone sem 9\n    t = t.slice(0, 4) + \"9\" + t.slice(4);\n  } else if (t.length > 13) {\n    // mantém apenas os últimos 13 dígitos\n    t = t.slice(-13);\n  }\n\n  return t;\n})($('Buscar Mailing Criado').first().json.whatsapp)\n}}_mem_agent_FINAMOB_SDR",
+          "messageData": "={{\nJSON.stringify({\n  type: \"human\",\n  data: {\n    content: `Olá, ${$('Buscar Mailing Criado').first().json.clientes}! Tudo bem?\nAqui é a Luiza, da Finamob. Vi que você se inscreveu na nossa campanha sobre Funding Imobiliário.\nVocês têm alguma operação em andamento ou em planejamento para os próximos meses que esteja precisando de funding?\nAbs!`,\n    additional_kwargs: {},\n    response_metadata: {}\n  }\n})\n}}"
+        },
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          496,
+          -544
+        ],
+        "id": "449b9010-c7ba-4137-982f-5faa02b7526d",
+        "name": "Adiciona Texto na Memoria3",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://graph.facebook.com/v22.0/1202871396233612/messages",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ \n  (() => {\n    let phone = String($('Buscar Mailing Criado').first().json.whatsapp|| \"\").replace(/\\D/g, \"\");\n\n    // Remove prefixo internacional com 00, ex: 005511989342471\n    if (phone.startsWith(\"00\")) {\n      phone = phone.slice(2);\n    }\n\n    // Se vier com 0 antes do DDD, ex: 011989342471\n    if (phone.startsWith(\"0\") && phone.length >= 11) {\n      phone = phone.slice(1);\n    }\n\n    // Se já vier com 55, mantém\n    if (phone.startsWith(\"55\")) {\n      return phone;\n    }\n\n    // Se vier DDD + número celular, ex: 11989342471\n    if (phone.length === 11) {\n      return \"55\" + phone;\n    }\n\n    // Se vier DDD + número com 8 dígitos, adiciona o 9\n    // Ex: 1189342471 vira 5511989342471\n    if (phone.length === 10) {\n      return \"55\" + phone.slice(0, 2) + \"9\" + phone.slice(2);\n    }\n\n    return phone;\n  })()\n}}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"mensagem_1_sem_incorporadora\",\n    \"language\": { \"code\": \"pt_PT\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": {{ JSON.stringify([\n  { \"type\": \"text\", \"text\": String($('Buscar Mailing Criado').first().json.clientes || \"\") }\n]) }}\n      }\n    ]\n  }\n}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          208,
+          -736
+        ],
+        "id": "536099cd-4547-4e65-8e9c-d454328aac37",
+        "name": "Enviar Template",
+        "retryOnFail": true,
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
       }
     ],
     "connections": {
@@ -5994,7 +7230,7 @@
         "main": [
           [
             {
-              "node": "Iterar envio por lead2",
+              "node": "API Finamob5",
               "type": "main",
               "index": 0
             }
@@ -6039,6 +7275,56 @@
           [
             {
               "node": "Iterar envio por lead1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cria Mensagem no Supabase3": {
+        "main": [
+          [
+            {
+              "node": "Adiciona Texto na Memoria3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "API Finamob5": {
+        "main": [
+          [
+            {
+              "node": "Enviar Template",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Atualiza Controle de Erros1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar Template": {
+        "main": [
+          [
+            {
+              "node": "Cria Mensagem no Supabase3",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Atualiza Controle de Disparos1",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Registra Evento - Disparo Enviado ",
               "type": "main",
               "index": 0
             }
