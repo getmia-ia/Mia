@@ -1,0 +1,823 @@
+{
+  "updatedAt": "2026-08-10T18:41:43.879Z",
+  "createdAt": "2026-08-10T15:51:29.134Z",
+  "id": "wwiI6ZidJPsIXYSe",
+  "name": "Campanha Mês do Agricultor - Quem já navegou",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 15,
+              "triggerAtMinute": 45
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        608,
+        864
+      ],
+      "id": "417ff526-0aff-40f7-aa64-cbc66e92fc0b",
+      "name": "Disparador Diário (Campanha)1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- CAMPANHA MÊS DO AGRICULTOR -> quem JÁ NAVEGOU no site (qualquer data)\n-- Puxa 1 telefone por usuário que navegou no site pelo menos uma vez,\n-- remove blacklist e quem JÁ recebeu esta campanha (disparo_campanha_log).\n-- Base esperada ~286 com celular válido. O fatiamento é garantido pelo LIMIT + DAILY_CAP.\n\nWITH visitantes AS MATERIALIZED (\n  SELECT DISTINCT nh.user_id AS candidato_id\n  FROM an_prod_cbc.navigation_histories nh\n  WHERE nh.deleted IS DISTINCT FROM true\n    AND nh.user_id IS NOT NULL\n),\nloc AS MATERIALIZED (\n  SELECT v.candidato_id,\n         cu.business_id AS cand_business_id\n  FROM visitantes v\n  JOIN an_prod_cbc.users cu ON cu.id = v.candidato_id\n  WHERE cu.business_id IS NOT NULL\n),\ncand_biz AS MATERIALIZED (\n  SELECT DISTINCT cand_business_id AS profile_id FROM loc\n),\ntel_raw AS MATERIALIZED (\n  SELECT bp.id AS profile_id, ph.type_id,\n         regexp_replace(ph.number, '\\D', '', 'g') AS d\n  FROM an_prod_cbc.business_profiles bp\n  JOIN cand_biz cb                     ON cb.profile_id = bp.id\n  JOIN an_prod_cbc.profile_phones pp   ON pp.profile_id = bp.id\n  JOIN an_prod_cbc.phones ph           ON ph.id = pp.phone_id\n  WHERE ph.deleted IS DISTINCT FROM true AND ph.number IS NOT NULL\n),\ntel_melhor AS MATERIALIZED (\n  SELECT profile_id,\n         (ARRAY_AGG(e164 ORDER BY CASE WHEN type_id = 2 THEN 0 ELSE 1 END))[1] AS telefone\n  FROM (\n    SELECT profile_id, type_id,\n      CASE\n        WHEN length(d) = 13 AND left(d,2) = '55' THEN d\n        WHEN length(d) = 12 AND left(d,2) = '55' THEN substr(d,1,4) || '9' || substr(d,5)\n        WHEN length(d) = 11 THEN '55' || d\n        WHEN length(d) = 10 THEN '55' || substr(d,1,2) || '9' || substr(d,3)\n        ELSE NULL\n      END AS e164\n    FROM tel_raw\n  ) n\n  WHERE e164 IS NOT NULL\n    AND length(e164) = 13\n    AND substr(e164,3,2) BETWEEN '11' AND '99'\n    AND substr(e164,5,1) = '9'\n  GROUP BY profile_id\n)\nSELECT\n  l.candidato_id,\n  tm.telefone,\n  u.email AS candidato_email\nFROM loc l\nJOIN an_prod_cbc.users u   ON u.id = l.candidato_id\nJOIN tel_melhor tm         ON tm.profile_id = l.cand_business_id\nLEFT JOIN public.disparo_campanha_log dl\n  ON dl.user_id = l.candidato_id AND dl.campanha = 'mes_do_agricultor'\nWHERE dl.id IS NULL\n  AND NOT EXISTS (\n    SELECT 1 FROM public.blacklist bl\n    WHERE bl.ativo IS DISTINCT FROM false\n      AND bl.telefone = tm.telefone\n      AND bl.produto IS NULL AND bl.product_id IS NULL   -- só bloqueios TOTAIS\n  )\nGROUP BY l.candidato_id, tm.telefone, u.email\nORDER BY l.candidato_id\nLIMIT 500;    -- base ~286; buffer folgado (dedup + check de WhatsApp reduzem um pouco)",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        800,
+        864
+      ],
+      "id": "1a42c094-ca9f-407b-be9e-4920f2f9d89c",
+      "name": "Query Visitantes 6m1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Junta todos os telefones do lote num array único para checar o WhatsApp de uma vez\nconst rows = $input.all().map(i => i.json);\nconst numeros = [...new Set(rows.map(r => String(r.telefone)))];\nreturn [{ json: { numeros, rows } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        864
+      ],
+      "id": "5338a291-46b7-4ff7-8ad1-92c5d2526e7f",
+      "name": "Monta lista de números1"
+    },
+    {
+      "parameters": {
+        "resource": "chat-api",
+        "instanceName": "AgroNegociar - Comercial",
+        "numbers": "={{ $json.numeros.join(',') }}"
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1232,
+        864
+      ],
+      "id": "ca79736f-7707-4e19-94e8-db9525a48641",
+      "name": "Check WA (lote)1",
+      "credentials": {
+        "evolutionApi": {
+          "id": "LpFE8TuJugE26UUu",
+          "name": "AGRONEGOCIAR-COMERCIAL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Checa o WhatsApp de todos os números do lote de uma vez. Se a sua versão do Evolution não aceitar array em 'numbers', a expressão já está com .join(',')."
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => i.json);\nlet lista = [];\nif (items.length === 1) {\n  const j = items[0];\n  lista = Array.isArray(j) ? j : (j.data || j.result || [j]);\n} else {\n  lista = items.flatMap(j => Array.isArray(j) ? j : (j.data || j.result || [j]));\n}\n\nconst digits = s => String(s || '').replace(/\\D/g, '');\n\n// gera as variantes com e sem o 9 (problema clássico BR)\nfunction variantes(num) {\n  const d = digits(num);\n  const set = new Set([d]);\n  if (d.length === 13 && d.substr(4, 1) === '9') set.add(d.substr(0, 4) + d.substr(5)); // tira o 9\n  else if (d.length === 12) set.add(d.substr(0, 4) + '9' + d.substr(4));                // põe o 9\n  return [...set];\n}\n\n// mapa de quem tem WhatsApp, indexado por TODAS as variantes\nconst existe = {};\nfor (const it of lista) {\n  const num = digits(it && (it.number || it.jid));\n  if (num && it.exists === true) for (const v of variantes(num)) existe[v] = true;\n}\n\nconst rows = $('Monta lista de números1').first().json.rows;\n\n// mantém só quem tem WhatsApp (comparando variantes)\nconst comWhats = rows.filter(r => variantes(r.telefone).some(v => existe[v] === true));\n\n// 1 disparo por pessoa: mantém a primeira ocorrência de cada telefone\nconst porTelefone = {};\nfor (const r of comWhats) {\n  const k = digits(r.telefone);\n  if (!porTelefone[k]) porTelefone[k] = r;\n}\n\n// >>> TETO DIÁRIO <<< base ~286; com 300 envia tudo numa execução.\n// Baixe esse valor (ex: 100) se quiser dividir em mais dias e aquecer o número.\nconst DAILY_CAP = 300;\nreturn Object.values(porTelefone).slice(0, DAILY_CAP).map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        864
+      ],
+      "id": "275e19d9-fdce-4787-a600-ca45841107e7",
+      "name": "Filtra com WhatsApp + teto diário1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1680,
+        864
+      ],
+      "id": "5f88d368-a1bb-44b2-9bb9-7b6c1747f4d9",
+      "name": "Loop Visitantes1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $('Loop Visitantes1').first().json;\n\n// ==== Template do Mês do Agricultor ====\n// Mensagem FIXA (sem variáveis), conforme aprovado no Meta.\n// Se o SEU template tiver variáveis no corpo ({{1}}, {{2}}...), preencha o array\n// abaixo NA MESMA ORDEM. Se não tiver, deixe vazio (não manda 'components').\nconst bodyParams = []; // ex.: [item.candidato_email]\n\nconst template = {\n  name: 'mes_do_agricultor',\n  language: { code: 'pt_BR' }\n};\nif (bodyParams.length) {\n  template.components = [\n    { type: 'body', parameters: bodyParams.map(t => ({ type: 'text', text: String(t) })) }\n  ];\n}\n\nconst body = {\n  messaging_product: 'whatsapp',\n  to: String(item.telefone),\n  type: 'template',\n  template\n};\n\nreturn [{\n  json: {\n    resultado: body,\n    telefone: item.telefone,\n    candidato_id: item.candidato_id,\n    whatsapp_number_id: '1123205217553260',\n    template_usado: 'mes_do_agricultor',\n    texto_log: 'Campanha Mês do Agricultor (template mes_do_agricultor)'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1888,
+        848
+      ],
+      "id": "88d1227e-0728-438d-87ea-1e5625d021c8",
+      "name": "Montar Body Template1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v22.0/1123205217553260/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.resultado) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2112,
+        864
+      ],
+      "id": "610167e0-10ed-4701-aea8-8fffce130dff",
+      "name": "Enviar Template1",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO public.disparo_campanha_log (campanha, user_id, telefone, enviado_em)\nVALUES ('mes_do_agricultor', {{ $('Montar Body Template1').item.json.candidato_id }}, '{{ $('Montar Body Template1').item.json.telefone }}', now());",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2336,
+        864
+      ],
+      "id": "9b042206-aed6-4c87-816a-7a66e88b956a",
+      "name": "Grava disparo_campanha_log1",
+      "credentials": {
+        "postgres": {
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "tableId": "historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Montar Body Template1').item.json.telefone }}"
+            },
+            {
+              "fieldId": "mensagem_usuario",
+              "fieldValue": "="
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Montar Body Template1').item.json.texto_log }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Montar Body Template1').item.json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "="
+            },
+            {
+              "fieldId": "id_conversa",
+              "fieldValue": "={{ $('Montar Body Template1').item.json.telefone }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "={{ $('Montar Body Template1').item.json.template_usado }}"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "=AGRO-INTERESSES"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "ia"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2560,
+        864
+      ],
+      "id": "13f19c78-15ea-4229-b0fd-9132c412d45f",
+      "name": "Cria Mensagem no Supabase1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "qF5T2ej3TiWXL4jk",
+          "name": "Agronegociar - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 6) + 4 }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2768,
+        880
+      ],
+      "id": "67b64765-81c7-4490-8dd4-c15805c0c0be",
+      "name": "Wait1",
+      "webhookId": "wait-mes-agricultor-001"
+    },
+    {
+      "parameters": {
+        "content": "## Campanha Mês do Agricultor — Quem já navegou no site\n\n**Fluxo:** agenda diária → puxa quem já navegou (qualquer data) → checa WhatsApp em lote → dedup + corta no teto diário → loop → envia template `mes_do_agricultor` → grava log da campanha + histórico → espera → próximo.\n\n**Base:** ~286 usuários com celular válido (navigation_histories, all-time). Com `DAILY_CAP = 300` sai tudo numa execução; baixe o cap se quiser dividir em mais dias.\n\n**Fatiamento/dedup:** quem recebe é gravado em `disparo_campanha_log`, então execuções seguintes já excluem essas pessoas (não repete ninguém). Rode até esgotar.\n\n**Antes de ligar:** rode o CREATE TABLE do `disparo_campanha_log` (arquivo .sql enviado junto).\n\n**Atenção WhatsApp:** mesmo com base menor, é contato frio. Se o número for novo/pouco aquecido, comece com DAILY_CAP baixo (ex: 100/dia) e acompanhe a qualidade no Business Manager.",
+        "height": 340,
+        "width": 2304
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        576,
+        640
+      ],
+      "typeVersion": 1,
+      "id": "8d0d45d8-3b25-4d79-b05d-0eb4d5f1b5d1",
+      "name": "Sticky Note1"
+    }
+  ],
+  "connections": {
+    "Disparador Diário (Campanha)1": {
+      "main": [
+        [
+          {
+            "node": "Query Visitantes 6m1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Visitantes 6m1": {
+      "main": [
+        [
+          {
+            "node": "Monta lista de números1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta lista de números1": {
+      "main": [
+        [
+          {
+            "node": "Check WA (lote)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check WA (lote)1": {
+      "main": [
+        [
+          {
+            "node": "Filtra com WhatsApp + teto diário1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtra com WhatsApp + teto diário1": {
+      "main": [
+        [
+          {
+            "node": "Loop Visitantes1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Visitantes1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Montar Body Template1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Body Template1": {
+      "main": [
+        [
+          {
+            "node": "Enviar Template1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Template1": {
+      "main": [
+        [
+          {
+            "node": "Grava disparo_campanha_log1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Grava disparo_campanha_log1": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase1": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Loop Visitantes1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": {
+    "node:Disparador Diário (Campanha)1": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "versionId": "f4c1f27d-dd17-42ae-b6c7-61ff5cc05878",
+  "activeVersionId": "f4c1f27d-dd17-42ae-b6c7-61ff5cc05878",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-08-10T15:51:29.134Z",
+      "createdAt": "2026-08-10T15:51:29.134Z",
+      "role": "workflow:owner",
+      "workflowId": "wwiI6ZidJPsIXYSe",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-08-10T18:41:35.471Z",
+    "createdAt": "2026-08-10T18:41:35.471Z",
+    "versionId": "f4c1f27d-dd17-42ae-b6c7-61ff5cc05878",
+    "workflowId": "wwiI6ZidJPsIXYSe",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 15,
+                "triggerAtMinute": 45
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          608,
+          864
+        ],
+        "id": "417ff526-0aff-40f7-aa64-cbc66e92fc0b",
+        "name": "Disparador Diário (Campanha)1"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- CAMPANHA MÊS DO AGRICULTOR -> quem JÁ NAVEGOU no site (qualquer data)\n-- Puxa 1 telefone por usuário que navegou no site pelo menos uma vez,\n-- remove blacklist e quem JÁ recebeu esta campanha (disparo_campanha_log).\n-- Base esperada ~286 com celular válido. O fatiamento é garantido pelo LIMIT + DAILY_CAP.\n\nWITH visitantes AS MATERIALIZED (\n  SELECT DISTINCT nh.user_id AS candidato_id\n  FROM an_prod_cbc.navigation_histories nh\n  WHERE nh.deleted IS DISTINCT FROM true\n    AND nh.user_id IS NOT NULL\n),\nloc AS MATERIALIZED (\n  SELECT v.candidato_id,\n         cu.business_id AS cand_business_id\n  FROM visitantes v\n  JOIN an_prod_cbc.users cu ON cu.id = v.candidato_id\n  WHERE cu.business_id IS NOT NULL\n),\ncand_biz AS MATERIALIZED (\n  SELECT DISTINCT cand_business_id AS profile_id FROM loc\n),\ntel_raw AS MATERIALIZED (\n  SELECT bp.id AS profile_id, ph.type_id,\n         regexp_replace(ph.number, '\\D', '', 'g') AS d\n  FROM an_prod_cbc.business_profiles bp\n  JOIN cand_biz cb                     ON cb.profile_id = bp.id\n  JOIN an_prod_cbc.profile_phones pp   ON pp.profile_id = bp.id\n  JOIN an_prod_cbc.phones ph           ON ph.id = pp.phone_id\n  WHERE ph.deleted IS DISTINCT FROM true AND ph.number IS NOT NULL\n),\ntel_melhor AS MATERIALIZED (\n  SELECT profile_id,\n         (ARRAY_AGG(e164 ORDER BY CASE WHEN type_id = 2 THEN 0 ELSE 1 END))[1] AS telefone\n  FROM (\n    SELECT profile_id, type_id,\n      CASE\n        WHEN length(d) = 13 AND left(d,2) = '55' THEN d\n        WHEN length(d) = 12 AND left(d,2) = '55' THEN substr(d,1,4) || '9' || substr(d,5)\n        WHEN length(d) = 11 THEN '55' || d\n        WHEN length(d) = 10 THEN '55' || substr(d,1,2) || '9' || substr(d,3)\n        ELSE NULL\n      END AS e164\n    FROM tel_raw\n  ) n\n  WHERE e164 IS NOT NULL\n    AND length(e164) = 13\n    AND substr(e164,3,2) BETWEEN '11' AND '99'\n    AND substr(e164,5,1) = '9'\n  GROUP BY profile_id\n)\nSELECT\n  l.candidato_id,\n  tm.telefone,\n  u.email AS candidato_email\nFROM loc l\nJOIN an_prod_cbc.users u   ON u.id = l.candidato_id\nJOIN tel_melhor tm         ON tm.profile_id = l.cand_business_id\nLEFT JOIN public.disparo_campanha_log dl\n  ON dl.user_id = l.candidato_id AND dl.campanha = 'mes_do_agricultor'\nWHERE dl.id IS NULL\n  AND NOT EXISTS (\n    SELECT 1 FROM public.blacklist bl\n    WHERE bl.ativo IS DISTINCT FROM false\n      AND bl.telefone = tm.telefone\n      AND bl.produto IS NULL AND bl.product_id IS NULL   -- só bloqueios TOTAIS\n  )\nGROUP BY l.candidato_id, tm.telefone, u.email\nORDER BY l.candidato_id\nLIMIT 500;    -- base ~286; buffer folgado (dedup + check de WhatsApp reduzem um pouco)",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          800,
+          864
+        ],
+        "id": "1a42c094-ca9f-407b-be9e-4920f2f9d89c",
+        "name": "Query Visitantes 6m1",
+        "alwaysOutputData": true,
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Junta todos os telefones do lote num array único para checar o WhatsApp de uma vez\nconst rows = $input.all().map(i => i.json);\nconst numeros = [...new Set(rows.map(r => String(r.telefone)))];\nreturn [{ json: { numeros, rows } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1008,
+          864
+        ],
+        "id": "5338a291-46b7-4ff7-8ad1-92c5d2526e7f",
+        "name": "Monta lista de números1"
+      },
+      {
+        "parameters": {
+          "resource": "chat-api",
+          "instanceName": "AgroNegociar - Comercial",
+          "numbers": "={{ $json.numeros.join(',') }}"
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1232,
+          864
+        ],
+        "id": "ca79736f-7707-4e19-94e8-db9525a48641",
+        "name": "Check WA (lote)1",
+        "credentials": {
+          "evolutionApi": {
+            "id": "LpFE8TuJugE26UUu",
+            "name": "AGRONEGOCIAR-COMERCIAL"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Checa o WhatsApp de todos os números do lote de uma vez. Se a sua versão do Evolution não aceitar array em 'numbers', a expressão já está com .join(',')."
+      },
+      {
+        "parameters": {
+          "jsCode": "const items = $input.all().map(i => i.json);\nlet lista = [];\nif (items.length === 1) {\n  const j = items[0];\n  lista = Array.isArray(j) ? j : (j.data || j.result || [j]);\n} else {\n  lista = items.flatMap(j => Array.isArray(j) ? j : (j.data || j.result || [j]));\n}\n\nconst digits = s => String(s || '').replace(/\\D/g, '');\n\n// gera as variantes com e sem o 9 (problema clássico BR)\nfunction variantes(num) {\n  const d = digits(num);\n  const set = new Set([d]);\n  if (d.length === 13 && d.substr(4, 1) === '9') set.add(d.substr(0, 4) + d.substr(5)); // tira o 9\n  else if (d.length === 12) set.add(d.substr(0, 4) + '9' + d.substr(4));                // põe o 9\n  return [...set];\n}\n\n// mapa de quem tem WhatsApp, indexado por TODAS as variantes\nconst existe = {};\nfor (const it of lista) {\n  const num = digits(it && (it.number || it.jid));\n  if (num && it.exists === true) for (const v of variantes(num)) existe[v] = true;\n}\n\nconst rows = $('Monta lista de números1').first().json.rows;\n\n// mantém só quem tem WhatsApp (comparando variantes)\nconst comWhats = rows.filter(r => variantes(r.telefone).some(v => existe[v] === true));\n\n// 1 disparo por pessoa: mantém a primeira ocorrência de cada telefone\nconst porTelefone = {};\nfor (const r of comWhats) {\n  const k = digits(r.telefone);\n  if (!porTelefone[k]) porTelefone[k] = r;\n}\n\n// >>> TETO DIÁRIO <<< base ~286; com 300 envia tudo numa execução.\n// Baixe esse valor (ex: 100) se quiser dividir em mais dias e aquecer o número.\nconst DAILY_CAP = 300;\nreturn Object.values(porTelefone).slice(0, DAILY_CAP).map(r => ({ json: r }));"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1456,
+          864
+        ],
+        "id": "275e19d9-fdce-4787-a600-ca45841107e7",
+        "name": "Filtra com WhatsApp + teto diário1"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          1680,
+          864
+        ],
+        "id": "5f88d368-a1bb-44b2-9bb9-7b6c1747f4d9",
+        "name": "Loop Visitantes1"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $('Loop Visitantes1').first().json;\n\n// ==== Template do Mês do Agricultor ====\n// Mensagem FIXA (sem variáveis), conforme aprovado no Meta.\n// Se o SEU template tiver variáveis no corpo ({{1}}, {{2}}...), preencha o array\n// abaixo NA MESMA ORDEM. Se não tiver, deixe vazio (não manda 'components').\nconst bodyParams = []; // ex.: [item.candidato_email]\n\nconst template = {\n  name: 'mes_do_agricultor',\n  language: { code: 'pt_BR' }\n};\nif (bodyParams.length) {\n  template.components = [\n    { type: 'body', parameters: bodyParams.map(t => ({ type: 'text', text: String(t) })) }\n  ];\n}\n\nconst body = {\n  messaging_product: 'whatsapp',\n  to: String(item.telefone),\n  type: 'template',\n  template\n};\n\nreturn [{\n  json: {\n    resultado: body,\n    telefone: item.telefone,\n    candidato_id: item.candidato_id,\n    whatsapp_number_id: '1123205217553260',\n    template_usado: 'mes_do_agricultor',\n    texto_log: 'Campanha Mês do Agricultor (template mes_do_agricultor)'\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1888,
+          848
+        ],
+        "id": "88d1227e-0728-438d-87ea-1e5625d021c8",
+        "name": "Montar Body Template1"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://graph.facebook.com/v22.0/1123205217553260/messages",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.resultado) }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2112,
+          864
+        ],
+        "id": "610167e0-10ed-4701-aea8-8fffce130dff",
+        "name": "Enviar Template1",
+        "retryOnFail": true,
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO public.disparo_campanha_log (campanha, user_id, telefone, enviado_em)\nVALUES ('mes_do_agricultor', {{ $('Montar Body Template1').item.json.candidato_id }}, '{{ $('Montar Body Template1').item.json.telefone }}', now());",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          2336,
+          864
+        ],
+        "id": "9b042206-aed6-4c87-816a-7a66e88b956a",
+        "name": "Grava disparo_campanha_log1",
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "tableId": "historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $('Montar Body Template1').item.json.telefone }}"
+              },
+              {
+                "fieldId": "mensagem_usuario",
+                "fieldValue": "="
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "={{ $('Montar Body Template1').item.json.texto_log }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Montar Body Template1').item.json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "="
+              },
+              {
+                "fieldId": "id_conversa",
+                "fieldValue": "={{ $('Montar Body Template1').item.json.telefone }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "={{ $('Montar Body Template1').item.json.template_usado }}"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "=AGRO-INTERESSES"
+              },
+              {
+                "fieldId": "origem",
+                "fieldValue": "ia"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2560,
+          864
+        ],
+        "id": "13f19c78-15ea-4229-b0fd-9132c412d45f",
+        "name": "Cria Mensagem no Supabase1",
+        "credentials": {
+          "supabaseApi": {
+            "id": "qF5T2ej3TiWXL4jk",
+            "name": "Agronegociar - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "amount": "={{ Math.floor(Math.random() * 6) + 4 }}"
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          2768,
+          880
+        ],
+        "id": "67b64765-81c7-4490-8dd4-c15805c0c0be",
+        "name": "Wait1",
+        "webhookId": "wait-mes-agricultor-001"
+      },
+      {
+        "parameters": {
+          "content": "## Campanha Mês do Agricultor — Quem já navegou no site\n\n**Fluxo:** agenda diária → puxa quem já navegou (qualquer data) → checa WhatsApp em lote → dedup + corta no teto diário → loop → envia template `mes_do_agricultor` → grava log da campanha + histórico → espera → próximo.\n\n**Base:** ~286 usuários com celular válido (navigation_histories, all-time). Com `DAILY_CAP = 300` sai tudo numa execução; baixe o cap se quiser dividir em mais dias.\n\n**Fatiamento/dedup:** quem recebe é gravado em `disparo_campanha_log`, então execuções seguintes já excluem essas pessoas (não repete ninguém). Rode até esgotar.\n\n**Antes de ligar:** rode o CREATE TABLE do `disparo_campanha_log` (arquivo .sql enviado junto).\n\n**Atenção WhatsApp:** mesmo com base menor, é contato frio. Se o número for novo/pouco aquecido, comece com DAILY_CAP baixo (ex: 100/dia) e acompanhe a qualidade no Business Manager.",
+          "height": 340,
+          "width": 2304
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "position": [
+          576,
+          640
+        ],
+        "typeVersion": 1,
+        "id": "8d0d45d8-3b25-4d79-b05d-0eb4d5f1b5d1",
+        "name": "Sticky Note1"
+      }
+    ],
+    "connections": {
+      "Disparador Diário (Campanha)1": {
+        "main": [
+          [
+            {
+              "node": "Query Visitantes 6m1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Query Visitantes 6m1": {
+        "main": [
+          [
+            {
+              "node": "Monta lista de números1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta lista de números1": {
+        "main": [
+          [
+            {
+              "node": "Check WA (lote)1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check WA (lote)1": {
+        "main": [
+          [
+            {
+              "node": "Filtra com WhatsApp + teto diário1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Filtra com WhatsApp + teto diário1": {
+        "main": [
+          [
+            {
+              "node": "Loop Visitantes1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Visitantes1": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Montar Body Template1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar Body Template1": {
+        "main": [
+          [
+            {
+              "node": "Enviar Template1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar Template1": {
+        "main": [
+          [
+            {
+              "node": "Grava disparo_campanha_log1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Grava disparo_campanha_log1": {
+        "main": [
+          [
+            {
+              "node": "Cria Mensagem no Supabase1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cria Mensagem no Supabase1": {
+        "main": [
+          [
+            {
+              "node": "Wait1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait1": {
+        "main": [
+          [
+            {
+              "node": "Loop Visitantes1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
