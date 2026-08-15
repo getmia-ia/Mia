@@ -1,0 +1,1398 @@
+{
+  "updatedAt": "2026-08-14T21:05:55.365Z",
+  "createdAt": "2026-08-14T17:04:00.772Z",
+  "id": "U5vufhe3Wh4IQeyO",
+  "name": "BMS - 8.01 - Orquestrador (Cálculo Inicial) copy",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bms-cred-score",
+        "authentication": "***REMOVIDO***",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        336,
+        992
+      ],
+      "id": "56d14ed8-6ff9-471e-99a4-c6e8574ba135",
+      "name": "Webhook",
+      "webhookId": "e6977154-7c31-48b7-8815-a898a70ebc83",
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "content": "## ENTRADA\nDisparado pelo trigger pg_net do Supabase sempre que uma linha nova\né criada em credscore.analises (status='aguardando') — o que acontece\nautomaticamente quando qualquer fornecedor novo é cadastrado (upload\núnico, em lote, portal do cliente ou mia-bms).\n\nAutenticação via Header Auth (x-webhook-secret) — configurada no\npróprio node, rejeita chamadas sem o header antes de qualquer execução.\n\n\"Buscar Fornecedor\" resolve o fornecedor_id do payload em CNPJ,\ncliente_id, uf, cidade, razão social etc.",
+        "height": 1184,
+        "width": 1072,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        304,
+        48
+      ],
+      "id": "6b8bb9bb-d162-412e-837c-1c512d4e11e7",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## FASE 0 · ENRIQUECIMENTO CADASTRAL  (Econodata)\nO usuário sobe só o CNPJ — razão social, nome fantasia, UF, cidade,\nREGIME TRIBUTÁRIO, porte, faturamento presumido, data de abertura,\ncapital social e o QSA (contatos[]) vêm todos daqui.\n\nAPI: Econodata · POST https://api.econodata.com.br/ecdt-api/v3/companies/search\nAuth: HEADER  x-api-token: <token>   (não é query param como era o Direct Data)\nBody: { \"cnpj\": \"XX.XXX.XXX/XXXX-XX\" }  ← a máscara é obrigatória\nResposta: objeto PLANO, sem envelope \"retorno\".\n\nCréditos: 1 por empresa nova. Reconsulta do mesmo CNPJ é grátis.\nLimites: 75 req/min · 100 CNPJs por request (endpoint /v3/companies em lote).\n\n⚠️ em_recuperacao_judicial: a Econodata NÃO tem esse campo.\nSai como null → o coalesce do UPDATE preserva o valor do banco\n(permite override manual). O Gate G2 passa a ser avaliado no D2\npela Serasa (facts.bankrupts).\n\n⚠️ Confirmar no 1º CNPJ real: quais strings vêm em regime_tributario,\nse faturamentoPresumido é número ou FAIXA, e se contatos[].cpf vem\ncompleto ou mascarado (isso decide se o node de Vínculos funciona).",
+        "height": 1184,
+        "width": 2080,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1392,
+        48
+      ],
+      "id": "e9332649-cd03-4b99-9dd3-5048b97b9c52",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## FASE 1 · D1 FISCAL (peso 30%)\nChama o sub-workflow \"BMS - 8.01 - D1 (Coleta Fiscal)\" via Execute\nWorkflow — CND Federal (Infosimples) + CND Estadual (Direct Data),\nclassificadas em t_cnd / t_pgfn / t_est.\n\nGATE G3: se t_cnd=\"Positiva\" E t_pgfn=\"Irregular\", o fornecedor é\neliminado aqui mesmo (decisao='nao_elegivel_gate') — o fluxo PARA,\nnunca chega a rodar D2/D3/D4/D5, porque já é reprovação automática.",
+        "height": 1184,
+        "width": 816,
+        "color": 2
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3488,
+        48
+      ],
+      "id": "419558ea-158c-4274-9f79-b6c566463e45",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "## FASE 2 · D2 FINANCEIRA (peso 20%) — AINDA É PLACEHOLDER\nAinda não temos o payload real da Serasa (Concentre/Relato) validado\nnesta conversa. Por enquanto devolve tudo ND, gate_disparado=null,\nsó pra não travar o fluxo.\n\nGATE G2 (recuperação judicial/falência) vai disparar aqui quando o\nsub-workflow real de D2 existir — hoje nunca dispara.\n\nSUBSTITUIR este node por um Execute Workflow chamando o sub-workflow\nD2 de verdade quando estiver pronto.",
+        "height": 512,
+        "width": 1184,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4320,
+        720
+      ],
+      "id": "0775eb0a-558c-4b98-acba-913362536e20",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "## FASE 3 e 4 · REGIME (D3) E DEPENDÊNCIA (D4) — sem API externa\nD3: lê fornecedores.regime_tributario (já populado na Fase 0) e\nclassifica direto pela tabela de pontos (T.regime).\n\nD4: p = valor_compras_anual do fornecedor / soma de todos os\nfornecedores do mesmo cliente. Curva linear com pisos (p0=2%, pmax=20%).\n\n\"Buscar Dados para o Cálculo\" é 1 query só com subqueries escalares:\ntabelas de pontos ativas (jsonb_object_agg), total de compras do\ncliente, e se já existe alguma resposta de D5 (edge case raro de\nD5 chegar antes do D1-D4 terminar).\n\n\"Montar S1-S4 e Completude\" soma os pontos de cada subcritério\n(usando as tabelas ativas, nunca hardcoded) e calcula completude_pct\ncom base em quantos campos vieram ND.",
+        "height": 656,
+        "width": 496
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4320,
+        48
+      ],
+      "id": "077abe31-968c-4e94-9392-bc0c30d08c3a",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "## FASE 5 · SCORE FINAL (COM OU SEM D5)\nChama o sub-workflow compartilhado \"BMS - 8.99 - Calcular Score\"\n(mesmo usado pelo recálculo de D5) — ele decide sozinho se redistribui\nos pesos entre D1-D4 (quando ainda não há D5) ou usa os pesos cheios.\n\n\"Montar Resultado Final\" junta s1-s4 + resultado do sub-workflow +\ndetalhes de D1/D2, formando o jsonb final de detalhes_calculo.\n\n\"Salvar Resultado da Análise\" grava tudo em credscore.analises:\nscore_total, decisao, status (concluido/analise_manual), preliminar,\nversao_pesos_id, versao_thresholds_id.\n\npreliminar=true significa \"sem D5 ainda\" — o workflow\n\"BMS - 9.00 - Recálculo D5\" é quem vira isso pra false depois.",
+        "height": 656,
+        "width": 672,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4832,
+        48
+      ],
+      "id": "82b42f00-d55e-445f-ade9-a45f84cf3429",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT f.id AS fornecedor_id, f.cnpj, f.cliente_id, f.uf, f.cidade, f.razao_social, f.regime_tributario, f.valor_compras_anual\nFROM credscore.fornecedores f\nWHERE f.id = '{{ $json.body.record.fornecedor_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        576,
+        992
+      ],
+      "id": "a04f6887-f00e-4bc0-b4ac-96043b0bb947",
+      "name": "Buscar Fornecedor",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET etapa_atual = 0, etapa_label = 'Enriquecimento cadastral', fonte_atual = 'directd_cadastro_pj'\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1456,
+        1008
+      ],
+      "id": "85a04b22-1009-459a-9c1d-060d671557aa",
+      "name": "Etapa 0 · Enriquecimento",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ed = $('Econodata · Empresa').first().json ?? {};\nconst f  = $('Buscar Fornecedor').first().json;\n\n// ---- regime tributário: a Econodata já devolve pronto, aqui só normaliza\n//      para o vocabulário usado na tabela de pontos T.regime.\nfunction classificarRegime(v) {\n  const s = String(v ?? '').toLowerCase();\n  if (!s) return 'ND';\n  if (s.includes('mei') || s.includes('microempreendedor')) return 'MEI';\n  if (s.includes('simples')) return 'Simples Nacional (padrão)';\n  if (s.includes('real') || s.includes('arbitrado')) return 'Lucro Real (regime regular IBS/CBS)';\n  if (s.includes('presumido')) return 'Lucro Presumido';\n  if (s.includes('imune') || s.includes('isent')) return 'Imune/Isento/Não contribuinte';\n  return 'ND';\n}\n\nfunction num(raw) {\n  if (raw === null || raw === undefined) return null;\n  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;\n  let s = String(raw).replace(/[^\\d,.-]/g, '');\n  if (!s) return null;\n  if (s.includes(',')) s = s.replace(/\\./g, '').replace(',', '.');\n  const v = parseFloat(s);\n  return Number.isFinite(v) ? v : null;\n}\n\n// Extrai o(s) número(s) de uma faixa em texto (\"R$ 1.800.001 a R$ 4.800.000\")\n// e retorna o maior valor (teto da faixa). Funciona também se vier um valor único.\nfunction parseFaixaMax(raw) {\n  if (raw === null || raw === undefined) return null;\n  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;\n  const matches = String(raw).match(/[\\d.,]+/g);\n  if (!matches || matches.length === 0) return null;\n  const valores = matches\n    .map(m => {\n      const s = m.replace(/\\./g, '').replace(',', '.'); // BR: ponto=milhar, vírgula=decimal\n      const v = parseFloat(s);\n      return Number.isFinite(v) ? v : null;\n    })\n    .filter(v => v !== null);\n  return valores.length > 0 ? Math.max(...valores) : null;\n}\n\nconst hist = $('Agregar Histórico Sócios').first().json ?? {};\n\nconst porte = ed.porteEstimado\n  ?? (Array.isArray(ed.enquadramentoPorte) ? ed.enquadramentoPorte[0] : null);\n\nreturn [{\n  json: {\n    fornecedor_id: f.fornecedor_id,\n    razao_social:  ed.razaoSocial  ?? f.razao_social ?? null,\n    nome_fantasia: ed.nomeFantasia ?? null,\n    uf:            ed.uf     ?? f.uf ?? null,\n    cidade:        ed.cidade ?? f.cidade ?? null,\n    regime_tributario: classificarRegime(ed.regime_tributario),\n    porte: porte ?? null,\n    faturamento_estimado: parseFaixaMax(ed.faturamentoPresumidoGrupoEconomico)\n  ?? parseFaixaMax(ed.faturamentoAnualPresumido ?? ed.faturamentoPresumido),\n    data_fundacao: ed.dataAbertura ? String(ed.dataAbertura).slice(0, 10) : null,\n    capital_social: num(ed.capitalSocial),\n\n    // A Econodata NAO tem flag de recuperacao judicial.\n    // null aqui = \"nao sei\" -> o coalesce do UPDATE preserva o valor que ja\n    // estiver no banco (permite override manual do analista).\n    // O Gate G2 e avaliado no D2 via Serasa (facts.bankrupts).\n    em_recuperacao_judicial: null,\n\n    pct_problematico_socios: hist.pct_problematico_medio ?? null,\n    detalhes_socios: hist.detalhes_socios ?? null,\n\n    // ---- extras Econodata (nao gravados hoje; disponiveis p/ uso futuro) ----\n    _situacao_cadastral: ed.situacao ?? null,\n    _qtd_funcionarios: ed.quantidadeFuncionarios ?? null,\n    _qtd_filiais: ed.quantidadeFiliais ?? null,\n    _divida_uniao_total: ed.dividasResumo?.dividas_uniao?.total_dividas_principal ?? null,\n    _divida_uniao_pct_fat: ed.dividasResumo?.dividas_uniao?.percentual_faturamento_principal ?? null,\n    _divida_uniao_socios_total: ed.dividasResumoSocios?.dividas_uniao?.total_dividas_principal ?? null\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3072,
+        992
+      ],
+      "id": "1c830945-310a-4f69-b57f-26c5c3903547",
+      "name": "Normalizar Dados Cadastrais"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.fornecedores\nSET razao_social            = coalesce($2, razao_social),\n    nome_fantasia           = coalesce($3, nome_fantasia),\n    uf                      = coalesce($4, uf),\n    cidade                  = coalesce($5, cidade),\n    regime_tributario       = coalesce($6, regime_tributario),\n    porte                   = coalesce($7, porte),\n    faturamento_estimado    = coalesce($8::numeric, faturamento_estimado),\n    data_fundacao           = coalesce($9::date, data_fundacao),\n    capital_social          = coalesce($10::numeric, capital_social),\n    em_recuperacao_judicial = coalesce($11::boolean, em_recuperacao_judicial),\n    pct_problematico_socios = coalesce($12::numeric, pct_problematico_socios),\n    detalhes_socios         = coalesce($13::jsonb, detalhes_socios)\nWHERE id = $1::uuid\nRETURNING *;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.fornecedor_id,\n  $json.razao_social,\n  $json.nome_fantasia,\n  $json.uf,\n  $json.cidade,\n  $json.regime_tributario === 'ND' ? null : $json.regime_tributario,\n  $json.porte,\n  $json.faturamento_estimado,\n  $json.data_fundacao,\n  $json.capital_social,\n  $json.em_recuperacao_judicial,\n  $json.pct_problematico_socios,\n  $json.detalhes_socios ? JSON.stringify($json.detalhes_socios) : null\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3296,
+        992
+      ],
+      "id": "746502e0-1158-4548-a3e0-28ceb0f33445",
+      "name": "Salvar Dados Cadastrais",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET etapa_atual = 1, etapa_label = 'Fiscal (D1)', fonte_atual = 'directd_infosimples'\nWHERE id = '{{ $('Webhook').first().json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3552,
+        992
+      ],
+      "id": "c7ba98e2-0f27-41c4-8d0e-e3ee2cfbfa53",
+      "name": "Etapa 1 · Fiscal",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "nBc4w2O4dwp8OtTk",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/nBc4w2O4dwp8OtTk",
+          "cachedResultName": "BMS - 8.02 - D1 (Coleta Fiscal)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fornecedor_id": "={{ $('Buscar Fornecedor').first().json.fornecedor_id }}",
+            "analise_id": "={{ $('Webhook').first().json.body.record.id }}",
+            "cnpj": "={{ $('Buscar Fornecedor').first().json.cnpj }}",
+            "uf": "={{ $('Salvar Dados Cadastrais').first().json.uf }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "fornecedor_id",
+              "displayName": "fornecedor_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "analise_id",
+              "displayName": "analise_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "cnpj",
+              "displayName": "cnpj",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "uf",
+              "displayName": "uf",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3744,
+        992
+      ],
+      "id": "291b9cb1-0c31-45a0-a5a9-baff15823f74",
+      "name": "Executar D1 (Coleta Fiscal)",
+      "notes": "IMPORTANTE: depois de importar o workflow D1 separadamente, abra este node e reselecione o workflow no campo 'workflowId' — o ID muda a cada import."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "orq-if-gate-d1",
+              "leftValue": "={{ !!$json.gate_disparado }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3920,
+        992
+      ],
+      "id": "616d46fa-625e-4171-9cbb-3a41593f111e",
+      "name": "D1 disparou gate?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET status = 'concluido', decisao = 'nao_elegivel_gate',\n    gate_disparado = '{{ $json.gate_disparado }}',\n    concluido_em = now()\nWHERE id = '{{ $('Webhook').item.json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4160,
+        848
+      ],
+      "id": "faf42036-eafe-4470-a165-117e891be066",
+      "name": "Finalizar (Gate disparado no D1)",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET etapa_atual = 2, etapa_label = 'Financeira (D2)', fonte_atual = 'serasa_concentre'\nWHERE id = '{{ $('Webhook').first().json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4368,
+        1008
+      ],
+      "id": "93af3029-0739-4d4a-8fbb-2cae1cf65b49",
+      "name": "Etapa 2 · Financeira",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "orq-if-gate-d2",
+              "leftValue": "={{ !!$json.gate_disparado }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4848,
+        1008
+      ],
+      "id": "d78be411-103c-4efe-b6d6-aed125a8817c",
+      "name": "D2 disparou gate?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET status = 'concluido', decisao = 'nao_elegivel_gate',\n    gate_disparado = '{{ $json.gate_disparado }}',\n    concluido_em = now()\nWHERE id = '{{ $('Webhook').first().json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        5088,
+        864
+      ],
+      "id": "d3355d4f-2b38-4c28-b6be-b2831f0965c4",
+      "name": "Finalizar (Gate disparado no D2)",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const dados = $('Buscar Tabelas de Pontos').first().json;\nconst tabelas = dados.tabelas_pontos || {};\nconst fonte = $('Buscar Fonte de Reaproveitamento').first().json.fonte;\n\nfunction pontosOpcao(criterio, categoria) {\n  const t = tabelas[criterio];\n  if (!t) return 0;\n  if (categoria in t) return Number(t[categoria]);\n  return Number(t['ND'] ?? 0);\n}\nfunction pontosBanda(criterio, valor) {\n  const t = tabelas[criterio];\n  if (!t || !t.bands || t.bands.length === 0) return 0;\n  if (valor === 'ND' || valor === null || valor === undefined) return Number(t.nd_pontos ?? 0);\n  const num = Number(valor);\n  if (!Number.isFinite(num)) return Number(t.nd_pontos ?? 0);\n\n  const isMinType = 'min' in t.bands[0];\n  if (isMinType) {\n    const sorted = [...t.bands].sort((a, b) => Number(b.min) - Number(a.min));\n    for (const b of sorted) {\n      if (num >= Number(b.min)) return Number(b.pontos);\n    }\n  } else {\n    for (const b of t.bands) {\n      if (b.max === null || b.max === undefined || num <= b.max) return Number(b.pontos);\n    }\n  }\n  return Number(t.nd_pontos ?? 0);\n}\n\nlet s1, s2, s3, s5;\nlet d1_block, d2_block, d3_block;\nlet camposND = [];\n\nif (fonte) {\n  // ---------- REAPROVEITADO: D1/D2/D3 vêm da análise de origem ----------\n  s1 = Number(fonte.s1_fiscal ?? 0);\n  s2 = Number(fonte.s2_financeira ?? 0);\n  s3 = Number(fonte.s3_regime ?? 0);\n\n  const detOrigem = fonte.detalhes_calculo || {};\n  d1_block = detOrigem.d1 ?? { subcriterios: [], total: s1, gate_disparado: null };\n  d2_block = detOrigem.d2 ?? { subcriterios: [], total: s2, gate_disparado: null };\n  d3_block = detOrigem.d3 ?? { subcriterios: [], total: s3 };\n\n  camposND = Array.isArray(fonte.campos_nd)\n    ? fonte.campos_nd.filter((c) => c !== 'dependencia_faturamento')\n    : [];\n\n  // S5 recalculado com as respostas recém-copiadas (não confia no s5 antigo,\n  // porque o conjunto de perguntas ativas pode ter mudado desde a análise de origem).\n  const contS5 = $('Contar Respostas Ativas (Reaproveitamento)').item.json;\n  const totalAtivas = Number(contS5.total_ativas || 0);\n  const respondidas = Number(contS5.respondidas || 0);\n  const pontuando = Number(contS5.pontuando || 0);\n  s5 = respondidas > 0 ? Math.round((100 * pontuando / totalAtivas) * 100) / 100 : null;\n} else {\n  // ---------- FLUXO NORMAL: D1/D2 vêm da coleta de API, D3 do regime recém-normalizado ----------\n  const d1 = $('Executar D1 (Coleta Fiscal)').item.json;\n  const d2 = $('Executar D2 (Coleta Financeira)').item.json;\n\n  const idxLongevidade = dados.data_fundacao\n  ? (Date.now() - new Date(dados.data_fundacao).getTime()) / (1000 * 60 * 60 * 24 * 365.25)\n  : null;\nconst pontosLongevidade = pontosBanda('longevidade', idxLongevidade ?? 'ND');\nconst pontosCapital = pontosBanda('capital_social', dados.capital_social ?? 'ND');\nconst pontosHistoricoSocios = pontosBanda('historico_socios', dados.pct_problematico_socios ?? 'ND');\nconst temHistoricoSocios = dados.pct_problematico_socios != null;\n\nconst idxsObrigacoes = [\n  idxLongevidade !== null ? pontosLongevidade : null,\n  dados.capital_social != null ? pontosCapital : null,\n  temHistoricoSocios ? pontosHistoricoSocios : null,\n].filter((v) => v !== null);\n\nconst pontosObrigacoes = idxsObrigacoes.length > 0\n  ? idxsObrigacoes.reduce((a, b) => a + b, 0) / idxsObrigacoes.length\n  : (tabelas['historico_socios']?.nd_pontos ?? 3);\n  \n  const d1_subcriterios = [\n    { criterio: 'cnd_federal', label: 'CND/CPEN Federal', categoria: d1.t_cnd, pontos: pontosOpcao('cnd_federal', d1.t_cnd) },\n    { criterio: 'pgfn', label: 'Dívida ativa PGFN', categoria: d1.t_pgfn, pontos: pontosOpcao('pgfn', d1.t_pgfn) },\n    { criterio: 'sintonia', label: 'Receita Sintonia', categoria: d1.t_sintonia, pontos: pontosOpcao('sintonia', d1.t_sintonia) },\n    { criterio: 'regularidade_estadual_municipal', label: 'Regularidade estadual/municipal', categoria: d1.t_est, pontos: pontosOpcao('regularidade_estadual_municipal', d1.t_est) },\n    { criterio: 'obrigacoes_acessorias', label: 'Obrigações acessórias', categoria: `longevidade≈${idxLongevidade ? idxLongevidade.toFixed(1) + 'a' : 'ND'} · capital=${dados.capital_social ?? 'ND'} · sócios=${dados.pct_problematico_socios != null ? dados.pct_problematico_socios + '%' : 'ND'}`, pontos: pontosObrigacoes },\n  ];\n  s1 = d1_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n  const d2_subcriterios = [\n    { criterio: 'serasa_score', label: 'Serasa Score', categoria: d2.t_score, pontos: pontosBanda('serasa_score', d2.t_score) },\n    { criterio: 'protestos', label: 'Protestos', categoria: d2.t_protestos, pontos: pontosBanda('protestos', d2.t_protestos) },\n    { criterio: 'execucoes_relevantes', label: 'Execuções relevantes', categoria: d2.t_execucoes, pontos: pontosBanda('execucoes_relevantes', d2.t_execucoes) },\n    { criterio: 'spc', label: 'Negativação SPC', categoria: d2.t_spc, pontos: pontosOpcao('spc', d2.t_spc) },\n  ];\n  s2 = d2_subcriterios.reduce((sum, s) => sum + s.pontos, 0);\n\n  const regime = dados.regime_tributario || 'ND';\n  s3 = pontosOpcao('regime_tributario', regime);\n\n  d1_block = { subcriterios: d1_subcriterios, total: s1, gate_disparado: d1.gate_disparado };\n  d2_block = { subcriterios: d2_subcriterios, total: s2, gate_disparado: d2.gate_disparado };\n  d3_block = { subcriterios: [{ criterio: 'regime_tributario', label: 'Regime tributário', categoria: regime, pontos: s3 }], total: s3 };\n\n  s5 = null; // D5 continua sendo calculado depois pelo workflow de recálculo\n\n  if (d1.t_cnd === 'Não obtida') camposND.push('cnd_federal');\n  if (d1.t_pgfn === 'Não verificado') camposND.push('pgfn');\n  if (d1.t_sintonia === 'ND') camposND.push('sintonia');\n  if (idxLongevidade === null && dados.capital_social == null && dados.pct_problematico_socios == null) camposND.push('obrigacoes_acessorias');\n  if (d1.t_est === 'ND') camposND.push('regularidade_estadual_municipal');\n  if (d2.t_score === 'ND') camposND.push('serasa_score');\n  if (d2.t_protestos === 'ND') camposND.push('protestos');\n  if (d2.t_execucoes === 'ND') camposND.push('execucoes_relevantes');\n  if (d2.t_spc === 'ND') camposND.push('spc');\n}\n\n// ---------- D4 — SEMPRE recalculado com o valor deste cliente ----------\nconst curva = tabelas['dependencia_curva'] || { p0_pct: 2, pmax_pct: 20 };\nconst valorPago = Number(dados.valor_compras_anual || 0);\nconst faturamentoFornecedor = Number(dados.faturamento_estimado || 0);\nlet s4, d4_nd = false, p_pct = null;\nif (faturamentoFornecedor > 0) {\n  p_pct = (valorPago / faturamentoFornecedor) * 100;\n  const p0 = Number(curva.p0_pct ?? 2);\n  const pmax = Number(curva.pmax_pct ?? 20);\n  s4 = 100 * Math.max(0, Math.min(1, (pmax - p_pct) / (pmax - p0)));\n  s4 = Math.round(s4 * 100) / 100;\n} else {\n  s4 = 50;\n  d4_nd = true;\n}\nconst d4_detalhe = {\n  valor_compras_anual: valorPago,\n  faturamento_estimado_fornecedor: faturamentoFornecedor || null,\n  participacao_pct: p_pct !== null ? Math.round(p_pct * 100) / 100 : null,\n  nd: d4_nd,\n  pontos: s4,\n};\nif (d4_nd) camposND.push('dependencia_faturamento');\n\nconst totalCampos = 15;\nconst completude_pct = Math.round(((totalCampos - camposND.length) / totalCampos) * 10000) / 100;\n\nreturn [{ json: {\n  s1_fiscal: s1, s2_financeira: s2, s3_regime: s3, s4_dependencia: s4,\n  s5_maturidade: s5,\n  completude_pct, campos_nd: camposND,\n  breakdown: { d1: d1_block, d2: d2_block, d3: d3_block, d4: d4_detalhe },\n  reaproveitado: !!fonte,\n  fonte_reaproveitamento: fonte ? {\n    analise_origem_id: fonte.analise_origem_id,\n    fornecedor_origem_id: fonte.fornecedor_origem_id,\n    cliente_origem_id: fonte.cliente_origem_id,\n    concluido_em: fonte.concluido_em,\n  } : null,\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4640,
+        528
+      ],
+      "id": "d25721d3-c671-47d2-8953-cfc84cb7036d",
+      "name": "Montar S1-S4 e Completude"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "o2QJUraN5YsNQuSt",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/o2QJUraN5YsNQuSt",
+          "cachedResultName": "BMS - 8.05 - Calcular Score"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "s1_fiscal": "={{ $json.s1_fiscal }}",
+            "s2_financeira": "={{ $json.s2_financeira }}",
+            "s3_regime": "={{ $json.s3_regime }}",
+            "s4_dependencia": "={{ $json.s4_dependencia }}",
+            "s5_maturidade": "={{ $json.s5_maturidade }}",
+            "completude_pct": "={{ $json.completude_pct }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "s1_fiscal",
+              "displayName": "s1_fiscal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s2_financeira",
+              "displayName": "s2_financeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s3_regime",
+              "displayName": "s3_regime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s4_dependencia",
+              "displayName": "s4_dependencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "s5_maturidade",
+              "displayName": "s5_maturidade",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "completude_pct",
+              "displayName": "completude_pct",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        4896,
+        528
+      ],
+      "id": "e0bc38a2-170a-4b95-ace7-3c2d34195529",
+      "name": "Executar Calcular Score",
+      "notes": "Reselecionar o workflow no dropdown depois de importar 'BMS - 8.99 - Calcular Score' — o ID muda a cada import."
+    },
+    {
+      "parameters": {
+        "jsCode": "const dims = $('Montar S1-S4 e Completude').first().json;\nconst score = $('Executar Calcular Score').first().json;\nconst alertaSocios = $('Salvar Dados Cadastrais').first().json.alerta_socios === true;\n\nconst statusFinal = alertaSocios ? 'analise_manual' : score.status;\nconst decisaoFinal = alertaSocios ? null : score.decisao;\n\nreturn [{ json: {\n  s1_fiscal: dims.s1_fiscal, s2_financeira: dims.s2_financeira,\n  s3_regime: dims.s3_regime, s4_dependencia: dims.s4_dependencia,\n  s5_maturidade: dims.s5_maturidade,\n  completude_pct: dims.completude_pct, campos_nd: dims.campos_nd,\n  score_total: score.score_total, decisao: decisaoFinal, status: statusFinal,\n  preliminar: score.preliminar,\n  versao_pesos_id: score.versao_pesos_id, versao_thresholds_id: score.versao_thresholds_id,\n  detalhes_calculo: { ...dims.breakdown, pesos_usados: score.pesos_usados, alerta_socios: alertaSocios },\n  reaproveitado: dims.reaproveitado,\n  fonte_reaproveitamento: dims.fonte_reaproveitamento,\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5136,
+        528
+      ],
+      "id": "a659b0d4-783c-4075-a0bf-59db4e9d9bcf",
+      "name": "Montar Resultado Final"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET status = '{{ $json.status }}',\n    decisao = {{ $json.decisao ? `'${$json.decisao}'` : 'null' }},\n    score_total = {{ $json.score_total }},\n    completude_pct = {{ $json.completude_pct }},\n    s1_fiscal = {{ $json.s1_fiscal }}, s2_financeira = {{ $json.s2_financeira }},\n    s3_regime = {{ $json.s3_regime }}, s4_dependencia = {{ $json.s4_dependencia }},\n    s5_maturidade = {{ $json.s5_maturidade ?? 'null' }},\n    campos_nd = '{{ JSON.stringify($json.campos_nd) }}'::jsonb,\n    preliminar = {{ $json.preliminar }},\n    versao_pesos_id = '{{ $json.versao_pesos_id }}',\n    versao_thresholds_id = '{{ $json.versao_thresholds_id }}',\n    detalhes_calculo = '{{ JSON.stringify($json.detalhes_calculo) }}'::jsonb,\n    etapa_atual = 5, etapa_label = 'Concluído',\n    dados_reaproveitados = {{ $json.reaproveitado }},\n    reaproveitada_de_analise_id = {{ $json.fonte_reaproveitamento ? `'${$json.fonte_reaproveitamento.analise_origem_id}'` : 'null' }},\n    reaproveitada_de_fornecedor_id = {{ $json.fonte_reaproveitamento ? `'${$json.fonte_reaproveitamento.fornecedor_origem_id}'` : 'null' }},\n    concluido_em = now()\nWHERE id = '{{ $('Webhook').first().json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        5360,
+        528
+      ],
+      "id": "fb52fde1-5380-4506-956a-94eb46c00d21",
+      "name": "Salvar Resultado da Análise",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT jsonb_object_agg(criterio, tabela_pontos) FROM credscore.parametros_tabelas WHERE ativo = true) AS tabelas_pontos,\n  (SELECT count(*) FROM credscore.questionario_respostas WHERE fornecedor_id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}') AS respostas_existentes,\n  (SELECT valor_compras_anual FROM credscore.fornecedores WHERE id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}') AS valor_compras_anual,\n  (SELECT faturamento_estimado FROM credscore.fornecedores WHERE id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}') AS faturamento_estimado,\n  (SELECT regime_tributario FROM credscore.fornecedores WHERE id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}') AS regime_tributario,\n  (SELECT data_fundacao FROM credscore.fornecedores WHERE id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}') AS data_fundacao,\n  (SELECT pct_problematico_socios FROM credscore.fornecedores WHERE id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}') AS pct_problematico_socios,\n  (SELECT capital_social FROM credscore.fornecedores WHERE id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}') AS capital_social;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4400,
+        528
+      ],
+      "id": "0ef30d7d-038c-4b1f-91b9-a688eebd17cc",
+      "name": "Buscar Tabelas de Pontos",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      },
+      "notes": "1 query só, com subqueries escalares. tabelas_pontos, pesos e thresholds vêm como jsonb (row_to_json / jsonb_object_agg), então o Code node de cálculo já recebe tudo estruturado sem precisar combinar vários nodes."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT credscore.buscar_fonte_reaproveitamento('{{ $json.fornecedor_id }}') AS fonte;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        800,
+        992
+      ],
+      "id": "95671e66-a662-40a6-9504-db34fad48b2e",
+      "name": "Buscar Fonte de Reaproveitamento",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "43366ed5-f039-4e96-9b6c-32dfbbd8e729",
+              "leftValue": "={{ $json.fonte }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1008,
+        992
+      ],
+      "id": "39cf8974-8301-4432-8d84-6264648884d0",
+      "name": "Existe fonte reaproveitável?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.fornecedores\nSET razao_social = coalesce('{{ $json.fonte.razao_social }}', razao_social),\n    nome_fantasia = coalesce('{{ $json.fonte.nome_fantasia }}', nome_fantasia),\n    uf = coalesce('{{ $json.fonte.uf }}', uf),\n    cidade = coalesce('{{ $json.fonte.cidade }}', cidade),\n    regime_tributario = coalesce('{{ $json.fonte.regime_tributario }}', regime_tributario),\n    porte = coalesce('{{ $json.fonte.porte }}', porte),\n    faturamento_estimado = coalesce({{ $json.fonte.faturamento_estimado ?? 'null' }}, faturamento_estimado)\nWHERE id = '{{ $('Buscar Fornecedor').item.json.fornecedor_id }}'\nRETURNING *;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1200,
+        512
+      ],
+      "id": "888ee44b-719e-4c5c-ac59-0326214a730e",
+      "name": "Aplicar Dados Cadastrais Reaproveitados",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "orq-if-gate-d1",
+              "leftValue": "={{ $('Buscar Fonte de Reaproveitamento').first().json.fonte.detalhes_calculo?.d1?.gate_disparado || $('Buscar Fonte de Reaproveitamento').first().json.fonte.detalhes_calculo?.d2?.gate_disparado }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3552,
+        512
+      ],
+      "id": "018d497f-ae1e-4dba-81c6-501752d5bbc3",
+      "name": "Fonte tem gate disparado?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE credscore.analises\nSET status = 'concluido',\n    decisao = 'nao_elegivel_gate',\n    gate_disparado = '{{ $('Buscar Fonte de Reaproveitamento').first().json.fonte.detalhes_calculo?.d1?.gate_disparado || $('Buscar Fonte de Reaproveitamento').first().json.fonte.detalhes_calculo?.d2?.gate_disparado }}',\n    concluido_em = now(),\n    dados_reaproveitados = true,\n    reaproveitada_de_analise_id = '{{ $('Buscar Fonte de Reaproveitamento').first().json.fonte.analise_origem_id }}',\n    reaproveitada_de_fornecedor_id = '{{ $('Buscar Fonte de Reaproveitamento').first().json.fonte.fornecedor_origem_id }}',\n    etapa_atual = 5, etapa_label = 'Concluído (gate reaproveitado)'\nWHERE id = '{{ $('Webhook').first().json.body.record.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3824,
+        320
+      ],
+      "id": "ee5fe3e9-2f21-4ccc-8171-54c8a01e5fe0",
+      "name": "Finalizar (Gate Reaproveitado)",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT credscore.copiar_respostas_questionario(\n  '{{ $('Buscar Fonte de Reaproveitamento').first().json.fonte.fornecedor_origem_id }}',\n  '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}'\n) AS copiadas;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3824,
+        528
+      ],
+      "id": "9a38f374-e5fb-4fc5-937f-00606901038d",
+      "name": "Copiar Respostas do Questionário",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*) FILTER (WHERE qr.resposta = qp.resposta_que_pontua) AS pontuando,\n       count(qr.id) AS respondidas,\n       count(*) AS total_ativas\nFROM credscore.questionario_perguntas qp\nLEFT JOIN credscore.questionario_respostas qr\n  ON qr.pergunta_id = qp.id AND qr.fornecedor_id = '{{ $('Buscar Fornecedor').first().json.fornecedor_id }}'\nWHERE qp.ativo = true;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4032,
+        528
+      ],
+      "id": "e0f71881-1d17-4d65-a12f-a8271f069bc9",
+      "name": "Contar Respostas Ativas (Reaproveitamento)",
+      "credentials": {
+        "postgres": {
+          "id": "F5GuYkVQ5eWZE44i",
+          "name": "BMS-Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Oab8CFwqDMSXErEJ",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/Oab8CFwqDMSXErEJ",
+          "cachedResultName": "BMS - 8.04 - D2 (Coleta Financeira)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fornecedor_id": "={{ $('Buscar Fornecedor').first().json.fornecedor_id }}",
+            "analise_id": "={{ $('Webhook').first().json.body.record.id }}",
+            "cnpj": "={{ $('Buscar Fornecedor').first().json.cnpj }}",
+            "em_recuperacao_judicial": "={{ $('Salvar Dados Cadastrais').first().json.em_recuperacao_judicial }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "fornecedor_id",
+              "displayName": "fornecedor_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "analise_id",
+              "displayName": "analise_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "cnpj",
+              "displayName": "cnpj",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "em_recuperacao_judicial",
+              "displayName": "em_recuperacao_judicial",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        4592,
+        1008
+      ],
+      "id": "4f69fe33-60be-42ae-8695-54ea66b54137",
+      "name": "Executar D2 (Coleta Financeira)"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2864,
+        992
+      ],
+      "id": "a7c983e5-2e5a-42ca-bee9-dda8e2e17dbc",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "contatos",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        2288,
+        704
+      ],
+      "id": "52445674-cab0-437c-b395-509c9949b5c6",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "let nomeS = 'Desconhecido', documentoS = null, ativas = 0, baixadas = 0, inaptas = 0, total = 0;\n\n// Fallback: quando o node de Vinculos Societarios esta desabilitado ou falhou,\n// $json ainda e o proprio contato vindo da Econodata (nome / cpf / qualificacao).\ntry {\n  const resp = $json;\n  const rel = resp?.retorno ?? null;\n\n  nomeS = rel?.nomeEntidade ?? resp?.nome ?? 'Desconhecido';\n  documentoS = rel?.documentoConsultado\n    ?? (resp?.cpf ? String(resp.cpf).replace(/\\D/g, '') : null);\n\n  // CPF mascarado (ex.: ***.123.456-**) nao serve como documento valido\n  if (documentoS && documentoS.length !== 11 && documentoS.length !== 14) documentoS = null;\n\n  if (rel && Array.isArray(rel.relacionamentos)) {\n    for (const r of rel.relacionamentos) {\n      if (r.nivel !== 1) continue;\n      if (r.tipo !== 'Sociedade') continue;\n      const pj = r.detalhesPessoaJuridica;\n      if (!pj) continue;\n      total++;\n      if (pj.baixada === true) baixadas++;\n      else if (pj.situacaoCadastral === 'ATIVA') ativas++;\n      else inaptas++;\n    }\n  }\n} catch (e) {\n  // Qualquer formato inesperado -> socio conta como \"sem dado\", nunca dispara alerta por engano.\n}\n\n// Sem consulta de vinculos = sem dado. Zera o documento para o agregador ignorar\n// este socio no calculo do pct medio (senao entraria como 0% problematico).\nif (total === 0) documentoS = null;\n\nconst pctProblematico = total > 0 ? Math.round(((baixadas + inaptas) / total) * 10000) / 100 : 0;\n\nreturn { json: { nome: nomeS, documento: documentoS, total, ativas, baixadas, inaptas, pct_problematico: pctProblematico } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2656,
+        816
+      ],
+      "id": "9ce8e9d3-a59f-4748-95df-6f8e15a4c225",
+      "name": "Classificar Vínculos do Sócio"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "ca98b00f-6484-4cf5-a96c-d7ffce3e70e3",
+              "leftValue": "={{ Array.isArray($json.contatos) && $json.contatos.length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2064,
+        832
+      ],
+      "id": "d8e7101a-f7b1-40e0-acf0-43346103ca64",
+      "name": "Tem sócios?"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { nome: '(nenhum sócio identificado)', total: 0, ativas: 0, baixadas: 0, inaptas: 0, pct_problematico: 0 } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2352,
+        896
+      ],
+      "id": "ebe8c0af-434e-414f-9f2b-af43c9821923",
+      "name": "Sem Sócios (fallback)"
+    },
+    {
+      "parameters": {
+        "content": "ÍNDICE DE HISTÓRICO DOS SÓCIOS (D1 · Obrigações Acessórias)\nNão pontua o score — só sinaliza revisão manual (alerta_socios).\n\n\"Tem sócios?\" protege contra travamento: se a QSA falhar ou o\nfornecedor não tiver nenhum sócio no retorno, Split Out produziria\nZERO itens, e \"Agregar Alerta Sócios\" nunca rodaria — travando o\nMerge pra sempre, sem erro visível. Por isso os dois caminhos\n(com sócios / sem sócios) sempre convergem no mesmo lugar.",
+        "height": 640,
+        "width": 448
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        368
+      ],
+      "id": "be77ddd9-49de-4fe8-af84-e4abcf282c72",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "1 CHAMADA POR SÓCIO\nSplit Out transforma o array de sócios (vindo da QSA) em N itens —\nos nodes seguintes rodam automaticamente 1x por sócio, sem precisar\nde \"Loop Over Items\" (isso trava com sub-execuções nesse cenário).\n\nDirect Data · Vínculos Societários: onError=continueRegularOutput\n(se 1 sócio falhar, os outros continuam).\n\nClassificar Vínculos do Sócio: conta empresas vinculadas em nivel=1,\ntipo=\"Sociedade\" (ignora \"Parentesco\"), separando em ativas/baixadas/\ninaptas pela situacaoCadastral + baixada. try/catch garante que\nqualquer erro de formato conta como \"sem dado\", nunca dispara alerta\npor engano.\n\n⚠️ MODO DO NODE: \"Run Once for Each Item\" ",
+        "height": 640,
+        "width": 800
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2240,
+        368
+      ],
+      "id": "f36b23b0-8dc8-42a7-959a-42921d40d71e",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(item => item.json);\nconst reais = items.filter(s => !!s.documento); // exclui o fallback \"sem sócios\" e sócios cuja consulta falhou\n\nconst pctMedio = reais.length > 0\n  ? Math.round((reais.reduce((sum, s) => sum + s.pct_problematico, 0) / reais.length) * 100) / 100\n  : null; // null = nenhum sócio com dado disponível (ND)\n\nreturn [{ json: { pct_problematico_medio: pctMedio, detalhes_socios: items }, pairedItem: 0 }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2864,
+        816
+      ],
+      "id": "34d0d3d7-6f3d-4990-ad83-d9633e93a933",
+      "name": "Agregar Histórico Sócios"
+    },
+    {
+      "parameters": {
+        "url": "https://apiv3.directd.com.br/api/VinculosSocietarios",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify(\n  (($json.cpf || $json.documento || '') + '').replace(/\\D/g, '').length === 14\n    ? { CNPJ: (($json.cpf || $json.documento || '') + '').replace(/\\D/g, '') }\n    : { CPF: (($json.cpf || $json.documento || '') + '').replace(/\\D/g, '') }\n) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2448,
+        704
+      ],
+      "id": "727e094a-eacb-4e34-8438-3c376c68c678",
+      "name": "Direct Data · Vínculos Societários",
+      "retryOnFail": true,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpQueryAuth": "***REMOVIDO***"
+      },
+      "disabled": true,
+      "onError": "continueRegularOutput",
+      "notes": "Le o CPF do socio vindo de contatos[].cpf da Econodata. ATENCAO: se a Econodata devolver o CPF MASCARADO (***.123.456-**) esta chamada nao funciona -> mantenha o node DISABLED e o indice de socios sai como ND (nao pontua o score, so alerta)."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.econodata.com.br/ecdt-api/v3/companies/search",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ cnpj: String($('Buscar Fornecedor').first().json.cnpj).replace(/\\D/g,'').replace(/^(\\d{2})(\\d{3})(\\d{3})(\\d{4})(\\d{2})$/,'$1.$2.$3/$4-$5') }) }}",
+        "options": {
+          "response": {
+            "response": {}
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1856,
+        1008
+      ],
+      "id": "f39143a5-e878-4d74-b90e-f16e2a3256d1",
+      "name": "Econodata · Empresa",
+      "retryOnFail": true,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Econodata /v3/companies/search. AUTENTICACAO: Header Auth com Name=x-api-token e Value=<seu token>. CNPJ precisa ir MASCARADO (XX.XXX.XXX/XXXX-XX). Resposta e o objeto plano, SEM envelope 'retorno'. 1 credito por empresa nova; reconsulta do mesmo CNPJ nao cobra."
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Buscar Fornecedor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Fornecedor": {
+      "main": [
+        [
+          {
+            "node": "Buscar Fonte de Reaproveitamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Etapa 0 · Enriquecimento": {
+      "main": [
+        [
+          {
+            "node": "Econodata · Empresa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Dados Cadastrais": {
+      "main": [
+        [
+          {
+            "node": "Salvar Dados Cadastrais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar Dados Cadastrais": {
+      "main": [
+        [
+          {
+            "node": "Etapa 1 · Fiscal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Etapa 1 · Fiscal": {
+      "main": [
+        [
+          {
+            "node": "Executar D1 (Coleta Fiscal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar D1 (Coleta Fiscal)": {
+      "main": [
+        [
+          {
+            "node": "D1 disparou gate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "D1 disparou gate?": {
+      "main": [
+        [
+          {
+            "node": "Finalizar (Gate disparado no D1)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Etapa 2 · Financeira",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Etapa 2 · Financeira": {
+      "main": [
+        [
+          {
+            "node": "Executar D2 (Coleta Financeira)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "D2 disparou gate?": {
+      "main": [
+        [
+          {
+            "node": "Finalizar (Gate disparado no D2)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Buscar Tabelas de Pontos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar S1-S4 e Completude": {
+      "main": [
+        [
+          {
+            "node": "Executar Calcular Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar Calcular Score": {
+      "main": [
+        [
+          {
+            "node": "Montar Resultado Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Resultado Final": {
+      "main": [
+        [
+          {
+            "node": "Salvar Resultado da Análise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Tabelas de Pontos": {
+      "main": [
+        [
+          {
+            "node": "Montar S1-S4 e Completude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Fonte de Reaproveitamento": {
+      "main": [
+        [
+          {
+            "node": "Existe fonte reaproveitável?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Existe fonte reaproveitável?": {
+      "main": [
+        [
+          {
+            "node": "Aplicar Dados Cadastrais Reaproveitados",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Etapa 0 · Enriquecimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplicar Dados Cadastrais Reaproveitados": {
+      "main": [
+        [
+          {
+            "node": "Fonte tem gate disparado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fonte tem gate disparado?": {
+      "main": [
+        [
+          {
+            "node": "Finalizar (Gate Reaproveitado)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Copiar Respostas do Questionário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copiar Respostas do Questionário": {
+      "main": [
+        [
+          {
+            "node": "Contar Respostas Ativas (Reaproveitamento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contar Respostas Ativas (Reaproveitamento)": {
+      "main": [
+        [
+          {
+            "node": "Buscar Tabelas de Pontos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar D2 (Coleta Financeira)": {
+      "main": [
+        [
+          {
+            "node": "D2 disparou gate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Dados Cadastrais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Direct Data · Vínculos Societários",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classificar Vínculos do Sócio": {
+      "main": [
+        [
+          {
+            "node": "Agregar Histórico Sócios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem sócios?": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sem Sócios (fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sem Sócios (fallback)": {
+      "main": [
+        [
+          {
+            "node": "Classificar Vínculos do Sócio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agregar Histórico Sócios": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Direct Data · Vínculos Societários": {
+      "main": [
+        [
+          {
+            "node": "Classificar Vínculos do Sócio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Econodata · Empresa": {
+      "main": [
+        [
+          {
+            "node": "Tem sócios?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "eda284a6-0837-4096-ad2d-a142be4a9cf2",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-08-14T17:04:00.772Z",
+      "createdAt": "2026-08-14T17:04:00.772Z",
+      "role": "workflow:owner",
+      "workflowId": "U5vufhe3Wh4IQeyO",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
