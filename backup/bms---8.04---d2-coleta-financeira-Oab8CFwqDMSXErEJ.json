@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-13T21:02:14.343Z",
+  "updatedAt": "2026-08-14T21:16:19.594Z",
   "createdAt": "2026-07-28T13:47:18.056Z",
   "id": "Oab8CFwqDMSXErEJ",
   "name": "BMS - 8.04 - D2 (Coleta Financeira)",
@@ -8,7 +8,7 @@
   "nodes": [
     {
       "parameters": {
-        "jsCode": "let t_score = 'ND';\nlet t_protestos = 'ND';\nlet t_execucoes = 'ND';\nlet t_spc = 'ND';\nlet gate_disparado = null;\n\ntry {\n  const resp = $json;\n  const report = Array.isArray(resp) ? resp[0] : resp;\n  const rel = report?.reports?.[0] ?? null;\n\n  if (rel) {\n    // ---- Score (numero bruto -- pontosBanda faz a classificacao por faixa) ----\n    const scoreVal = report?.optionalFeatures?.score?.score;\n    if (typeof scoreVal === 'number') t_score = scoreVal;\n\n    // ---- Protestos: negativeData.notary.summary.count ----\n    const protestosCount = rel?.negativeData?.notary?.summary?.count;\n    if (typeof protestosCount === 'number') t_protestos = protestosCount;\n\n    // ---- Execucoes relevantes: facts.judgementFilings.summary.count ----\n    const execucoesCount = rel?.facts?.judgementFilings?.summary?.count;\n    if (typeof execucoesCount === 'number') t_execucoes = execucoesCount;\n\n    // ---- \"SPC\" (proxy: pefin -- Pendencias Financeiras da propria Serasa, nao e literalmente SPC) ----\n    const pefinCount = rel?.negativeData?.pefin?.summary?.count;\n    if (typeof pefinCount === 'number') {\n      t_spc = pefinCount > 0 ? 'Sim' : 'Não';\n    }\n\n    // ---- Gate G2: falencia / recuperacao judicial ----\n    // ---- Gate G2: falencia / recuperacao judicial (2 fontes combinadas) ----\n    const bankruptsCount = rel?.facts?.bankrupts?.summary?.count;\n    const emRJDireto = $('When Executed by Another Workflow').item.json.em_recuperacao_judicial === true;\n    \n    if (emRJDireto) {\n      gate_disparado = 'G2: recuperação judicial (Direct Data)';\n    } else if (typeof bankruptsCount === 'number' && bankruptsCount > 0) {\n      gate_disparado = 'G2: recuperação judicial ou falência (Serasa)';\n    }\n  }\n} catch (e) {\n  // Qualquer formato inesperado -> tudo ND, nunca trava o fluxo.\n}\n\nreturn [{ json: { t_score, t_protestos, t_execucoes, t_spc, gate_disparado } }];"
+        "jsCode": "let t_score = 'ND';\nlet t_protestos = 'ND';\nlet t_execucoes = 'ND';\nlet t_spc = 'ND';\nlet gate_disparado = null;\nlet obs_score = null;\nlet obs_spc_historico = null; // registra ocorrência SPC fora da janela de 1 ano (não pontua, só auditoria)\n\ntry {\n  const resp = $json;\n  const report = Array.isArray(resp) ? resp[0] : resp;\n  const rel = report?.reports?.[0] ?? null;\n\n  if (rel) {\n    const scoreBlock = report?.optionalFeatures?.score;\n    if (scoreBlock && typeof scoreBlock.score === 'number') {\n      t_score = scoreBlock.score;\n    } else if (scoreBlock?.message) {\n      obs_score = scoreBlock.message;\n    }\n\n    const protestosCount = rel?.negativeData?.notary?.summary?.count;\n    if (typeof protestosCount === 'number') t_protestos = protestosCount;\n\n    const execucoesCount = rel?.facts?.judgementFilings?.summary?.count;\n    if (typeof execucoesCount === 'number') t_execucoes = execucoesCount;\n\n    // ---- SPC: só conta como \"Já teve ocorrência\" se houver item com data\n    // dentro do último ano. Ocorrências mais antigas (mesmo 10 anos atrás)\n    // não pontuam, mas ficam registradas em obs_spc_historico.\n    const spcAnn = report?.optionalFeatures?.spcAnnotations;\n    const spcList = Array.isArray(spcAnn?.spcAnnotationsResponseList) ? spcAnn.spcAnnotationsResponseList : null;\n    const spcCountTotal = spcAnn?.summary?.count;\n\n    const UM_ANO_MS = 365 * 24 * 60 * 60 * 1000;\n    const agora = Date.now();\n\n    if (spcList) {\n      let temNoUltimoAno = false;\n      let temAntigo = false;\n\n      for (const item of spcList) {\n        const dataRef = item?.occurrenceDate ?? item?.inclusionDate;\n        if (!dataRef) continue;\n        const dt = new Date(dataRef).getTime();\n        if (!Number.isFinite(dt)) continue;\n        if (agora - dt <= UM_ANO_MS) temNoUltimoAno = true;\n        else temAntigo = true;\n      }\n\n      t_spc = temNoUltimoAno ? 'Já teve ocorrência no SPC' : 'Sem ocorrência no SPC';\n      if (temAntigo) {\n        obs_spc_historico = 'Possui ocorrência(s) de SPC registradas há mais de 1 ano (fora da janela considerada para pontuação)';\n      }\n    } else if (typeof spcCountTotal === 'number') {\n      // Fallback: se a Serasa não trouxer a lista detalhada, usa o count agregado\n      // (sem filtro de data -- comportamento antigo, só como rede de segurança).\n      t_spc = spcCountTotal > 0 ? 'Já teve ocorrência no SPC' : 'Sem ocorrência no SPC';\n    }\n\n    const bankruptsCount = rel?.facts?.bankrupts?.summary?.count;\n    const emRJDireto = $('When Executed by Another Workflow').item.json.em_recuperacao_judicial === true;\n\n    if (emRJDireto) {\n      gate_disparado = 'G2: recuperação judicial (cadastro)';\n    } else if (typeof bankruptsCount === 'number' && bankruptsCount > 0) {\n      gate_disparado = 'G2: recuperação judicial ou falência (Serasa)';\n    }\n  }\n} catch (e) {}\n\nreturn [{ json: { t_score, t_protestos, t_execucoes, t_spc, gate_disparado, obs_score, obs_spc_historico } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -221,7 +221,7 @@
             },
             {
               "name": "optionalFeatures",
-              "value": "SCORE_POSITIVO"
+              "value": "SCORE_POSITIVO,ANOTACOES_CONSULTAS_SPC"
             }
           ]
         },
@@ -270,7 +270,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"document\": \"{{ $('When Executed by Another Workflow').item.json.cnpj }}\",\n  \"attributes\": [\n    \"DOCUMENT\",\n    \"BUSINESSNAME\",\n    \"ADDRESSES\",\n    \"PHONES\",\n    \"COMPANYSIZE\"\n  ]\n}",
+        "jsonBody": "={\n  \"document\": \"61068276000791\",\n  \"attributes\": [\n    \"DOCUMENT\",\n\n    \"BUSINESSNAME\",\n    \"ADDRESSES\",\n    \"PHONES\",\n    \"COMPANYSIZE\"\n  ]\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -358,7 +358,7 @@
             },
             {
               "name": "optionalFeatures",
-              "value": "SCORE_POSITIVO"
+              "value": "SCORE_POSITIVO,ANOTACOES_CONSULTAS_SPC"
             }
           ]
         },
@@ -462,7 +462,7 @@
   },
   "staticData": null,
   "meta": null,
-  "versionId": "5d57887f-46cf-40a7-991c-36bd4f504aa1",
+  "versionId": "f5e0a142-30e4-4c54-b2d1-e99d5aefa932",
   "activeVersionId": null,
   "triggerCount": 0,
   "shared": [
