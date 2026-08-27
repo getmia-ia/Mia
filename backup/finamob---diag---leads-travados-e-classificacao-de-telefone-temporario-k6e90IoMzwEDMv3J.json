@@ -1,0 +1,176 @@
+{
+  "updatedAt": "2026-08-26T22:35:57.053Z",
+  "createdAt": "2026-08-26T18:09:34.236Z",
+  "id": "k6e90IoMzwEDMv3J",
+  "name": "Finamob - DIAG - Leads travados e classificacao de telefone (temporario)",
+  "active": false,
+  "isArchived": true,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -96,
+        320
+      ],
+      "id": "92c615fa-aced-4823-93b1-3e52d9c1dc39",
+      "name": "Executar manualmente"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  TRIM(COALESCE(`Tipo`, '(nulo)'))          AS tipo,\n  COUNT(*)                                  AS leads_travados,\n  MIN(DATE(fup))                            AS fup_mais_antigo,\n  MAX(DATE(fup))                            AS fup_mais_recente,\n  SUM(status_plano_acao = 'ptentativaderreativaçãor') AS parou_na_msg_1,\n  SUM(status_plano_acao = 'stentativadereativaçãor')   AS parou_na_msg_2,\n  SUM(status_plano_acao = 'ttentativadereativaçãor')   AS parou_na_msg_3\nFROM mailing\nWHERE lixeira = 0\n  AND status_plano_acao IN ('ptentativaderreativaçãor', 'stentativadereativaçãor', 'ttentativadereativaçãor')\n  AND DATE(fup) < CURDATE()\n  AND NOT (`Tipo` IS NULL OR TRIM(`Tipo`) = '' OR TRIM(`Tipo`) IN ('Cliente', 'Cliente/Parceiro', 'Outros'))\nGROUP BY 1\nORDER BY leads_travados DESC;\n\n-- QUANTOS LEADS FICARAM PRESOS PELA REGRA ANTIGA DE `tipo`\n-- Estes tem status de tentativa de reativacao e fup vencido, mas o `Tipo` esta\n-- fora da whitelist - entao nenhuma das 4 filas do 6.01 consegue pesca-los.\n-- Continuam contando no card \"FUPs Atrasados por Dono\" do dash pra sempre.\n-- A soma da coluna leads_travados é o numero que a gente quer.\n-- Se vier VAZIO: ninguem ficou preso, nada a limpar.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        192,
+        48
+      ],
+      "id": "29908bfc-5f2a-475b-b079-48ff48029009",
+      "name": "1 - Leads travados pela regra antiga de tipo",
+      "alwaysOutputData": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  TRIM(COALESCE(`Tipo`, '(nulo)')) AS tipo,\n  COUNT(*)                         AS total,\n  SUM(lixeira = 0)                 AS ativos,\n  SUM(lixeira = 0 AND status_plano_acao IN ('ptentativaderreativaçãor', 'stentativadereativaçãor', 'ttentativadereativaçãor')) AS em_tentativa\nFROM mailing\nGROUP BY 1\nORDER BY total DESC;\n\n-- DISTRIBUICAO GERAL DE `tipo` NA BASE\n-- Contexto pra decisao: mostra todos os valores que existem no campo.\n-- Tudo que nao for Cliente / Cliente/Parceiro / Outros / (nulo) / vazio\n-- é tipo que a whitelist barra.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        192,
+        256
+      ],
+      "id": "0b53e706-5704-4fdc-aa9e-300126cf483e",
+      "name": "2 - Distribuicao de tipo na base",
+      "alwaysOutputData": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  CASE\n    WHEN LENGTH(loc) = 11 AND SUBSTRING(loc, 3, 1) = '9'\n      THEN 'A) celular atual (11 digitos) - envia direto'\n    WHEN LENGTH(loc) = 10 AND SUBSTRING(loc, 3, 1) BETWEEN '6' AND '9'\n      THEN 'B) celular antigo (10 digitos) - recebe o 9 no envio'\n    WHEN LENGTH(loc) = 10 AND SUBSTRING(loc, 3, 1) BETWEEN '2' AND '5'\n      THEN 'C) FIXO (10 digitos) - envia SEM o 9 (antes de 26/08 ia com 9, pra outra pessoa)'\n    ELSE 'D) invalido - barrado na fila'\n  END AS classificacao,\n  COUNT(*) AS total\nFROM (\n  SELECT CASE WHEN LENGTH(raw) IN (12, 13) AND LEFT(raw, 2) = '55'\n              THEN SUBSTRING(raw, 3) ELSE raw END AS loc\n  FROM (\n    SELECT REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n             m.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''), '+', ''\n           ) AS raw\n    FROM mailing m\n    WHERE m.lixeira = 0 AND m.whatsapp IS NOT NULL AND m.whatsapp <> ''\n  ) a\n) b\nGROUP BY 1\nORDER BY 1;\n\n-- CLASSIFICACAO DOS TELEFONES DA BASE\n-- A linha C) é o volume de leads que, antes da correcao de 26/08, recebiam a\n-- mensagem num numero de OUTRA pessoa (o 9 era inserido em fixo tambem).\n-- Agora vao com 55+DDD+8 digitos, sem o 9 - lead recuperado.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        192,
+        448
+      ],
+      "id": "7f4dc866-4096-43fd-abac-2a502bf78628",
+      "name": "3 - Classificacao dos telefones",
+      "alwaysOutputData": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  id, clientes, `Tipo` AS tipo, status_plano_acao,\n  DATE(fup) AS fup, DATE(ultimo_contato) AS ultimo_contato,\n  whatsapp, email, dono_do_lead\nFROM mailing\nWHERE lixeira = 0\n  AND status_plano_acao IN ('ptentativaderreativaçãor', 'stentativadereativaçãor', 'ttentativadereativaçãor')\n  AND DATE(fup) < CURDATE()\n  AND NOT (`Tipo` IS NULL OR TRIM(`Tipo`) = '' OR TRIM(`Tipo`) IN ('Cliente', 'Cliente/Parceiro', 'Outros'))\nORDER BY DATE(fup) ASC;\n\n-- LISTA NOMINAL DOS LEADS TRAVADOS\n-- Revise antes de marcar. Para tira-los da contagem do dash sem reabordar:\n--   UPDATE mailing SET status_plano_acao = 'naoeoICP' WHERE id IN (...);\n-- ('naoeoICP' ja esta na lista de status excluidos de todas as 4 filas.)\n-- Rode um SELECT antes do UPDATE e guarde os ids.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        192,
+        656
+      ],
+      "id": "374669ab-6ec8-4d44-bfb2-319a7b464b91",
+      "name": "4 - Lista nominal dos travados",
+      "alwaysOutputData": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Diagnóstico\n\n**1 — Leads travados pela regra antiga de `tipo`.** É a resposta que a gente quer: soma da coluna `leads_travados`. Se vier vazio, ninguém ficou preso e não há limpeza a fazer. As colunas `parou_na_msg_1/2/3` mostram em que ponto do ciclo cada um travou.\n\n**2 — Distribuição de `tipo`.** Contexto: todos os valores que existem no campo. Tudo fora de `Cliente` / `Cliente/Parceiro` / `Outros` / nulo / vazio é barrado pela whitelist.\n\n**3 — Classificação dos telefones.** A linha **C)** é o volume de leads que, antes de 26/08, recebiam a mensagem no número de outra pessoa (o 9 era inserido em fixo também). Agora vão sem o 9 — é lead recuperado.\n\n**4 — Lista nominal dos travados.** Para revisar antes de marcar. O `UPDATE` sugerido está no comentário da query; rode o SELECT primeiro e guarde os ids.\n\nUsa a credencial `Finamob database`, só `SELECT` — nenhum node escreve nada.",
+        "height": 560,
+        "width": 700,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        976,
+        48
+      ],
+      "id": "8c672437-7b51-4a93-89f4-fd6ad133eb68",
+      "name": "Como usar"
+    }
+  ],
+  "connections": {
+    "Executar manualmente": {
+      "main": [
+        [
+          {
+            "node": "1 - Leads travados pela regra antiga de tipo",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "2 - Distribuicao de tipo na base",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "3 - Classificacao dos telefones",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "4 - Lista nominal dos travados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "6a5751d6-25d1-4a4c-b0dd-09b9787af547",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-08-26T18:09:34.236Z",
+      "createdAt": "2026-08-26T18:09:34.236Z",
+      "role": "workflow:owner",
+      "workflowId": "k6e90IoMzwEDMv3J",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
