@@ -1,0 +1,565 @@
+{
+  "updatedAt": "2026-08-27T23:41:17.780Z",
+  "createdAt": "2026-08-21T19:48:53.252Z",
+  "id": "hubZPE7io0uIweH1",
+  "name": "FINAMOB - 4.03 - Reports SDR (Inbound + Remarketing)",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        1776
+      ],
+      "id": "c2e72a9e-6ea3-498d-b14a-f5740e738a5f",
+      "name": "Todo dia 9h"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "sdr_eventos",
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        384,
+        1776
+      ],
+      "id": "b47b227d-6a02-4a51-8b52-edcdc18929cd",
+      "name": "Eventos SDR - Ler",
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "h1L5Q3AbzIAqdnsv",
+          "name": "Finamob - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "sdr_reunioes",
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        576,
+        1776
+      ],
+      "id": "550e2da8-fdd6-43bb-8c9e-f11c3691d4bf",
+      "name": "Reunioes SDR - Ler",
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "h1L5Q3AbzIAqdnsv",
+          "name": "Finamob - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// 4.03 - Calcula Report (Inbound e Remarketing separados)\n//\n// FONTE UNICA: sdr_eventos (Supabase) para disparos/respostas/falhas\n//              + node \"agenda\" (MySQL) para calls.\n// Nao usa mais a planilha \"mailing\" nem as materialized views\n// (mv_sdr_disparos_diario / mv_sdr_respostas_diario), que nao sao\n// refreshadas por nenhum fluxo.\n//\n// CANAL = nome_app do proprio evento (SDR-INBOUND / SDR-REMARKETING).\n// Disparos, respostas e encaminhamentos ja nascem carimbados pelos fluxos,\n// entao aqui nao ha inferencia: le-se a coluna. O canal e do EVENTO, nao do\n// lead - lead de inbound que entrou na regua de remarketing (o FUP) conta\n// como remarketing a partir do momento em que o 6.01 dispara para ele.\n//\n// Calls sao a excecao: vem do MySQL, que nao tem nome_app. A atribuicao usa,\n// nesta ordem: (1) origem da reuniao em sdr_reunioes, que os calendars\n// carimbam; (2) nome_app do ultimo disparo ANTES daquele dia; (3) mailing.midia.\n//\n// FUSO: tudo convertido para America/Sao_Paulo (UTC-3, sem horario de\n// verao). \"Ontem\" = dia civil brasileiro, nao janela UTC.\n// SEMANA VIGENTE = domingo desta semana ate ontem (D-1).\n// =====================================================================\n\nconst OFFSET_MIN = -180;              // America/Sao_Paulo\nconst DIA_MS = 86400000;\n\nfunction diaLocal(iso) {\n  if (!iso) return null;\n  const d = new Date(iso);\n  if (isNaN(d)) return null;\n  const l = new Date(d.getTime() + OFFSET_MIN * 60000);\n  return Date.UTC(l.getUTCFullYear(), l.getUTCMonth(), l.getUTCDate());\n}\nfunction tsLocal(iso) {\n  const d = new Date(iso);\n  return isNaN(d) ? null : d.getTime();\n}\n\nconst agoraLocal = new Date(Date.now() + OFFSET_MIN * 60000);\nconst HOJE = Date.UTC(agoraLocal.getUTCFullYear(), agoraLocal.getUTCMonth(), agoraLocal.getUTCDate());\nconst ONTEM = HOJE - DIA_MS;\nconst INICIO_SEMANA = HOJE - new Date(HOJE).getUTCDay() * DIA_MS;\n\nfunction ehOntem(t) { return t === ONTEM; }\nfunction ehSemana(t) { return t !== null && t >= INICIO_SEMANA && t < HOJE; }\nfunction ddmm(t) {\n  const d = new Date(t);\n  return String(d.getUTCDate()).padStart(2, '0') + '/' + String(d.getUTCMonth() + 1).padStart(2, '0');\n}\n// Taxa so existe se houve disparo no periodo. Sem denominador a taxa nao e\n// zero - ela nao se aplica, e mostrar \"0.0%\" faz parecer que o disparo\n// nao converteu, quando na verdade nao houve disparo.\nfunction taxa(num, den) {\n  return den > 0 ? `taxa ${(num / den * 100).toFixed(1)}%` : 'sem disparos no período';\n}\n\n// ---------------------------------------------------------------------\n// 1. Eventos\n// ---------------------------------------------------------------------\nconst eventos = $('Eventos SDR - Ler').all().map(i => i.json);\n\nfunction parsePayload(p) {\n  try { return typeof p === 'string' ? JSON.parse(p) : (p || {}); } catch (e) { return {}; }\n}\n// tipo_disparo e coluna dedicada (preenchida pelos fluxos 6.01 e 7.01);\n// payload.template fica como fallback para eventos antigos.\nfunction templateDoEvento(e) {\n  return e.tipo_disparo || parsePayload(e.payload).template || null;\n}\nfunction canalPorApp(app) {\n  const a = String(app || '').toUpperCase();\n  if (a.indexOf('INBOUND') >= 0) return 'inbound';\n  if (a.indexOf('REMARKETING') >= 0) return 'remarketing';\n  if (a.indexOf('OUTBOUND') >= 0) return 'outbound';\n  return null;\n}\nfunction canalPorTemplate(tpl) {\n  const t = String(tpl || '');\n  if (t.indexOf('inbound') >= 0) return 'inbound';\n  if (t.indexOf('outbound') >= 0) return 'outbound';\n  if (/^mensagem_\\d+/.test(t)) return 'remarketing';\n  return null;\n}\n// Tentativa dentro da regua de remarketing (1, 2 ou 3). Disparo inicial\n// de inbound/outbound nao tem regua -> 'inicial'.\nfunction tentativaDoTemplate(tpl) {\n  const t = String(tpl || '');\n  if (/disparo_inicial/.test(t)) return 'inicial';\n  const m = t.match(/mensagem_(\\d+)/);\n  return m ? m[1] : null;\n}\n// Chave do lead: mailing_id quando existe, senao os ultimos 11 digitos do\n// telefone. Sem isso, todo evento sem mailing_id colapsava num unico\n// balde (bug do report antigo).\nfunction chaveLead(e) {\n  if (e.mailing_id !== null && e.mailing_id !== undefined && e.mailing_id !== '') return 'm' + e.mailing_id;\n  const tel = String(e.telefone || '').replace(/\\D/g, '');\n  return tel ? 't' + tel.slice(-11) : null;\n}\n\nconst CANAIS = ['inbound', 'remarketing', 'outbound', 'parcerias', 'outros'];\nfunction novoBalde() {\n  return {\n    disparos_ontem: 0, disparos_semana: 0,\n    disparos_ontem_t: { inicial: 0, '1': 0, '2': 0, '3': 0 },\n    disparos_semana_t: { inicial: 0, '1': 0, '2': 0, '3': 0 },\n    falhas_ontem: 0, falhas_semana: 0,\n    respostas_ontem: 0, respostas_semana: 0,\n    respostas_ontem_t: { inicial: 0, '1': 0, '2': 0, '3': 0, sem_disparo: 0 },\n    respostas_semana_t: { inicial: 0, '1': 0, '2': 0, '3': 0, sem_disparo: 0 },\n    enc_advisor_ontem: 0, enc_advisor_semana: 0,\n    enc_parcerias_ontem: 0, enc_parcerias_semana: 0,\n    calls_marcadas_ontem: 0, calls_marcadas_semana: 0,\n    calls_realizadas_ontem: 0, calls_realizadas_semana: 0,\n    calls_noshow_ontem: 0, calls_noshow_semana: 0,\n    calls_hoje: 0, calls_a_frente: 0\n  };\n}\nconst R = {};\nfor (const c of CANAIS) R[c] = novoBalde();\n\n// ---------------------------------------------------------------------\n// 2. Historico de disparos por lead (canal + tentativa + data)\n// ---------------------------------------------------------------------\nconst historico = {};   // chaveLead -> [{ts, canal, tentativa}]\nfor (const e of eventos) {\n  if (e.tipo_evento !== 'disparo_enviado') continue;\n  const k = chaveLead(e);\n  const ts = tsLocal(e.created_at);\n  if (!k || ts === null) continue;\n  const tpl = templateDoEvento(e);\n  const canal = canalPorApp(e.nome_app) || canalPorTemplate(tpl) || 'outros';\n  (historico[k] = historico[k] || []).push({ ts, canal, tentativa: tentativaDoTemplate(tpl) });\n}\nfor (const k in historico) historico[k].sort((a, b) => a.ts - b.ts);\n\n// Canal do lead num INSTANTE: o ultimo disparo ate aquela data. Usar o\n// \"ultimo disparo de todos\" jogaria para remarketing uma call que nasceu da\n// conversa de inbound semanas antes de o lead entrar no FUP.\nfunction canalDoLeadEm(k, ts) {\n  const h = historico[k];\n  if (!h || !h.length) return null;\n  let canal = null;\n  for (const d of h) { if (d.ts <= ts) canal = d.canal; else break; }\n  return canal || h[0].canal;\n}\nfunction canalDoLead(k) {\n  const h = historico[k];\n  return h && h.length ? h[h.length - 1].canal : null;\n}\n// Ultimo disparo ANTES da resposta. Janela de 7 dias para atribuir a\n// tentativa: resposta a um disparo de 3 meses atras nao e resposta\n// daquele disparo (o report antigo atribuia sem limite nenhum).\nconst JANELA_ATRIB_MS = 7 * DIA_MS;\nfunction disparoAnterior(k, ts) {\n  const h = historico[k];\n  if (!h) return null;\n  let achado = null;\n  for (const d of h) { if (d.ts <= ts) achado = d; else break; }\n  if (!achado) return null;\n  return { canal: achado.canal, tentativa: (ts - achado.ts) <= JANELA_ATRIB_MS ? achado.tentativa : null };\n}\n\n// ---------------------------------------------------------------------\n// 3. Disparos, falhas, respostas e encaminhamentos\n// ---------------------------------------------------------------------\nconst vistoRespOntem = new Set();\nconst vistoRespSemana = new Set();\n\nfor (const e of eventos) {\n  const dia = diaLocal(e.created_at);\n  if (dia === null) continue;\n  const ontem = ehOntem(dia);\n  const semana = ehSemana(dia);\n  if (!ontem && !semana) continue;\n\n  const k = chaveLead(e);\n  const tipo = String(e.tipo_evento || '');\n\n  if (tipo === 'disparo_enviado') {\n    const tpl = templateDoEvento(e);\n    const canal = canalPorApp(e.nome_app) || canalPorTemplate(tpl) || 'outros';\n    const t = tentativaDoTemplate(tpl);\n    const b = R[canal] || R.outros;\n    if (ontem) { b.disparos_ontem++; if (t) b.disparos_ontem_t[t] = (b.disparos_ontem_t[t] || 0) + 1; }\n    if (semana) { b.disparos_semana++; if (t) b.disparos_semana_t[t] = (b.disparos_semana_t[t] || 0) + 1; }\n\n  } else if (tipo === 'disparo_falhou') {\n    const tpl = templateDoEvento(e);\n    const canal = canalPorApp(e.nome_app) || canalPorTemplate(tpl) || 'outros';\n    const b = R[canal] || R.outros;\n    if (ontem) b.falhas_ontem++;\n    if (semana) b.falhas_semana++;\n\n  } else if (tipo === 'resposta_recebida') {\n    const ts = tsLocal(e.created_at);\n    const ant = k ? disparoAnterior(k, ts) : null;\n    // O nome_app da resposta vem do historico de mensagens (trigger\n    // fn_sdr_detecta_resposta) = o agente que recebeu. E a fonte certa.\n    const canal = canalPorApp(e.nome_app) || (ant && ant.canal) || 'outros';\n    const tent = ant && ant.tentativa ? ant.tentativa : 'sem_disparo';\n    const b = R[canal] || R.outros;\n    // dedupe: mesmo lead, mesmo dia = 1 resposta\n    const chave = (k || 'evt' + e.id) + '_' + dia;\n    if (ontem && !vistoRespOntem.has(chave)) {\n      vistoRespOntem.add(chave);\n      b.respostas_ontem++;\n      b.respostas_ontem_t[tent] = (b.respostas_ontem_t[tent] || 0) + 1;\n    }\n    if (semana && !vistoRespSemana.has(chave)) {\n      vistoRespSemana.add(chave);\n      b.respostas_semana++;\n      b.respostas_semana_t[tent] = (b.respostas_semana_t[tent] || 0) + 1;\n    }\n\n  } else if (/encaminh/i.test(tipo)) {\n    // Eventos 'encaminhado_advisor' / 'encaminhado_parcerias', gravados pela\n    // 6.04 (remarketing) e 7.04 (inbound), ja com nome_app fixo do fluxo.\n    const p = parsePayload(e.payload);\n    const destinoRaw = String(p.destino || tipo).toLowerCase();\n    const destino = /parceri/.test(destinoRaw) ? 'parcerias' : (/advisor/.test(destinoRaw) ? 'advisor' : null);\n    if (!destino) continue;\n    const canal = canalPorApp(e.nome_app) || (k && canalDoLead(k)) || 'outros';\n    const b = R[canal] || R.outros;\n    const campo = destino === 'advisor' ? 'enc_advisor' : 'enc_parcerias';\n    if (ontem) b[campo + '_ontem']++;\n    if (semana) b[campo + '_semana']++;\n  }\n}\n\n// ---------------------------------------------------------------------\n// 4. Calls (node \"agenda\", linha a linha) atribuidas ao canal de ORIGEM\n// ---------------------------------------------------------------------\nconst MIDIA_CANAL = { '14': 'inbound', '15': 'remarketing', '5': 'remarketing', '2': 'parcerias', '1': 'outbound', '4': 'outbound' };\n\n// --- Reunioes carimbadas pelos calendars (sdr_reunioes.origem) ---\n// Fonte mais confiavel de canal para uma call: quem agendou disse quem era.\n// So cobre o que a IA agendou; call marcada na mao no CRM cai nos fallbacks.\nconst reunioesPorLead = {};\nfor (const r of $('Reunioes SDR - Ler').all().map(i => i.json)) {\n  const canal = canalPorApp(r.origem);\n  if (!canal) continue;\n  const chaves = [];\n  if (r.mailing_id) chaves.push('m' + r.mailing_id);\n  const tel = String(r.telefone || '').replace(/\\D/g, '');\n  if (tel) chaves.push('t' + tel.slice(-11));\n  const marcos = [tsLocal(r.criado_em), tsLocal(r.data_hora_agendada)].filter(t => t !== null);\n  for (const c of chaves) (reunioesPorLead[c] = reunioesPorLead[c] || []).push({ canal, marcos });\n}\nfunction canalPorReuniao(chaves, ts) {\n  let melhor = null, menorDist = Infinity;\n  for (const c of chaves) {\n    for (const r of (reunioesPorLead[c] || [])) {\n      for (const m of r.marcos) {\n        const dist = Math.abs(m - ts);\n        if (dist < menorDist) { menorDist = dist; melhor = r.canal; }\n      }\n    }\n  }\n  return melhor;\n}\n\nfunction canalDaCall(row, ts) {\n  const chaves = [];\n  if (row.mailing_id !== null && row.mailing_id !== undefined && row.mailing_id !== '') chaves.push('m' + row.mailing_id);\n  const tel = String(row.telefone || '').replace(/\\D/g, '');\n  if (tel) chaves.push('t' + tel.slice(-11));\n  return canalPorReuniao(chaves, ts)\n      || (chaves.length ? canalDoLeadEm(chaves[0], ts) : null)\n      || MIDIA_CANAL[String(row.midia)]\n      || 'outros';\n}\n\nconst linhasAgenda = $('agenda1').all().map(i => i.json).filter(r => r && r.evento);\nfor (const row of linhasAgenda) {\n  const dia = row.dia ? diaLocal(String(row.dia).slice(0, 10) + 'T12:00:00Z') : null;\n  const b = R[canalDaCall(row, dia !== null ? dia : Date.now())] || R.outros;\n  const ontem = dia !== null && ehOntem(dia);\n  const semana = dia !== null && ehSemana(dia);\n  switch (row.evento) {\n    case 'marcada':\n      if (ontem) b.calls_marcadas_ontem++;\n      if (semana) b.calls_marcadas_semana++;\n      break;\n    case 'realizada':\n      if (ontem) b.calls_realizadas_ontem++;\n      if (semana) b.calls_realizadas_semana++;\n      break;\n    case 'no_show':\n      if (ontem) b.calls_noshow_ontem++;\n      if (semana) b.calls_noshow_semana++;\n      break;\n    case 'agendada_hoje': b.calls_hoje++; break;\n    case 'agendada_frente': b.calls_a_frente++; break;\n  }\n}\n\n// ---------------------------------------------------------------------\n// 5. Montagem das mensagens\n// ---------------------------------------------------------------------\nconst periodo = `Ontem ${ddmm(ONTEM)} · semana ${ddmm(INICIO_SEMANA)} → ${ddmm(ONTEM)}`;\n\n// A soma das tentativas tem que fechar com o total. Disparo antigo, sem\n// tipo_disparo e sem template no payload, nao cai em nenhuma tentativa -\n// em vez de sumir da conta, aparece como \"sem template\".\n// A soma das etapas tem que fechar com o total. \"entrada\" e o primeiro\n// contato da regua (template disparo_inicial_*, disparado pela fila de\n// entrada do 6.01) - nao e 1a/2a/3a tentativa. Se ainda sobrar diferenca,\n// e disparo sem template identificavel e aparece como tal, em vez de sumir.\nfunction entradaLbl(t) {\n  return (t.inicial || 0) > 0 ? `entrada: ${t.inicial} | ` : '';\n}\nfunction restoDisp(total, t) {\n  const resto = total - ((t['1'] || 0) + (t['2'] || 0) + (t['3'] || 0) + (t.inicial || 0));\n  return resto > 0 ? ` | sem template: ${resto}` : '';\n}\n\nfunction blocoEncaminhamentos(b) {\n  return `➡️ *ENCAMINHAMENTOS*\nAdvisor — ontem: ${b.enc_advisor_ontem} | semana: ${b.enc_advisor_semana}\nParcerias — ontem: ${b.enc_parcerias_ontem} | semana: ${b.enc_parcerias_semana}`;\n}\nfunction blocoCalls(b) {\n  return `📅 *CALLS*\nAgendadas — ontem: ${b.calls_marcadas_ontem} | semana: ${b.calls_marcadas_semana}\nRealizadas — ontem: ${b.calls_realizadas_ontem} | semana: ${b.calls_realizadas_semana}\nNo-show — ontem: ${b.calls_noshow_ontem} | semana: ${b.calls_noshow_semana}\nNa agenda — hoje: ${b.calls_hoje} | daqui pra frente: ${b.calls_a_frente}`;\n}\n\n// ---- INBOUND ----\nconst i = R.inbound;\nconst mensagem_inbound = `*REPORT INBOUND*\n_${periodo}_\n\n📤 *DISPAROS*\nOntem: ${i.disparos_ontem}${i.falhas_ontem ? ` (falhas: ${i.falhas_ontem})` : ''}\nSemana: ${i.disparos_semana}${i.falhas_semana ? ` (falhas: ${i.falhas_semana})` : ''}\n\n💬 *RESPOSTAS* (leads distintos que responderam)\nOntem: ${i.respostas_ontem} — ${taxa(i.respostas_ontem, i.disparos_ontem)}\nSemana: ${i.respostas_semana} — ${taxa(i.respostas_semana, i.disparos_semana)}\n\n${blocoEncaminhamentos(i)}\n\n${blocoCalls(i)}`;\n\n// ---- REMARKETING ----\nconst r = R.remarketing;\nconst dOnt = r.disparos_ontem_t, dSem = r.disparos_semana_t;\nconst rOnt = r.respostas_ontem_t, rSem = r.respostas_semana_t;\nconst o = R.outbound, p = R.parcerias, x = R.outros;\nconst outrosDispOntem = o.disparos_ontem + p.disparos_ontem + x.disparos_ontem;\nconst outrosDispSemana = o.disparos_semana + p.disparos_semana + x.disparos_semana;\nconst totalDispOntem = i.disparos_ontem + r.disparos_ontem + outrosDispOntem;\nconst totalDispSemana = i.disparos_semana + r.disparos_semana + outrosDispSemana;\nconst totalRespOntem = CANAIS.reduce((s, c) => s + R[c].respostas_ontem, 0);\nconst totalRespSemana = CANAIS.reduce((s, c) => s + R[c].respostas_semana, 0);\n\nconst mensagem_remarketing = `*REPORT REMARKETING*\n_${periodo}_\n\n📤 *DISPAROS*\nOntem: ${r.disparos_ontem}${r.falhas_ontem ? ` (falhas: ${r.falhas_ontem})` : ''}\n• ${entradaLbl(dOnt)}1ª: ${dOnt['1']} | 2ª: ${dOnt['2']} | 3ª: ${dOnt['3']}${restoDisp(r.disparos_ontem, dOnt)}\nSemana: ${r.disparos_semana}${r.falhas_semana ? ` (falhas: ${r.falhas_semana})` : ''}\n• ${entradaLbl(dSem)}1ª: ${dSem['1']} | 2ª: ${dSem['2']} | 3ª: ${dSem['3']}${restoDisp(r.disparos_semana, dSem)}\n\n💬 *RESPOSTAS* (leads distintos que responderam)\nOntem: ${r.respostas_ontem} — ${taxa(r.respostas_ontem, r.disparos_ontem)}\n• ${entradaLbl(rOnt)}1ª: ${rOnt['1']} | 2ª: ${rOnt['2']} | 3ª: ${rOnt['3']} | sem disparo recente: ${rOnt.sem_disparo}\nSemana: ${r.respostas_semana} — ${taxa(r.respostas_semana, r.disparos_semana)}\n• ${entradaLbl(rSem)}1ª: ${rSem['1']} | 2ª: ${rSem['2']} | 3ª: ${rSem['3']} | sem disparo recente: ${rSem.sem_disparo}\n\n${blocoEncaminhamentos(r)}\n\n${blocoCalls(r)}\n\n—\n*TOTAL DA OPERAÇÃO (todos os canais)*\nDisparos — ontem: ${totalDispOntem} | semana: ${totalDispSemana}\nRespostas — ontem: ${totalRespOntem} | semana: ${totalRespSemana}\nOutros canais (outbound/parcerias) — disparos ontem: ${outrosDispOntem} | semana: ${outrosDispSemana}\nRespostas sem canal identificado — ontem: ${x.respostas_ontem} | semana: ${x.respostas_semana}\nCalls agendadas ontem — inbound: ${i.calls_marcadas_ontem} | remarketing: ${r.calls_marcadas_ontem} | parcerias: ${p.calls_marcadas_ontem} | outros: ${o.calls_marcadas_ontem + x.calls_marcadas_ontem}`;\n\nreturn [{\n  json: {\n    referencia_ontem: ddmm(ONTEM),\n    inicio_semana: ddmm(INICIO_SEMANA),\n    mensagem_inbound,\n    mensagem_remarketing,\n    detalhe: R\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        1776
+      ],
+      "id": "a7e41faa-e8df-4489-b208-614b94f63447",
+      "name": "Calcula Report",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "120363425631150537@g.us",
+        "messageText": "={{ $json.mensagem_inbound }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1136,
+        1776
+      ],
+      "id": "638c3f8c-aaeb-49d1-b2f3-6121ee36423c",
+      "name": "Enviar Report Inbound",
+      "executeOnce": true,
+      "retryOnFail": true,
+      "credentials": {
+        "evolutionApi": {
+          "id": "keWx5OuE8n8WEbw0",
+          "name": "EMI-SDR-DIOGO"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1344,
+        1776
+      ],
+      "id": "73466faa-5fe9-4d6a-a4fe-82e5f61e1c08",
+      "name": "Aguarda 5s",
+      "webhookId": "0f2a7c53-9a1e-4a5c-bd6f-2c3f1d5e7a90"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "120363425631150537@g.us",
+        "messageText": "={{ $('Calcula Report').first().json.mensagem_remarketing }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        1776
+      ],
+      "id": "d5ecc6d9-a16c-4d5f-929a-b4063e9e7af2",
+      "name": "Enviar Report Remarketing",
+      "executeOnce": true,
+      "retryOnFail": true,
+      "credentials": {
+        "evolutionApi": {
+          "id": "keWx5OuE8n8WEbw0",
+          "name": "EMI-SDR-DIOGO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4.03 - Reports SDR (Inbound + Remarketing)\n\nRoda 9h. Dispara DUAS mensagens no mesmo grupo: 1) Inbound, 2) Remarketing.\n\nFONTES\n- sdr_eventos (Supabase): disparos, falhas, respostas, encaminhamentos.\n- agenda (MySQL): calls, linha a linha, com mailing_id e midia.\n\nO QUE MUDOU (27/08)\n1. Saiu a planilha \"mailing\" (export do 0.02) como fonte de midia -> o canal\n   agora vem do nome_app do proprio evento. Sem dependencia de export defasado.\n2. Sairam as views mv_sdr_disparos_diario e mv_sdr_respostas_diario: nenhum\n   fluxo faz REFRESH nelas. Tudo vem de sdr_eventos.\n3. Inbound voltou a ser contado: a classificacao antiga so reconhecia\n   \"mensagem_N_\" e \"disparo_inicial_outbound\"; \"disparo_inicial_inbound\" caia\n   fora de todos os baldes (entrava no total e em nenhuma linha).\n4. Taxa de resposta = respostas de ONTEM / disparos de ONTEM, mesma fonte e\n   mesmo dia. Antes era respostas de HOJE / disparos de ONTEM, com o numero\n   exibido vindo de uma terceira fonte.\n5. Datas em America/Sao_Paulo (antes UTC: \"ontem\" comecava as 21h de anteontem).\n6. Atribuicao resposta -> tentativa tem janela de 7 dias. Antes, resposta de\n   hoje era atribuida ao ultimo disparo do lead mesmo que fosse de 3 meses atras.\n7. Dedupe de resposta nao colapsa mais leads sem mailing_id num balde so.\n8. disparo_falhou aparece no report.\n\nPENDENCIA - ENCAMINHAMENTOS\nO bloco de encaminhamentos le eventos com tipo_evento contendo \"encaminh\".\nHoje a 6.04 nao grava nada em sdr_eventos, entao esse bloco fica zerado ate\no patch descrito no doc de entrega (um node Supabase por branch, com\ntipo_evento = \"encaminhamento\" e payload = { destino: \"advisor\" | \"parcerias\" }).\n\nATENCAO - CREDENCIAL\nEste fluxo LE sdr_eventos com \"Finamob - Supabase\"; a 6.01 e a 7.01 GRAVAM com\n\"EMI - Supabase\". Confirmar que as duas apontam para o mesmo projeto.",
+        "height": 700,
+        "width": 520,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        208,
+        1936
+      ],
+      "id": "74e484e3-a73b-4854-b4bd-e07db0931f76",
+      "name": "Doc 4.03"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- =====================================================================\n-- 4.03 - AGENDA (detalhe linha a linha, para atribuicao por canal)\n--\n-- Diferenca para a versao anterior: em vez de devolver contadores ja\n-- agregados por mailing.midia, devolve UMA LINHA POR EVENTO DE CALL com\n-- call_id + mailing_id + midia. O node \"Calcula Report\" decide o canal\n-- pelo historico de disparos (sdr_eventos), porque quando a IA encaminha\n-- um lead para Advisor/Parcerias a mailing.midia muda para 2 e a call\n-- deixaria de ser contada no canal que originou o lead.\n--\n-- Regras preservadas do original:\n--  - marcada  = to_status 'grupo_criado' vindo de outro status\n--               (exclui o log fantasma grupo_criado -> grupo_criado)\n--  - realizada/no_show = saiu de 'grupo_criado' no dia E o status FINAL\n--               do dia nao voltou a ser 'grupo_criado'\n--  - dedupe por (call_id, dia): a call conta 1x por dia, mas pode contar\n--               em dias diferentes da mesma semana\n--  - calls na lixeira excluidas\n--  - janela = domingo desta semana ate ontem (recalculada inline: tabela\n--    derivada no MySQL nao enxerga coluna de outra derivada externa)\n-- =====================================================================\n\nSELECT 'marcada' AS evento, x.call_id, x.mailing_id, x.midia, x.telefone, x.dia\nFROM (\n    SELECT DISTINCT\n        l.call_id,\n        c.mailing_id,\n        m.midia,\n        m.whatsapp AS telefone,\n        DATE(l.changed_at) AS dia\n    FROM calls_status_log l\n    JOIN calls_pipeline c ON c.id = l.call_id\n    LEFT JOIN mailing m ON m.id = c.mailing_id\n    WHERE l.to_status = 'grupo_criado'\n      AND (l.from_status IS NULL OR l.from_status <> 'grupo_criado')\n      AND c.lixeira = 0\n      AND DATE(l.changed_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL (DAYOFWEEK(CURDATE()) - 1) DAY)\n                                 AND DATE_SUB(CURDATE(), INTERVAL 1 DAY)\n) x\n\nUNION ALL\n\nSELECT\n    CASE WHEN y.status_final = 'no_show' THEN 'no_show' ELSE 'realizada' END AS evento,\n    y.call_id, y.mailing_id, y.midia, y.telefone, y.dia\nFROM (\n    SELECT DISTINCT\n        l.call_id,\n        c.mailing_id,\n        m.midia,\n        m.whatsapp AS telefone,\n        DATE(l.changed_at) AS dia,\n        (\n            SELECT l3.to_status\n            FROM calls_status_log l3\n            WHERE l3.call_id = l.call_id\n              AND DATE(l3.changed_at) = DATE(l.changed_at)\n            ORDER BY l3.changed_at DESC\n            LIMIT 1\n        ) AS status_final\n    FROM calls_status_log l\n    JOIN calls_pipeline c ON c.id = l.call_id\n    LEFT JOIN mailing m ON m.id = c.mailing_id\n    WHERE l.from_status = 'grupo_criado'\n      AND l.to_status <> l.from_status\n      AND c.lixeira = 0\n      AND DATE(l.changed_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL (DAYOFWEEK(CURDATE()) - 1) DAY)\n                                 AND DATE_SUB(CURDATE(), INTERVAL 1 DAY)\n) y\nWHERE y.status_final IS NOT NULL\n  AND y.status_final <> 'grupo_criado'\n\nUNION ALL\n\nSELECT 'agendada_hoje' AS evento, c.id AS call_id, c.mailing_id, m.midia, m.whatsapp AS telefone, DATE(c.dt_call) AS dia\nFROM calls_pipeline c\nLEFT JOIN mailing m ON m.id = c.mailing_id\nWHERE c.status = 'grupo_criado'\n  AND c.lixeira = 0\n  AND DATE(c.dt_call) = CURDATE()\n\nUNION ALL\n\nSELECT 'agendada_frente' AS evento, c.id AS call_id, c.mailing_id, m.midia, m.whatsapp AS telefone, DATE(c.dt_call) AS dia\nFROM calls_pipeline c\nLEFT JOIN mailing m ON m.id = c.mailing_id\nWHERE c.status = 'grupo_criado'\n  AND c.lixeira = 0\n  AND DATE(c.dt_call) > CURDATE();\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        768,
+        1776
+      ],
+      "id": "0d5b4376-57ed-48a0-822e-771870455872",
+      "name": "agenda1",
+      "executeOnce": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Todo dia 9h": {
+      "main": [
+        [
+          {
+            "node": "Eventos SDR - Ler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eventos SDR - Ler": {
+      "main": [
+        [
+          {
+            "node": "Reunioes SDR - Ler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reunioes SDR - Ler": {
+      "main": [
+        [
+          {
+            "node": "agenda1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcula Report": {
+      "main": [
+        [
+          {
+            "node": "Enviar Report Inbound",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Report Inbound": {
+      "main": [
+        [
+          {
+            "node": "Aguarda 5s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguarda 5s": {
+      "main": [
+        [
+          {
+            "node": "Enviar Report Remarketing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "agenda1": {
+      "main": [
+        [
+          {
+            "node": "Calcula Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": {
+    "node:Toda Semana1": {
+      "recurrenceRules": []
+    },
+    "node:Todo dia 9h": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "versionId": "c7fcaa10-69c1-4fb9-89d2-b2324e86ffba",
+  "activeVersionId": "c7fcaa10-69c1-4fb9-89d2-b2324e86ffba",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-08-21T19:48:53.252Z",
+      "createdAt": "2026-08-21T19:48:53.252Z",
+      "role": "workflow:owner",
+      "workflowId": "hubZPE7io0uIweH1",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-08-27T23:41:17.808Z",
+    "createdAt": "2026-08-27T23:41:17.808Z",
+    "versionId": "c7fcaa10-69c1-4fb9-89d2-b2324e86ffba",
+    "workflowId": "hubZPE7io0uIweH1",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 9
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          208,
+          1776
+        ],
+        "id": "c2e72a9e-6ea3-498d-b14a-f5740e738a5f",
+        "name": "Todo dia 9h"
+      },
+      {
+        "parameters": {
+          "operation": "getAll",
+          "tableId": "sdr_eventos",
+          "returnAll": true
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          384,
+          1776
+        ],
+        "id": "b47b227d-6a02-4a51-8b52-edcdc18929cd",
+        "name": "Eventos SDR - Ler",
+        "executeOnce": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "h1L5Q3AbzIAqdnsv",
+            "name": "Finamob - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "getAll",
+          "tableId": "sdr_reunioes",
+          "returnAll": true
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          576,
+          1776
+        ],
+        "id": "550e2da8-fdd6-43bb-8c9e-f11c3691d4bf",
+        "name": "Reunioes SDR - Ler",
+        "executeOnce": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "h1L5Q3AbzIAqdnsv",
+            "name": "Finamob - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// =====================================================================\n// 4.03 - Calcula Report (Inbound e Remarketing separados)\n//\n// FONTE UNICA: sdr_eventos (Supabase) para disparos/respostas/falhas\n//              + node \"agenda\" (MySQL) para calls.\n// Nao usa mais a planilha \"mailing\" nem as materialized views\n// (mv_sdr_disparos_diario / mv_sdr_respostas_diario), que nao sao\n// refreshadas por nenhum fluxo.\n//\n// CANAL = nome_app do proprio evento (SDR-INBOUND / SDR-REMARKETING).\n// Disparos, respostas e encaminhamentos ja nascem carimbados pelos fluxos,\n// entao aqui nao ha inferencia: le-se a coluna. O canal e do EVENTO, nao do\n// lead - lead de inbound que entrou na regua de remarketing (o FUP) conta\n// como remarketing a partir do momento em que o 6.01 dispara para ele.\n//\n// Calls sao a excecao: vem do MySQL, que nao tem nome_app. A atribuicao usa,\n// nesta ordem: (1) origem da reuniao em sdr_reunioes, que os calendars\n// carimbam; (2) nome_app do ultimo disparo ANTES daquele dia; (3) mailing.midia.\n//\n// FUSO: tudo convertido para America/Sao_Paulo (UTC-3, sem horario de\n// verao). \"Ontem\" = dia civil brasileiro, nao janela UTC.\n// SEMANA VIGENTE = domingo desta semana ate ontem (D-1).\n// =====================================================================\n\nconst OFFSET_MIN = -180;              // America/Sao_Paulo\nconst DIA_MS = 86400000;\n\nfunction diaLocal(iso) {\n  if (!iso) return null;\n  const d = new Date(iso);\n  if (isNaN(d)) return null;\n  const l = new Date(d.getTime() + OFFSET_MIN * 60000);\n  return Date.UTC(l.getUTCFullYear(), l.getUTCMonth(), l.getUTCDate());\n}\nfunction tsLocal(iso) {\n  const d = new Date(iso);\n  return isNaN(d) ? null : d.getTime();\n}\n\nconst agoraLocal = new Date(Date.now() + OFFSET_MIN * 60000);\nconst HOJE = Date.UTC(agoraLocal.getUTCFullYear(), agoraLocal.getUTCMonth(), agoraLocal.getUTCDate());\nconst ONTEM = HOJE - DIA_MS;\nconst INICIO_SEMANA = HOJE - new Date(HOJE).getUTCDay() * DIA_MS;\n\nfunction ehOntem(t) { return t === ONTEM; }\nfunction ehSemana(t) { return t !== null && t >= INICIO_SEMANA && t < HOJE; }\nfunction ddmm(t) {\n  const d = new Date(t);\n  return String(d.getUTCDate()).padStart(2, '0') + '/' + String(d.getUTCMonth() + 1).padStart(2, '0');\n}\n// Taxa so existe se houve disparo no periodo. Sem denominador a taxa nao e\n// zero - ela nao se aplica, e mostrar \"0.0%\" faz parecer que o disparo\n// nao converteu, quando na verdade nao houve disparo.\nfunction taxa(num, den) {\n  return den > 0 ? `taxa ${(num / den * 100).toFixed(1)}%` : 'sem disparos no período';\n}\n\n// ---------------------------------------------------------------------\n// 1. Eventos\n// ---------------------------------------------------------------------\nconst eventos = $('Eventos SDR - Ler').all().map(i => i.json);\n\nfunction parsePayload(p) {\n  try { return typeof p === 'string' ? JSON.parse(p) : (p || {}); } catch (e) { return {}; }\n}\n// tipo_disparo e coluna dedicada (preenchida pelos fluxos 6.01 e 7.01);\n// payload.template fica como fallback para eventos antigos.\nfunction templateDoEvento(e) {\n  return e.tipo_disparo || parsePayload(e.payload).template || null;\n}\nfunction canalPorApp(app) {\n  const a = String(app || '').toUpperCase();\n  if (a.indexOf('INBOUND') >= 0) return 'inbound';\n  if (a.indexOf('REMARKETING') >= 0) return 'remarketing';\n  if (a.indexOf('OUTBOUND') >= 0) return 'outbound';\n  return null;\n}\nfunction canalPorTemplate(tpl) {\n  const t = String(tpl || '');\n  if (t.indexOf('inbound') >= 0) return 'inbound';\n  if (t.indexOf('outbound') >= 0) return 'outbound';\n  if (/^mensagem_\\d+/.test(t)) return 'remarketing';\n  return null;\n}\n// Tentativa dentro da regua de remarketing (1, 2 ou 3). Disparo inicial\n// de inbound/outbound nao tem regua -> 'inicial'.\nfunction tentativaDoTemplate(tpl) {\n  const t = String(tpl || '');\n  if (/disparo_inicial/.test(t)) return 'inicial';\n  const m = t.match(/mensagem_(\\d+)/);\n  return m ? m[1] : null;\n}\n// Chave do lead: mailing_id quando existe, senao os ultimos 11 digitos do\n// telefone. Sem isso, todo evento sem mailing_id colapsava num unico\n// balde (bug do report antigo).\nfunction chaveLead(e) {\n  if (e.mailing_id !== null && e.mailing_id !== undefined && e.mailing_id !== '') return 'm' + e.mailing_id;\n  const tel = String(e.telefone || '').replace(/\\D/g, '');\n  return tel ? 't' + tel.slice(-11) : null;\n}\n\nconst CANAIS = ['inbound', 'remarketing', 'outbound', 'parcerias', 'outros'];\nfunction novoBalde() {\n  return {\n    disparos_ontem: 0, disparos_semana: 0,\n    disparos_ontem_t: { inicial: 0, '1': 0, '2': 0, '3': 0 },\n    disparos_semana_t: { inicial: 0, '1': 0, '2': 0, '3': 0 },\n    falhas_ontem: 0, falhas_semana: 0,\n    respostas_ontem: 0, respostas_semana: 0,\n    respostas_ontem_t: { inicial: 0, '1': 0, '2': 0, '3': 0, sem_disparo: 0 },\n    respostas_semana_t: { inicial: 0, '1': 0, '2': 0, '3': 0, sem_disparo: 0 },\n    enc_advisor_ontem: 0, enc_advisor_semana: 0,\n    enc_parcerias_ontem: 0, enc_parcerias_semana: 0,\n    calls_marcadas_ontem: 0, calls_marcadas_semana: 0,\n    calls_realizadas_ontem: 0, calls_realizadas_semana: 0,\n    calls_noshow_ontem: 0, calls_noshow_semana: 0,\n    calls_hoje: 0, calls_a_frente: 0\n  };\n}\nconst R = {};\nfor (const c of CANAIS) R[c] = novoBalde();\n\n// ---------------------------------------------------------------------\n// 2. Historico de disparos por lead (canal + tentativa + data)\n// ---------------------------------------------------------------------\nconst historico = {};   // chaveLead -> [{ts, canal, tentativa}]\nfor (const e of eventos) {\n  if (e.tipo_evento !== 'disparo_enviado') continue;\n  const k = chaveLead(e);\n  const ts = tsLocal(e.created_at);\n  if (!k || ts === null) continue;\n  const tpl = templateDoEvento(e);\n  const canal = canalPorApp(e.nome_app) || canalPorTemplate(tpl) || 'outros';\n  (historico[k] = historico[k] || []).push({ ts, canal, tentativa: tentativaDoTemplate(tpl) });\n}\nfor (const k in historico) historico[k].sort((a, b) => a.ts - b.ts);\n\n// Canal do lead num INSTANTE: o ultimo disparo ate aquela data. Usar o\n// \"ultimo disparo de todos\" jogaria para remarketing uma call que nasceu da\n// conversa de inbound semanas antes de o lead entrar no FUP.\nfunction canalDoLeadEm(k, ts) {\n  const h = historico[k];\n  if (!h || !h.length) return null;\n  let canal = null;\n  for (const d of h) { if (d.ts <= ts) canal = d.canal; else break; }\n  return canal || h[0].canal;\n}\nfunction canalDoLead(k) {\n  const h = historico[k];\n  return h && h.length ? h[h.length - 1].canal : null;\n}\n// Ultimo disparo ANTES da resposta. Janela de 7 dias para atribuir a\n// tentativa: resposta a um disparo de 3 meses atras nao e resposta\n// daquele disparo (o report antigo atribuia sem limite nenhum).\nconst JANELA_ATRIB_MS = 7 * DIA_MS;\nfunction disparoAnterior(k, ts) {\n  const h = historico[k];\n  if (!h) return null;\n  let achado = null;\n  for (const d of h) { if (d.ts <= ts) achado = d; else break; }\n  if (!achado) return null;\n  return { canal: achado.canal, tentativa: (ts - achado.ts) <= JANELA_ATRIB_MS ? achado.tentativa : null };\n}\n\n// ---------------------------------------------------------------------\n// 3. Disparos, falhas, respostas e encaminhamentos\n// ---------------------------------------------------------------------\nconst vistoRespOntem = new Set();\nconst vistoRespSemana = new Set();\n\nfor (const e of eventos) {\n  const dia = diaLocal(e.created_at);\n  if (dia === null) continue;\n  const ontem = ehOntem(dia);\n  const semana = ehSemana(dia);\n  if (!ontem && !semana) continue;\n\n  const k = chaveLead(e);\n  const tipo = String(e.tipo_evento || '');\n\n  if (tipo === 'disparo_enviado') {\n    const tpl = templateDoEvento(e);\n    const canal = canalPorApp(e.nome_app) || canalPorTemplate(tpl) || 'outros';\n    const t = tentativaDoTemplate(tpl);\n    const b = R[canal] || R.outros;\n    if (ontem) { b.disparos_ontem++; if (t) b.disparos_ontem_t[t] = (b.disparos_ontem_t[t] || 0) + 1; }\n    if (semana) { b.disparos_semana++; if (t) b.disparos_semana_t[t] = (b.disparos_semana_t[t] || 0) + 1; }\n\n  } else if (tipo === 'disparo_falhou') {\n    const tpl = templateDoEvento(e);\n    const canal = canalPorApp(e.nome_app) || canalPorTemplate(tpl) || 'outros';\n    const b = R[canal] || R.outros;\n    if (ontem) b.falhas_ontem++;\n    if (semana) b.falhas_semana++;\n\n  } else if (tipo === 'resposta_recebida') {\n    const ts = tsLocal(e.created_at);\n    const ant = k ? disparoAnterior(k, ts) : null;\n    // O nome_app da resposta vem do historico de mensagens (trigger\n    // fn_sdr_detecta_resposta) = o agente que recebeu. E a fonte certa.\n    const canal = canalPorApp(e.nome_app) || (ant && ant.canal) || 'outros';\n    const tent = ant && ant.tentativa ? ant.tentativa : 'sem_disparo';\n    const b = R[canal] || R.outros;\n    // dedupe: mesmo lead, mesmo dia = 1 resposta\n    const chave = (k || 'evt' + e.id) + '_' + dia;\n    if (ontem && !vistoRespOntem.has(chave)) {\n      vistoRespOntem.add(chave);\n      b.respostas_ontem++;\n      b.respostas_ontem_t[tent] = (b.respostas_ontem_t[tent] || 0) + 1;\n    }\n    if (semana && !vistoRespSemana.has(chave)) {\n      vistoRespSemana.add(chave);\n      b.respostas_semana++;\n      b.respostas_semana_t[tent] = (b.respostas_semana_t[tent] || 0) + 1;\n    }\n\n  } else if (/encaminh/i.test(tipo)) {\n    // Eventos 'encaminhado_advisor' / 'encaminhado_parcerias', gravados pela\n    // 6.04 (remarketing) e 7.04 (inbound), ja com nome_app fixo do fluxo.\n    const p = parsePayload(e.payload);\n    const destinoRaw = String(p.destino || tipo).toLowerCase();\n    const destino = /parceri/.test(destinoRaw) ? 'parcerias' : (/advisor/.test(destinoRaw) ? 'advisor' : null);\n    if (!destino) continue;\n    const canal = canalPorApp(e.nome_app) || (k && canalDoLead(k)) || 'outros';\n    const b = R[canal] || R.outros;\n    const campo = destino === 'advisor' ? 'enc_advisor' : 'enc_parcerias';\n    if (ontem) b[campo + '_ontem']++;\n    if (semana) b[campo + '_semana']++;\n  }\n}\n\n// ---------------------------------------------------------------------\n// 4. Calls (node \"agenda\", linha a linha) atribuidas ao canal de ORIGEM\n// ---------------------------------------------------------------------\nconst MIDIA_CANAL = { '14': 'inbound', '15': 'remarketing', '5': 'remarketing', '2': 'parcerias', '1': 'outbound', '4': 'outbound' };\n\n// --- Reunioes carimbadas pelos calendars (sdr_reunioes.origem) ---\n// Fonte mais confiavel de canal para uma call: quem agendou disse quem era.\n// So cobre o que a IA agendou; call marcada na mao no CRM cai nos fallbacks.\nconst reunioesPorLead = {};\nfor (const r of $('Reunioes SDR - Ler').all().map(i => i.json)) {\n  const canal = canalPorApp(r.origem);\n  if (!canal) continue;\n  const chaves = [];\n  if (r.mailing_id) chaves.push('m' + r.mailing_id);\n  const tel = String(r.telefone || '').replace(/\\D/g, '');\n  if (tel) chaves.push('t' + tel.slice(-11));\n  const marcos = [tsLocal(r.criado_em), tsLocal(r.data_hora_agendada)].filter(t => t !== null);\n  for (const c of chaves) (reunioesPorLead[c] = reunioesPorLead[c] || []).push({ canal, marcos });\n}\nfunction canalPorReuniao(chaves, ts) {\n  let melhor = null, menorDist = Infinity;\n  for (const c of chaves) {\n    for (const r of (reunioesPorLead[c] || [])) {\n      for (const m of r.marcos) {\n        const dist = Math.abs(m - ts);\n        if (dist < menorDist) { menorDist = dist; melhor = r.canal; }\n      }\n    }\n  }\n  return melhor;\n}\n\nfunction canalDaCall(row, ts) {\n  const chaves = [];\n  if (row.mailing_id !== null && row.mailing_id !== undefined && row.mailing_id !== '') chaves.push('m' + row.mailing_id);\n  const tel = String(row.telefone || '').replace(/\\D/g, '');\n  if (tel) chaves.push('t' + tel.slice(-11));\n  return canalPorReuniao(chaves, ts)\n      || (chaves.length ? canalDoLeadEm(chaves[0], ts) : null)\n      || MIDIA_CANAL[String(row.midia)]\n      || 'outros';\n}\n\nconst linhasAgenda = $('agenda1').all().map(i => i.json).filter(r => r && r.evento);\nfor (const row of linhasAgenda) {\n  const dia = row.dia ? diaLocal(String(row.dia).slice(0, 10) + 'T12:00:00Z') : null;\n  const b = R[canalDaCall(row, dia !== null ? dia : Date.now())] || R.outros;\n  const ontem = dia !== null && ehOntem(dia);\n  const semana = dia !== null && ehSemana(dia);\n  switch (row.evento) {\n    case 'marcada':\n      if (ontem) b.calls_marcadas_ontem++;\n      if (semana) b.calls_marcadas_semana++;\n      break;\n    case 'realizada':\n      if (ontem) b.calls_realizadas_ontem++;\n      if (semana) b.calls_realizadas_semana++;\n      break;\n    case 'no_show':\n      if (ontem) b.calls_noshow_ontem++;\n      if (semana) b.calls_noshow_semana++;\n      break;\n    case 'agendada_hoje': b.calls_hoje++; break;\n    case 'agendada_frente': b.calls_a_frente++; break;\n  }\n}\n\n// ---------------------------------------------------------------------\n// 5. Montagem das mensagens\n// ---------------------------------------------------------------------\nconst periodo = `Ontem ${ddmm(ONTEM)} · semana ${ddmm(INICIO_SEMANA)} → ${ddmm(ONTEM)}`;\n\n// A soma das tentativas tem que fechar com o total. Disparo antigo, sem\n// tipo_disparo e sem template no payload, nao cai em nenhuma tentativa -\n// em vez de sumir da conta, aparece como \"sem template\".\n// A soma das etapas tem que fechar com o total. \"entrada\" e o primeiro\n// contato da regua (template disparo_inicial_*, disparado pela fila de\n// entrada do 6.01) - nao e 1a/2a/3a tentativa. Se ainda sobrar diferenca,\n// e disparo sem template identificavel e aparece como tal, em vez de sumir.\nfunction entradaLbl(t) {\n  return (t.inicial || 0) > 0 ? `entrada: ${t.inicial} | ` : '';\n}\nfunction restoDisp(total, t) {\n  const resto = total - ((t['1'] || 0) + (t['2'] || 0) + (t['3'] || 0) + (t.inicial || 0));\n  return resto > 0 ? ` | sem template: ${resto}` : '';\n}\n\nfunction blocoEncaminhamentos(b) {\n  return `➡️ *ENCAMINHAMENTOS*\nAdvisor — ontem: ${b.enc_advisor_ontem} | semana: ${b.enc_advisor_semana}\nParcerias — ontem: ${b.enc_parcerias_ontem} | semana: ${b.enc_parcerias_semana}`;\n}\nfunction blocoCalls(b) {\n  return `📅 *CALLS*\nAgendadas — ontem: ${b.calls_marcadas_ontem} | semana: ${b.calls_marcadas_semana}\nRealizadas — ontem: ${b.calls_realizadas_ontem} | semana: ${b.calls_realizadas_semana}\nNo-show — ontem: ${b.calls_noshow_ontem} | semana: ${b.calls_noshow_semana}\nNa agenda — hoje: ${b.calls_hoje} | daqui pra frente: ${b.calls_a_frente}`;\n}\n\n// ---- INBOUND ----\nconst i = R.inbound;\nconst mensagem_inbound = `*REPORT INBOUND*\n_${periodo}_\n\n📤 *DISPAROS*\nOntem: ${i.disparos_ontem}${i.falhas_ontem ? ` (falhas: ${i.falhas_ontem})` : ''}\nSemana: ${i.disparos_semana}${i.falhas_semana ? ` (falhas: ${i.falhas_semana})` : ''}\n\n💬 *RESPOSTAS* (leads distintos que responderam)\nOntem: ${i.respostas_ontem} — ${taxa(i.respostas_ontem, i.disparos_ontem)}\nSemana: ${i.respostas_semana} — ${taxa(i.respostas_semana, i.disparos_semana)}\n\n${blocoEncaminhamentos(i)}\n\n${blocoCalls(i)}`;\n\n// ---- REMARKETING ----\nconst r = R.remarketing;\nconst dOnt = r.disparos_ontem_t, dSem = r.disparos_semana_t;\nconst rOnt = r.respostas_ontem_t, rSem = r.respostas_semana_t;\nconst o = R.outbound, p = R.parcerias, x = R.outros;\nconst outrosDispOntem = o.disparos_ontem + p.disparos_ontem + x.disparos_ontem;\nconst outrosDispSemana = o.disparos_semana + p.disparos_semana + x.disparos_semana;\nconst totalDispOntem = i.disparos_ontem + r.disparos_ontem + outrosDispOntem;\nconst totalDispSemana = i.disparos_semana + r.disparos_semana + outrosDispSemana;\nconst totalRespOntem = CANAIS.reduce((s, c) => s + R[c].respostas_ontem, 0);\nconst totalRespSemana = CANAIS.reduce((s, c) => s + R[c].respostas_semana, 0);\n\nconst mensagem_remarketing = `*REPORT REMARKETING*\n_${periodo}_\n\n📤 *DISPAROS*\nOntem: ${r.disparos_ontem}${r.falhas_ontem ? ` (falhas: ${r.falhas_ontem})` : ''}\n• ${entradaLbl(dOnt)}1ª: ${dOnt['1']} | 2ª: ${dOnt['2']} | 3ª: ${dOnt['3']}${restoDisp(r.disparos_ontem, dOnt)}\nSemana: ${r.disparos_semana}${r.falhas_semana ? ` (falhas: ${r.falhas_semana})` : ''}\n• ${entradaLbl(dSem)}1ª: ${dSem['1']} | 2ª: ${dSem['2']} | 3ª: ${dSem['3']}${restoDisp(r.disparos_semana, dSem)}\n\n💬 *RESPOSTAS* (leads distintos que responderam)\nOntem: ${r.respostas_ontem} — ${taxa(r.respostas_ontem, r.disparos_ontem)}\n• ${entradaLbl(rOnt)}1ª: ${rOnt['1']} | 2ª: ${rOnt['2']} | 3ª: ${rOnt['3']} | sem disparo recente: ${rOnt.sem_disparo}\nSemana: ${r.respostas_semana} — ${taxa(r.respostas_semana, r.disparos_semana)}\n• ${entradaLbl(rSem)}1ª: ${rSem['1']} | 2ª: ${rSem['2']} | 3ª: ${rSem['3']} | sem disparo recente: ${rSem.sem_disparo}\n\n${blocoEncaminhamentos(r)}\n\n${blocoCalls(r)}\n\n—\n*TOTAL DA OPERAÇÃO (todos os canais)*\nDisparos — ontem: ${totalDispOntem} | semana: ${totalDispSemana}\nRespostas — ontem: ${totalRespOntem} | semana: ${totalRespSemana}\nOutros canais (outbound/parcerias) — disparos ontem: ${outrosDispOntem} | semana: ${outrosDispSemana}\nRespostas sem canal identificado — ontem: ${x.respostas_ontem} | semana: ${x.respostas_semana}\nCalls agendadas ontem — inbound: ${i.calls_marcadas_ontem} | remarketing: ${r.calls_marcadas_ontem} | parcerias: ${p.calls_marcadas_ontem} | outros: ${o.calls_marcadas_ontem + x.calls_marcadas_ontem}`;\n\nreturn [{\n  json: {\n    referencia_ontem: ddmm(ONTEM),\n    inicio_semana: ddmm(INICIO_SEMANA),\n    mensagem_inbound,\n    mensagem_remarketing,\n    detalhe: R\n  }\n}];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          944,
+          1776
+        ],
+        "id": "a7e41faa-e8df-4489-b208-614b94f63447",
+        "name": "Calcula Report",
+        "executeOnce": true
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "EMI-SDR-DIOGO",
+          "remoteJid": "120363425631150537@g.us",
+          "messageText": "={{ $json.mensagem_inbound }}",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1136,
+          1776
+        ],
+        "id": "638c3f8c-aaeb-49d1-b2f3-6121ee36423c",
+        "name": "Enviar Report Inbound",
+        "executeOnce": true,
+        "retryOnFail": true,
+        "credentials": {
+          "evolutionApi": {
+            "id": "keWx5OuE8n8WEbw0",
+            "name": "EMI-SDR-DIOGO"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          1344,
+          1776
+        ],
+        "id": "73466faa-5fe9-4d6a-a4fe-82e5f61e1c08",
+        "name": "Aguarda 5s",
+        "webhookId": "0f2a7c53-9a1e-4a5c-bd6f-2c3f1d5e7a90"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "EMI-SDR-DIOGO",
+          "remoteJid": "120363425631150537@g.us",
+          "messageText": "={{ $('Calcula Report').first().json.mensagem_remarketing }}",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1536,
+          1776
+        ],
+        "id": "d5ecc6d9-a16c-4d5f-929a-b4063e9e7af2",
+        "name": "Enviar Report Remarketing",
+        "executeOnce": true,
+        "retryOnFail": true,
+        "credentials": {
+          "evolutionApi": {
+            "id": "keWx5OuE8n8WEbw0",
+            "name": "EMI-SDR-DIOGO"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## 4.03 - Reports SDR (Inbound + Remarketing)\n\nRoda 9h. Dispara DUAS mensagens no mesmo grupo: 1) Inbound, 2) Remarketing.\n\nFONTES\n- sdr_eventos (Supabase): disparos, falhas, respostas, encaminhamentos.\n- agenda (MySQL): calls, linha a linha, com mailing_id e midia.\n\nO QUE MUDOU (27/08)\n1. Saiu a planilha \"mailing\" (export do 0.02) como fonte de midia -> o canal\n   agora vem do nome_app do proprio evento. Sem dependencia de export defasado.\n2. Sairam as views mv_sdr_disparos_diario e mv_sdr_respostas_diario: nenhum\n   fluxo faz REFRESH nelas. Tudo vem de sdr_eventos.\n3. Inbound voltou a ser contado: a classificacao antiga so reconhecia\n   \"mensagem_N_\" e \"disparo_inicial_outbound\"; \"disparo_inicial_inbound\" caia\n   fora de todos os baldes (entrava no total e em nenhuma linha).\n4. Taxa de resposta = respostas de ONTEM / disparos de ONTEM, mesma fonte e\n   mesmo dia. Antes era respostas de HOJE / disparos de ONTEM, com o numero\n   exibido vindo de uma terceira fonte.\n5. Datas em America/Sao_Paulo (antes UTC: \"ontem\" comecava as 21h de anteontem).\n6. Atribuicao resposta -> tentativa tem janela de 7 dias. Antes, resposta de\n   hoje era atribuida ao ultimo disparo do lead mesmo que fosse de 3 meses atras.\n7. Dedupe de resposta nao colapsa mais leads sem mailing_id num balde so.\n8. disparo_falhou aparece no report.\n\nPENDENCIA - ENCAMINHAMENTOS\nO bloco de encaminhamentos le eventos com tipo_evento contendo \"encaminh\".\nHoje a 6.04 nao grava nada em sdr_eventos, entao esse bloco fica zerado ate\no patch descrito no doc de entrega (um node Supabase por branch, com\ntipo_evento = \"encaminhamento\" e payload = { destino: \"advisor\" | \"parcerias\" }).\n\nATENCAO - CREDENCIAL\nEste fluxo LE sdr_eventos com \"Finamob - Supabase\"; a 6.01 e a 7.01 GRAVAM com\n\"EMI - Supabase\". Confirmar que as duas apontam para o mesmo projeto.",
+          "height": 700,
+          "width": 520,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          208,
+          1936
+        ],
+        "id": "74e484e3-a73b-4854-b4bd-e07db0931f76",
+        "name": "Doc 4.03"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- =====================================================================\n-- 4.03 - AGENDA (detalhe linha a linha, para atribuicao por canal)\n--\n-- Diferenca para a versao anterior: em vez de devolver contadores ja\n-- agregados por mailing.midia, devolve UMA LINHA POR EVENTO DE CALL com\n-- call_id + mailing_id + midia. O node \"Calcula Report\" decide o canal\n-- pelo historico de disparos (sdr_eventos), porque quando a IA encaminha\n-- um lead para Advisor/Parcerias a mailing.midia muda para 2 e a call\n-- deixaria de ser contada no canal que originou o lead.\n--\n-- Regras preservadas do original:\n--  - marcada  = to_status 'grupo_criado' vindo de outro status\n--               (exclui o log fantasma grupo_criado -> grupo_criado)\n--  - realizada/no_show = saiu de 'grupo_criado' no dia E o status FINAL\n--               do dia nao voltou a ser 'grupo_criado'\n--  - dedupe por (call_id, dia): a call conta 1x por dia, mas pode contar\n--               em dias diferentes da mesma semana\n--  - calls na lixeira excluidas\n--  - janela = domingo desta semana ate ontem (recalculada inline: tabela\n--    derivada no MySQL nao enxerga coluna de outra derivada externa)\n-- =====================================================================\n\nSELECT 'marcada' AS evento, x.call_id, x.mailing_id, x.midia, x.telefone, x.dia\nFROM (\n    SELECT DISTINCT\n        l.call_id,\n        c.mailing_id,\n        m.midia,\n        m.whatsapp AS telefone,\n        DATE(l.changed_at) AS dia\n    FROM calls_status_log l\n    JOIN calls_pipeline c ON c.id = l.call_id\n    LEFT JOIN mailing m ON m.id = c.mailing_id\n    WHERE l.to_status = 'grupo_criado'\n      AND (l.from_status IS NULL OR l.from_status <> 'grupo_criado')\n      AND c.lixeira = 0\n      AND DATE(l.changed_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL (DAYOFWEEK(CURDATE()) - 1) DAY)\n                                 AND DATE_SUB(CURDATE(), INTERVAL 1 DAY)\n) x\n\nUNION ALL\n\nSELECT\n    CASE WHEN y.status_final = 'no_show' THEN 'no_show' ELSE 'realizada' END AS evento,\n    y.call_id, y.mailing_id, y.midia, y.telefone, y.dia\nFROM (\n    SELECT DISTINCT\n        l.call_id,\n        c.mailing_id,\n        m.midia,\n        m.whatsapp AS telefone,\n        DATE(l.changed_at) AS dia,\n        (\n            SELECT l3.to_status\n            FROM calls_status_log l3\n            WHERE l3.call_id = l.call_id\n              AND DATE(l3.changed_at) = DATE(l.changed_at)\n            ORDER BY l3.changed_at DESC\n            LIMIT 1\n        ) AS status_final\n    FROM calls_status_log l\n    JOIN calls_pipeline c ON c.id = l.call_id\n    LEFT JOIN mailing m ON m.id = c.mailing_id\n    WHERE l.from_status = 'grupo_criado'\n      AND l.to_status <> l.from_status\n      AND c.lixeira = 0\n      AND DATE(l.changed_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL (DAYOFWEEK(CURDATE()) - 1) DAY)\n                                 AND DATE_SUB(CURDATE(), INTERVAL 1 DAY)\n) y\nWHERE y.status_final IS NOT NULL\n  AND y.status_final <> 'grupo_criado'\n\nUNION ALL\n\nSELECT 'agendada_hoje' AS evento, c.id AS call_id, c.mailing_id, m.midia, m.whatsapp AS telefone, DATE(c.dt_call) AS dia\nFROM calls_pipeline c\nLEFT JOIN mailing m ON m.id = c.mailing_id\nWHERE c.status = 'grupo_criado'\n  AND c.lixeira = 0\n  AND DATE(c.dt_call) = CURDATE()\n\nUNION ALL\n\nSELECT 'agendada_frente' AS evento, c.id AS call_id, c.mailing_id, m.midia, m.whatsapp AS telefone, DATE(c.dt_call) AS dia\nFROM calls_pipeline c\nLEFT JOIN mailing m ON m.id = c.mailing_id\nWHERE c.status = 'grupo_criado'\n  AND c.lixeira = 0\n  AND DATE(c.dt_call) > CURDATE();\n",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.5,
+        "position": [
+          768,
+          1776
+        ],
+        "id": "0d5b4376-57ed-48a0-822e-771870455872",
+        "name": "agenda1",
+        "executeOnce": true,
+        "credentials": {
+          "mySql": {
+            "id": "8ItpiHe2joMjz6qf",
+            "name": "Finamob database"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Todo dia 9h": {
+        "main": [
+          [
+            {
+              "node": "Eventos SDR - Ler",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Eventos SDR - Ler": {
+        "main": [
+          [
+            {
+              "node": "Reunioes SDR - Ler",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Reunioes SDR - Ler": {
+        "main": [
+          [
+            {
+              "node": "agenda1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Calcula Report": {
+        "main": [
+          [
+            {
+              "node": "Enviar Report Inbound",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar Report Inbound": {
+        "main": [
+          [
+            {
+              "node": "Aguarda 5s",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Aguarda 5s": {
+        "main": [
+          [
+            {
+              "node": "Enviar Report Remarketing",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "agenda1": {
+        "main": [
+          [
+            {
+              "node": "Calcula Report",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
