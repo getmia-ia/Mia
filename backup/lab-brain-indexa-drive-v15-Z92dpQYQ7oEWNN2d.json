@@ -1,0 +1,2086 @@
+{
+  "updatedAt": "2026-08-28T21:04:24.423Z",
+  "createdAt": "2026-08-27T19:22:51.465Z",
+  "id": "Z92dpQYQ7oEWNN2d",
+  "name": "Lab Brain – Indexa Drive v15",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "94bd6e44-c89d-492c-bfb9-2f125c1662ba",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        4864,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://script.google.com/macros/s/AKfycbwpo-wwY_2xRQvcJCcfVH2XrxzCjqjBK0sHQB-ScgP6gnz1RS877NRgDWXE0IqXnhop/exec",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "folderId",
+              "value": "1WIjp8kdnVIMmt2yBSgoHYSvxvcfGEK3_"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4c31db2c-c8a7-4a71-98e7-e8b94d1a05ce",
+      "name": "HTTP: Lista Arquivos LAB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5136,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://alrnajijumqvxzmogwpy.supabase.co/rest/v1/lab_brain_documents?select=external_id,drive_modified_at&origin=eq.drive&limit=1000",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "***REMOVIDO***"
+            },
+            {
+              "name": "Authorization",
+              "value": "***REMOVIDO***"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "604e8e88-e134-447c-836b-1a4cfe0eb2ed",
+      "name": "HTTP: Busca Indexados",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5392,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { files } = $('HTTP: Lista Arquivos LAB').first().json;\nconst raw = $input.first().json;\nconst indexed = raw.body || raw;\nconst indexedMap = {};\n(Array.isArray(indexed) ? indexed : []).forEach(d => {\n  if (d.external_id) indexedMap[d.external_id] = d.drive_modified_at;\n});\n\nif (!files || files.length === 0) throw new Error('SKIP: nenhum arquivo retornado pelo GAS');\n\nconst toProcess = files.filter(f => {\n  const lastIndexed = indexedMap[f.id];\n  if (!lastIndexed) return true;\n  return new Date(f.modifiedTime) > new Date(lastIndexed);\n});\n\nif (toProcess.length === 0) throw new Error('SKIP: todos os arquivos já estão atualizados');\nreturn toProcess.map(f => ({ json: f }));"
+      },
+      "id": "39a80123-558d-4c94-9732-d5597ea590e6",
+      "name": "Code: Filtra Novos/Modificados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5648,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "5b8e2fcd-d969-43df-a7ad-49beaa2dd8cc",
+      "name": "Split in Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        5904,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const f = $input.first().json;\nconst mime = f.mimeType || '';\n\nconst EXPORTABLE = new Set([\n  'application/vnd.google-apps.document',\n  'application/vnd.google-apps.presentation',\n  'application/vnd.google-apps.spreadsheet',\n  'application/vnd.google-apps.drawing',\n]);\nconst isGoogleNative = EXPORTABLE.has(mime);\n\nconst extractOpMap = {\n  'application/pdf': 'pdf',\n  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'word',\n  'application/msword': 'word',\n  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'word',\n  'application/vnd.ms-powerpoint': 'word',\n  'text/plain': 'text',\n  'text/markdown': 'text',\n  'text/x-markdown': 'text',\n  'text/csv': 'text',\n  'application/csv': 'text',\n};\nconst extractOp = isGoogleNative ? 'pdf' : (extractOpMap[mime] || null);\n\nif (!extractOp) {\n  return [{ json: { _skip: true, _reason: 'tipo não suportado: ' + mime, fileName: f.name } }];\n}\n\nreturn [{ json: {\n  ...f,\n  isGoogleNative,\n  extractOp,\n  driveFileId:        f.id,\n  driveModifiedAt:    f.modifiedTime,\n  fileName:           f.name,\n  mimeType:           mime,\n  driveFolderWatchId: '1WIjp8kdnVIMmt2yBSgoHYSvxvcfGEK3_',\n  supabaseUrl:        'https://alrnajijumqvxzmogwpy.supabase.co',\n  supabaseServiceKey: '***REMOVIDO***',\n} }];"
+      },
+      "id": "2f854be3-79ea-4c19-ba91-df67e07c807f",
+      "name": "Code: Classifica Arquivo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6176,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4125fb29-ce68-43fb-b8b1-f13f2950c9a8",
+      "name": "IF: Pular Arquivo",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        6432,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.isGoogleNative }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2f75efce-6926-46d2-9213-2fac5bdef44b",
+      "name": "IF: É Google Nativo",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        6688,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $('Code: Classifica Arquivo').item.json.driveFileId }}/export",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "mimeType",
+              "value": "application/pdf"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "28c985b9-ee16-46d4-9e3a-c2462448743d",
+      "name": "HTTP: Exporta Drive (PDF)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6944,
+        1344
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "0826ee83-64b6-443f-95ba-597ae94cf754",
+      "name": "Extract: Google Nativo",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        7216,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $('Code: Classifica Arquivo').item.json.driveFileId }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "alt",
+              "value": "media"
+            },
+            {
+              "name": "supportsAllDrives",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "8384ea47-36fa-44dd-9bd3-1608cd384473",
+      "name": "HTTP: Baixa Arquivo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6944,
+        1712
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "s1",
+                    "leftValue": "={{ $('Code: Classifica Arquivo').item.json.extractOp }}",
+                    "rightValue": "pdf",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "PDF"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "s2",
+                    "leftValue": "={{ $('Code: Classifica Arquivo').item.json.extractOp }}",
+                    "rightValue": "word",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Word"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "09ecf0ce-5959-4463-bd52-08aaac3da0fa",
+      "name": "Switch: Por Tipo",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        7216,
+        1712
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "66c03c1b-6b2c-4b0b-a134-89516579ccd7",
+      "name": "Extract: PDF",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        7472,
+        1584
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "word"
+      },
+      "id": "8509ac45-9a3b-4ef0-b40a-a2b1e0300800",
+      "name": "Extract: Word / PPTX",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        7472,
+        1728
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "id": "1e897bd4-f9c4-4214-9324-cb1defae9f81",
+      "name": "Extract: Texto / MD",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        7472,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawText = $input.first().json.text || $input.first().json.data || '';\nconst cfg = $('Code: Classifica Arquivo').first().json;\n\nfunction stripMarkdown(txt) {\n  return txt\n    .replace(/^#{1,6}\\s+/gm, '')\n    .replace(/\\*\\*(.+?)\\*\\*/g, '$1')\n    .replace(/\\*(.+?)\\*/g, '$1')\n    .replace(/_{2}(.+?)_{2}/g, '$1')\n    .replace(/`{3}[\\s\\S]*?`{3}/gm, '')\n    .replace(/`(.+?)`/g, '$1')\n    .replace(/^\\s*[-*+]\\s+/gm, '')\n    .replace(/^\\s*\\d+\\.\\s+/gm, '')\n    .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1')\n    .replace(/!\\[.*?\\]\\([^)]+\\)/g, '')\n    .replace(/^>\\s*/gm, '')\n    .replace(/^---+$/gm, '')\n    .trim();\n}\n\nconst isMarkdown = /\\.(md|markdown)$/i.test(cfg.fileName || '');\nconst cleaned = rawText.replace(/\\r\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').replace(/[ \\t]{2,}/g, ' ').trim();\nconst text = isMarkdown ? stripMarkdown(cleaned) : cleaned;\n\nif (text.length < 30) {\n  return [{ json: { _skip: true, _reason: 'texto muito curto', fileName: cfg.fileName } }];\n}\n\nconst CHUNK_SIZE = 800, OVERLAP = 120;\nconst chunks = [];\nlet start = 0;\nwhile (start < text.length) {\n  const end = Math.min(start + CHUNK_SIZE, text.length);\n  const content = text.slice(start, end).trim();\n  if (content.length > 20) chunks.push({ content, chunkIndex: chunks.length });\n  if (end >= text.length) break;\n  start += CHUNK_SIZE - OVERLAP;\n}\n\nif (chunks.length === 0) {\n  return [{ json: { _skip: true, _reason: 'sem chunks gerados', fileName: cfg.fileName } }];\n}\n\nreturn [{ json: {\n  chunks,\n  totalChunks:        chunks.length,\n  driveFileId:        cfg.driveFileId,\n  driveModifiedAt:    cfg.driveModifiedAt,\n  fileName:           cfg.fileName,\n  mimeType:           cfg.mimeType,\n  driveFolderWatchId: cfg.driveFolderWatchId,\n  supabaseUrl:        cfg.supabaseUrl,\n  supabaseServiceKey: cfg.supabaseServiceKey,\n} }];"
+      },
+      "id": "f2a55d28-905d-4be5-81e7-6c10ae0a7773",
+      "name": "Code: Divide em Chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7728,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f6009b0a-b8a0-418b-a6fc-9f943fa1ba2e",
+      "name": "IF: Pular Chunk",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        7984,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.supabaseUrl + '/rest/v1/lab_brain_folders?drive_folder_id=eq.' + $json.driveFolderWatchId + '&select=id&limit=1' }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $json.supabaseServiceKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.supabaseServiceKey }}"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "identity"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6537bea8-84fe-472d-a677-0030f054ff39",
+      "name": "HTTP: Busca Pasta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8256,
+        1648
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Code: Divide em Chunks').first().json.supabaseUrl + '/rest/v1/lab_brain_documents' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "on_conflict",
+              "value": "external_id"
+            }
+          ]
+        },
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "identity"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ external_id: $('Code: Divide em Chunks').first().json.driveFileId, folder_id: $input.first().json[0]?.id || null, title: $('Code: Divide em Chunks').first().json.fileName, mime_type: $('Code: Divide em Chunks').first().json.mimeType, origin: 'drive', status: 'processing', drive_modified_at: $('Code: Divide em Chunks').first().json.driveModifiedAt }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "f6e5a035-5e03-476f-9fb7-e58bdb17b68f",
+      "name": "HTTP: Upsert Documento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8512,
+        1648
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $('Code: Divide em Chunks').first().json.supabaseUrl }}/rest/v1/lab_brain_chunks?document_id=eq.{{ $('HTTP: Upsert Documento').first().json[0]?.id || $('HTTP: Upsert Documento').first().json.body?.[0]?.id }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8015d246-c331-4dda-90eb-801778877ae1",
+      "name": "HTTP: Deleta Chunks Antigos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8944,
+        1632
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'text-embedding-3-small', input: $('Code: Divide em Chunks').first().json.chunks.map(c => c.content) }) }}",
+        "options": {}
+      },
+      "id": "9a82818f-8775-401a-99e3-6fe6768c2c7a",
+      "name": "HTTP: Gera Embeddings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        9200,
+        1632
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "GNYM1RjawrdA7XKF",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const embedData  = $input.first().json.data;\nconst ctx        = $('Code: Divide em Chunks').first().json;\nconst upsertResp = $('HTTP: Upsert Documento').first().json;\nconst documentId = upsertResp.body?.[0]?.id || upsertResp?.[0]?.id;\nif (!documentId) return [{ json: { _skip: true, _reason: 'document_id não encontrado', fileName: ctx.fileName } }];\nconst rows = ctx.chunks.map((c, i) => ({\n  document_id: documentId,\n  content:     c.content,\n  embedding:   embedData[i]?.embedding || [],\n  chunk_index: c.chunkIndex,\n  page:        null,\n}));\nreturn [{ json: { rows, totalChunks: rows.length, documentId, supabaseUrl: ctx.supabaseUrl, supabaseServiceKey: ctx.supabaseServiceKey, fileName: ctx.fileName } }];"
+      },
+      "id": "e026d74c-7807-411e-ba64-db332a7bb5e2",
+      "name": "Code: Monta Chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9472,
+        1632
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.supabaseUrl + '/rest/v1/lab_brain_chunks' }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $json.supabaseServiceKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.supabaseServiceKey }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.rows) }}",
+        "options": {}
+      },
+      "id": "3c8a184e-1e69-4835-b5a2-5e286a159fd1",
+      "name": "HTTP: Insere Chunks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        9728,
+        1632
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Code: Monta Chunks').first().json.supabaseUrl + '/rest/v1/lab_brain_documents?id=eq.' + $('Code: Monta Chunks').first().json.documentId }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Code: Monta Chunks').first().json.supabaseServiceKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Code: Monta Chunks').first().json.supabaseServiceKey }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ status: 'ready', chunk_count: $('Code: Monta Chunks').first().json.totalChunks, indexed_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "id": "280ac4ee-a0b1-4e23-a9d7-f5a63750b00f",
+      "name": "HTTP: Atualiza Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        9984,
+        1632
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Code: Divide em Chunks').first().json.supabaseUrl }}/rest/v1/lab_brain_documents?external_id=eq.{{ $('Code: Divide em Chunks').first().json.driveFileId }}&select=id",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "identity"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ external_id: $('Code: Divide em Chunks').first().json.driveFileId, folder_id: $input.first().json[0]?.id || null, title: $('Code: Divide em Chunks').first().json.fileName, mime_type: $('Code: Divide em Chunks').first().json.mimeType, origin: 'drive', status: 'processing', drive_modified_at: $('Code: Divide em Chunks').first().json.driveModifiedAt }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "e5742d35-3eb2-4628-8fa9-39a973ecd4b2",
+      "name": "HTTP: Busca ID Documento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8704,
+        1648
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Lista Arquivos LAB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Lista Arquivos LAB": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Busca Indexados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Busca Indexados": {
+      "main": [
+        [
+          {
+            "node": "Code: Filtra Novos/Modificados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Filtra Novos/Modificados": {
+      "main": [
+        [
+          {
+            "node": "Split in Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split in Batches": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Code: Classifica Arquivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Classifica Arquivo": {
+      "main": [
+        [
+          {
+            "node": "IF: Pular Arquivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Pular Arquivo": {
+      "main": [
+        [
+          {
+            "node": "Split in Batches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF: É Google Nativo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: É Google Nativo": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Exporta Drive (PDF)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP: Baixa Arquivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Exporta Drive (PDF)": {
+      "main": [
+        [
+          {
+            "node": "Extract: Google Nativo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract: Google Nativo": {
+      "main": [
+        [
+          {
+            "node": "Code: Divide em Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Baixa Arquivo": {
+      "main": [
+        [
+          {
+            "node": "Switch: Por Tipo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: Por Tipo": {
+      "main": [
+        [
+          {
+            "node": "Extract: PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract: Word / PPTX",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract: Texto / MD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract: PDF": {
+      "main": [
+        [
+          {
+            "node": "Code: Divide em Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract: Word / PPTX": {
+      "main": [
+        [
+          {
+            "node": "Code: Divide em Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract: Texto / MD": {
+      "main": [
+        [
+          {
+            "node": "Code: Divide em Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Divide em Chunks": {
+      "main": [
+        [
+          {
+            "node": "IF: Pular Chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Pular Chunk": {
+      "main": [
+        [
+          {
+            "node": "Split in Batches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP: Busca Pasta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Busca Pasta": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Upsert Documento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Upsert Documento": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Busca ID Documento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Deleta Chunks Antigos": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Gera Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Gera Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Code: Monta Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Monta Chunks": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Insere Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Insere Chunks": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Atualiza Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Atualiza Status": {
+      "main": [
+        [
+          {
+            "node": "Split in Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Busca ID Documento": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Deleta Chunks Antigos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Google Drive Trigger": {
+      "lastTimeChecked": "2026-08-27T23:53:43Z"
+    },
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "c5300f39-a6f8-43d4-b346-ac86ea7d0b8d",
+  "activeVersionId": "c5300f39-a6f8-43d4-b346-ac86ea7d0b8d",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-08-27T19:22:51.465Z",
+      "createdAt": "2026-08-27T19:22:51.465Z",
+      "role": "workflow:owner",
+      "workflowId": "Z92dpQYQ7oEWNN2d",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-08-28T21:04:24.461Z",
+    "createdAt": "2026-08-28T21:04:24.461Z",
+    "versionId": "c5300f39-a6f8-43d4-b346-ac86ea7d0b8d",
+    "workflowId": "Z92dpQYQ7oEWNN2d",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 30
+              }
+            ]
+          }
+        },
+        "id": "94bd6e44-c89d-492c-bfb9-2f125c1662ba",
+        "name": "Schedule Trigger",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          4864,
+          1344
+        ]
+      },
+      {
+        "parameters": {
+          "url": "https://script.google.com/macros/s/AKfycbwpo-wwY_2xRQvcJCcfVH2XrxzCjqjBK0sHQB-ScgP6gnz1RS877NRgDWXE0IqXnhop/exec",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "folderId",
+                "value": "1WIjp8kdnVIMmt2yBSgoHYSvxvcfGEK3_"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "4c31db2c-c8a7-4a71-98e7-e8b94d1a05ce",
+        "name": "HTTP: Lista Arquivos LAB",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5136,
+          1344
+        ]
+      },
+      {
+        "parameters": {
+          "url": "https://alrnajijumqvxzmogwpy.supabase.co/rest/v1/lab_brain_documents?select=external_id,drive_modified_at&origin=eq.drive&limit=1000",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "***REMOVIDO***"
+              },
+              {
+                "name": "Authorization",
+                "value": "***REMOVIDO***"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "id": "604e8e88-e134-447c-836b-1a4cfe0eb2ed",
+        "name": "HTTP: Busca Indexados",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5392,
+          1344
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const { files } = $('HTTP: Lista Arquivos LAB').first().json;\nconst raw = $input.first().json;\nconst indexed = raw.body || raw;\nconst indexedMap = {};\n(Array.isArray(indexed) ? indexed : []).forEach(d => {\n  if (d.external_id) indexedMap[d.external_id] = d.drive_modified_at;\n});\n\nif (!files || files.length === 0) throw new Error('SKIP: nenhum arquivo retornado pelo GAS');\n\nconst toProcess = files.filter(f => {\n  const lastIndexed = indexedMap[f.id];\n  if (!lastIndexed) return true;\n  return new Date(f.modifiedTime) > new Date(lastIndexed);\n});\n\nif (toProcess.length === 0) throw new Error('SKIP: todos os arquivos já estão atualizados');\nreturn toProcess.map(f => ({ json: f }));"
+        },
+        "id": "39a80123-558d-4c94-9732-d5597ea590e6",
+        "name": "Code: Filtra Novos/Modificados",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5648,
+          1344
+        ]
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "id": "5b8e2fcd-d969-43df-a7ad-49beaa2dd8cc",
+        "name": "Split in Batches",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          5904,
+          1344
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const f = $input.first().json;\nconst mime = f.mimeType || '';\n\nconst EXPORTABLE = new Set([\n  'application/vnd.google-apps.document',\n  'application/vnd.google-apps.presentation',\n  'application/vnd.google-apps.spreadsheet',\n  'application/vnd.google-apps.drawing',\n]);\nconst isGoogleNative = EXPORTABLE.has(mime);\n\nconst extractOpMap = {\n  'application/pdf': 'pdf',\n  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'word',\n  'application/msword': 'word',\n  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'word',\n  'application/vnd.ms-powerpoint': 'word',\n  'text/plain': 'text',\n  'text/markdown': 'text',\n  'text/x-markdown': 'text',\n  'text/csv': 'text',\n  'application/csv': 'text',\n};\nconst extractOp = isGoogleNative ? 'pdf' : (extractOpMap[mime] || null);\n\nif (!extractOp) {\n  return [{ json: { _skip: true, _reason: 'tipo não suportado: ' + mime, fileName: f.name } }];\n}\n\nreturn [{ json: {\n  ...f,\n  isGoogleNative,\n  extractOp,\n  driveFileId:        f.id,\n  driveModifiedAt:    f.modifiedTime,\n  fileName:           f.name,\n  mimeType:           mime,\n  driveFolderWatchId: '1WIjp8kdnVIMmt2yBSgoHYSvxvcfGEK3_',\n  supabaseUrl:        'https://alrnajijumqvxzmogwpy.supabase.co',\n  supabaseServiceKey: '***REMOVIDO***',\n} }];"
+        },
+        "id": "2f854be3-79ea-4c19-ba91-df67e07c807f",
+        "name": "Code: Classifica Arquivo",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          6176,
+          1344
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "id": "c1",
+                "leftValue": "={{ $json._skip }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "4125fb29-ce68-43fb-b8b1-f13f2950c9a8",
+        "name": "IF: Pular Arquivo",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          6432,
+          1344
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "id": "c1",
+                "leftValue": "={{ $json.isGoogleNative }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "2f75efce-6926-46d2-9213-2fac5bdef44b",
+        "name": "IF: É Google Nativo",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          6688,
+          1536
+        ]
+      },
+      {
+        "parameters": {
+          "url": "=https://www.googleapis.com/drive/v3/files/{{ $('Code: Classifica Arquivo').item.json.driveFileId }}/export",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "googleDriveOAuth2Api",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "mimeType",
+                "value": "application/pdf"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "id": "28c985b9-ee16-46d4-9e3a-c2462448743d",
+        "name": "HTTP: Exporta Drive (PDF)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          6944,
+          1344
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "operation": "pdf",
+          "options": {}
+        },
+        "id": "0826ee83-64b6-443f-95ba-597ae94cf754",
+        "name": "Extract: Google Nativo",
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          7216,
+          1344
+        ]
+      },
+      {
+        "parameters": {
+          "url": "=https://www.googleapis.com/drive/v3/files/{{ $('Code: Classifica Arquivo').item.json.driveFileId }}",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "googleDriveOAuth2Api",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "alt",
+                "value": "media"
+              },
+              {
+                "name": "supportsAllDrives",
+                "value": "true"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "id": "8384ea47-36fa-44dd-9bd3-1608cd384473",
+        "name": "HTTP: Baixa Arquivo",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          6944,
+          1712
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 1
+                  },
+                  "conditions": [
+                    {
+                      "id": "s1",
+                      "leftValue": "={{ $('Code: Classifica Arquivo').item.json.extractOp }}",
+                      "rightValue": "pdf",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "PDF"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 1
+                  },
+                  "conditions": [
+                    {
+                      "id": "s2",
+                      "leftValue": "={{ $('Code: Classifica Arquivo').item.json.extractOp }}",
+                      "rightValue": "word",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "Word"
+              }
+            ]
+          },
+          "options": {
+            "fallbackOutput": "extra"
+          }
+        },
+        "id": "09ecf0ce-5959-4463-bd52-08aaac3da0fa",
+        "name": "Switch: Por Tipo",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3,
+        "position": [
+          7216,
+          1712
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "pdf",
+          "options": {}
+        },
+        "id": "66c03c1b-6b2c-4b0b-a134-89516579ccd7",
+        "name": "Extract: PDF",
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          7472,
+          1584
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "word"
+        },
+        "id": "8509ac45-9a3b-4ef0-b40a-a2b1e0300800",
+        "name": "Extract: Word / PPTX",
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          7472,
+          1728
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "text",
+          "options": {}
+        },
+        "id": "1e897bd4-f9c4-4214-9324-cb1defae9f81",
+        "name": "Extract: Texto / MD",
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          7472,
+          1856
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const rawText = $input.first().json.text || $input.first().json.data || '';\nconst cfg = $('Code: Classifica Arquivo').first().json;\n\nfunction stripMarkdown(txt) {\n  return txt\n    .replace(/^#{1,6}\\s+/gm, '')\n    .replace(/\\*\\*(.+?)\\*\\*/g, '$1')\n    .replace(/\\*(.+?)\\*/g, '$1')\n    .replace(/_{2}(.+?)_{2}/g, '$1')\n    .replace(/`{3}[\\s\\S]*?`{3}/gm, '')\n    .replace(/`(.+?)`/g, '$1')\n    .replace(/^\\s*[-*+]\\s+/gm, '')\n    .replace(/^\\s*\\d+\\.\\s+/gm, '')\n    .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1')\n    .replace(/!\\[.*?\\]\\([^)]+\\)/g, '')\n    .replace(/^>\\s*/gm, '')\n    .replace(/^---+$/gm, '')\n    .trim();\n}\n\nconst isMarkdown = /\\.(md|markdown)$/i.test(cfg.fileName || '');\nconst cleaned = rawText.replace(/\\r\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').replace(/[ \\t]{2,}/g, ' ').trim();\nconst text = isMarkdown ? stripMarkdown(cleaned) : cleaned;\n\nif (text.length < 30) {\n  return [{ json: { _skip: true, _reason: 'texto muito curto', fileName: cfg.fileName } }];\n}\n\nconst CHUNK_SIZE = 800, OVERLAP = 120;\nconst chunks = [];\nlet start = 0;\nwhile (start < text.length) {\n  const end = Math.min(start + CHUNK_SIZE, text.length);\n  const content = text.slice(start, end).trim();\n  if (content.length > 20) chunks.push({ content, chunkIndex: chunks.length });\n  if (end >= text.length) break;\n  start += CHUNK_SIZE - OVERLAP;\n}\n\nif (chunks.length === 0) {\n  return [{ json: { _skip: true, _reason: 'sem chunks gerados', fileName: cfg.fileName } }];\n}\n\nreturn [{ json: {\n  chunks,\n  totalChunks:        chunks.length,\n  driveFileId:        cfg.driveFileId,\n  driveModifiedAt:    cfg.driveModifiedAt,\n  fileName:           cfg.fileName,\n  mimeType:           cfg.mimeType,\n  driveFolderWatchId: cfg.driveFolderWatchId,\n  supabaseUrl:        cfg.supabaseUrl,\n  supabaseServiceKey: cfg.supabaseServiceKey,\n} }];"
+        },
+        "id": "f2a55d28-905d-4be5-81e7-6c10ae0a7773",
+        "name": "Code: Divide em Chunks",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          7728,
+          1536
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "id": "c1",
+                "leftValue": "={{ $json._skip }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "f6009b0a-b8a0-418b-a6fc-9f943fa1ba2e",
+        "name": "IF: Pular Chunk",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          7984,
+          1536
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.supabaseUrl + '/rest/v1/lab_brain_folders?drive_folder_id=eq.' + $json.driveFolderWatchId + '&select=id&limit=1' }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "={{ $json.supabaseServiceKey }}"
+              },
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $json.supabaseServiceKey }}"
+              },
+              {
+                "name": "Accept-Encoding",
+                "value": "identity"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "6537bea8-84fe-472d-a677-0030f054ff39",
+        "name": "HTTP: Busca Pasta",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          8256,
+          1648
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $('Code: Divide em Chunks').first().json.supabaseUrl + '/rest/v1/lab_brain_documents' }}",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "on_conflict",
+                "value": "external_id"
+              }
+            ]
+          },
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "={{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+              },
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+              },
+              {
+                "name": "Prefer",
+                "value": "resolution=merge-duplicates,return=representation"
+              },
+              {
+                "name": "Accept-Encoding",
+                "value": "identity"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ JSON.stringify({ external_id: $('Code: Divide em Chunks').first().json.driveFileId, folder_id: $input.first().json[0]?.id || null, title: $('Code: Divide em Chunks').first().json.fileName, mime_type: $('Code: Divide em Chunks').first().json.mimeType, origin: 'drive', status: 'processing', drive_modified_at: $('Code: Divide em Chunks').first().json.driveModifiedAt }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "id": "f6e5a035-5e03-476f-9fb7-e58bdb17b68f",
+        "name": "HTTP: Upsert Documento",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          8512,
+          1648
+        ]
+      },
+      {
+        "parameters": {
+          "method": "DELETE",
+          "url": "={{ $('Code: Divide em Chunks').first().json.supabaseUrl }}/rest/v1/lab_brain_chunks?document_id=eq.{{ $('HTTP: Upsert Documento').first().json[0]?.id || $('HTTP: Upsert Documento').first().json.body?.[0]?.id }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "={{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+              },
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "8015d246-c331-4dda-90eb-801778877ae1",
+        "name": "HTTP: Deleta Chunks Antigos",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          8944,
+          1632
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.openai.com/v1/embeddings",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "openAiApi",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ JSON.stringify({ model: 'text-embedding-3-small', input: $('Code: Divide em Chunks').first().json.chunks.map(c => c.content) }) }}",
+          "options": {}
+        },
+        "id": "9a82818f-8775-401a-99e3-6fe6768c2c7a",
+        "name": "HTTP: Gera Embeddings",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          9200,
+          1632
+        ],
+        "credentials": {
+          "openAiApi": {
+            "id": "GNYM1RjawrdA7XKF",
+            "name": "OpenAi account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const embedData  = $input.first().json.data;\nconst ctx        = $('Code: Divide em Chunks').first().json;\nconst upsertResp = $('HTTP: Upsert Documento').first().json;\nconst documentId = upsertResp.body?.[0]?.id || upsertResp?.[0]?.id;\nif (!documentId) return [{ json: { _skip: true, _reason: 'document_id não encontrado', fileName: ctx.fileName } }];\nconst rows = ctx.chunks.map((c, i) => ({\n  document_id: documentId,\n  content:     c.content,\n  embedding:   embedData[i]?.embedding || [],\n  chunk_index: c.chunkIndex,\n  page:        null,\n}));\nreturn [{ json: { rows, totalChunks: rows.length, documentId, supabaseUrl: ctx.supabaseUrl, supabaseServiceKey: ctx.supabaseServiceKey, fileName: ctx.fileName } }];"
+        },
+        "id": "e026d74c-7807-411e-ba64-db332a7bb5e2",
+        "name": "Code: Monta Chunks",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          9472,
+          1632
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $json.supabaseUrl + '/rest/v1/lab_brain_chunks' }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "={{ $json.supabaseServiceKey }}"
+              },
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $json.supabaseServiceKey }}"
+              },
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ JSON.stringify($json.rows) }}",
+          "options": {}
+        },
+        "id": "3c8a184e-1e69-4835-b5a2-5e286a159fd1",
+        "name": "HTTP: Insere Chunks",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          9728,
+          1632
+        ]
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "={{ $('Code: Monta Chunks').first().json.supabaseUrl + '/rest/v1/lab_brain_documents?id=eq.' + $('Code: Monta Chunks').first().json.documentId }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "={{ $('Code: Monta Chunks').first().json.supabaseServiceKey }}"
+              },
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('Code: Monta Chunks').first().json.supabaseServiceKey }}"
+              },
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ JSON.stringify({ status: 'ready', chunk_count: $('Code: Monta Chunks').first().json.totalChunks, indexed_at: new Date().toISOString() }) }}",
+          "options": {}
+        },
+        "id": "280ac4ee-a0b1-4e23-a9d7-f5a63750b00f",
+        "name": "HTTP: Atualiza Status",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          9984,
+          1632
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Code: Divide em Chunks').first().json.supabaseUrl }}/rest/v1/lab_brain_documents?external_id=eq.{{ $('Code: Divide em Chunks').first().json.driveFileId }}&select=id",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {}
+            ]
+          },
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "={{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+              },
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('Code: Divide em Chunks').first().json.supabaseServiceKey }}"
+              },
+              {
+                "name": "Prefer",
+                "value": "resolution=merge-duplicates,return=representation"
+              },
+              {
+                "name": "Accept-Encoding",
+                "value": "identity"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ JSON.stringify({ external_id: $('Code: Divide em Chunks').first().json.driveFileId, folder_id: $input.first().json[0]?.id || null, title: $('Code: Divide em Chunks').first().json.fileName, mime_type: $('Code: Divide em Chunks').first().json.mimeType, origin: 'drive', status: 'processing', drive_modified_at: $('Code: Divide em Chunks').first().json.driveModifiedAt }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "id": "e5742d35-3eb2-4628-8fa9-39a973ecd4b2",
+        "name": "HTTP: Busca ID Documento",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          8704,
+          1648
+        ]
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "HTTP: Lista Arquivos LAB",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP: Lista Arquivos LAB": {
+        "main": [
+          [
+            {
+              "node": "HTTP: Busca Indexados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP: Busca Indexados": {
+        "main": [
+          [
+            {
+              "node": "Code: Filtra Novos/Modificados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code: Filtra Novos/Modificados": {
+        "main": [
+          [
+            {
+              "node": "Split in Batches",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Split in Batches": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Code: Classifica Arquivo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code: Classifica Arquivo": {
+        "main": [
+          [
+            {
+              "node": "IF: Pular Arquivo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF: Pular Arquivo": {
+        "main": [
+          [
+            {
+              "node": "Split in Batches",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "IF: É Google Nativo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF: É Google Nativo": {
+        "main": [
+          [
+            {
+              "node": "HTTP: Exporta Drive (PDF)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "HTTP: Baixa Arquivo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP: Exporta Drive (PDF)": {
+        "main": [
+          [
+            {
+              "node": "Extract: Google Nativo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract: Google Nativo": {
+        "main": [
+          [
+            {
+              "node": "Code: Divide em Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP: Baixa Arquivo": {
+        "main": [
+          [
+            {
+              "node": "Switch: Por Tipo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Switch: Por Tipo": {
+        "main": [
+          [
+            {
+              "node": "Extract: PDF",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Extract: Word / PPTX",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Extract: Texto / MD",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract: PDF": {
+        "main": [
+          [
+            {
+              "node": "Code: Divide em Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract: Word / PPTX": {
+        "main": [
+          [
+            {
+              "node": "Code: Divide em Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract: Texto / MD": {
+        "main": [
+          [
+            {
+              "node": "Code: Divide em Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code: Divide em Chunks": {
+        "main": [
+          [
+            {
+              "node": "IF: Pular Chunk",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF: Pular Chunk": {
+        "main": [
+          [
+            {
+              "node": "Split in Batches",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "HTTP: Busca Pasta",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP: Busca Pasta": {
+        "main": [
+          [
+            {
+              "node": "HTTP: Upsert Documento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP: Upsert Documento": {
+        "main": [
+          [
+            {
+              "node": "HTTP: Busca ID Documento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP: Deleta Chunks Antigos": {
+        "main": [
+          [
+            {
+              "node": "HTTP: Gera Embeddings",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP: Gera Embeddings": {
+        "main": [
+          [
+            {
+              "node": "Code: Monta Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code: Monta Chunks": {
+        "main": [
+          [
+            {
+              "node": "HTTP: Insere Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP: Insere Chunks": {
+        "main": [
+          [
+            {
+              "node": "HTTP: Atualiza Status",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP: Atualiza Status": {
+        "main": [
+          [
+            {
+              "node": "Split in Batches",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP: Busca ID Documento": {
+        "main": [
+          [
+            {
+              "node": "HTTP: Deleta Chunks Antigos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null
+  },
+  "tags": []
+}
