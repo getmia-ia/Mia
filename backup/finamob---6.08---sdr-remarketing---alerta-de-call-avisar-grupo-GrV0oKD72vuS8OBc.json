@@ -1,0 +1,368 @@
+{
+  "updatedAt": "2026-08-31T19:37:29.177Z",
+  "createdAt": "2026-08-31T19:37:07.514Z",
+  "id": "GrV0oKD72vuS8OBc",
+  "name": "Finamob - 6.08 - SDR Remarketing - Alerta de Call (avisar grupo)",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Normaliza telefone e monta o texto do alerta.\nconst body = $json.body ?? $json;\n\nfunction normaliza(raw) {\n  let t = String(raw ?? '').replace(/\\D/g, '');\n  if (!t) return '';\n  if (t.startsWith('55')) t = t.slice(2);\n  if (t.length === 10) t = t.slice(0, 2) + '9' + t.slice(2);\n  return '55' + t;\n}\n\nconst phone = normaliza(body.phone);\nif (!phone || phone.length < 12) {\n  throw new Error('phone inválido recebido pela tool alerta_call: ' + body.phone);\n}\n\nconst MOTIVOS = {\n  na_call:   'Lead está na sala e ninguém entrou',\n  esperando: 'Lead está na sala de espera aguardando ser aceito',\n  sem_acesso:'Lead não está conseguindo acessar o link da reunião'\n};\n\nconst motivo = MOTIVOS[body.motivo] ? body.motivo : 'na_call';\nconst nome = (body.nome || '').trim() || 'Lead sem nome no cadastro';\nconst detalhe = (body.detalhe || '').trim();\n\nconst agora = new Date().toLocaleTimeString('pt-BR', {\n  timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit'\n});\n\nconst texto =\n  '🔴 *CALL AGORA - AÇÃO IMEDIATA*\\n' +\n  MOTIVOS[motivo] + '\\n\\n' +\n  '*Lead:* ' + nome + '\\n' +\n  '*WhatsApp:* +' + phone + '\\n' +\n  (body.email ? '*E-mail:* ' + body.email + '\\n' : '') +\n  (detalhe ? '*O que ele disse:* ' + detalhe + '\\n' : '') +\n  '*Horário do aviso:* ' + agora + '\\n\\n' +\n  'Origem: SDR Remarketing';\n\nreturn [{ json: { phone, nome, motivo, detalhe, texto, redis_key: 'notif_call:' + phone } }];"
+      },
+      "id": "2e04aa85-615c-410e-aa11-1425d709ff29",
+      "name": "Monta Alerta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -928,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "={{ $json.redis_key }}",
+        "options": {}
+      },
+      "id": "3381c4a1-6dcb-4440-8e64-27fa54143233",
+      "name": "Já avisei nos últimos 30min?",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -736,
+        352
+      ],
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "sem-trava",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.propertyName }}",
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c0ed0f60-2d83-43d1-ac5d-b7b02cb4cb4d",
+      "name": "Sem aviso recente?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -512,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Monta Alerta').item.json.redis_key }}",
+        "value": "={{ $now.toISO() }}",
+        "expire": true,
+        "ttl": 1800
+      },
+      "id": "0cc52193-20b5-4a45-af4e-3e29792dc39e",
+      "name": "Marca aviso enviado (30min)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        208
+      ],
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "ok",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "avisado",
+              "name": "avisado",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "msg",
+              "name": "mensagem",
+              "value": "Time avisado no grupo.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e6ce0d1b-9b90-4ec5-8b3f-d188b2aab2ea",
+      "name": "Resposta - Avisado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        176,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok2",
+              "name": "ok",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "avisado2",
+              "name": "avisado",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "msg2",
+              "name": "mensagem",
+              "value": "Time ja havia sido avisado sobre esse lead nos ultimos 30 minutos. Nao avise de novo, apenas tranquilize o lead.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8471a36e-3b8e-4a5c-b6ad-9e057d752011",
+      "name": "Resposta - Ja avisado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -288,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok3",
+              "name": "ok",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "msg3",
+              "name": "mensagem",
+              "value": "Falha ao avisar o time. Peca desculpa pelo transtorno e diga que ja sinalizou; nao invente detalhes.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d7a7aad3-d3be-4361-9f0d-5d91d587c0dc",
+      "name": "Resposta - Erro no envio",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -32,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "phone"
+            },
+            {
+              "name": "nome"
+            },
+            {
+              "name": "email"
+            },
+            {
+              "name": "motivo"
+            },
+            {
+              "name": "detalhe"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1136,
+        352
+      ],
+      "id": "58cc38a3-1c82-468b-872f-ce734ef99699",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "120363425631150537@g.us",
+        "messageText": "={{ $('Monta Alerta').first().json.texto }}",
+        "options_message": {
+          "mentions": {
+            "mentionsSettings": {
+              "mentioned": "5545991584592"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        -288,
+        224
+      ],
+      "id": "60b06a8f-6202-4e0a-ae3d-f534d73f7a59",
+      "name": "Mensagem no Grupo Finamob",
+      "executeOnce": true,
+      "credentials": {
+        "evolutionApi": {
+          "id": "keWx5OuE8n8WEbw0",
+          "name": "EMI-SDR-DIOGO"
+        }
+      },
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "connections": {
+    "Monta Alerta": {
+      "main": [
+        [
+          {
+            "node": "Já avisei nos últimos 30min?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Já avisei nos últimos 30min?": {
+      "main": [
+        [
+          {
+            "node": "Sem aviso recente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sem aviso recente?": {
+      "main": [
+        [
+          {
+            "node": "Mensagem no Grupo Finamob",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resposta - Ja avisado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca aviso enviado (30min)": {
+      "main": [
+        [
+          {
+            "node": "Resposta - Avisado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Monta Alerta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem no Grupo Finamob": {
+      "main": [
+        [
+          {
+            "node": "Marca aviso enviado (30min)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resposta - Erro no envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "2158016f-cd17-4794-beed-bda81acc978e",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-08-31T19:37:07.514Z",
+      "createdAt": "2026-08-31T19:37:07.514Z",
+      "role": "workflow:owner",
+      "workflowId": "GrV0oKD72vuS8OBc",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
