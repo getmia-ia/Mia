@@ -1,0 +1,518 @@
+{
+  "updatedAt": "2026-09-02T00:29:51.223Z",
+  "createdAt": "2026-09-01T18:47:25.671Z",
+  "id": "yJIPy3qIlM1l2mtg",
+  "name": "Finamob - 4.01 - Trafego Pago - Ingestao Meta Ads",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        2160,
+        1344
+      ],
+      "id": "e7edee55-0ee8-4634-aa1b-70d4e229c567",
+      "name": "Agendamento"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        1520
+      ],
+      "id": "2e5b264c-208c-483a-a9a3-5bdb60253793",
+      "name": "Manual"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select conta_id, nome, cliente, moeda, timezone, atribuicao,\n       usar_atribuicao_unificada, janela_rolante, janela_semanal,\n       backfill_de, backfill_ate\n  from ads_conta\n where ativo\n order by conta_id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2384,
+        1344
+      ],
+      "id": "ea660c38-3db7-486c-8b82-3bd77048a35c",
+      "name": "Contas Ativas",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2608,
+        1344
+      ],
+      "id": "deec296c-da38-4ff6-91f3-e878d959c74c",
+      "name": "Loop Contas"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Monta a janela de leitura no FUSO DA CONTA e a URL completa da Graph API.\n// Backfill: preencher backfill_de/backfill_ate em ads_conta e rodar no Manual.\n//\n// Sem URLSearchParams e sem Intl: o sandbox do task runner do n8n não expõe\n// nenhum dos dois. A data sai do $now (Luxon), que o n8n injeta no Code node.\nconst c  = $input.first().json;\nconst tz = c.timezone || 'America/Sao_Paulo';\n\nconst base      = $now.setZone(tz).startOf('day');\nconst hojeConta = base.toFormat('yyyy-MM-dd');\nconst domingo   = base.weekday === 7;           // Luxon: 1=segunda, 7=domingo\nconst janela    = domingo ? (c.janela_semanal || 28) : (c.janela_rolante || 7);\n\n// Modo backfill: com backfill_de e backfill_ate preenchidos em ads_conta,\n// lê exatamente esse intervalo e ignora a janela rolante.\n//\n// SÓ VALE EM EXECUÇÃO MANUAL. Se as colunas ficarem preenchidas por engano,\n// o agendamento das 07:00 continua fazendo a janela rolante normal — em vez\n// de reler o mesmo intervalo antigo todo dia e parar de trazer o de ontem.\nconst modo   = ($execution && $execution.mode) || 'production';\nconst manual = modo === 'test' || modo === 'manual';\n\nconst iso   = (v) => v ? String(v).slice(0, 10) : null;\nconst bfDe  = iso(c.backfill_de);\nconst bfAte = iso(c.backfill_ate);\nconst backfill = manual && !!(bfDe && bfAte);\nconst backfill_ignorado = !manual && !!(bfDe && bfAte);\n\nconst ate = backfill ? bfAte : base.minus({ days: 1 }).toFormat('yyyy-MM-dd');\nconst de  = backfill ? bfDe  : base.minus({ days: janela }).toFormat('yyyy-MM-dd');\n\nconst fields = [\n  'date_start', 'ad_id', 'adset_id', 'campaign_id',\n  'campaign_name', 'adset_name', 'ad_name', 'objective',\n  'spend', 'impressions', 'reach', 'clicks', 'inline_link_clicks',\n  'actions', 'action_values'\n].join(',');\n\nconst params = [\n  ['level', 'ad'],\n  ['time_increment', '1'],\n  ['time_range', JSON.stringify({ since: de, until: ate })],\n  ['fields', fields],\n  ['action_breakdowns', 'action_type'],\n  ['limit', '500'],\n  // SEM filtering: linha com conversão e gasto zero também entra.\n];\n\nif (c.usar_atribuicao_unificada === false) {\n  params.push(['use_unified_attribution_setting', 'false']);\n  params.push(['action_attribution_windows', JSON.stringify(String(c.atribuicao).split(','))]);\n} else {\n  params.push(['use_unified_attribution_setting', 'true']);\n}\n\nconst qs = params\n  .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v))\n  .join('&');\n\nconst url = 'https://graph.facebook.com/v23.0/act_' + c.conta_id + '/insights?' + qs;\n\nreturn [{ json: { ...c, hoje_conta: hojeConta, domingo, modo,\n                  backfill, backfill_ignorado,\n                  janela_dias: backfill ? null : janela, de, ate, url } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2848,
+        1472
+      ],
+      "id": "92bafb39-2a2b-440e-9fe8-36e86ba3e59c",
+      "name": "Janela"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into ads_ingestao_log (fluxo, conta_id, janela_de, janela_ate, status)\nvalues ('4.01', $1, $2::date, $3::date, 'rodando')\nreturning id;",
+        "options": {
+          "queryReplacement": "={{ [$json.conta_id, $json.de, $json.ate] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3072,
+        1472
+      ],
+      "id": "c1fb3aad-0765-48bd-a1e2-f203a2c4eca0",
+      "name": "Log Inicio",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Janela').first().json.url }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "facebookGraphApi",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body.paging?.next }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.paging?.next }}",
+              "limitPagesFetched": true,
+              "requestInterval": 250
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3280,
+        1472
+      ],
+      "id": "34f1703b-ad6c-48f8-ad85-f8a2470bbe68",
+      "name": "Meta Insights",
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "bqvhO7I9HxNLrUbM",
+          "name": "app-mia-finamob"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Achata as páginas da Graph API num único payload JSON.\n// leads / lpv NÃO são calculados aqui: saem de fn_ads_leads() no upsert,\n// para que mudar o mapa de action_type conserte o histórico sem rechamar a API.\nconst j = $('Janela').first().json;\nconst rows = [];\nlet paginas = 0;\n\nfor (const item of $input.all()) {\n  paginas++;\n  for (const r of (item.json.data ?? [])) {\n    rows.push({\n      dia: r.date_start,\n      ad_id: String(r.ad_id),\n      adset_id: r.adset_id ? String(r.adset_id) : null,\n      campaign_id: r.campaign_id ? String(r.campaign_id) : null,\n      conta_id: j.conta_id,\n      atribuicao: j.usar_atribuicao_unificada === false ? j.atribuicao : 'unified',\n      spend: Number(r.spend ?? 0),\n      impressoes: Number(r.impressions ?? 0),\n      alcance: Number(r.reach ?? 0),\n      cliques: Number(r.clicks ?? 0),\n      cliques_link: Number(r.inline_link_clicks ?? 0),\n      actions_raw: r.actions ?? [],\n      action_values_raw: r.action_values ?? [],\n      campaign_nome: r.campaign_name ?? null,\n      objetivo: r.objective ?? null,\n      adset_nome: r.adset_name ?? null,\n      ad_nome: r.ad_name ?? null,\n    });\n  }\n}\n\nreturn [{ json: {\n  conta_id: j.conta_id,\n  conta_nome: j.nome,\n  de: j.de,\n  ate: j.ate,\n  log_id: $('Log Inicio').first().json.id,\n  paginas,\n  linhas: rows.length,\n  payload: JSON.stringify(rows),\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3504,
+        1392
+      ],
+      "id": "ef6fcaaf-af87-4e2e-9b1e-c4eef3ca0c8c",
+      "name": "Normaliza"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Uma única transação por conta. Idempotente: reexecutar dá o mesmo resultado.\nwith src as (\n  select * from jsonb_to_recordset($1::jsonb) as x(\n    dia               date,\n    ad_id             text,\n    adset_id          text,\n    campaign_id       text,\n    conta_id          text,\n    atribuicao        text,\n    spend             numeric,\n    impressoes        bigint,\n    alcance           bigint,\n    cliques           bigint,\n    cliques_link      bigint,\n    actions_raw       jsonb,\n    action_values_raw jsonb,\n    campaign_nome     text,\n    adset_nome        text,\n    ad_nome           text,\n    objetivo          text\n  )\n),\ndimsrc as (\n  select ad_id,\n         min(conta_id)      as conta_id,\n         max(ad_nome)       as ad_nome,\n         max(adset_id)      as adset_id,\n         max(adset_nome)    as adset_nome,\n         max(campaign_id)   as campaign_id,\n         max(campaign_nome) as campaign_nome,\n         max(dia)           as visto_em\n  from src\n  group by ad_id\n),\ncampsrc as (\n  select campaign_id,\n         min(conta_id)      as conta_id,\n         max(campaign_nome) as campaign_nome,\n         max(objetivo)      as objetivo,\n         max(dia)           as visto_em\n  from src where campaign_id is not null group by campaign_id\n),\ncamp as (\n  insert into ads_campanha (campaign_id, conta_id, campaign_nome, objetivo, visto_em)\n  select campaign_id, conta_id, campaign_nome, objetivo, visto_em from campsrc\n  on conflict (campaign_id) do update set\n    campaign_nome = coalesce(excluded.campaign_nome, ads_campanha.campaign_nome),\n    objetivo      = coalesce(excluded.objetivo,      ads_campanha.objetivo),\n    visto_em      = greatest(coalesce(ads_campanha.visto_em, excluded.visto_em), excluded.visto_em),\n    atualizado_em = now()\n  returning 1\n),\ncjsrc as (\n  select adset_id,\n         min(campaign_id) as campaign_id,\n         min(conta_id)    as conta_id,\n         max(adset_nome)  as adset_nome,\n         max(dia)         as visto_em\n  from src where adset_id is not null group by adset_id\n),\ncj as (\n  insert into ads_conjunto (adset_id, campaign_id, conta_id, adset_nome, visto_em)\n  select adset_id, campaign_id, conta_id, adset_nome, visto_em from cjsrc\n  on conflict (adset_id) do update set\n    campaign_id   = coalesce(excluded.campaign_id, ads_conjunto.campaign_id),\n    adset_nome    = coalesce(excluded.adset_nome,  ads_conjunto.adset_nome),\n    visto_em      = greatest(coalesce(ads_conjunto.visto_em, excluded.visto_em), excluded.visto_em),\n    atualizado_em = now()\n  returning 1\n),\ndim as (\n  insert into ads_anuncio\n    (ad_id, conta_id, ad_nome, adset_id, adset_nome, campaign_id, campaign_nome, visto_em)\n  select ad_id, conta_id, ad_nome, adset_id, adset_nome, campaign_id, campaign_nome, visto_em\n  from dimsrc\n  on conflict (ad_id) do update set\n    ad_nome       = coalesce(excluded.ad_nome,       ads_anuncio.ad_nome),\n    adset_id      = coalesce(excluded.adset_id,      ads_anuncio.adset_id),\n    adset_nome    = coalesce(excluded.adset_nome,    ads_anuncio.adset_nome),\n    campaign_id   = coalesce(excluded.campaign_id,   ads_anuncio.campaign_id),\n    campaign_nome = coalesce(excluded.campaign_nome, ads_anuncio.campaign_nome),\n    visto_em      = greatest(coalesce(ads_anuncio.visto_em, excluded.visto_em), excluded.visto_em),\n    atualizado_em = now()\n  returning 1\n),\nfato as (\n  insert into ads_insight_dia\n    (dia, ad_id, conta_id, atribuicao, spend, impressoes, alcance,\n     cliques, cliques_link, lpv, leads, actions_raw, action_values_raw)\n  select\n    s.dia, s.ad_id, s.conta_id, s.atribuicao,\n    s.spend, s.impressoes, s.alcance, s.cliques, s.cliques_link,\n    fn_ads_action(s.actions_raw, 'landing_page_view'),\n    fn_ads_leads(s.actions_raw, s.conta_id),\n    s.actions_raw, s.action_values_raw\n  from src s\n  on conflict (dia, ad_id, atribuicao) do update set\n    spend             = excluded.spend,\n    impressoes        = excluded.impressoes,\n    alcance           = excluded.alcance,\n    cliques           = excluded.cliques,\n    cliques_link      = excluded.cliques_link,\n    lpv               = excluded.lpv,\n    leads             = excluded.leads,\n    actions_raw       = excluded.actions_raw,\n    action_values_raw = excluded.action_values_raw,\n    ingerido_em       = now()\n  returning 1\n)\nselect (select count(*) from fato) as linhas_gravadas,\n       (select count(*) from dim)  as anuncios_tocados,\n       (select count(*) from cj)   as conjuntos_tocados,\n       (select count(*) from camp) as campanhas_tocadas;",
+        "options": {
+          "queryReplacement": "={{ [$json.payload] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3728,
+        1392
+      ],
+      "id": "a5a0357d-88fb-4695-998e-0a8d053a3547",
+      "name": "Upsert Fato e Dimensao",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update ads_ingestao_log\n   set status = 'ok',\n       linhas = $2::int,\n       paginas = $3::int,\n       terminado_em = now()\n where id = $1::bigint\nreturning conta_id, linhas, paginas;",
+        "options": {
+          "queryReplacement": "={{ [$('Normaliza').first().json.log_id, $('Normaliza').first().json.linhas, $('Normaliza').first().json.paginas] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3952,
+        1392
+      ],
+      "id": "d374735f-c4bf-4a89-8edd-df3003860e54",
+      "name": "Log Fim",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update ads_ingestao_log\n   set status = 'erro',\n       erro = $2,\n       terminado_em = now()\n where id = $1::bigint\nreturning conta_id;",
+        "options": {
+          "queryReplacement": "={{ [$('Log Inicio').first().json.id, JSON.stringify($json.error ?? $json).slice(0, 1800)] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3504,
+        1600
+      ],
+      "id": "c448b52e-221f-422a-83df-2d9906095338",
+      "name": "Log Erro",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "120363423041053494@g.us",
+        "messageText": "=🔧 *INGESTÃO META FALHOU*\n\nConta: {{ $('Janela').first().json.nome }} ({{ $('Janela').first().json.conta_id }})\nJanela: {{ $('Janela').first().json.de }} → {{ $('Janela').first().json.ate }}\n\n```{{ JSON.stringify($('Log Erro').first().json).slice(0,300) }}```\n\n_O report das 10h não vai sair para esta conta._",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        3728,
+        1600
+      ],
+      "id": "cd615321-3fdf-4dba-94e8-4abb56cdf884",
+      "name": "Avisa Falha de Ingestao",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dow",
+              "leftValue": "={{ $now.setZone('America/Sao_Paulo').weekday }}",
+              "rightValue": 7,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2848,
+        1184
+      ],
+      "id": "b43605ba-c454-495b-9548-7b58f70b8a7e",
+      "name": "E Domingo?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Reaplica o mapa de action_type sobre o histórico recente.\nselect fn_ads_recalcula_leads(current_date - 28, current_date - 1) as linhas;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3072,
+        1184
+      ],
+      "id": "31acf3de-21e8-4754-883c-9433ef8da485",
+      "name": "Recalcula Leads 28d",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4.01 · Ingestão Meta Ads (multi-conta)\n\n**Uma conta por volta do loop.** Se uma falha, as outras seguem — o erro vira linha `erro` em `ads_ingestao_log` e uma mensagem no MIA-LOGS, e o 4.02 se recusa a reportar aquela conta.\n\n**Nada é apagado.** `on conflict do update` no fato e na dimensão: reexecutar dez vezes no mesmo dia dá o mesmo resultado.\n\n**Janela rolante.** 7 dias todo dia, 28 no domingo — a Meta reprocessa atribuição por até 28 dias.\n\n**Backfill:** preencher `backfill_de` e `backfill_ate` em `ads_conta`, rodar no Manual, e limpar as duas colunas. Intervalos longos no grão de anúncio são pesados na Graph API — caminhar em blocos de 60 a 90 dias.\n\n**Três níveis de uma vez.** `level=ad` traz `campaign_id/name` e `adset_id/name` em cada linha, então a mesma resposta popula `ads_campanha`, `ads_conjunto` e `ads_anuncio` — sem chamada extra. Campanha e conjunto são soma dos anúncios: fecha por construção.\n\n**Paginação nativa** do nó HTTP (`responseContainsNextURL`). Nunca montar `url_next` à mão.",
+        "height": 660,
+        "width": 560,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        880
+      ],
+      "id": "752d2cb2-5f45-4a60-bb8e-513cdf472cf5",
+      "name": "Nota -620-460"
+    }
+  ],
+  "connections": {
+    "Agendamento": {
+      "main": [
+        [
+          {
+            "node": "Contas Ativas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual": {
+      "main": [
+        [
+          {
+            "node": "Contas Ativas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contas Ativas": {
+      "main": [
+        [
+          {
+            "node": "Loop Contas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Contas": {
+      "main": [
+        [
+          {
+            "node": "E Domingo?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Janela",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "E Domingo?": {
+      "main": [
+        [
+          {
+            "node": "Recalcula Leads 28d",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Janela": {
+      "main": [
+        [
+          {
+            "node": "Log Inicio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Inicio": {
+      "main": [
+        [
+          {
+            "node": "Meta Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta Insights": {
+      "main": [
+        [
+          {
+            "node": "Normaliza",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliza": {
+      "main": [
+        [
+          {
+            "node": "Upsert Fato e Dimensao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Fato e Dimensao": {
+      "main": [
+        [
+          {
+            "node": "Log Fim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Fim": {
+      "main": [
+        [
+          {
+            "node": "Loop Contas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Erro": {
+      "main": [
+        [
+          {
+            "node": "Avisa Falha de Ingestao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisa Falha de Ingestao": {
+      "main": [
+        [
+          {
+            "node": "Loop Contas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "66a09384-abd3-44ab-ac9b-4338edd06024",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-09-01T18:47:25.671Z",
+      "createdAt": "2026-09-01T18:47:25.671Z",
+      "role": "workflow:owner",
+      "workflowId": "yJIPy3qIlM1l2mtg",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": [
+    {
+      "updatedAt": "2026-09-01T19:39:38.763Z",
+      "createdAt": "2026-09-01T19:39:38.763Z",
+      "id": "oge68DCELclv7rhu",
+      "name": "trafego-meta"
+    }
+  ]
+}
