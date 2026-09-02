@@ -1,0 +1,583 @@
+{
+  "updatedAt": "2026-09-02T00:30:57.949Z",
+  "createdAt": "2026-09-01T18:49:09.911Z",
+  "id": "ITzSZVO6DEouV0Qd",
+  "name": "Finamob - 4.02 - Trafego Pago - Report e Alertas",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 10
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        1696,
+        816
+      ],
+      "id": "fe91f96c-6007-4627-b023-5d2cad72ae4c",
+      "name": "Todo Dia 10h"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Guard de frescor. Nada é enviado sem passar por aqui.\nselect * from vw_ads_frescor order by conta_nome;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1920,
+        816
+      ],
+      "id": "5876aeb4-bdd6-417d-a2bf-12d8251fd220",
+      "name": "Frescor",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2128,
+        816
+      ],
+      "id": "04e98f85-f9f5-472b-ac46-431fbbcb294d",
+      "name": "Loop Contas"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fresco",
+              "leftValue": "={{ $json.pode_reportar }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2368,
+        928
+      ],
+      "id": "0172641e-5321-4ae8-b524-eb24612b4d40",
+      "name": "Pode Reportar?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from vw_ads_periodo\n where conta_id = $1\n   and rotulo in ('ONTEM','7 DIAS','30 DIAS','1 ANO')\n order by ordem, canal;",
+        "options": {
+          "queryReplacement": "={{ [$json.conta_id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2608,
+        848
+      ],
+      "id": "f2457f4d-9c3f-4c41-bc1f-2b0c9d047fef",
+      "name": "Le Periodos",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formatação sem Intl: o sandbox do task runner do n8n não expõe Intl,\n// então toLocaleString('pt-BR') não é confiável aqui. Estes helpers produzem\n// o formato brasileiro de forma determinística. Nulo vira '—', nunca NaN.\nconst nf = (v, dec) => {\n  const n = Number(v);\n  if (v === null || v === undefined || v === '' || !isFinite(n)) return null;\n  const neg = n < 0;\n  const parts = Math.abs(n).toFixed(dec).split('.');\n  const inteiro = parts[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.');\n  return (neg ? '-' : '') + inteiro + (parts[1] ? ',' + parts[1] : '');\n};\nconst brl = v => { const s = nf(v, 2); return s === null ? '—' : 'R$ ' + s; };\nconst pct = v => {\n  if (v === null || v === undefined || v === '') return '—';   // 0,0% != sem dado\n  const s = nf(Number(v) * 100, 1);\n  return s === null ? '—' : s + '%';\n};\nconst int = v => { const s = nf(v, 0); return s === null ? '—' : s; };\nconst dia = v => v ? String(v).slice(0, 10).split('-').reverse().join('/') : '—';\n\n// Uma query, campos nomeados. Zero índice posicional.\nconst rows  = $input.all().map(i => i.json);\nconst conta = $('Loop Contas').first().json;\nif (!rows.length) return [];\n\nconst todos = rows.filter(r => r.canal === 'TODOS');\nconst get   = rot => todos.find(r => r.rotulo === rot) || {};\n\nconst bloco = (rot) => {\n  const d = get(rot);\n  const falta = (Number(d.dias_com_dado) || 0) < (Number(d.dias_do_periodo) || 0);\n  const cobertura = falta\n    ? `\\n_⚠ cobertura ${d.dias_com_dado}/${d.dias_do_periodo} dias_`\n    : '';\n  // Engajamento não tem formulário: o gasto é real, mas fica fora do CPL.\n  const fora = Number(d.gasto_fora) || 0;\n  const linhaFora = fora > 0\n    ? `\\n_+ ${brl(fora)} em engajamento (fora do CPL) · total ${brl(d.gasto_total)}_`\n    : '';\n  return [\n    `- *${rot}*`,\n    `Gasto: ${brl(d.gasto)}`,\n    `Leads: ${int(d.leads)}`,\n    `CPL:   ${brl(d.cpa)}`,\n    `CPM ${brl(d.cpm)} · CTR ${pct(d.ctr)} · Conv ${pct(d.conversao)}${linhaFora}${cobertura}`,\n  ].join('\\n');\n};\n\nconst partes = [\n  `*RELATÓRIO TRÁFEGO PAGO*\\n*${conta.conta_nome}* · dados até ${dia(conta.dado_ate)}`,\n  bloco('ONTEM'),\n  bloco('7 DIAS'),\n  bloco('30 DIAS'),\n];\nreturn [{ json: {\n  conta_id: conta.conta_id,\n  grupo_whatsapp: conta.grupo_whatsapp,\n  mensagem: partes.join('\\n\\n'),\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2832,
+        848
+      ],
+      "id": "0ad72709-7ba9-4d34-9e3e-8fbf13527a24",
+      "name": "Monta Report"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "={{ $json.grupo_whatsapp }}",
+        "messageText": "={{ $json.mensagem }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        3056,
+        848
+      ],
+      "id": "215178b4-39ad-4fe5-9676-2f677bb3cea0",
+      "name": "Envia Report",
+      "credentials": {
+        "evolutionApi": {
+          "id": "keWx5OuE8n8WEbw0",
+          "name": "EMI-SDR-DIOGO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Dado velho nunca sai como report.\nconst c = $('Loop Contas').first().json;\nconst motivo = !c.dado_ate\n  ? 'nenhum dado ingerido para esta conta'\n  : (String(c.ultimo_status ?? 'ausente') !== 'ok'\n      ? `última ingestão terminou em \"${c.ultimo_status ?? 'ausente'}\"`\n      : `dado só até ${String(c.dado_ate).slice(0,10)} (esperado ${String(c.esperado).slice(0,10)})`);\n\nreturn [{ json: {\n  conta_id: c.conta_id,\n  mensagem: [\n    '🔧 *REPORT DE TRÁFEGO NÃO ENVIADO*',\n    '',\n    `Conta: *${c.conta_nome}* (${c.conta_id})`,\n    `Motivo: ${motivo}`,\n    `Última execução do 4.01: ${c.ultima_execucao ?? '—'}`,\n    '',\n    '_O relatório foi retido de propósito: número velho é pior que número ausente._',\n  ].join('\\n'),\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        1072
+      ],
+      "id": "904343b0-82c7-4fd3-9ad5-625561d492e0",
+      "name": "Monta Aviso Tecnico"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "120363423041053494@g.us",
+        "messageText": "={{ $json.mensagem }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2832,
+        1072
+      ],
+      "id": "b5a85fdd-fbd1-48ce-a058-14a309523678",
+      "name": "Avisa MIA-LOGS",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Regras em SQL. Só o que ainda não foi enviado hoje.\nselect a.* from vw_ads_alerta a\n where not exists (\n   select 1 from ads_alerta_enviado e\n    where e.dia = current_date\n      and e.conta_id = a.conta_id\n      and e.regra = a.regra\n )\n order by a.conta_nome, a.regra;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2368,
+        608
+      ],
+      "id": "a5e1ea7f-db33-4a1f-8db4-4ea32aa1c2b2",
+      "name": "Alertas Pendentes",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formatação sem Intl: o sandbox do task runner do n8n não expõe Intl,\n// então toLocaleString('pt-BR') não é confiável aqui. Estes helpers produzem\n// o formato brasileiro de forma determinística. Nulo vira '—', nunca NaN.\nconst nf = (v, dec) => {\n  const n = Number(v);\n  if (v === null || v === undefined || v === '' || !isFinite(n)) return null;\n  const neg = n < 0;\n  const parts = Math.abs(n).toFixed(dec).split('.');\n  const inteiro = parts[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.');\n  return (neg ? '-' : '') + inteiro + (parts[1] ? ',' + parts[1] : '');\n};\nconst brl = v => { const s = nf(v, 2); return s === null ? '—' : 'R$ ' + s; };\nconst pct = v => {\n  if (v === null || v === undefined || v === '') return '—';   // 0,0% != sem dado\n  const s = nf(Number(v) * 100, 1);\n  return s === null ? '—' : s + '%';\n};\nconst int = v => { const s = nf(v, 0); return s === null ? '—' : s; };\nconst dia = v => v ? String(v).slice(0, 10).split('-').reverse().join('/') : '—';\n\n// Um alerta consolidado por conta. Vazio => nada é enviado e o ramo para aqui.\nconst rows = $input.all().map(i => i.json).filter(r => r.conta_id);\nif (!rows.length) return [];\n\nconst rotulo = {\n  gasto_fora_da_meta:   'GASTO FORA DA META',\n  leads_abaixo_da_meta: 'LEADS ABAIXO DA META',\n  saldo_acabando:          'SALDO ACABANDO',\n  limite_de_gasto_proximo: 'LIMITE DE GASTO DA CONTA ACABANDO',\n  gasto_zerado:            'GASTO ZERADO ONTEM',\n};\n\nconst porConta = {};\nfor (const r of rows) {\n  porConta[r.conta_id] ??= { conta_id: r.conta_id, conta_nome: r.conta_nome, grupo: r.grupo_whatsapp, itens: [], marcar: [] };\n  const linhas = [`*${rotulo[r.regra] ?? r.regra}*`];\n  if (r.regra === 'gasto_fora_da_meta') {\n    linhas.push(`Gasto D-1 (total da conta): ${brl(r.valor)}`, `Meta diária: ${brl(r.referencia)}`, `Atingimento: ${pct(r.atingimento)} (${r.direcao})`);\n  } else if (r.regra === 'leads_abaixo_da_meta') {\n    linhas.push(`Leads D-1: ${int(r.valor)}`, `Meta diária: ${int(r.referencia)}`, `Atingimento: ${pct(r.atingimento)}`);\n  } else if (r.regra === 'saldo_acabando') {\n    linhas.push(`Saldo em fundos: ${brl(r.valor)}`, `Gasto médio 7d: ${brl(r.gasto_medio)}`, `Estimativa: acaba em ${int(r.atingimento)} dias`);\n  } else if (r.regra === 'limite_de_gasto_proximo') {\n    linhas.push(`Limite restante na conta: ${brl(r.valor)}`, `Gasto médio 7d: ${brl(r.gasto_medio)}`, `Estimativa: atinge o limite em ${int(r.atingimento)} dias`, '_A entrega para quando o limite de gastos da conta é alcançado._');\n  } else if (r.regra === 'gasto_zerado') {\n    linhas.push(`Nenhum gasto ontem, com média de ${brl(r.gasto_medio)}/dia na semana.`, 'Campanha pausada, fundo esgotado ou conta com restrição.');\n  } else {\n    // Regra nova sem template: mostra os números crus em vez de sair muda.\n    linhas.push(`Valor: ${r.valor}`, `Referência: ${r.referencia}`, `Razão: ${r.atingimento}`);\n  }\n  porConta[r.conta_id].itens.push(linhas.join('\\n'));\n  porConta[r.conta_id].marcar.push({ conta_id: r.conta_id, regra: r.regra, valor: r.valor == null ? null : Number(r.valor) });\n}\n\nreturn Object.values(porConta).map(c => ({ json: {\n  conta_id: c.conta_id,\n  grupo_whatsapp: c.grupo,\n  payload: JSON.stringify(c.marcar),\n  mensagem: [\n    '🚨 *ATENÇÃO · TRÁFEGO PAGO*',\n    `*${c.conta_nome}*`,\n    '',\n    c.itens.join('\\n\\n'),\n    '',\n    `_Verificado em ${$now.setZone('America/Sao_Paulo').toFormat('dd/MM/yyyy HH:mm')}._`,\n  ].join('\\n'),\n} }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        608
+      ],
+      "id": "9ca7ddc4-16f7-4469-a98b-89153161280e",
+      "name": "Monta Alertas"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "={{ $json.grupo_whatsapp }}",
+        "messageText": "={{ $json.mensagem }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2832,
+        608
+      ],
+      "id": "d1a8f422-93d1-4c4e-9382-bc06c5adbdb9",
+      "name": "Envia Alerta",
+      "credentials": {
+        "evolutionApi": {
+          "id": "keWx5OuE8n8WEbw0",
+          "name": "EMI-SDR-DIOGO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into ads_alerta_enviado (dia, conta_id, regra, valor)\nselect current_date, x.conta_id, x.regra, x.valor\nfrom jsonb_to_recordset($1::jsonb) as x(conta_id text, regra text, valor numeric)\non conflict (dia, conta_id, regra) do nothing\nreturning regra;",
+        "options": {
+          "queryReplacement": "={{ [$('Monta Alertas').first().json.payload] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3056,
+        608
+      ],
+      "id": "a4720bf6-0c2b-417e-911a-8eed8d08a0d8",
+      "name": "Marca Alerta Enviado",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        1696,
+        1264
+      ],
+      "id": "cfe62282-d1b8-4b8c-932f-ebfc8698b73a",
+      "name": "Toda Segunda 8h"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select t.*, c.grupo_whatsapp\n  from vw_ads_top_anuncio t\n  join ads_conta c using (conta_id)\n where t.posicao <= 5\n order by t.conta_nome, t.posicao;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1920,
+        1264
+      ],
+      "id": "2623b626-0190-4b2c-973e-c69f9ff101b7",
+      "name": "Top Anuncios 30d",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formatação sem Intl: o sandbox do task runner do n8n não expõe Intl,\n// então toLocaleString('pt-BR') não é confiável aqui. Estes helpers produzem\n// o formato brasileiro de forma determinística. Nulo vira '—', nunca NaN.\nconst nf = (v, dec) => {\n  const n = Number(v);\n  if (v === null || v === undefined || v === '' || !isFinite(n)) return null;\n  const neg = n < 0;\n  const parts = Math.abs(n).toFixed(dec).split('.');\n  const inteiro = parts[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.');\n  return (neg ? '-' : '') + inteiro + (parts[1] ? ',' + parts[1] : '');\n};\nconst brl = v => { const s = nf(v, 2); return s === null ? '—' : 'R$ ' + s; };\nconst pct = v => {\n  if (v === null || v === undefined || v === '') return '—';   // 0,0% != sem dado\n  const s = nf(Number(v) * 100, 1);\n  return s === null ? '—' : s + '%';\n};\nconst int = v => { const s = nf(v, 0); return s === null ? '—' : s; };\nconst dia = v => v ? String(v).slice(0, 10).split('-').reverse().join('/') : '—';\n\n// Só anúncio com lead (having leads > 0 na view). Ordenado por CPL.\nconst rows = $input.all().map(i => i.json);\nif (!rows.length) return [];\n\nconst porConta = {};\nfor (const r of rows) {\n  porConta[r.conta_id] ??= { conta_id: r.conta_id, conta_nome: r.conta_nome, grupo: r.grupo_whatsapp, itens: [] };\n  if (porConta[r.conta_id].itens.length >= 5) continue;\n  const n = porConta[r.conta_id].itens.length + 1;\n  porConta[r.conta_id].itens.push([\n    `*${n}. ${r.ad_nome ?? r.ad_id}*`,\n    `Gasto: ${brl(r.gasto)} · Leads: ${int(r.leads)} · CPL: ${brl(r.cpa)}`,\n    r.canal ? `Canal: ${r.canal}` : null,\n    r.permalink_url ? `Link: ${r.permalink_url}` : '_sem permalink de Instagram_',\n  ].filter(Boolean).join('\\n'));\n}\n\nreturn Object.values(porConta).map(c => ({ json: {\n  conta_id: c.conta_id,\n  grupo_whatsapp: c.grupo,\n  mensagem: [\n    `*MELHORES ANÚNCIOS · ÚLTIMOS 30 DIAS*`,\n    `*${c.conta_nome}*`,\n    '',\n    c.itens.join('\\n\\n'),\n  ].join('\\n'),\n} }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2128,
+        1264
+      ],
+      "id": "b6351a50-2a0a-4e1c-a40c-746165c8acce",
+      "name": "Monta Top"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "={{ $json.grupo_whatsapp }}",
+        "messageText": "={{ $json.mensagem }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2368,
+        1264
+      ],
+      "id": "36cad033-991b-4b98-be30-50f5012bcc2c",
+      "name": "Envia Top",
+      "credentials": {
+        "evolutionApi": {
+          "id": "keWx5OuE8n8WEbw0",
+          "name": "EMI-SDR-DIOGO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4.02 · Report e Alertas\n\n**Guard de frescor primeiro.** `vw_ads_frescor.pode_reportar` só é `true` quando o dado chega a D-1 **e** a última execução do 4.01 terminou em `ok`. Falhou? A conta recebe aviso técnico no MIA-LOGS e o report é retido.\n\n**Uma query por mensagem, campo nomeado.** Nada de `data[2]`, nada de range `A5:K10`.\n\n**Formatação num só lugar:** `brl()`, `pct()`, `int()`, escritos à mão — o sandbox do task runner não expõe `Intl`, então `toLocaleString(\"pt-BR\")` não é confiável. Nulo vira `—`, nunca `NaN`. Nenhum `.format()` em número.\n\n**Alerta consolidado e sem repetição:** uma mensagem por conta, com dedup em `ads_alerta_enviado (dia, conta, regra)`.\n\n**Melhores anúncios** vêm de `vw_ads_top_anuncio`, que já filtra `having sum(leads) > 0`.",
+        "height": 620,
+        "width": 560,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        544
+      ],
+      "id": "7450b499-40e5-4e66-81de-e70130cd2cbf",
+      "name": "Nota -1240-260"
+    }
+  ],
+  "connections": {
+    "Todo Dia 10h": {
+      "main": [
+        [
+          {
+            "node": "Frescor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Frescor": {
+      "main": [
+        [
+          {
+            "node": "Loop Contas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Contas": {
+      "main": [
+        [
+          {
+            "node": "Alertas Pendentes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pode Reportar?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pode Reportar?": {
+      "main": [
+        [
+          {
+            "node": "Le Periodos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Monta Aviso Tecnico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Le Periodos": {
+      "main": [
+        [
+          {
+            "node": "Monta Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta Report": {
+      "main": [
+        [
+          {
+            "node": "Envia Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia Report": {
+      "main": [
+        [
+          {
+            "node": "Loop Contas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta Aviso Tecnico": {
+      "main": [
+        [
+          {
+            "node": "Avisa MIA-LOGS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisa MIA-LOGS": {
+      "main": [
+        [
+          {
+            "node": "Loop Contas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alertas Pendentes": {
+      "main": [
+        [
+          {
+            "node": "Monta Alertas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta Alertas": {
+      "main": [
+        [
+          {
+            "node": "Envia Alerta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia Alerta": {
+      "main": [
+        [
+          {
+            "node": "Marca Alerta Enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Toda Segunda 8h": {
+      "main": [
+        [
+          {
+            "node": "Top Anuncios 30d",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Top Anuncios 30d": {
+      "main": [
+        [
+          {
+            "node": "Monta Top",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta Top": {
+      "main": [
+        [
+          {
+            "node": "Envia Top",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "16da19d3-921d-4451-8cbd-b36c67c50838",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-09-01T18:49:09.911Z",
+      "createdAt": "2026-09-01T18:49:09.911Z",
+      "role": "workflow:owner",
+      "workflowId": "ITzSZVO6DEouV0Qd",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": [
+    {
+      "updatedAt": "2026-09-01T19:39:38.763Z",
+      "createdAt": "2026-09-01T19:39:38.763Z",
+      "id": "oge68DCELclv7rhu",
+      "name": "trafego-meta"
+    }
+  ]
+}
