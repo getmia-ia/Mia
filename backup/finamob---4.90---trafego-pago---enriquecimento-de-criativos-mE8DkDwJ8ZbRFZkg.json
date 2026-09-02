@@ -1,0 +1,323 @@
+{
+  "updatedAt": "2026-09-01T19:44:42.564Z",
+  "createdAt": "2026-09-01T18:48:41.116Z",
+  "id": "mE8DkDwJ8ZbRFZkg",
+  "name": "Finamob - 4.90 - Trafego Pago - Enriquecimento de Criativos",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 40
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        432
+      ],
+      "id": "31d6761d-e69d-4461-a105-a38633aabacb",
+      "name": "Agendamento"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        608
+      ],
+      "id": "5aa67ac8-2c38-49ca-939f-4b87f2619655",
+      "name": "Manual"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Só anúncio novo, visto nos últimos 60 dias, com menos de 3 tentativas.\nselect ad_id, conta_id from vw_ads_sem_criativo limit 500;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        432
+      ],
+      "id": "eedc7474-a38e-4efc-b030-254cf1baa20c",
+      "name": "Fila de Anuncios",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Agrupa em lotes de 50: a Graph API lê múltiplos objetos numa só chamada (?ids=).\nconst ids = $input.all().map(i => i.json.ad_id);\nconst lotes = [];\nfor (let i = 0; i < ids.length; i += 50) lotes.push(ids.slice(i, i + 50));\nreturn lotes.map((l, i) => ({ json: { lote: i + 1, total: lotes.length, ids: l.join(',') } }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        432
+      ],
+      "id": "ba0bfb45-0cb6-4db4-9692-7cc0e146c0f1",
+      "name": "Divide em Lotes de 50"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        672,
+        432
+      ],
+      "id": "96801641-08c1-46ae-a713-1f3a23ad336a",
+      "name": "Loop Lotes"
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/v23.0/?ids={{ $json.ids }}&fields=id,status,effective_status,creative{instagram_permalink_url,thumbnail_url}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "facebookGraphApi",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        544
+      ],
+      "id": "f87d3840-1093-4d8e-81df-923c2ab16180",
+      "name": "Meta Criativos",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 4000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "bqvhO7I9HxNLrUbM",
+          "name": "app-mia-finamob"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// A resposta de ?ids= vem como objeto chaveado pelo id.\nconst rows = [];\nfor (const item of $input.all()) {\n  for (const o of Object.values(item.json)) {\n    if (!o || typeof o !== 'object' || !o.id) continue;\n    rows.push({\n      ad_id: String(o.id),\n      permalink_url: o.creative?.instagram_permalink_url ?? null,\n      thumbnail_url: o.creative?.thumbnail_url ?? null,\n      status_ad: o.status ?? null,\n      status_efetivo: o.effective_status ?? null,\n    });\n  }\n}\nreturn [{ json: { linhas: rows.length, payload: JSON.stringify(rows) } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        544
+      ],
+      "id": "e7ac0380-6b2b-476f-8bb1-143a4016b3ed",
+      "name": "Normaliza Criativos"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Nunca apaga link existente. Conta tentativa para não reconsultar eternamente\n-- anúncio que simplesmente não tem permalink de Instagram.\nupdate ads_anuncio a set\n  permalink_url        = coalesce(x.permalink_url, a.permalink_url),\n  thumbnail_url        = coalesce(x.thumbnail_url, a.thumbnail_url),\n  status_ad            = coalesce(x.status_ad,      a.status_ad),\n  status_efetivo       = coalesce(x.status_efetivo, a.status_efetivo),\n  criativo_em          = case when x.permalink_url is not null then now() else a.criativo_em end,\n  criativo_tentativas  = a.criativo_tentativas + 1,\n  atualizado_em        = now()\nfrom jsonb_to_recordset($1::jsonb) as x(\n  ad_id text, permalink_url text, thumbnail_url text,\n  status_ad text, status_efetivo text\n)\nwhere a.ad_id = x.ad_id\nreturning a.ad_id;",
+        "options": {
+          "queryReplacement": "={{ [$json.payload] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1344,
+        544
+      ],
+      "id": "2c34c8c9-d2cb-475f-9fe1-8eb10f13d054",
+      "name": "Atualiza Dimensao",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into ads_ingestao_log (fluxo, status, linhas, terminado_em)\nvalues ('4.90', 'ok', $1::int, now()) returning id;",
+        "options": {
+          "queryReplacement": "={{ [$('Fila de Anuncios').all().length] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        912,
+        272
+      ],
+      "id": "3b8a447d-9954-4e88-90ac-3b9305403a70",
+      "name": "Log",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4.90 · Enriquecimento de criativos\n\nSubstitui o loop antigo que **apagava** `MetaAds3!C2:C9999` e refazia anúncio por anúncio com `Wait 5s`.\n\n**Só o que falta.** Consome `vw_ads_sem_criativo` — anúncio sem permalink, visto nos últimos 60 dias, com menos de 3 tentativas.\n\n**50 por chamada** via `?ids=` em vez de 1 por chamada. 500 anúncios = 10 requisições, não 1.000.\n\n**Nunca apaga.** `coalesce(novo, atual)`: um link já resolvido nunca volta a ficar vazio no meio da execução.",
+        "height": 400,
+        "width": 520,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "81a59ec2-a63e-4667-bf33-7bd734ab556b",
+      "name": "Nota -400-420"
+    }
+  ],
+  "connections": {
+    "Agendamento": {
+      "main": [
+        [
+          {
+            "node": "Fila de Anuncios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual": {
+      "main": [
+        [
+          {
+            "node": "Fila de Anuncios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fila de Anuncios": {
+      "main": [
+        [
+          {
+            "node": "Divide em Lotes de 50",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Divide em Lotes de 50": {
+      "main": [
+        [
+          {
+            "node": "Loop Lotes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Lotes": {
+      "main": [
+        [
+          {
+            "node": "Log",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Meta Criativos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta Criativos": {
+      "main": [
+        [
+          {
+            "node": "Normaliza Criativos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliza Criativos": {
+      "main": [
+        [
+          {
+            "node": "Atualiza Dimensao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza Dimensao": {
+      "main": [
+        [
+          {
+            "node": "Loop Lotes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "89f3c3fd-ad31-40d1-be4a-f26fb27dfe59",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-09-01T18:48:41.116Z",
+      "createdAt": "2026-09-01T18:48:41.116Z",
+      "role": "workflow:owner",
+      "workflowId": "mE8DkDwJ8ZbRFZkg",
+      "projectId": "nRxOu1L1N41Jyveq"
+    }
+  ],
+  "activeVersion": null,
+  "tags": [
+    {
+      "updatedAt": "2026-09-01T19:39:38.763Z",
+      "createdAt": "2026-09-01T19:39:38.763Z",
+      "id": "oge68DCELclv7rhu",
+      "name": "trafego-meta"
+    }
+  ]
+}
