@@ -3,7 +3,7 @@
   "createdAt": "2026-04-01T14:24:11.428Z",
   "id": "Yj3X4FYgOuxA6Gaa",
   "name": "02 - Extrato WhatsApp",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
@@ -244,17 +244,256 @@
   "staticData": null,
   "meta": null,
   "versionId": "35cf0c28-8927-45ff-829f-2482c27c2e8b",
-  "activeVersionId": null,
+  "activeVersionId": "35cf0c28-8927-45ff-829f-2482c27c2e8b",
   "triggerCount": 0,
   "shared": [
     {
-      "updatedAt": "2026-04-01T14:24:11.428Z",
-      "createdAt": "2026-04-01T14:24:11.428Z",
       "role": "workflow:owner",
       "workflowId": "Yj3X4FYgOuxA6Gaa",
-      "projectId": "nRxOu1L1N41Jyveq"
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-04-01T14:24:11.428Z",
+      "updatedAt": "2026-04-01T14:24:11.428Z"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "versionId": "35cf0c28-8927-45ff-829f-2482c27c2e8b",
+    "workflowId": "Yj3X4FYgOuxA6Gaa",
+    "nodes": [
+      {
+        "parameters": {
+          "workflowInputs": {
+            "values": [
+              {
+                "name": "url_arquivo"
+              },
+              {
+                "name": "tipo"
+              },
+              {
+                "name": "accountId"
+              },
+              {
+                "name": "bankName"
+              },
+              {
+                "name": "accountName"
+              },
+              {
+                "name": "userId"
+              },
+              {
+                "name": "ownerId"
+              },
+              {
+                "name": "ownerName"
+              },
+              {
+                "name": "paymentDate"
+              },
+              {
+                "name": "filePassword"
+              }
+            ]
+          }
+        },
+        "id": "545553fb-6502-4b2e-b558-97b30bbe48e7",
+        "name": "Recebe Dados do Agente",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          704,
+          -496
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.url_arquivo }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "id": "f8ad1046-3e46-4cd5-97a2-cc27da3b1a7d",
+        "name": "Baixar Arquivo do WhatsApp",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          912,
+          -496
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Extrai apenas nome e tipo do arquivo. O conteudo em si nao vai no payload:\n// o fluxo 01 baixa o arquivo por conta propria a partir da fileUrl.\nconst binario = $input.item.binary.data;\nconst mimeType = binario.mimeType || 'application/pdf';\nconst extensao = (mimeType.split('/')[1] || 'pdf').split(';')[0];\n\nlet fileName = binario.fileName || `documento_whatsapp.${extensao}`;\n\n// O WhatsApp costuma anexar \"-filename*=...\" ao nome; corta isso fora.\nif (fileName.includes('-filename')) {\n  fileName = fileName.split('-filename')[0];\n}\n// Evita nomes duplicados tipo \"arquivo.pdf.pdf\"\nfileName = fileName.replace(/\\.(pdf|ofx|csv|jpg|jpeg|png)\\.\\1$/i, '.$1');\n\nreturn [{ json: { fileName, mimeType } }];"
+        },
+        "id": "f5c6ce34-c3cf-4c02-b7db-323fc4896583",
+        "name": "Extrai Nome e Tipo do Arquivo",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1120,
+          -496
+        ],
+        "alwaysOutputData": true
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "insert into public.import_jobs\n  (user_id, file_name, status, progress, status_message, account_id, payment_date)\nvalues\n  ($1::uuid, $2, 'pending', 0, 'Recebido pelo WhatsApp. Iniciando processamento...',\n   nullif($3, '')::uuid, nullif($4, '')::date)\nreturning id as job_id;",
+          "options": {
+            "queryReplacement": "={{ [$('Recebe Dados do Agente').first().json.userId, $json.fileName, ($('Recebe Dados do Agente').first().json.accountId || ''), ($('Recebe Dados do Agente').first().json.paymentDate || '')] }}"
+          }
+        },
+        "id": "93dfdaf7-423e-47ca-8b7a-83dc8e75d715",
+        "name": "Criar Job de Importacao",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1328,
+          -496
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "769u9DNAemYPOCzL",
+            "name": "ELEVA - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://webhook.miabuilder.com/webhook/24fb8480-52b3-4a66-8574-882420172277",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"fileUrl\": \"{{ $('Recebe Dados do Agente').first().json.url_arquivo }}\",\n  \"fileName\": \"{{ $('Extrai Nome e Tipo do Arquivo').first().json.fileName }}\",\n  \"fileType\": \"{{ $('Extrai Nome e Tipo do Arquivo').first().json.mimeType }}\",\n  \"storagePath\": \"\",\n  \"tipo\": \"{{ $('Recebe Dados do Agente').first().json.tipo }}\",\n  \"accountId\": \"{{ $('Recebe Dados do Agente').first().json.accountId }}\",\n  \"bankName\": \"{{ $('Recebe Dados do Agente').first().json.bankName }}\",\n  \"accountName\": \"{{ $('Recebe Dados do Agente').first().json.accountName }}\",\n  \"userId\": \"{{ $('Recebe Dados do Agente').first().json.userId }}\",\n  \"ownerId\": \"{{ $('Recebe Dados do Agente').first().json.ownerId }}\",\n  \"ownerName\": \"{{ $('Recebe Dados do Agente').first().json.ownerName }}\",\n  \"paymentDate\": {{ $('Recebe Dados do Agente').first().json.paymentDate ? '\"' + $('Recebe Dados do Agente').first().json.paymentDate + '\"' : 'null' }},\n  \"jobId\": \"{{ $json.job_id }}\",\n  \"filePassword\": {{ $('Recebe Dados do Agente').first().json.filePassword ? '\"' + $('Recebe Dados do Agente').first().json.filePassword + '\"' : 'null' }}\n}",
+          "options": {
+            "timeout": 300000
+          }
+        },
+        "id": "330b05f3-fa7e-4e60-a5b4-a21c092c161d",
+        "name": "Dispara para Fluxo de OCR",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1536,
+          -496
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "54388268-a9d4-4dee-b545-6639f1bae511",
+                "name": "importacao_concluida",
+                "type": "boolean",
+                "value": true
+              },
+              {
+                "id": "4b48d857-79b2-450c-a95b-7f3ae7d3a88d",
+                "name": "status",
+                "type": "string",
+                "value": "Importação concluída. Os lançamentos do arquivo foram extraídos e já estão na conta, aguardando conciliação no app."
+              },
+              {
+                "id": "35b3f298-7423-430e-9f2a-97dcc97d625b",
+                "name": "proximo_passo",
+                "type": "string",
+                "value": "O cliente precisa abrir o app para revisar e conciliar os lançamentos importados."
+              },
+              {
+                "id": "3e73263b-3738-4d3d-93f7-f27b6b0f4336",
+                "name": "job_id",
+                "type": "string",
+                "value": "={{ $('Criar Job de Importacao').first().json.job_id }}"
+              },
+              {
+                "id": "a0ddc14b-8fe2-4f7e-a43e-19c347f326c3",
+                "name": "file_name",
+                "type": "string",
+                "value": "={{ $('Extrai Nome e Tipo do Arquivo').first().json.fileName }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "3f006289-7d4d-49fe-9edc-7557290ee6be",
+        "name": "Resposta para o Agente",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          1760,
+          -496
+        ]
+      }
+    ],
+    "connections": {
+      "Recebe Dados do Agente": {
+        "main": [
+          [
+            {
+              "node": "Baixar Arquivo do WhatsApp",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Baixar Arquivo do WhatsApp": {
+        "main": [
+          [
+            {
+              "node": "Extrai Nome e Tipo do Arquivo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai Nome e Tipo do Arquivo": {
+        "main": [
+          [
+            {
+              "node": "Criar Job de Importacao",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Criar Job de Importacao": {
+        "main": [
+          [
+            {
+              "node": "Dispara para Fluxo de OCR",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Dispara para Fluxo de OCR": {
+        "main": [
+          [
+            {
+              "node": "Resposta para o Agente",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-08-21T15:05:07.789Z",
+    "updatedAt": "2026-08-21T15:05:07.789Z"
+  },
   "tags": []
 }
