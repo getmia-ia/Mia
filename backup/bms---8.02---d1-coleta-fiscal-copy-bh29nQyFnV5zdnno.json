@@ -3,7 +3,7 @@
   "createdAt": "2026-08-19T16:17:11.601Z",
   "id": "bh29nQyFnV5zdnno",
   "name": "BMS - 8.02 - D1 (Coleta Fiscal)copy",
-  "active": false,
+  "active": true,
   "isArchived": true,
   "nodes": [
     {
@@ -753,17 +753,769 @@
   "staticData": null,
   "meta": null,
   "versionId": "21f32b37-c40b-4418-af36-59c7f5a6de22",
-  "activeVersionId": null,
+  "activeVersionId": "21f32b37-c40b-4418-af36-59c7f5a6de22",
   "triggerCount": 0,
   "shared": [
     {
-      "updatedAt": "2026-08-19T16:17:11.601Z",
-      "createdAt": "2026-08-19T16:17:11.601Z",
       "role": "workflow:owner",
       "workflowId": "bh29nQyFnV5zdnno",
-      "projectId": "nRxOu1L1N41Jyveq"
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-08-19T16:17:11.601Z",
+      "updatedAt": "2026-08-19T16:17:11.601Z"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "versionId": "21f32b37-c40b-4418-af36-59c7f5a6de22",
+    "workflowId": "bh29nQyFnV5zdnno",
+    "nodes": [
+      {
+        "parameters": {
+          "workflowInputs": {
+            "values": [
+              {
+                "name": "fornecedor_id"
+              },
+              {
+                "name": "analise_id"
+              },
+              {
+                "name": "cnpj"
+              },
+              {
+                "name": "uf"
+              },
+              {
+                "name": "divida_uniao_qtde",
+                "type": "number"
+              },
+              {
+                "name": "divida_uniao_valor_total",
+                "type": "number"
+              },
+              {
+                "name": "divida_uniao_pct_faturamento",
+                "type": "number"
+              }
+            ]
+          }
+        },
+        "id": "62d10dd6-df69-4c11-a6ae-d1108ac232cd",
+        "typeVersion": 1.1,
+        "name": "When Executed by Another Workflow",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "position": [
+          160,
+          512
+        ]
+      },
+      {
+        "parameters": {
+          "url": "https://apiv3.directd.com.br/api/CertidaoNegativaDebitos",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "CNPJ",
+                "value": "={{ $json.cnpj }}"
+              },
+              {
+                "name": "UF",
+                "value": "={{ $json.uf }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1264,
+          128
+        ],
+        "id": "ed99e713-2f6d-45ef-b387-3a2076a61607",
+        "name": "Direct Data · CND Estadual",
+        "retryOnFail": true,
+        "waitBetweenTries": 3000,
+        "credentials": {
+          "httpQueryAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Trocar o TOKEN direto no node por uma credencial — não deixar chave em texto puro."
+      },
+      {
+        "parameters": {
+          "url": "https://servicos.receitafederal.gov.br/servico/consulta-selo-sintonia/api/portalservicos/empresas/com-selo",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "cnpjBaseOuNome",
+                "value": "={{ $('When Executed by Another Workflow').item.json.cnpj.substring(0, 8) }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          400,
+          992
+        ],
+        "id": "3fe973ea-2108-4f26-bf21-df31b209b822",
+        "name": "Receita Sintonia · Consulta Selo A+",
+        "retryOnFail": false,
+        "waitBetweenTries": 3000,
+        "onError": "continueRegularOutput",
+        "notes": "API pública, sem autenticação — descoberta via DevTools (Network) da própria página de busca da Receita Federal. dados=[] quando não está na lista A+ ou não encontrado. Checar mesValidadeSelo (formato AAAAMM) pra confirmar que o selo ainda está válido.\n\nonError=continueRegularOutput: se essa chamada falhar (site fora do ar, mudança de layout/endpoint, timeout), o D1 NÃO trava — segue com o item de erro adiante, e 'Classificar Sintonia' já trata isso como ND (dados=[] no fallback)."
+      },
+      {
+        "parameters": {
+          "jsCode": "// ============================================================================\n// CLASSIFICAR SINTONIA — conformidade cooperativa junto a Receita Federal.\n//\n// Fonte 1 (principal): Selo Sintonia A+ (API publica da RFB).\n// Fonte 2 (FALLBACK):  lista de protocolos do programa Confia\n//                      (https://www.gov.br/receitafederal/.../confia/protocolos)\n//\n// Decisao BMS: estar no Confia vale a MESMA pontuacao do Selo A+ — sao os dois\n// programas de conformidade cooperativa da RFB, e o Confia e ate mais exigente\n// (adesao por ADE, com protocolo assinado). Sem nenhum dos dois -> ND.\n//\n// t_sintonia: 'A+' | 'ND'   (contrato que o Orquestrador pontua)\n// sintonia_fonte: selo_sintonia | confia_protocolo | nenhum  (exibicao/auditoria)\n// ============================================================================\n\n// Snapshot da lista do Confia (bases de CNPJ, 8 digitos) — atualizado em 2026-08.\n// Usado SO quando o download da pagina falha; assim uma queda do gov.br nao\n// transforma um fornecedor Confia em ND.\nconst CONFIA_SNAPSHOT = [\n  '62462015', '59476770', '81243735', '02886427', '10456016', '02270689',\n  '02302100', '28152650', '59104422', '07047251', '10394422', '33050071',\n  '61695227', '55962369', '90400888', '50567288', '43461789', '45985371',\n  '08324196', '87235172', '00360305', '00000000', '02914460', '33000167',\n  '04817052', '60409075', '76093731', '01358874', '01730520', '75904383',\n  '62695036', '60665981', '33657248', '87288940', '24227491', '33611500',\n  '89850341'\n];\n\nconst entrada = $('When Executed by Another Workflow').first().json;\nconst cnpjBase = String(entrada.cnpj || '')\n  .toUpperCase()\n  .replace(/[^0-9A-Z]/g, '')\n  .padStart(14, '0')\n  .substring(0, 8);\n\nlet t_sintonia = 'ND';\nlet sintonia_fonte = 'nenhum';\nlet confia_lista_origem = 'nao_consultada';\nlet confia_qtde_lista = null;\n\n// ---------------------------------------------------------------------------\n// 1) Selo Sintonia A+\n// ---------------------------------------------------------------------------\ntry {\n  const dadosSintonia = $('Receita Sintonia · Consulta Selo A+').first().json?.dados || [];\n  if (Array.isArray(dadosSintonia) && dadosSintonia.length > 0) {\n    const hoje = new Date();\n    const anoMesAtual = hoje.getFullYear() * 100 + (hoje.getMonth() + 1);\n    if (Number(dadosSintonia[0].mesValidadeSelo) >= anoMesAtual) {\n      t_sintonia = 'A+';\n      sintonia_fonte = 'selo_sintonia';\n    }\n  }\n} catch (e) {\n  // chamada anterior falhou / formato inesperado -> segue pro fallback\n}\n\n// ---------------------------------------------------------------------------\n// 2) FALLBACK — lista de protocolos do Confia\n// ---------------------------------------------------------------------------\nif (t_sintonia === 'ND') {\n  let bases = [];\n\n  try {\n    const resp = $('Confia · Lista de Protocolos').first().json;\n    const html = String(resp?.data ?? resp?.body ?? '');\n\n    if (html.length > 500) {\n      // Varre linha a linha da tabela: pega os CNPJs e descarta linhas cuja\n      // situacao nao esta ativa.\n      const linhas = html.split(/<tr[\\s>]/i).slice(1);\n      const encontrados = [];\n      for (const linha of linhas) {\n        const texto = linha.replace(/<[^>]*>/g, ' ').replace(/&nbsp;?/gi, ' ');\n        const cnpjs = texto.match(/\\d{2}\\.?\\d{3}\\.?\\d{3}\\/?\\d{4}-?\\d{2}/g) || [];\n        if (cnpjs.length === 0) continue;\n        if (/(INATIV|REVOGAD|SUSPENS|CANCELAD|EXCLU|RESCIND)/i.test(texto)) continue;\n        for (const c of cnpjs) {\n          encontrados.push(c.replace(/\\D/g, '').substring(0, 8));\n        }\n      }\n      if (encontrados.length > 0) {\n        bases = encontrados;\n        confia_lista_origem = 'site';\n        // Sanidade: a lista tinha 37 empresas em 2026-08 e so cresce. Se o parser\n        // trouxe pouca coisa, o layout provavelmente mudou -> une com o snapshot\n        // pra nao perder ninguem (falso ND e pior que um A+ a mais aqui).\n        if (encontrados.length < 20) {\n          bases = Array.from(new Set([...encontrados, ...CONFIA_SNAPSHOT]));\n          confia_lista_origem = 'site+snapshot';\n        }\n      }\n    }\n  } catch (e) {\n    // node nao executou / erro de parsing -> snapshot\n  }\n\n  if (bases.length === 0) {\n    bases = CONFIA_SNAPSHOT;\n    confia_lista_origem = 'snapshot_local';\n  }\n\n  confia_qtde_lista = bases.length;\n\n  if (bases.includes(cnpjBase)) {\n    t_sintonia = 'A+';            // mesma pontuacao do Selo Sintonia\n    sintonia_fonte = 'confia_protocolo';\n  }\n}\n\nreturn [{\n  json: {\n    t_sintonia,\n    sintonia_fonte,\n    confia_lista_origem,   // site | snapshot_local | nao_consultada\n    confia_qtde_lista,     // quantas empresas ativas a lista trouxe (sanidade do parser)\n    cnpj_base_consultado: cnpjBase,\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1056,
+          992
+        ],
+        "id": "d16c4768-2c6b-4f26-99a2-de0a72940d3c",
+        "name": "Classificar Sintonia",
+        "notes": "Decide t_sintonia com duas fontes: Selo Sintonia A+ (principal) e, se nao houver selo, a lista de protocolos do Confia (fallback) — estar no Confia vale a MESMA pontuacao. Sem nenhum dos dois -> ND. sintonia_fonte registra qual das duas decidiu."
+      },
+      {
+        "parameters": {
+          "numberInputs": 3
+        },
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          1744,
+          512
+        ],
+        "id": "6ca9d6c3-7944-424b-9173-93b834d12f0b",
+        "name": "Merge",
+        "notes": "Barreira de sincronização: espera a CND Estadual (input 0), o resultado do PGFN — com ou sem fallback (input 1) — e a Receita Sintonia (input 2) antes de seguir. Não usamos o item mesclado em si; a consolidação de verdade acontece no próximo node."
+      },
+      {
+        "parameters": {
+          "jsCode": "// ============================================================================\n// CLASSIFICAR D1 — traduz as fontes fiscais em categorias (nunca em pontos).\n//\n// PGFN — quem decide o quê:\n//   • EXISTÊNCIA da dívida  -> Econodata (campos que o Orquestrador manda).\n//                              É a FONTE DE VERDADE: null/0 = não há dívida.\n//   • CLASSIFICAÇÃO da dívida -> CND/CPEN Federal da Infosimples.\n//                              Só é consultada quando existe dívida.\n//\n// Ou seja: sem dívida no Econodata, o t_pgfn é 'Não' mesmo que a certidão\n// diga outra coisa. Com dívida, a certidão define se é regularizada\n// (Parcelada/garantida) ou exigível (Irregular).\n// ============================================================================\n\nconst cndOriginal = $('Infosimples · CND Federal (Resultado Final)').first().json;\nconst cnd = cndOriginal.data?.[0] ?? null;   // null = a Infosimples não emitiu a certidão\nconst est = $('Direct Data · CND Estadual').first().json.retorno ?? null;\nconst sintoniaCls = $('Classificar Sintonia').first().json ?? {};\nconst t_sintonia = sintoniaCls.t_sintonia ?? 'ND';\n// Qual fonte deu o A+: selo_sintonia | confia_protocolo | nenhum\nconst sintonia_fonte = sintoniaCls.sintonia_fonte ?? 'nenhum';\nconst confia_lista_origem = sintoniaCls.confia_lista_origem ?? 'nao_consultada';\n\nconst entrada = $('When Executed by Another Workflow').first().json;\n\n// ---------------------------------------------------------------------------\n// Dívida ativa da União (Econodata, via Orquestrador)\n// Se o Orquestrador não mandar os campos, chegam undefined -> null.\n// ---------------------------------------------------------------------------\nconst num = (v) => {\n  if (v === null || v === undefined || v === '') return null;\n  const n = Number(v);\n  return Number.isFinite(n) ? n : null;\n};\n\nconst divida_uniao_qtde = num(entrada.divida_uniao_qtde);\nconst divida_uniao_valor_total = num(entrada.divida_uniao_valor_total);\nconst divida_uniao_pct_faturamento = num(entrada.divida_uniao_pct_faturamento);\n\n// Existe dívida registrada? 0 NÃO conta (o Econodata devolve 0 quando não há dívida),\n// e null também não (campo ausente -> assume 'Não' por decisão da BMS).\nconst temDividaUniao = (divida_uniao_qtde ?? 0) > 0 || (divida_uniao_valor_total ?? 0) > 0;\n\n// ---------------------------------------------------------------------------\n// t_cnd — categoria da certidão federal, independente do PGFN.\n// Fica 'ND' quando a Infosimples não conseguiu emitir.\n// ---------------------------------------------------------------------------\nconst tipo = cnd?.tipo || '';\nlet t_cnd = 'ND';\nif (cnd) {\n  if (tipo.includes('efeitos de negativa')) t_cnd = 'Positiva c/ efeitos de negativa';\n  else if (tipo === 'Positiva') t_cnd = 'Positiva';   // débito exigível, sem regularização\n  else if (tipo === 'Negativa') t_cnd = 'Negativa';   // nada em aberto\n}\n\n// ---------------------------------------------------------------------------\n// t_pgfn — dívida ativa da União\n// ---------------------------------------------------------------------------\nlet t_pgfn = 'Não';\nlet pgfn_fonte = 'econodata_sem_divida';  // rastreabilidade de qual regra decidiu\nlet pgfn_divergencia = false;             // Econodata x certidão se contradizem\n\nif (!temDividaUniao) {\n  // ---- SEM DÍVIDA (null, ausente ou 0) — fonte de verdade é o Econodata ----\n  t_pgfn = 'Não';\n  pgfn_fonte = (divida_uniao_qtde === null && divida_uniao_valor_total === null)\n    ? 'sem_dado_assumido_nao'   // campo não chegou -> assume 'Não'\n    : 'econodata_sem_divida';   // chegou 0 -> confirmadamente sem dívida\n\n} else if (!cnd) {\n  // ---- COM DÍVIDA, mas a certidão não saiu --------------------------------\n  // Sem a certidão não há como saber se está exigível; por decisão da BMS,\n  // classifica no grau mais brando (não penaliza por falha de coleta).\n  t_pgfn = 'Parcelada/garantida';\n  pgfn_fonte = 'divida_sem_certidao';\n\n} else if (cnd.debitos_pgfn !== true || t_cnd === 'Negativa') {\n  // ---- COM DÍVIDA, mas a certidão está limpa ------------------------------\n  // A certidão é do dia; a Lista de Devedores da PGFN (Econodata) é snapshot\n  // trimestral. A certidão ganha, mas fica registrada a divergência para o\n  // analista conferir na revisão manual.\n  t_pgfn = 'Não';\n  pgfn_fonte = 'certidao_limpa_divergente';\n  pgfn_divergencia = true;\n\n} else if (tipo.includes('efeitos de negativa')) {\n  // ---- COM DÍVIDA + certidão positiva c/ efeitos de negativa --------------\n  // Dívida existe mas está parcelada, garantida ou com exigibilidade suspensa.\n  t_pgfn = 'Parcelada/garantida';\n  pgfn_fonte = 'cnd_efeitos_negativa';\n\n} else {\n  // ---- COM DÍVIDA + certidão positiva pura --------------------------------\n  // Débito exigível, sem regularização. Único caminho que gera 'Irregular'.\n  t_pgfn = 'Irregular';\n  pgfn_fonte = 'cnd_positiva';\n}\n\n// ---------------------------------------------------------------------------\n// CND Estadual (Direct Data) — independente do federal.\n// possuiDebito=false                      -> Regular\n// possuiDebito=true + efeitoNegativa=true -> Regular (exigibilidade suspensa)\n// possuiDebito=true sem efeito negativa   -> Irregular\n// est null (API falhou)                   -> ND\n// ---------------------------------------------------------------------------\nlet t_est = 'ND';\nif (est) {\n  t_est = (!est.possuiDebito || est.efeitoNegativa) ? 'Regular' : 'Irregular';\n}\n\n// ---------------------------------------------------------------------------\n// GATE G3 — reprovação automática: certidão federal POSITIVA pura + dívida\n// ativa irregular. Só dispara quando há dívida no Econodata E a certidão saiu\n// positiva pura (as duas condições vêm do mesmo caminho 'cnd_positiva').\n// ---------------------------------------------------------------------------\nconst gateDisparado = (t_cnd === 'Positiva' && t_pgfn === 'Irregular')\n  ? 'G3: CND federal positiva + PGFN irregular'\n  : null;\n\nreturn [{\n  json: {\n    // ---- contrato de classificação (o Orquestrador pontua a partir disto) --\n    t_cnd,\n    t_pgfn,\n    t_est,\n    t_sintonia,\n    sintonia_fonte,\n    confia_lista_origem,\n    gate_disparado: gateDisparado,\n\n    // ---- dado de exibição (Lovable) ---------------------------------------\n    pgfn_fonte,          // econodata_sem_divida | sem_dado_assumido_nao | divida_sem_certidao\n                         // | certidao_limpa_divergente | cnd_efeitos_negativa | cnd_positiva\n    pgfn_divergencia,    // true = certidão limpa mas Econodata acusa dívida\n    divida_uniao_qtde,\n    divida_uniao_valor_total,\n    divida_uniao_pct_faturamento,\n\n    // ---- auditoria --------------------------------------------------------\n    cnpj_consultado: (() => {\n      // Se houve retry de matriz real, o CNPJ consultado de fato é o do retry.\n      try { return $('Extrair CNPJ Matriz Real do Erro').first().json.cnpj_matriz_real; }\n      catch (e) { return $('Normalizar CNPJ Matriz').first().json.cnpj_matriz; }\n    })(),\n    retry_matriz_real: (() => {\n      try { $('Extrair CNPJ Matriz Real do Erro').first(); return true; }\n      catch (e) { return false; }\n    })(),\n    cnd_code: cndOriginal?.code ?? null,\n    cnd_erro: (!cnd && Array.isArray(cndOriginal?.errors) && cndOriginal.errors.length) ? String(cndOriginal.errors[0]) : null,\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1952,
+          528
+        ],
+        "id": "364df032-8221-4f49-b6dd-0afc474a3ed8",
+        "name": "Classificar D1"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "WITH ins1 AS (\n  INSERT INTO credscore.fornecedor_dados_brutos (fornecedor_id, fonte, payload)\n  VALUES ('{{ $('When Executed by Another Workflow').first().json.fornecedor_id }}', 'infosimples_cnd_pgfn', '{{ JSON.stringify($('Infosimples · CND Federal (Resultado Final)').first().json) }}'::jsonb)\n),\nins2 AS (\n  INSERT INTO credscore.fornecedor_dados_brutos (fornecedor_id, fonte, payload)\n  VALUES ('{{ $('When Executed by Another Workflow').first().json.fornecedor_id }}', 'directd_cnd_estadual', '{{ JSON.stringify($('Direct Data · CND Estadual').first().json) }}'::jsonb)\n),\nins4 AS (\n  INSERT INTO credscore.fornecedor_dados_brutos (fornecedor_id, fonte, payload)\n  VALUES ('{{ $('When Executed by Another Workflow').first().json.fornecedor_id }}', 'receita_sintonia_selo', '{{ JSON.stringify($('Receita Sintonia · Consulta Selo A+').first().json) }}'::jsonb)\n),\nins4b AS (\n  INSERT INTO credscore.fornecedor_dados_brutos (fornecedor_id, fonte, payload)\n  VALUES ('{{ $('When Executed by Another Workflow').first().json.fornecedor_id }}', 'confia_lista_protocolos', '{{ JSON.stringify($('Classificar Sintonia').first().json) }}'::jsonb)\n),\nins5 AS (\n  INSERT INTO credscore.fornecedor_dados_brutos (fornecedor_id, fonte, payload)\n  VALUES ('{{ $('When Executed by Another Workflow').first().json.fornecedor_id }}', 'econodata_divida_uniao_pgfn', '{{ JSON.stringify({\n    divida_uniao_qtde: $('When Executed by Another Workflow').first().json.divida_uniao_qtde,\n    divida_uniao_valor_total: $('When Executed by Another Workflow').first().json.divida_uniao_valor_total,\n    divida_uniao_pct_faturamento: $('When Executed by Another Workflow').first().json.divida_uniao_pct_faturamento\n  }) }}'::jsonb)\n),\nupd_divida AS (\n  UPDATE credscore.fornecedores\n  SET divida_uniao_total = coalesce({{ $('Classificar D1').first().json.divida_uniao_valor_total ?? 'null' }}, divida_uniao_total),\n      divida_uniao_qtde = coalesce({{ $('Classificar D1').first().json.divida_uniao_qtde ?? 'null' }}, divida_uniao_qtde),\n      divida_uniao_pct_faturamento = coalesce({{ $('Classificar D1').first().json.divida_uniao_pct_faturamento ?? 'null' }}, divida_uniao_pct_faturamento)\n  WHERE id = '{{ $('When Executed by Another Workflow').first().json.fornecedor_id }}'\n)\nSELECT 1;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          2144,
+          528
+        ],
+        "id": "47489850-dc42-467d-aa91-5d30f51ffca3",
+        "name": "Salvar Dados Brutos",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        },
+        "notes": "O 3º insert (directd_pgfn_lista_devedores) só acontece se o fallback foi realmente usado (payload_val diferente de 'null') — não grava um registro vazio quando a Infosimples funcionou normalmente.\n\nins4b (confia_lista_protocolos) grava o resultado da classificacao de Sintonia (t_sintonia, sintonia_fonte, confia_lista_origem, cnpj_base) em vez do HTML cru da pagina do Confia — o HTML tem centenas de KB e nao serve pra auditoria."
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "name": "t_cnd",
+                "value": "={{ $('Classificar D1').item.json.t_cnd }}",
+                "type": "string",
+                "id": "27d00215-2e60-4c08-bc50-732137a1cd18"
+              },
+              {
+                "name": "t_pgfn",
+                "value": "={{ $('Classificar D1').item.json.t_pgfn }}",
+                "type": "string",
+                "id": "4dd6d557-ed10-4c06-b159-c284961d96cf"
+              },
+              {
+                "name": "t_est",
+                "value": "={{ $('Classificar D1').item.json.t_est }}",
+                "type": "string",
+                "id": "47820ac3-fe67-49ea-9058-6037eb1bdb8e"
+              },
+              {
+                "name": "t_sintonia",
+                "value": "={{ $('Classificar D1').item.json.t_sintonia }}",
+                "type": "string",
+                "id": "cc6d67b1-3d6b-457c-8428-47059b321129"
+              },
+              {
+                "id": "9a1c5b70-3e44-4a12-b0d6-1f2e3c4d5e6f",
+                "name": "sintonia_fonte",
+                "value": "={{ $('Classificar D1').item.json.sintonia_fonte }}",
+                "type": "string"
+              },
+              {
+                "name": "gate_disparado",
+                "value": "={{ $('Classificar D1').item.json.gate_disparado }}",
+                "type": "string",
+                "id": "1fa805c6-7555-49b1-a53d-cc0388977694"
+              },
+              {
+                "id": "6e2a3e24-af08-4912-859e-3d2d9a4898e7",
+                "name": "divida_uniao_qtde",
+                "value": "={{ $('Classificar D1').item.json.divida_uniao_qtde }}",
+                "type": "string"
+              },
+              {
+                "id": "4867ab99-664f-4ce4-a389-d77f0be547ed",
+                "name": "divida_uniao_valor_total",
+                "value": "={{ $('Classificar D1').item.json.divida_uniao_valor_total }}",
+                "type": "string"
+              },
+              {
+                "id": "56355bf4-8694-49ef-a237-0f501490f288",
+                "name": "divida_uniao_pct_faturamento",
+                "value": "={{ $('Classificar D1').item.json.divida_uniao_pct_faturamento }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          2320,
+          528
+        ],
+        "id": "6b231c4c-d987-4871-9371-e1700127b687",
+        "name": "Retorno pro Orquestrador"
+      },
+      {
+        "parameters": {
+          "content": "## RECEITA SINTONIA (Selo A+) + FALLBACK CONFIA\n1) Selo Sintonia A+ — API publica sem autenticacao, descoberta via DevTools\nna pagina de busca da propria RFB (nao documentada oficialmente).\nGET .../consulta-selo-sintonia/api/portalservicos/empresas/com-selo?cnpjBaseOuNome=...\ndados=[] -> nao esta na lista A+;  dados[0] + mesValidadeSelo valido -> A+\n\n2) FALLBACK — lista de protocolos do programa CONFIA (gov.br/receitafederal):\nbaixa o HTML da pagina de protocolos e procura a base do CNPJ (8 digitos)\nnas linhas com situacao ATIVA. Estar no Confia vale a MESMA pontuacao do\nSelo A+ (decisao BMS: os dois sao conformidade cooperativa da RFB).\nSe a pagina falhar, usa um snapshot embutido no code node (2026-08).\n\nSem selo E sem Confia -> ND.\nsintonia_fonte = selo_sintonia | confia_protocolo | nenhum\n\nSelo cobre so a faixa A+ (a unica publica) — A/B/C/D seguem ND,\nporque exigem login da propria empresa no e-CAC.",
+          "height": 560,
+          "width": 1088,
+          "color": 7
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          336,
+          688
+        ],
+        "id": "18af0d06-a813-4b61-9f3e-bf1de818fb61",
+        "name": "Sticky Note Sintonia"
+      },
+      {
+        "parameters": {
+          "content": "## ENTRADA\nSUB-WORKFLOW — só roda quando chamado pelo Orquestrador.\nRecebe: fornecedor_id, analise_id, cnpj, uf.",
+          "height": 1216,
+          "width": 192,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          128,
+          -32
+        ],
+        "id": "3cc2bade-99c0-4283-8053-0ffdc7d56f08",
+        "name": "Sticky Note Entrada"
+      },
+      {
+        "parameters": {
+          "content": "## CND ESTADUAL + CND FEDERAL, em paralelo\n\nDirect Data · CND Estadual — sempre roda.\nGET .../api/CertidaoNegativaDebitos?CNPJ=...&UF=...&TOKEN=...\nCampos-chave: possuiDebito (bool), efeitoNegativa (bool)\n\nInfosimples · CND Federal — sempre roda (é a fonte principal do PGFN).\nPOST .../receita-federal/pgfn\nCampos-chave: data_count (0 = falhou em emitir), data[0].tipo, data[0].debitos_pgfn",
+          "height": 704,
+          "width": 1088,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          336,
+          -32
+        ],
+        "id": "f4a73ae8-5143-46a4-aa69-8aa58bf62ecb",
+        "name": "Sticky Note Parte 1"
+      },
+      {
+        "parameters": {
+          "content": "## SINCRONIZAÇÃO + CLASSIFICAÇÃO\n\"Merge\" espera a CND Estadual e o resultado do PGFN (com ou sem\nfallback) antes de seguir.\n\n\"Consolidar PGFN Fallback\" usa try/catch pra pegar o resultado de\nqual dos dois branches rodou, sem quebrar quando o outro não executou.\n\n\"Classificar D1\" traduz tudo em t_cnd/t_pgfn/t_est + calcula o Gate G3.\nNunca hardcoda pontos — só classifica em categoria.",
+          "height": 1216,
+          "width": 432,
+          "color": 2
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1440,
+          -32
+        ],
+        "id": "c95e271a-d996-4252-8322-6130e4386268",
+        "name": "Sticky Note Classificação"
+      },
+      {
+        "parameters": {
+          "content": "## AUDITORIA + RETORNO\nSalva os payloads crus em fornecedor_dados_brutos — o 3º (fallback)\nsó é gravado quando realmente foi usado.\n\n\"Retorno pro Orquestrador\" devolve o contrato limpo:\n{ t_cnd, t_pgfn, t_est, gate_disparado }",
+          "height": 1216,
+          "width": 544,
+          "color": 5
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1888,
+          -32
+        ],
+        "id": "cfe1973c-12a8-4c40-8c54-149c4bb8a6f3",
+        "name": "Sticky Note Retorno"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.infosimples.com/api/v2/consultas/receita-federal/pgfn",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "content-type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "form-urlencoded",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "cnpj",
+                "value": "={{ $json.cnpj_matriz }}"
+              },
+              {
+                "name": "preferencia_emissao",
+                "value": "2via"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 300000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          624,
+          512
+        ],
+        "id": "554147a6-b0f7-4fd0-ae2a-87984c24fc2d",
+        "name": "Infosimples · CND Federal",
+        "retryOnFail": true,
+        "waitBetweenTries": 1000,
+        "maxTries": 2,
+        "credentials": {
+          "httpQueryAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput",
+        "notes": "preferencia_emissao=2via: a Infosimples tenta primeiro recuperar uma 2a via valida ja emitida e so entao emite uma nova. Recomendado pela propria Infosimples — maior taxa de sucesso (cobre o caso 'Positiva c/ efeitos de negativa', que o portal da PGFN nao reemite) e mesmo efeito pratico da certidao nova.\n\ncnpj = cnpj_matriz (vem do node 'Normalizar CNPJ Matriz') — evita o code 620 'A certidao deve ser emitida para o CNPJ da matriz'.\n\nCampos-chave: data_count (0 = nao emitiu), data[0].tipo, data[0].debitos_pgfn."
+      },
+      {
+        "parameters": {
+          "jsCode": "// Normaliza o CNPJ para a MATRIZ (raiz + 0001 + DV recalculado).\n// Motivo: a CND Federal (RFB/PGFN) so e emitida para o CNPJ da matriz.\n// Chamar com o CNPJ de uma filial retorna code 620:\n//   \"A certidao deve ser emitida para o CNPJ da matriz - 10.483.444/0001-89\"\n// A certidao da matriz abrange todos os estabelecimentos (filiais), entao\n// o resultado e valido para o fornecedor consultado.\n//\n// Suporta o CNPJ alfanumerico (regra oficial: valor do caractere = ASCII - 48).\n\nconst raw = String($json.cnpj || '')\n  .toUpperCase()\n  .replace(/[^0-9A-Z]/g, '')\n  .padStart(14, '0');\n\nconst raiz = raw.substring(0, 8);\nconst base = raiz + '0001';\n\nconst val = (c) => c.charCodeAt(0) - 48;\nconst calcDV = (str, pesos) => {\n  const soma = str.split('').reduce((acc, c, i) => acc + val(c) * pesos[i], 0);\n  const resto = soma % 11;\n  return resto < 2 ? 0 : 11 - resto;\n};\n\nconst d1 = calcDV(base, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);\nconst d2 = calcDV(base + d1, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);\n\nconst cnpj_matriz = `${base}${d1}${d2}`;\nconst eh_filial = raw.substring(8, 12) !== '0001';\n\nreturn [{\n  json: {\n    ...$json,\n    cnpj_original: raw,\n    cnpj_matriz,\n    eh_filial,\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          400,
+          512
+        ],
+        "id": "2c0caab3-569a-42c5-a3be-cc2599e769bb",
+        "name": "Normalizar CNPJ Matriz",
+        "notes": "A CND Federal so e emitida para a matriz. Converte qualquer CNPJ de filial em raiz+0001+DV (suporta CNPJ alfanumerico). Sem custo de API."
+      },
+      {
+        "parameters": {
+          "jsCode": "// Ponto unico de referencia pro resultado final da CND Federal,\n// venha ele do caminho normal (sem retry) ou do retry de matriz real.\n// So um dos dois ramos roda, entao so um item chega aqui.\nreturn [{ json: $json }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1264,
+          528
+        ],
+        "id": "aa550809-8cf6-4b28-8b2c-d4616709a9b7",
+        "name": "Infosimples · CND Federal (Resultado Final)",
+        "notes": "Consolida o resultado da CND Federal independente de ter havido retry de matriz real ou nao. Classificar D1 e Salvar Dados Brutos devem referenciar ESTE node, nao o 'Infosimples · CND Federal' original."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.infosimples.com/api/v2/consultas/receita-federal/pgfn",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "content-type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "form-urlencoded",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "cnpj",
+                "value": "={{ $json.cnpj_matriz_real }}"
+              },
+              {
+                "name": "preferencia_emissao",
+                "value": "2via"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 300000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1264,
+          336
+        ],
+        "id": "ff364927-bacf-46ed-bc6f-e2c883bf9df2",
+        "name": "Infosimples · CND Federal (Retry Matriz Real)",
+        "credentials": {
+          "httpQueryAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Retry com o CNPJ de matriz REAL extraido do erro 620 (a ordem 0001 calculada nao era a matriz de fato pra esse CNPJ). So executa nessa excecao -- custo extra de R$0,30 so nesse caso, nunca no fluxo normal."
+      },
+      {
+        "parameters": {
+          "jsCode": "// Extrai o CNPJ real da matriz a partir do texto do erro 620, ex:\n// \"A certidao deve ser emitida para o CNPJ da matriz - 02.914.460/0112-76\"\n// Isso cobre o caso em que a ordem 0001 (calculada) nao e a matriz de fato\n// -- CNPJs antigos/reestruturados podem ter a matriz registrada em outra\n// ordem. A Infosimples/Receita sempre devolve o CNPJ certo no proprio erro.\n\nconst msg = ($json.errors && $json.errors[0]) || '';\nconst match = msg.match(/(\\d{2}\\.?\\d{3}\\.?\\d{3}\\/?\\d{4}-?\\d{2})/);\nconst cnpj_matriz_real = match ? match[1].replace(/[^0-9]/g, '') : null;\n\nreturn [{\n  json: {\n    ...$('Normalizar CNPJ Matriz').first().json,\n    cnpj_matriz_real,\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1056,
+          336
+        ],
+        "id": "74b500f4-d4b7-49fb-93cb-7b9bd27eed8e",
+        "name": "Extrair CNPJ Matriz Real do Erro",
+        "notes": "So roda quando o IF detecta code 620 citando outro CNPJ de matriz. Se o regex nao achar nada, cnpj_matriz_real fica null e o retry abaixo vai falhar de novo (fail-safe: nao mascara o problema)."
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "cond-retry-matriz",
+                "leftValue": "={{ $json.code === 620 && Array.isArray($json.errors) && $json.errors.length > 0 && /matriz/i.test($json.errors[0]) }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          848,
+          512
+        ],
+        "id": "57456941-24ce-4425-a3f3-50b0a9229e22",
+        "name": "Precisa Retry p/ CNPJ Matriz Real?",
+        "notes": "A ordem '0001' calculada pelo Normalizar CNPJ Matriz cobre a imensa maioria dos casos, mas nao e garantia da Receita -- ha CNPJs antigos/reestruturados onde a matriz de fato esta em outra ordem. Quando isso acontece, a propria Infosimples devolve code 620 com o CNPJ certo em texto (ex: 'A certidao deve ser emitida para o CNPJ da matriz - 02.914.460/0112-76'). Esse IF detecta esse caso especifico p/ tentar de novo com o CNPJ certo -- so paga uma 2a consulta nessa excecao, nunca no fluxo normal."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.infosimples.com/api/v2/consultas/receita-federal/pgfn",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "content-type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "form-urlencoded",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "cnpj",
+                "value": "={{ $json.cnpj_matriz }}"
+              },
+              {
+                "name": "preferencia_emissao",
+                "value": "2via"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 300000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          -608,
+          400
+        ],
+        "id": "8002221f-e777-45c1-ade7-5cec0a28150f",
+        "name": "Infosimples · CND Federal1",
+        "retryOnFail": true,
+        "waitBetweenTries": 1000,
+        "maxTries": 2,
+        "credentials": {
+          "httpQueryAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput",
+        "notes": "preferencia_emissao=2via: a Infosimples tenta primeiro recuperar uma 2a via valida ja emitida e so entao emite uma nova. Recomendado pela propria Infosimples — maior taxa de sucesso (cobre o caso 'Positiva c/ efeitos de negativa', que o portal da PGFN nao reemite) e mesmo efeito pratico da certidao nova.\n\ncnpj = cnpj_matriz (vem do node 'Normalizar CNPJ Matriz') — evita o code 620 'A certidao deve ser emitida para o CNPJ da matriz'.\n\nCampos-chave: data_count (0 = nao emitiu), data[0].tipo, data[0].debitos_pgfn."
+      },
+      {
+        "parameters": {
+          "url": "https://www.gov.br/receitafederal/pt-br/acesso-a-informacao/acoes-e-programas/confia/protocolos",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "text"
+              }
+            },
+            "timeout": 30000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          800,
+          992
+        ],
+        "id": "25ac00c8-c077-49ea-b87a-3d94cf40aae3",
+        "retryOnFail": true,
+        "waitBetweenTries": 3000,
+        "maxTries": 2,
+        "name": "Confia · Lista de Protocolos",
+        "onError": "continueRegularOutput",
+        "notes": "FALLBACK do Selo Sintonia. Pagina publica da RFB com a tabela de ADEs do programa Confia (ADE n / CNPJ / Razao Social / Data / Situacao). Baixa o HTML como texto e o 'Classificar Sintonia' extrai os CNPJs por linha, ignorando linhas com situacao INATIVO/REVOGADO/SUSPENSO.\n\nonError=continueRegularOutput + snapshot embutido no code node: se a pagina sair do ar ou mudar de layout, o D1 nao trava e nem perde a informacao - cai no snapshot local (atualizado em 2026-08). Custo zero, sem autenticacao."
+      }
+    ],
+    "connections": {
+      "When Executed by Another Workflow": {
+        "main": [
+          [
+            {
+              "node": "Direct Data · CND Estadual",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Receita Sintonia · Consulta Selo A+",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Normalizar CNPJ Matriz",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Receita Sintonia · Consulta Selo A+": {
+        "main": [
+          [
+            {
+              "node": "Confia · Lista de Protocolos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Classificar Sintonia": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 2
+            }
+          ]
+        ]
+      },
+      "Direct Data · CND Estadual": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge": {
+        "main": [
+          [
+            {
+              "node": "Classificar D1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Classificar D1": {
+        "main": [
+          [
+            {
+              "node": "Salvar Dados Brutos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Salvar Dados Brutos": {
+        "main": [
+          [
+            {
+              "node": "Retorno pro Orquestrador",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalizar CNPJ Matriz": {
+        "main": [
+          [
+            {
+              "node": "Infosimples · CND Federal",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Infosimples · CND Federal": {
+        "main": [
+          [
+            {
+              "node": "Precisa Retry p/ CNPJ Matriz Real?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Infosimples · CND Federal (Resultado Final)": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Infosimples · CND Federal (Retry Matriz Real)": {
+        "main": [
+          [
+            {
+              "node": "Infosimples · CND Federal (Resultado Final)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrair CNPJ Matriz Real do Erro": {
+        "main": [
+          [
+            {
+              "node": "Infosimples · CND Federal (Retry Matriz Real)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Precisa Retry p/ CNPJ Matriz Real?": {
+        "main": [
+          [
+            {
+              "node": "Extrair CNPJ Matriz Real do Erro",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Infosimples · CND Federal (Resultado Final)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Confia · Lista de Protocolos": {
+        "main": [
+          [
+            {
+              "node": "Classificar Sintonia",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-08-19T16:24:28.728Z",
+    "updatedAt": "2026-08-19T16:24:28.728Z"
+  },
   "tags": []
 }
