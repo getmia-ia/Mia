@@ -3,7 +3,7 @@
   "createdAt": "2026-07-31T02:45:26.029Z",
   "id": "nfTS5SW9c4iILIvg",
   "name": "Eleva - 1.06 - Lancamento Manual",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
@@ -132,17 +132,141 @@
   "staticData": null,
   "meta": null,
   "versionId": "d0840d89-3b93-4088-864a-4504d39c43c5",
-  "activeVersionId": null,
+  "activeVersionId": "d0840d89-3b93-4088-864a-4504d39c43c5",
   "triggerCount": 0,
   "shared": [
     {
-      "updatedAt": "2026-07-31T02:45:26.029Z",
-      "createdAt": "2026-07-31T02:45:26.029Z",
       "role": "workflow:owner",
       "workflowId": "nfTS5SW9c4iILIvg",
-      "projectId": "nRxOu1L1N41Jyveq"
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-07-31T02:45:26.029Z",
+      "updatedAt": "2026-07-31T02:45:26.029Z"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "versionId": "d0840d89-3b93-4088-864a-4504d39c43c5",
+    "workflowId": "nfTS5SW9c4iILIvg",
+    "nodes": [
+      {
+        "parameters": {
+          "workflowInputs": {
+            "values": [
+              {
+                "name": "description"
+              },
+              {
+                "name": "date"
+              },
+              {
+                "name": "category_id"
+              },
+              {
+                "name": "subcategory_id"
+              },
+              {
+                "name": "type"
+              },
+              {
+                "name": "value"
+              },
+              {
+                "name": "account_id"
+              },
+              {
+                "name": "payment_date"
+              },
+              {
+                "name": "created_at"
+              },
+              {
+                "name": "owner_id"
+              },
+              {
+                "name": "user_id"
+              },
+              {
+                "name": "forma_pagamento"
+              }
+            ]
+          }
+        },
+        "id": "d4bb66d6-58b6-4624-b1d6-11d755ca0948",
+        "name": "When Executed by Another Workflow",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          1424,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "with conta_resolvida as (\n  select a.id::text as account_id, a.bank, a.name as account_name\n  from public.accounts a\n  where (a.owner_id = $9::uuid or a.user_id = $11::uuid)\n    and nullif($12, '') is not null\n    and (\n      $12 ilike '%' || a.bank || '%'\n      or $12 ilike '%' || a.name || '%'\n      or (a.type = 'credito' and $12 ilike '%cart%')\n      or (a.type in ('conta_corrente','debito') and (\n        $12 ilike '%deb%' or $12 ilike '%déb%' or $12 ilike '%pix%' or $12 ilike '%conta%'\n      ))\n    )\n  order by\n    case when ($12 ilike '%' || a.bank || '%' or $12 ilike '%' || a.name || '%') then 0 else 1 end,\n    case\n      when a.type = 'credito' and $12 ilike '%cart%' then 0\n      when a.type in ('conta_corrente','debito') and (\n        $12 ilike '%deb%' or $12 ilike '%déb%' or $12 ilike '%pix%' or $12 ilike '%conta%'\n      ) then 0\n      else 1\n    end\n  limit 1\n),\nnovo_lancamento as (\n  insert into public.transactions\n    (description, date, category_id, subcategory_id, type, value, account_id, owner_id, payment_date, pending_review, created_at, user_id)\n  values\n    (\n      $1,\n      $2::date,\n      $3,\n      nullif($4, ''),\n      $5,\n      $6::numeric,\n      coalesce(nullif($7, ''), (select account_id from conta_resolvida), 'dinheiro'),\n      $9::uuid,\n      nullif($8, '')::date,\n      false,\n      nullif($10, '')::timestamptz,\n      $11::uuid\n    )\n  returning id, description, date, category_id, value, type, owner_id, account_id\n),\nperiodo as (\n  select\n    date_trunc('month', (select date from novo_lancamento))::date as mes_inicio,\n    (date_trunc('month', (select date from novo_lancamento)) + interval '1 month - 1 day')::date as mes_fim\n),\nmeses as (\n  select extract(year from mes_ref)::int as ano, extract(month from mes_ref)::int - 1 as mes_idx\n  from (select generate_series((select mes_inicio from periodo), (select mes_fim from periodo), interval '1 month')::date as mes_ref) g\n),\nplanejado as (\n  select coalesce(sum(b.planned_value), 0) as planejado\n  from public.budgets b\n  join meses m on b.year = m.ano and b.month = m.mes_idx\n  where b.owner_id = (select owner_id from novo_lancamento)\n    and b.category_id = (select category_id from novo_lancamento)\n),\nrealizado as (\n  -- Postgres: um CTE nao enxerga as linhas inseridas por outro CTE no mesmo statement\n  -- (todos usam o mesmo snapshot). Por isso somamos os OUTROS lancamentos e adicionamos\n  -- o valor recem-lancado separadamente — assim o total ja inclui o lancamento novo.\n  select coalesce(sum(abs(t.value)), 0) + abs((select value from novo_lancamento)) as realizado\n  from public.transactions t, periodo p\n  where t.owner_id = (select owner_id from novo_lancamento)\n    and t.category_id = (select category_id from novo_lancamento)\n    and t.type = (select type from novo_lancamento)\n    and t.deleted = false\n    and t.id <> (select id from novo_lancamento)\n    and t.date >= p.mes_inicio and t.date <= p.mes_fim\n),\nconta_final as (\n  select a.bank, a.name as account_name\n  from public.accounts a\n  where a.id::text = (select account_id from novo_lancamento)\n)\nselect\n  (select id from novo_lancamento) as lancamento_id,\n  (select description from novo_lancamento) as description,\n  (select date from novo_lancamento) as date,\n  (select category_id from novo_lancamento) as category_id,\n  (select value from novo_lancamento) as value,\n  (select type from novo_lancamento) as type,\n  (select account_id from novo_lancamento) as account_id,\n  (select bank from conta_final) as bank,\n  (select account_name from conta_final) as account_name,\n  (select planejado from planejado) as planejado,\n  (select realizado from realizado) as realizado,\n  (select mes_inicio from periodo) as mes_inicio,\n  (select mes_fim from periodo) as mes_fim;",
+          "options": {
+            "queryReplacement": "={{ [$json.description, $json.date, $json.category_id, ($json.subcategory_id || ''), $json.type, $json.value, ($json.account_id || ''), ($json.payment_date || ''), ($json.owner_id), ($json.created_at || ''), $json.user_id, ($json.forma_pagamento || '')] }}"
+          }
+        },
+        "id": "c763cceb-b298-4550-84b3-cf20a7a0e75e",
+        "name": "Inserir e Comparar Categoria",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1696,
+          0
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "769u9DNAemYPOCzL",
+            "name": "ELEVA - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const CATEGORY_META = {\"renda\": {\"grupo\": \"Ganhos\", \"emoji\": \"💰\", \"tipo\": \"receita\", \"nome\": \"Renda\"}, \"renda-conjuge\": {\"grupo\": \"Ganhos\", \"emoji\": \"💑\", \"tipo\": \"receita\", \"nome\": \"Renda Cônjuge\"}, \"outras-fontes-renda\": {\"grupo\": \"Ganhos\", \"emoji\": \"💵\", \"tipo\": \"receita\", \"nome\": \"Outras Fontes de Renda\"}, \"moradia\": {\"grupo\": \"Contas Fixas\", \"emoji\": \"🏠\", \"tipo\": \"despesa\", \"nome\": \"Moradia\"}, \"assinaturas\": {\"grupo\": \"Contas Fixas\", \"emoji\": \"📱\", \"tipo\": \"despesa\", \"nome\": \"Assinaturas\"}, \"seguros\": {\"grupo\": \"Contas Fixas\", \"emoji\": \"🛡️\", \"tipo\": \"despesa\", \"nome\": \"Seguros\"}, \"tarifas-bancarias\": {\"grupo\": \"Contas Fixas\", \"emoji\": \"🏦\", \"tipo\": \"despesa\", \"nome\": \"Tarifas Bancárias\"}, \"impostos-taxas\": {\"grupo\": \"Contas Fixas\", \"emoji\": \"🧾\", \"tipo\": \"despesa\", \"nome\": \"Impostos e Taxas\"}, \"servicos-financeiros\": {\"grupo\": \"Contas Fixas\", \"emoji\": \"💳\", \"tipo\": \"despesa\", \"nome\": \"Serviços Financeiros\"}, \"pagamento-fatura-cartao\": {\"grupo\": \"Contas Fixas\", \"emoji\": \"💳\", \"tipo\": \"despesa\", \"nome\": \"Pagamento Fatura de Cartão\"}, \"dizimo-oferta\": {\"grupo\": \"Contas Fixas\", \"emoji\": \"🙏\", \"tipo\": \"despesa\", \"nome\": \"Dízimo ou Oferta\"}, \"previdencia\": {\"grupo\": \"Investimentos\", \"emoji\": \"👴\", \"tipo\": \"investimento\", \"nome\": \"Previdência\"}, \"alimentacao-mercado\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"🍽️\", \"tipo\": \"despesa\", \"nome\": \"Alimentação/Mercado\"}, \"transporte\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"🚗\", \"tipo\": \"despesa\", \"nome\": \"Transporte\"}, \"compras\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"🛍️\", \"tipo\": \"despesa\", \"nome\": \"Compras\"}, \"lazer\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"🎉\", \"tipo\": \"despesa\", \"nome\": \"Lazer\"}, \"roupas-acessorios\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"👕\", \"tipo\": \"despesa\", \"nome\": \"Roupas e Acessórios\"}, \"cuidados-pessoais\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"💇\", \"tipo\": \"despesa\", \"nome\": \"Cuidados Pessoais\"}, \"educacao\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"📚\", \"tipo\": \"despesa\", \"nome\": \"Educação\"}, \"despesas-saude\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"🏥\", \"tipo\": \"despesa\", \"nome\": \"Despesas de Saúde\"}, \"filhos-familia\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"👨‍👩‍👧\", \"tipo\": \"despesa\", \"nome\": \"Filhos e Família\"}, \"pets\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"🐶\", \"tipo\": \"despesa\", \"nome\": \"Pets\"}, \"esportes\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"⚽\", \"tipo\": \"despesa\", \"nome\": \"Esportes\"}, \"viagens\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"✈️\", \"tipo\": \"despesa\", \"nome\": \"Viagens\"}, \"presentes-doacoes\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"🎁\", \"tipo\": \"despesa\", \"nome\": \"Presentes e Doações\"}, \"casa-veraneio\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"🏖️\", \"tipo\": \"despesa\", \"nome\": \"Casa de Veraneio\"}, \"outros-gv\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"📦\", \"tipo\": \"despesa\", \"nome\": \"Outros\"}, \"meta-casa\": {\"grupo\": \"Metas e Projetos\", \"emoji\": \"🏡\", \"tipo\": \"despesa\", \"nome\": \"Casa\"}, \"meta-educacao\": {\"grupo\": \"Metas e Projetos\", \"emoji\": \"🎓\", \"tipo\": \"despesa\", \"nome\": \"Educação\"}, \"meta-eletronicos\": {\"grupo\": \"Metas e Projetos\", \"emoji\": \"📱\", \"tipo\": \"despesa\", \"nome\": \"Eletrônicos\"}, \"meta-familia\": {\"grupo\": \"Metas e Projetos\", \"emoji\": \"👪\", \"tipo\": \"despesa\", \"nome\": \"Família\"}, \"meta-hobby\": {\"grupo\": \"Metas e Projetos\", \"emoji\": \"🎨\", \"tipo\": \"despesa\", \"nome\": \"Hobby\"}, \"meta-outros\": {\"grupo\": \"Metas e Projetos\", \"emoji\": \"🎯\", \"tipo\": \"despesa\", \"nome\": \"Outros\"}, \"meta-profissional\": {\"grupo\": \"Metas e Projetos\", \"emoji\": \"💼\", \"tipo\": \"despesa\", \"nome\": \"Profissional\"}, \"meta-saude\": {\"grupo\": \"Metas e Projetos\", \"emoji\": \"🏥\", \"tipo\": \"despesa\", \"nome\": \"Saúde\"}, \"meta-veiculo\": {\"grupo\": \"Metas e Projetos\", \"emoji\": \"🚙\", \"tipo\": \"despesa\", \"nome\": \"Veículo\"}, \"meta-viagem\": {\"grupo\": \"Metas e Projetos\", \"emoji\": \"🧳\", \"tipo\": \"despesa\", \"nome\": \"Viagem\"}, \"projetos-vida\": {\"grupo\": \"Investimentos\", \"emoji\": \"🌱\", \"tipo\": \"investimento\", \"nome\": \"Projetos de Vida\"}, \"reserva-emergencia\": {\"grupo\": \"Investimentos\", \"emoji\": \"🆘\", \"tipo\": \"investimento\", \"nome\": \"Reserva de Emergência\"}, \"independencia-financeira\": {\"grupo\": \"Investimentos\", \"emoji\": \"🕊️\", \"tipo\": \"investimento\", \"nome\": \"Independência Financeira\"}, \"consorcio\": {\"grupo\": \"Metas e Projetos\", \"emoji\": \"🎟️\", \"tipo\": \"despesa\", \"nome\": \"Consórcio\"}, \"dividas-emprestimos\": {\"grupo\": \"Dívidas\", \"emoji\": \"💸\", \"tipo\": \"despesa\", \"nome\": \"Dívidas e Empréstimos\"}, \"financiamento-imobiliario\": {\"grupo\": \"Financiamentos\", \"emoji\": \"🏘️\", \"tipo\": \"despesa\", \"nome\": \"Financiamento Imobiliário\"}, \"financiamento-veiculo\": {\"grupo\": \"Financiamentos\", \"emoji\": \"🚘\", \"tipo\": \"despesa\", \"nome\": \"Financiamento Veículo\"}, \"profissional\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"💼\", \"tipo\": \"despesa\", \"nome\": \"Profissional\"}, \"prof-colaboradores\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"👥\", \"tipo\": \"despesa\", \"nome\": \"Colaboradores\"}, \"prof-comissoes\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"🤝\", \"tipo\": \"despesa\", \"nome\": \"Comissões\"}, \"prof-dividas\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"💳\", \"tipo\": \"despesa\", \"nome\": \"Dívidas\"}, \"prof-expansao\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"📈\", \"tipo\": \"despesa\", \"nome\": \"Expansão e Crescimento\"}, \"prof-ferramentas\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"🛠️\", \"tipo\": \"despesa\", \"nome\": \"Ferramentas\"}, \"prof-impostos\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"🧾\", \"tipo\": \"despesa\", \"nome\": \"Impostos\"}, \"prof-infraestrutura\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"🏢\", \"tipo\": \"despesa\", \"nome\": \"Infraestrutura\"}, \"prof-insumos\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"📦\", \"tipo\": \"despesa\", \"nome\": \"Insumos\"}, \"prof-marketing\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"📣\", \"tipo\": \"despesa\", \"nome\": \"Marketing\"}, \"prof-meios-pagamento\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"💳\", \"tipo\": \"despesa\", \"nome\": \"Meios de Pagamento\"}, \"prof-outros\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"📁\", \"tipo\": \"despesa\", \"nome\": \"Outros\"}, \"prof-prestadores\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"🧑‍🔧\", \"tipo\": \"despesa\", \"nome\": \"Prestadores de Serviço\"}, \"prof-taxas\": {\"grupo\": \"Despesas Profissionais\", \"emoji\": \"🧾\", \"tipo\": \"despesa\", \"nome\": \"Taxas\"}, \"__sem_categoria__\": {\"grupo\": \"Outros\", \"emoji\": \"❔\", \"tipo\": \"despesa\", \"nome\": \"Sem Categoria\"}, \"aplicacao-investimentos\": {\"grupo\": \"Investimentos\", \"emoji\": \"📈\", \"tipo\": \"investimento\", \"nome\": \"Aplicação em Investimentos\"}, \"resgate-investimentos\": {\"grupo\": \"Investimentos\", \"emoji\": \"📉\", \"tipo\": \"investimento\", \"nome\": \"Resgate de Investimentos\"}, \"transferencia-mesma-titularidade\": {\"grupo\": \"Transferências\", \"emoji\": \"🔁\", \"tipo\": \"neutro\", \"nome\": \"Transferência de Mesma Titularidade\"}, \"restaurantes\": {\"grupo\": \"Gastos Variáveis\", \"emoji\": \"🍴\", \"tipo\": \"despesa\", \"nome\": \"Restaurantes\"}};\nfunction meta(catId) { return CATEGORY_META[catId] || { grupo: 'Outros', emoji: '❔', tipo: 'despesa', nome: catId }; }\nfunction formatBRL(n) { return Math.abs(Number(n)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }\nfunction formatDate(iso) { const d = new Date(iso); return `${String(d.getUTCDate()).padStart(2,'0')}/${String(d.getUTCMonth()+1).padStart(2,'0')}`; }\n\nconst row = $input.all()[0].json;\nconst m = meta(row.category_id);\n\nconst planejado = Number(row.planejado);\nconst realizado = Number(row.realizado);\n\nfunction paraDataUTC(v) {\n  if (v instanceof Date) return new Date(Date.UTC(v.getFullYear(), v.getMonth(), v.getDate()));\n  const s = String(v).slice(0, 10);\n  const [ano, mes, dia] = s.split('-').map(Number);\n  return new Date(Date.UTC(ano, mes - 1, dia));\n}\nfunction hojeUTC() {\n  const agora = new Date();\n  return new Date(Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate()));\n}\nconst dataInicio = paraDataUTC(row.mes_inicio);\nconst dataFim = paraDataUTC(row.mes_fim);\nconst hoje = hojeUTC();\nconst diasTotais = Math.max(1, Math.round((dataFim - dataInicio) / 86400000) + 1);\nconst periodoEmAndamento = hoje >= dataInicio && hoje <= dataFim;\nconst diasPassadosBruto = Math.round((hoje - dataInicio) / 86400000) + 1;\nconst diasPassados = periodoEmAndamento ? diasPassadosBruto : (hoje > dataFim ? diasTotais : 0);\n\nconst ritmo_diario_esperado = planejado > 0 ? Number((planejado / diasTotais).toFixed(2)) : 0;\nconst esperado_ate_hoje = Number((ritmo_diario_esperado * diasPassados).toFixed(2));\nconst ja_estourou = planejado === 0 ? realizado > 0 : realizado > planejado;\nconst acima_do_ritmo = periodoEmAndamento && planejado > 0 && !ja_estourou && realizado > esperado_ate_hoje;\n\nlet mensagem_ritmo = '';\nif (planejado === 0 && realizado > 0) {\n  mensagem_ritmo = `🚨 **${m.nome}** não tinha planejamento e teve gasto de **R$ ${formatBRL(realizado)}** neste mês - vale a pena conversar com seu planejador.`;\n} else if (planejado > 0 && realizado > planejado) {\n  const excedente = Number((realizado - planejado).toFixed(2));\n  mensagem_ritmo = `🚨 Você já ultrapassou o planejado de **${m.nome}** neste mês (R$ ${formatBRL(excedente)} a mais) - vale a pena conversar com seu planejador.`;\n} else if (acima_do_ritmo) {\n  mensagem_ritmo = `🚨 No ritmo atual, você deve estourar o planejado de **${m.nome}** esse mês.`;\n}\n\nreturn [{\n  json: {\n    lancado: true,\n    lancamento_id: row.lancamento_id,\n    description: row.description,\n    data_formatada: formatDate(row.date),\n    category_id: row.category_id,\n    categoria_nome: m.nome,\n    emoji: m.emoji,\n    value: Number(row.value),\n    account_id: row.account_id,\n    bank: row.bank,\n    account_name: row.account_name,\n    planejado: Number(planejado.toFixed(2)),\n    realizado: Number(realizado.toFixed(2)),\n    ja_estourou,\n    acima_do_ritmo,\n    mensagem_ritmo\n  }\n}];"
+        },
+        "id": "6261be40-ae4f-4184-9457-bf2c23d797b8",
+        "name": "Formatar Resultado do Lancamento",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1952,
+          0
+        ]
+      }
+    ],
+    "connections": {
+      "When Executed by Another Workflow": {
+        "main": [
+          [
+            {
+              "node": "Inserir e Comparar Categoria",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Inserir e Comparar Categoria": {
+        "main": [
+          [
+            {
+              "node": "Formatar Resultado do Lancamento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-08-20T15:47:48.769Z",
+    "updatedAt": "2026-08-20T15:47:48.769Z"
+  },
   "tags": []
 }
