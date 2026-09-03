@@ -1,0 +1,306 @@
+{
+  "updatedAt": "2026-09-02T13:59:58.085Z",
+  "createdAt": "2026-09-02T13:43:03.852Z",
+  "id": "tNnkDUMX3Y02TwYZ",
+  "name": "06 - Aviso de manutenção",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -128,
+        224
+      ],
+      "id": "5cb004c3-9af2-44cd-b8dd-f223acb7858f",
+      "name": "Iniciar Envio"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  v.conta_nome as nome,\n  v.conta_telefone as telefone\nfrom v_historico_conversas_lista v\nwhere v.user_id not in (\n  '48864b57-5428-46f1-9023-9e70ccc3e72f', -- Tywin Lannister\n  'b07b75bd-cc08-4d20-b392-5c502bedba91'  -- Julius Rock\n)\norder by v.conta_nome;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        96,
+        224
+      ],
+      "id": "8b06ccfd-a658-4704-9f2e-68ea2599daf8",
+      "name": "Buscar Clientes Ativos",
+      "credentials": {
+        "postgres": {
+          "id": "769u9DNAemYPOCzL",
+          "name": "ELEVA - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function normalizarTelefone(raw) {\n  if (!raw) return null;\n  let digits = String(raw).replace(/\\D/g, '');\n\n  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {\n    digits = digits.slice(2);\n  }\n\n  const ddd = digits.slice(0, 2);\n  let numero = digits.slice(2);\n\n  if (numero.length === 8) {\n    numero = '9' + numero;\n  }\n\n  return `55${ddd}${numero}`;\n}\n\nconst itens = $input.all().map(i => i.json);\n\nconst vistos = new Set();\nconst clientes = itens\n  .map(c => ({ nome: (c.nome || '').trim(), telefone: normalizarTelefone(c.telefone) }))\n  .filter(c => c.telefone && !vistos.has(c.telefone) && vistos.add(c.telefone));\n\nreturn clientes.map(c => ({ json: c }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        224
+      ],
+      "id": "2a4fce11-0be0-4608-9e53-2a1147d57ae0",
+      "name": "Organizar e Normalizar Dados"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        544,
+        224
+      ],
+      "id": "6bd71bf9-4cef-4806-a737-0f56faf59348",
+      "name": "Loop - Enviar Mensagens"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        752,
+        64
+      ],
+      "id": "cc75ef71-4114-4380-bd2a-d3fa0d1fdbc2",
+      "name": "Fim do Loop"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $json;\n\nreturn {\n  json: {\n    telefone: item.telefone,\n    nome: item.nome,\n    template_name: \"aviso_manutencao_sistema2\",\n    param_0: item.nome,\n    mensagem_completa: `Olá ${item.nome}! Informamos uma atualização programada em nossos sistemas hoje às 12h, que pode deixar o acesso à sua conta temporariamente instável. Nenhuma ação é necessária da sua parte.`\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        304
+      ],
+      "id": "2e393d73-9f75-4054-8b1d-2335e275c686",
+      "name": "Montar Mensagem"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v22.0/928381500368600/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $json.telefone }}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"{{ $json.template_name }}\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": {{ \n          JSON.stringify(\n            [\n              { \"type\": \"text\", \"text\": $json.param_0}\n            ].filter(p => p.text && p.text.trim() !== \"\")\n          )\n        }}\n      }\n    ]\n  }\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        976,
+        304
+      ],
+      "id": "fa7d0967-21b6-4a17-9084-9f57842ea8ab",
+      "name": "Enviar Mensagem via Meta API",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "tableId": "historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Montar Mensagem').item.json.mensagem_completa }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Montar Mensagem').item.json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Montar Mensagem').item.json.nome }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "=text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "=ELEVA-IA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        304
+      ],
+      "id": "3152e22a-731c-489f-bc98-5bf42f0e6e93",
+      "name": "Cria Mensagem no Supabase",
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "kajlEDhCYmeLcxgQ",
+          "name": "ELEVA - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Aviso pontual de manutenção — envio manual único para clientes ativos\n",
+        "height": 640,
+        "width": 1600,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -160,
+        -64
+      ],
+      "typeVersion": 1,
+      "id": "1e51cabc-2507-4eba-9263-638bb5037186",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "Iniciar Envio": {
+      "main": [
+        [
+          {
+            "node": "Buscar Clientes Ativos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Clientes Ativos": {
+      "main": [
+        [
+          {
+            "node": "Organizar e Normalizar Dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Organizar e Normalizar Dados": {
+      "main": [
+        [
+          {
+            "node": "Loop - Enviar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop - Enviar Mensagens": {
+      "main": [
+        [
+          {
+            "node": "Fim do Loop",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Montar Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Enviar Mensagem via Meta API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Mensagem via Meta API": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop - Enviar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase": {
+      "main": [
+        [
+          {
+            "node": "Loop - Enviar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "af8e768f-6e44-4bfd-af9a-43ce51c85d5b",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "tNnkDUMX3Y02TwYZ",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-02T13:43:03.852Z",
+      "updatedAt": "2026-09-02T13:43:03.852Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
