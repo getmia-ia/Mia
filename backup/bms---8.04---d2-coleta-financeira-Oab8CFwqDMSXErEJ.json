@@ -3,7 +3,7 @@
   "createdAt": "2026-07-28T13:47:18.056Z",
   "id": "Oab8CFwqDMSXErEJ",
   "name": "BMS - 8.04 - D2 (Coleta Financeira)",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
@@ -467,17 +467,478 @@
   "staticData": null,
   "meta": null,
   "versionId": "b79295c3-b32c-4937-994d-9565747f9fd9",
-  "activeVersionId": null,
+  "activeVersionId": "b79295c3-b32c-4937-994d-9565747f9fd9",
   "triggerCount": 0,
   "shared": [
     {
-      "updatedAt": "2026-07-28T13:47:18.056Z",
-      "createdAt": "2026-07-28T13:47:18.056Z",
       "role": "workflow:owner",
       "workflowId": "Oab8CFwqDMSXErEJ",
-      "projectId": "nRxOu1L1N41Jyveq"
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-07-28T13:47:18.056Z",
+      "updatedAt": "2026-07-28T13:47:18.056Z"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "versionId": "b79295c3-b32c-4937-994d-9565747f9fd9",
+    "workflowId": "Oab8CFwqDMSXErEJ",
+    "nodes": [
+      {
+        "parameters": {
+          "jsCode": "let t_score = 'ND';\nlet t_protestos = 'ND';\nlet t_execucoes = 'ND';\nlet t_spc = 'ND';\nlet gate_disparado = null;\nlet obs_score = null;\nlet obs_spc_historico = null; // registra ocorrência SPC fora da janela de 1 ano (não pontua, só auditoria)\n\ntry {\n  const resp = $json;\n  const report = Array.isArray(resp) ? resp[0] : resp;\n  const rel = report?.reports?.[0] ?? null;\n\n  if (rel) {\n    const scoreBlock = report?.optionalFeatures?.score;\n    if (scoreBlock && typeof scoreBlock.score === 'number') {\n      t_score = scoreBlock.score;\n    } else if (scoreBlock?.message) {\n      obs_score = scoreBlock.message;\n    }\n\n    const protestosCount = rel?.negativeData?.notary?.summary?.count;\n    if (typeof protestosCount === 'number') t_protestos = protestosCount;\n\n    const execucoesCount = rel?.facts?.judgementFilings?.summary?.count;\n    if (typeof execucoesCount === 'number') t_execucoes = execucoesCount;\n\n    // ---- SPC: só conta como \"Já teve ocorrência\" se houver item com data\n    // dentro do último ano. Ocorrências mais antigas (mesmo 10 anos atrás)\n    // não pontuam, mas ficam registradas em obs_spc_historico.\n    const spcAnn = report?.optionalFeatures?.spcAnnotations;\n    const spcList = Array.isArray(spcAnn?.spcAnnotationsResponseList) ? spcAnn.spcAnnotationsResponseList : null;\n    const spcCountTotal = spcAnn?.summary?.count;\n\n    const UM_ANO_MS = 365 * 24 * 60 * 60 * 1000;\n    const agora = Date.now();\n\n    if (spcList) {\n      let temNoUltimoAno = false;\n      let temAntigo = false;\n\n      for (const item of spcList) {\n        const dataRef = item?.occurrenceDate ?? item?.inclusionDate;\n        if (!dataRef) continue;\n        const dt = new Date(dataRef).getTime();\n        if (!Number.isFinite(dt)) continue;\n        if (agora - dt <= UM_ANO_MS) temNoUltimoAno = true;\n        else temAntigo = true;\n      }\n\n      t_spc = temNoUltimoAno ? 'Já teve ocorrência no SPC' : 'Sem ocorrência no SPC';\n      if (temAntigo) {\n        obs_spc_historico = 'Possui ocorrência(s) de SPC registradas há mais de 1 ano (fora da janela considerada para pontuação)';\n      }\n    } else if (typeof spcCountTotal === 'number') {\n      // Fallback: se a Serasa não trouxer a lista detalhada, usa o count agregado\n      // (sem filtro de data -- comportamento antigo, só como rede de segurança).\n      t_spc = spcCountTotal > 0 ? 'Já teve ocorrência no SPC' : 'Sem ocorrência no SPC';\n    }\n\n    const bankruptsCount = rel?.facts?.bankrupts?.summary?.count;\n    const emRJDireto = $('When Executed by Another Workflow').item.json.em_recuperacao_judicial === true;\n\n    if (emRJDireto) {\n      gate_disparado = 'G2: recuperação judicial (cadastro)';\n    } else if (typeof bankruptsCount === 'number' && bankruptsCount > 0) {\n      gate_disparado = 'G2: recuperação judicial ou falência (Serasa)';\n    }\n  }\n} catch (e) {}\n\nreturn [{ json: { t_score, t_protestos, t_execucoes, t_spc, gate_disparado, obs_score, obs_spc_historico } }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2144,
+          1648
+        ],
+        "id": "f241d9d4-12e8-4db5-94fe-690fd79a1b26",
+        "name": "Classificar D2"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO credscore.fornecedor_dados_brutos\n    (fornecedor_id, fonte, payload)\nVALUES\n    ($1, $2, $3::jsonb);",
+          "options": {
+            "queryReplacement": "={{ [\n  $('When Executed by Another Workflow').first().json.fornecedor_id,\n  'serasa_relatorio_intermediario_pj',\n  JSON.stringify($('Serasa · Consultar Relatório  - PROD').first().json)\n] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          2528,
+          1648
+        ],
+        "id": "5d7a5aac-a31d-4e21-9851-5f547c490d4e",
+        "name": "Salvar Dados Brutos",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "name": "t_score",
+                "value": "={{ $('Classificar D2').item.json.t_score }}",
+                "type": "string"
+              },
+              {
+                "name": "t_protestos",
+                "value": "={{ $('Classificar D2').item.json.t_protestos }}",
+                "type": "string"
+              },
+              {
+                "name": "t_execucoes",
+                "value": "={{ $('Classificar D2').item.json.t_execucoes }}",
+                "type": "string"
+              },
+              {
+                "name": "t_spc",
+                "value": "={{ $('Classificar D2').item.json.t_spc }}",
+                "type": "string"
+              },
+              {
+                "name": "gate_disparado",
+                "value": "={{ $('Classificar D2').item.json.gate_disparado }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          2720,
+          1648
+        ],
+        "id": "8f1a994b-1c59-48fa-ae27-2c8a324e1891",
+        "name": "Retorno pro Orquestrador"
+      },
+      {
+        "parameters": {
+          "content": "## ENTRADA\nSUB-WORKFLOW — só roda quando chamado pelo Orquestrador.\nRecebe: fornecedor_id, analise_id, cnpj.",
+          "height": 560,
+          "width": 192,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1280,
+          1248
+        ],
+        "id": "e2834f49-7bb3-4512-9d8f-6f243cd985ab",
+        "name": "Sticky Note Entrada"
+      },
+      {
+        "parameters": {
+          "content": "## AUTENTICAÇÃO + RELATÓRIO\nDois passos: gera token OAuth2 (Basic Auth com clientID:clientSecret),\ndepois consulta o relatório usando esse token.\n\n⚠️ AMBIENTE: hoje configurado em UAT (homologação). Trocar as 2 URLs\n(tirar o 'uat-' do domínio) e a credencial pra produção antes de operar\ncom fornecedores de verdade.\n\nonError=continueRegularOutput nos dois HTTP nodes — se a Serasa cair,\nD2 não trava o D1-D4, só devolve tudo ND.",
+          "height": 560,
+          "width": 496,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1488,
+          1248
+        ],
+        "id": "bec8f1da-a489-4ecb-9cdf-1fd29f37ce33",
+        "name": "Sticky Note Auth"
+      },
+      {
+        "parameters": {
+          "content": "## CLASSIFICAÇÃO\nt_score / t_protestos / t_execucoes saem como NÚMERO BRUTO (ou 'ND') —\né o Orquestrador (pontosBanda) quem decide a faixa de pontos, não aqui.\n\nt_spc é a ÚNICA exceção: sai como categoria 'Sim'/'Não'/'ND', porque a\ntabela de pontos dela é do tipo 'opções', não 'faixas'.\n\n⚠️ 'SPC' aqui é uma APROXIMAÇÃO usando pefin (Pendências Financeiras\nda própria Serasa) — esse relatório não tem um campo literal de SPC\n(bureau diferente). Confirmar com a BMS se essa aproximação serve.\n\nGate G2 dispara se facts.bankrupts.summary.count > 0.",
+          "height": 560,
+          "width": 416,
+          "color": 2
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          2000,
+          1248
+        ],
+        "id": "445f5d49-0ee2-4cfc-9e15-ea9a5a332abc",
+        "name": "Sticky Note Classificação"
+      },
+      {
+        "parameters": {
+          "content": "## AUDITORIA + RETORNO\nSalva o payload cru completo em fornecedor_dados_brutos\n(fonte: serasa_relatorio_intermediario_pj).\n\n\"Retorno pro Orquestrador\" devolve o contrato limpo:\n{ t_score, t_protestos, t_execucoes, t_spc, gate_disparado }\n— mesmo formato que o placeholder que ele substitui.",
+          "height": 560,
+          "width": 496,
+          "color": 5
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          2432,
+          1248
+        ],
+        "id": "72ab37a6-588d-4701-9c0d-f75af4b60eda",
+        "name": "Sticky Note Retorno"
+      },
+      {
+        "parameters": {
+          "workflowInputs": {
+            "values": [
+              {
+                "name": "fornecedor_id"
+              },
+              {
+                "name": "analise_id"
+              },
+              {
+                "name": "cnpj"
+              },
+              {
+                "name": "em_recuperacao_judicial",
+                "type": "boolean"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          1344,
+          1648
+        ],
+        "id": "32a888b1-3217-4648-be2e-0806bd02e8fe",
+        "name": "When Executed by Another Workflow",
+        "notes": "Mesmo contrato do D1: fornecedor_id, analise_id, cnpj."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.serasaexperian.com.br/security/iam/v1/client-identities/login",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1584,
+          1648
+        ],
+        "id": "8ab2124b-1379-4104-9a2b-d913beb076b8",
+        "name": "Serasa · Gerar Token - PROD",
+        "credentials": {
+          "httpBasicAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput",
+        "notes": "⚠️ Está em UAT (homologação) — trocar a URL pra https://api.serasaexperian.com.br/... e a credencial Basic Auth pra PROD antes de ir pra produção de verdade. onError=continueRegularOutput evita travar o D2 inteiro se a Serasa cair."
+      },
+      {
+        "parameters": {
+          "url": "https://api.serasaexperian.com.br/credit-services/business-information-report/v1/reports",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "reportName",
+                "value": "RELATORIO_INTERMEDIARIO_PJ"
+              },
+              {
+                "name": "optionalFeatures",
+                "value": "SCORE_POSITIVO,ANOTACOES_CONSULTAS_SPC"
+              },
+              {
+                "name": "reportParameters",
+                "value": "ew0KICAgICJyZXBvcnRQYXJhbWV0ZXJzIjogWw0KICAgIHsNCiAgICAgICAgICAgICJuYW1lIjogIlNDT1JFX1BPU0lUSVZPIiwNCiAgICAgICAgICAgICJ2YWx1ZSI6ICJINFBKIg0KICAgICAgICB9DQogICAgXQ0KfQ"
+              }
+            ]
+          },
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "={{ $('Serasa · Gerar Token - PROD').item.json.tokenType }} {{ $('Serasa · Gerar Token - PROD').item.json.accessToken }}"
+              },
+              {
+                "name": "X-Document-Id",
+                "value": "={{ $('When Executed by Another Workflow').first().json.cnpj }}"
+              },
+              {
+                "name": "X-Retailer-Document-Id",
+                "value": "45249843000164"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1824,
+          1648
+        ],
+        "id": "bece3460-d325-4b0f-9ee6-13fab552cd93",
+        "name": "Serasa · Consultar Relatório  - PROD",
+        "onError": "continueRegularOutput",
+        "notes": "⚠️ Também em UAT — trocar URL pra api.serasaexperian.com.br (sem 'uat-') quando for produção."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://uat-api.serasaexperian.com.br/ms-da/enrichment/v1/enrichments/organizations",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "={{ $('Serasa · Gerar Token Infomais').item.json.tokenType }} {{ $('Serasa · Gerar Token Infomais').item.json.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"document\": \"61068276000791\",\n  \"attributes\": [\n    \"DOCUMENT\",\n\n    \"BUSINESSNAME\",\n    \"ADDRESSES\",\n    \"PHONES\",\n    \"COMPANYSIZE\"\n  ]\n}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1808,
+          2304
+        ],
+        "id": "29597996-52e5-443d-9ba5-fcbbc8e8abae",
+        "name": "Serasa · Infomais",
+        "onError": "continueRegularOutput",
+        "notes": "⚠️ Também em UAT — trocar URL pra api.serasaexperian.com.br (sem 'uat-') quando for produção."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://uat-api.serasaexperian.com.br/security/iam/v1/client-identities/login",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1584,
+          2304
+        ],
+        "id": "f63c08cf-d029-4437-a59a-155aedcdae66",
+        "name": "Serasa · Gerar Token Infomais",
+        "credentials": {
+          "httpBasicAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput",
+        "notes": "⚠️ Está em UAT (homologação) — trocar a URL pra https://api.serasaexperian.com.br/... e a credencial Basic Auth pra PROD antes de ir pra produção de verdade. onError=continueRegularOutput evita travar o D2 inteiro se a Serasa cair."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://uat-api.serasaexperian.com.br/security/iam/v1/client-identities/login ",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1568,
+          832
+        ],
+        "id": "d2669e6e-6c4b-40d4-9d43-9d53d56bb0a1",
+        "name": "Serasa · Gerar Token",
+        "credentials": {
+          "httpBasicAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput",
+        "notes": "⚠️ Está em UAT (homologação) — trocar a URL pra https://api.serasaexperian.com.br/... e a credencial Basic Auth pra PROD antes de ir pra produção de verdade. onError=continueRegularOutput evita travar o D2 inteiro se a Serasa cair."
+      },
+      {
+        "parameters": {
+          "url": "https://uat-api.serasaexperian.com.br/credit-services/business-information-report/v1/reports",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "reportName",
+                "value": "RELATORIO_INTERMEDIARIO_PJ"
+              },
+              {
+                "name": "optionalFeatures",
+                "value": "SCORE_POSITIVO,ANOTACOES_CONSULTAS_SPC"
+              }
+            ]
+          },
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "={{ $('Serasa · Gerar Token').item.json.tokenType }} {{ $('Serasa · Gerar Token').item.json.accessToken }}"
+              },
+              {
+                "name": "X-Document-Id",
+                "value": "={{ $('When Executed by Another Workflow').item.json.cnpj }}"
+              },
+              {
+                "name": "X-Retailer-Document-Id",
+                "value": "45249843000164"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1792,
+          832
+        ],
+        "id": "97cbc616-f822-4e65-9e29-a093847f32e9",
+        "name": "Serasa · Consultar Relatório",
+        "onError": "continueRegularOutput",
+        "notes": "⚠️ Também em UAT — trocar URL pra api.serasaexperian.com.br (sem 'uat-') quando for produção."
+      }
+    ],
+    "connections": {
+      "Classificar D2": {
+        "main": [
+          [
+            {
+              "node": "Salvar Dados Brutos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Salvar Dados Brutos": {
+        "main": [
+          [
+            {
+              "node": "Retorno pro Orquestrador",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "When Executed by Another Workflow": {
+        "main": [
+          [
+            {
+              "node": "Serasa · Gerar Token - PROD",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Serasa · Gerar Token - PROD": "***REMOVIDO***",
+      "Serasa · Consultar Relatório  - PROD": {
+        "main": [
+          [
+            {
+              "node": "Classificar D2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Serasa · Infomais": {
+        "main": [
+          []
+        ]
+      },
+      "Serasa · Gerar Token Infomais": "***REMOVIDO***",
+      "Serasa · Gerar Token": "***REMOVIDO***",
+      "Serasa · Consultar Relatório": {
+        "main": [
+          []
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version b79295c3",
+    "description": "",
+    "autosaved": false,
+    "createdAt": "2026-08-19T16:35:24.004Z",
+    "updatedAt": "2026-09-02T19:35:03.408Z"
+  },
   "tags": []
 }
