@@ -3,7 +3,7 @@
   "createdAt": "2026-07-28T14:24:11.430Z",
   "id": "o2QJUraN5YsNQuSt",
   "name": "BMS - 8.05 - Calcular Score",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
@@ -134,17 +134,145 @@
   "staticData": null,
   "meta": null,
   "versionId": "1f92e271-e0c0-4984-92ff-ffdbf0f3ee1a",
-  "activeVersionId": null,
+  "activeVersionId": "1f92e271-e0c0-4984-92ff-ffdbf0f3ee1a",
   "triggerCount": 0,
   "shared": [
     {
-      "updatedAt": "2026-07-28T14:24:11.430Z",
-      "createdAt": "2026-07-28T14:24:11.430Z",
       "role": "workflow:owner",
       "workflowId": "o2QJUraN5YsNQuSt",
-      "projectId": "nRxOu1L1N41Jyveq"
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-07-28T14:24:11.430Z",
+      "updatedAt": "2026-07-28T14:24:11.430Z"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "versionId": "1f92e271-e0c0-4984-92ff-ffdbf0f3ee1a",
+    "workflowId": "o2QJUraN5YsNQuSt",
+    "nodes": [
+      {
+        "parameters": {
+          "workflowInputs": {
+            "values": [
+              {
+                "name": "s1_fiscal",
+                "type": "number"
+              },
+              {
+                "name": "s2_financeira",
+                "type": "number"
+              },
+              {
+                "name": "s3_regime",
+                "type": "number"
+              },
+              {
+                "name": "s4_dependencia",
+                "type": "number"
+              },
+              {
+                "name": "s5_maturidade",
+                "type": "number"
+              },
+              {
+                "name": "completude_pct",
+                "type": "number"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -304,
+          -48
+        ],
+        "id": "2a979c7a-3d14-4e62-8bbc-ba3e9c5e43d2",
+        "name": "When Executed by Another Workflow",
+        "notes": "s5_maturidade pode vir null (fluxo inicial, sem D5 ainda) ou preenchido (recalculo). completude_pct é calculado por quem chama, com base nos campos_nd que só o chamador conhece."
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT\n  (SELECT row_to_json(p) FROM credscore.parametros_pesos p WHERE ativo = true LIMIT 1) AS pesos,\n  (SELECT row_to_json(t) FROM credscore.parametros_thresholds t WHERE ativo = true LIMIT 1) AS thresholds;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -64,
+          -48
+        ],
+        "id": "2e0f1a8f-1a35-4202-bfe7-65ad41d20bff",
+        "name": "Buscar Pesos e Thresholds Ativos",
+        "credentials": {
+          "postgres": {
+            "id": "F5GuYkVQ5eWZE44i",
+            "name": "BMS-Postgres"
+          }
+        },
+        "notes": "Sempre lê os parâmetros ATIVOS AGORA — tanto no cálculo inicial quanto no recálculo pós-D5, garantindo que uma mudança de peso/threshold pela tela de Parâmetros já valha na próxima vez que qualquer um dos dois workflows chamar este aqui."
+      },
+      {
+        "parameters": {
+          "jsCode": "const input = $('When Executed by Another Workflow').item.json;\nconst dados = $('Buscar Pesos e Thresholds Ativos').item.json;\nconst pesos = dados.pesos || {};\nconst thr = dados.thresholds || {};\n\nconst s1 = Number(input.s1_fiscal ?? 0);\nconst s2 = Number(input.s2_financeira ?? 0);\nconst s3 = Number(input.s3_regime ?? 0);\nconst s4 = Number(input.s4_dependencia ?? 0);\nconst s5 = input.s5_maturidade === null || input.s5_maturidade === undefined ? null : Number(input.s5_maturidade);\nconst completude = Number(input.completude_pct ?? 100);\n\nconst temD5 = s5 !== null;\n\nlet w = { d1: Number(pesos.w_d1), d2: Number(pesos.w_d2), d3: Number(pesos.w_d3), d4: Number(pesos.w_d4), d5: Number(pesos.w_d5) };\nif (!temD5) {\n  const fator = 1 / (1 - w.d5);\n  w = { d1: w.d1 * fator, d2: w.d2 * fator, d3: w.d3 * fator, d4: w.d4 * fator, d5: 0 };\n}\n\nconst scoreTotal = Math.round((w.d1*s1 + w.d2*s2 + w.d3*s3 + w.d4*s4 + w.d5*(s5 ?? 0)) * 100) / 100;\n\nlet decisao = null;\nlet status = 'concluido';\n\nif (completude < Number(thr.completude_minima_pct)) {\n  status = 'analise_manual';\n  decisao = null;\n} else {\n  if (scoreTotal >= Number(thr.elegivel_min)) decisao = 'elegivel';\n  else if (scoreTotal >= Number(thr.condicionado_min)) decisao = 'elegivel_condicionado';\n  else if (scoreTotal >= Number(thr.atencao_min)) decisao = 'atencao';\n  else decisao = 'nao_elegivel';\n}\n\nreturn [{ json: {\n  score_total: scoreTotal,\n  decisao,\n  status,\n  preliminar: !temD5,\n  pesos_usados: { w_d1: w.d1, w_d2: w.d2, w_d3: w.d3, w_d4: w.d4, w_d5: w.d5 },\n  versao_pesos_id: pesos.id,\n  versao_thresholds_id: thr.id\n} }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          176,
+          -48
+        ],
+        "id": "853dbf9d-ab4c-412b-b357-ad8924624bed",
+        "name": "Calcular Score e Decisão"
+      },
+      {
+        "parameters": {
+          "content": "## SUB-WORKFLOW COMPARTILHADO — usado pelo Orquestrador (cálculo inicial) E pelo Recálculo D5. Não sabe nada sobre D1/D2/gates/\nquestionário — só recebe 5 números e devolve score + decisão.\nNUNCA escreve no banco (quem chama decide o que fazer com o resultado).\n\nENTRADA: s1_fiscal, s2_financeira, s3_regime, s4_dependencia, s5_maturidade (pode ser null), completude_pct\n\nLÓGICA:\n- Lê pesos e thresholds ATIVOS AGORA (não uma versão fixa) — assim, se a BMS mudar peso/threshold pela tela de Parâmetros, o próximo cálculo (inicial ou recálculo de D5) já usa o valor novo.\n- Se s5_maturidade for null: redistribui o peso de D5 proporcionalmente entre D1-D4 (wi' = wi / (1 - w_d5)) — preserva a proporção AHP\n  original entre as 4 dimensões restantes.\n- completude_pct < completude_minima_pct → status='analise_manual', decisao=null. Senão, aplica os thresholds normalmente.\n\nSAÍDA: score_total, decisao, status, preliminar (=true quando s5 for null), pesos_usados, versao_pesos_id, versao_thresholds_id",
+          "height": 608,
+          "width": 848,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -416,
+          -480
+        ],
+        "id": "d71218c5-b55d-4968-acdb-aebbada46aba",
+        "name": "Sticky Note"
+      }
+    ],
+    "connections": {
+      "When Executed by Another Workflow": {
+        "main": [
+          [
+            {
+              "node": "Buscar Pesos e Thresholds Ativos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar Pesos e Thresholds Ativos": {
+        "main": [
+          [
+            {
+              "node": "Calcular Score e Decisão",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-08-07T21:49:41.076Z",
+    "updatedAt": "2026-08-07T21:49:41.076Z"
+  },
   "tags": []
 }
