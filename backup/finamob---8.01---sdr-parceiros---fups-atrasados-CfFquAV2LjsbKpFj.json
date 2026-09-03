@@ -1,0 +1,3324 @@
+{
+  "updatedAt": "2026-09-02T21:40:21.672Z",
+  "createdAt": "2026-09-02T21:34:10.794Z",
+  "id": "CfFquAV2LjsbKpFj",
+  "name": "Finamob - 8.01 - SDR Parceiros - FUPs Atrasados",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -176,
+        1808
+      ],
+      "id": "d1e713d1-ca8e-4186-b5f0-277d4d860cc9",
+      "name": "Schedule Trigger",
+      "notesInFlow": true,
+      "notes": "9h no timezone da INSTANCIA n8n (conferir: se a instancia estiver em UTC, isso é 6h BRT). Dispara as 4 filas na mesma execucao. CURDATE() nas queries usa o timezone do MySQL, $now usa o do n8n - se divergirem, o corte de data pode nao coincidir."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT *\nFROM (\n  -- ----------------------------------------------------------------------\n  -- CAMADA 3: calcula o telefone \"canônico\" (DDD + 8 últimos dígitos),\n  -- usado tanto pra validar o número quanto pra achar duplicatas.\n  -- ----------------------------------------------------------------------\n  SELECT\n    e.*,\n    CONCAT(\n      LEFT(e.whatsapp_digits_local, 2),\n      RIGHT(e.whatsapp_digits_local, 8)\n    ) AS whatsapp_canonical\n  FROM (\n\n    /* --------------------------------------------------------------------\n       CAMADA 2:\n       (a) calcula `tem_operacao`, verificando 5 caminhos diferentes de\n           vínculo entre o mailing e uma operação (negócio) já existente;\n       (b) remove o código do país \"55\" do telefone, se houver, gerando\n           `whatsapp_digits_local` — o número já só com DDD + local.\n       -------------------------------------------------------------------- */\n    SELECT\n      r.*,\n      CASE\n        -- (1) Vínculo direto: a operação foi criada apontando pro próprio mailing.\n        WHEN EXISTS (\n          SELECT 1\n          FROM operacao o\n          WHERE o.mailing_id = r.id\n        )\n        -- (2) Vínculo via incorporadora: o lead está associado a uma\n        --     incorporadora (r.idincorporadora) cujo CNPJ bate com o CNPJ de\n        --     alguma operação.\n        OR EXISTS (\n          SELECT 1\n          FROM incorporadoras i\n          JOIN operacao o2 ON o2.cnpj_digits = i.cnpj_digits\n          WHERE i.id = r.idincorporadora\n            AND i.cnpj_digits IS NOT NULL\n        )\n        -- (3) Vínculo via CNPJ do próprio lead: o CNPJ salvo no mailing\n        --     (r.cnpj_empresa) bate com o CNPJ de alguma operação.\n        OR EXISTS (\n          SELECT 1\n          FROM operacao o3\n          WHERE o3.cnpj_digits = r.cnpj_empresa\n            AND r.cnpj_empresa IS NOT NULL\n            AND r.cnpj_empresa <> ''\n        )\n        -- (4) Vínculo via idcliente: um mesmo cliente (tabela `clientes`)\n        --     pode gerar vários registros de mailing ao longo do tempo, mas\n        --     a operação fica vinculada ao idclientes, não necessariamente\n        --     ao mailing_id mais recente.\n        OR EXISTS (\n          SELECT 1\n          FROM operacao o4\n          WHERE o4.idclientes = r.idcliente\n            AND r.idcliente IS NOT NULL\n        )\n        -- (5) Mesmo vínculo do item (4), no sentido inverso\n        --     (clientes.mailing_id -> mailing.id), pro caso de o mailing não\n        --     ter o idcliente preenchido mas existir um registro em\n        --     `clientes` apontando de volta pra ele.\n        OR EXISTS (\n          SELECT 1\n          FROM clientes c\n          JOIN operacao o5 ON o5.idclientes = c.id\n          WHERE c.mailing_id = r.id\n        )\n        THEN 'Sim'\n        ELSE 'Não'\n      END AS tem_operacao,\n\n      -- Remove o \"55\" da frente quando o número ficou com 12 ou 13 dígitos\n      -- depois da limpeza básica (camada 1) — ou seja, quando ainda tinha\n      -- código do país (com ou sem \"+\"). Sem isso, um número como\n      -- \"+55 (82) 9944-4245\" ficava com o DDD calculado errado, porque\n      -- sobrava um dígito solto do \"55\" colado na frente.\n      CASE\n        WHEN LENGTH(r.whatsapp_digits_raw) IN (12, 13)\n             AND LEFT(r.whatsapp_digits_raw, 2) = '55'\n          THEN SUBSTRING(r.whatsapp_digits_raw, 3)\n        ELSE r.whatsapp_digits_raw\n      END AS whatsapp_digits_local\n\n    FROM (\n      -- --------------------------------------------------------------------\n      -- CAMADA 1: limpeza básica do telefone. Remove parênteses, espaço,\n      -- hífen, ponto e o \"+\" (de \"+55\"). Esse banco não tem REGEXP_REPLACE\n      -- (só existe a partir do MySQL 8.0.4), então a limpeza é feita com\n      -- REPLACE() encadeado. Se aparecer outro separador no futuro (ex: \"_\",\n      -- \"/\"), é só adicionar mais um REPLACE aqui — como agora essa limpeza\n      -- só existe UMA vez na query (graças a essa camada), corrigir aqui já\n      -- corrige em todo o resto da lógica.\n      -- --------------------------------------------------------------------\n      SELECT\n        m.*,\n        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n          m.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''), '+', ''\n        ) AS whatsapp_digits_raw\n      FROM mailing m\n    ) AS r\n\n  ) AS e\n\n) AS mailing_enriched\n\nWHERE\n  -- Não considerar leads que estão na lixeira.\n  lixeira = 0\n\n  -- Não considerar leads que já têm operação vinculada por nenhum dos\n  -- 5 caminhos calculados na camada 2.\n  AND tem_operacao = 'Não'\n\n  -- ---------------- TIPO ----------------\n  -- REGRA UNIFICADA (decidido em 26/08/2026): WHITELIST, igual às 3 filas de\n  -- follow-up. Antes esta query usava BLACKLIST (tipo <> 'Parceiro'), então um\n  -- lead com tipo fora da whitelist (ex: 'Investidor') entrava aqui, recebia a\n  -- mensagem 1 e depois NUNCA era pescado por nenhuma fila de follow-up: ficava\n  -- com fup vencido para sempre, inflando o card de FUPs Atrasados do dash sem\n  -- o robô conseguir fazer nada com ele. Agora ele simplesmente não entra.\n  AND (\n    `Tipo` IS NULL\n    OR TRIM(`Tipo`) = ''\n    OR TRIM(`Tipo`) IN ('Cliente', 'Cliente/Parceiro', 'Outros')\n  )\n\n  -- Follow-up (fup): entra quem nunca teve fup definido (fup vazio/nulo) OU\n  -- quem tem uma data de fup que já venceu (passado em relação a hoje).\n  AND (\n    fup IS NULL\n    OR fup = ''\n    OR DATE(fup) < CURDATE()\n  )\n\n  -- Precisa ter algum valor de WhatsApp cadastrado.\n  AND whatsapp IS NOT NULL\n  AND whatsapp <> ''\n\n  -- Validação de tamanho E FAIXA (revisto em 26/08). Nao basta o tamanho: um\n  -- numero de 10 digitos pode ser celular antigo (falta o 9) ou fixo, e o\n  -- node de envio trata os dois de forma diferente. O 1º digito do local\n  -- distingue: 6-9 = celular, 2-5 = fixo.\n  AND (\n    -- celular atual: DDD + 9 digitos, local comecando em 9\n    (LENGTH(whatsapp_digits_local) = 11 AND SUBSTRING(whatsapp_digits_local, 3, 1) = '9')\n    -- DDD + 8 digitos: celular antigo (local 6-9, ganha o 9 no envio) OU\n    -- fixo (local 2-5, NAO ganha o 9 - fixo pode ter WhatsApp Business, o que\n    -- ele nao pode é receber o 9, que criava um celular de outra pessoa).\n    OR (LENGTH(whatsapp_digits_local) = 10 AND SUBSTRING(whatsapp_digits_local, 3, 1) BETWEEN '2' AND '9')\n  )\n  -- Rejeita de quebra o que antes passava: 11 digitos cujo local nao comeca\n  -- em 9 (celular BR sempre comeca em 9) e 10 digitos comecando em 0 ou 1.\n\n  -- Rejeita números \"placeholder\" onde todos os dígitos são iguais\n  -- (ex: \"0000000000\", \"1111111111\"): compara o número limpo com uma\n  -- string do mesmo tamanho feita só repetindo o primeiro dígito.\n  AND whatsapp_digits_local <> REPEAT(\n        LEFT(whatsapp_digits_local, 1),\n        LENGTH(whatsapp_digits_local)\n      )\n\n  -- Valida o DDD: os 2 primeiros dígitos do número (já sem código de país)\n  -- precisam formar um número entre 11 e 99 — DDDs brasileiros reais\n  -- começam em 11, então qualquer coisa abaixo disso (ex: \"00\", \"01\") é\n  -- inválida.\n  AND CAST(LEFT(whatsapp_digits_local, 2) AS UNSIGNED) BETWEEN 11 AND 99\n\n  -- --------------------------------------------------------------------\n  -- STATUS DO PLANO DE AÇÃO\n  -- Não considerar leads cujo status_plano_acao já indica que o lead foi\n  -- tratado ou descartado (tentativas de reativação já feitas, encaminhado\n  -- pro advisor, ou fora do ICP). Aceita nulo/vazio (nunca classificado)\n  -- ou qualquer status que não esteja nessa lista de \"já resolvidos\".\n  -- --------------------------------------------------------------------\n  AND (\n    status_plano_acao IS NULL\n    OR status_plano_acao = ''\n    OR status_plano_acao NOT IN (\n      'ptentativaderreativaçãor',\n      'stentativadereativaçãor',\n      'ttentativadereativaçãor',\n      'encaminhar advisor',\n      'naoeoICP'\n    )\n  )\n\n  -- --------------------------------------------------------------------\n  -- DEDUPLICAÇÃO DE TELEFONE\n  -- A API bloqueia a atualização (erro \"multiple_mailings_found\") quando\n  -- mais de um mailing ATIVO tem o mesmo telefone (considerando variações\n  -- com/sem \"9\" extra de celular e com/sem código de país). Aqui refazemos\n  -- a mesma limpeza em 2 camadas pra qualquer OUTRO mailing (m2) e\n  -- comparamos o canônico dele com o do registro atual.\n  -- --------------------------------------------------------------------\n  AND NOT EXISTS (\n    SELECT 1\n    FROM (\n      SELECT\n        m2r.id,\n        m2r.lixeira,\n        CONCAT(\n          LEFT(\n            CASE\n              WHEN LENGTH(m2r.whatsapp_digits_raw) IN (12, 13)\n                   AND LEFT(m2r.whatsapp_digits_raw, 2) = '55'\n                THEN SUBSTRING(m2r.whatsapp_digits_raw, 3)\n              ELSE m2r.whatsapp_digits_raw\n            END,\n            2\n          ),\n          RIGHT(\n            CASE\n              WHEN LENGTH(m2r.whatsapp_digits_raw) IN (12, 13)\n                   AND LEFT(m2r.whatsapp_digits_raw, 2) = '55'\n                THEN SUBSTRING(m2r.whatsapp_digits_raw, 3)\n              ELSE m2r.whatsapp_digits_raw\n            END,\n            8\n          )\n        ) AS whatsapp_canonical\n      FROM (\n        SELECT\n          m2.id,\n          m2.lixeira,\n          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n            m2.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''), '+', ''\n          ) AS whatsapp_digits_raw\n        FROM mailing m2\n      ) AS m2r\n    ) AS m2c\n  -- ATENCAO (revisao 27/08): a comparacao é \"m2c.id <> ...\", que exclui OS DOIS\n    -- lados do par de duplicatas — ninguem é contatado. Isso é INTENCIONAL:\n    -- telefone duplicado é erro de cadastro, e disparar para o registro errado do\n    -- par é pior do que nao disparar. Em 26/08 eu tinha trocado para \"<\" (o de\n    -- menor id passava) e foi revertido em 27/08 por decisao de negocio. O lead\n    -- aparece como \"Precisa de gente\" no dash, que é onde alguem mescla os registros.\n    WHERE m2c.lixeira = 0\n      AND m2c.id <> mailing_enriched.id\n      AND m2c.whatsapp_canonical = mailing_enriched.whatsapp_canonical\n  )\n\n-- Ordena os follow-ups vencidos do mais antigo pro mais recente primeiro;\n-- leads sem fup definido (nunca agendados) ficam por último na fila.\nORDER BY\n  CASE WHEN fup IS NULL OR fup = '' THEN 1 ELSE 0 END,\n  DATE(fup) ASC\n\n-- RESOLVIDO 26/08: as 4 filas agora usam LIMIT 100 (antes era 100/25/25, o\n-- que fazia a entrada encher 4x mais rapido do que o follow-up drenava e a\n-- distancia entre a mensagem 1 e a 2 crescer todo dia). Teto de ~300 msgs/dia\n-- num unico numero WhatsApp - acompanhar a qualidade no Business Manager.\n--\n-- SOBRE O ORDER BY: ele joga os leads SEM fup pro fim da fila. Isso só seria\n-- problema se a query batesse no LIMIT 100 todo dia - CONFERIDO em 26/08: ela\n-- devolve MENOS de 100, entao o bloco \"nunca agendado\" é alcancado na mesma\n-- execucao. Se um dia a fila passar a encher os 100, revisitar: aí esses leads\n-- deixam de ser contatados e vale uma cota fixa (ex: 80 vencidos + 20 sem fup).\nLIMIT 100;\n\n-- ============================================================================\n-- SOBRE ESSA QUERY: Fila de leads para follow-up via WhatsApp\n-- ----------------------------------------------------------------------------\n-- Objetivo geral:\n-- Selecionar até 100 leads da tabela `mailing` que precisam de contato via\n-- WhatsApp, evitando trazer leads que:\n--   - já viraram operação (negócio) por qualquer um dos caminhos de vínculo\n--     existentes no banco;\n--   - estão na lixeira, ou são do tipo \"Parceiro\";\n--   - não têm WhatsApp válido (vazio, com poucos dígitos, número placeholder\n--     tipo \"0000000000\", DDD inexistente, ou mal formatado);\n--   - já foram marcados com um status de plano de ação que indica que o lead\n--     já foi tratado/descartado;\n--   - têm o mesmo telefone de outro mailing ativo (duplicidade), porque a API\n--     de atualização (update_mailing_api.php) bloqueia esse caso com erro\n--     \"multiple_mailings_found\".\n--\n-- Sobre a estrutura em camadas (Camada 1 / 2 / 3):\n-- Esse banco não suporta REGEXP_REPLACE (só existe a partir do MySQL 8.0.4)\n-- nem CTEs / WITH (só a partir do MySQL 8.0). Pra evitar repetir a limpeza\n-- do telefone dezenas de vezes (o que já causou um bug real: o \"+55\" não\n-- era removido em todo lugar, quebrando a comparação de duplicatas), a\n-- limpeza agora é feita uma vez só, em subconsultas aninhadas dentro do\n-- FROM (isso funciona em qualquer versão do MySQL, não precisa de CTE nem\n-- de função). O mesmo padrão de 2 camadas é repetido dentro do NOT EXISTS\n-- de deduplicação, porque ali precisamos calcular o canônico de QUALQUER\n-- outro mailing (m2), não do mailing atual.\n--\n-- IMPORTANTE: não coloque comentário/bloco /* */ ANTES do SELECT ao usar essa\n-- query no node MySQL do n8n. Algumas integrações (incluindo esse node)\n-- decidem se a query é um SELECT checando se o texto começa literalmente com\n-- \"SELECT\" — um comentário antes disso faz a ferramenta tratar a query como\n-- \"não-SELECT\" e devolver só um {\"success\": true} genérico, em vez da lista\n-- de linhas. Por isso essa documentação geral fica no final do arquivo.\n-- ============================================================================",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        432,
+        624
+      ],
+      "id": "92cb825b-149c-4905-b513-f3f3e9af0b03",
+      "name": "Execute a SQL query2",
+      "notesInFlow": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "notes": "FILA DE ENTRADA - lead que nunca entrou em tentativa de reativacao (ou tem fup vencido/nulo). LIMIT 100. Em 26/08 passou a usar a WHITELIST de tipo, igual as 3 filas de follow-up - antes usava blacklist e deixava entrar lead que nenhuma fila de follow-up conseguia pescar depois."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/1202871396233612/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ \n  (() => {\n    let p = String($('Intervalo entre mensagens1').first().json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // prefixo internacional discado (00...) e 0 de operadora antes do DDD\n    if (p.startsWith(\"00\")) p = p.slice(2);\n    if (p.startsWith(\"0\") && p.length >= 11) p = p.slice(1);\n\n    // Remove o 55 SEMPRE que for codigo de pais, pra reavaliar o local pela\n    // mesma regra. Antes o codigo fazia \"return\" aqui sem tratar, entao um\n    // celular antigo gravado como 5511 8765-4321 (12 digitos, sem o 9) saia\n    // desse jeito e o Meta recusava - enquanto o MESMO numero sem o 55\n    // recebia o 9 corretamente. O guard de tamanho protege o DDD 55\n    // (Santa Maria/RS): 11 digitos comecando em 55 e DDD, nao codigo de pais.\n    if (p.length >= 12 && p.startsWith(\"55\")) p = p.slice(2);\n\n    const ddd = p.slice(0, 2);\n    const local = p.slice(2);\n\n    // celular atual: DDD + 9 digitos comecando em 9\n    if (local.length === 9 && local[0] === \"9\") return \"55\" + ddd + local;\n    // celular antigo: DDD + 8 digitos comecando em 6-9 -> falta o 9\n    if (local.length === 8 && /[6-9]/.test(local[0])) return \"55\" + ddd + \"9\" + local;\n    // FIXO: DDD + 8 digitos comecando em 2-5 -> pode ter WhatsApp Business,\n    // mas NAO leva o 9. Inserir o 9 aqui criava um celular de outra pessoa.\n    if (local.length === 8 && /[2-5]/.test(local[0])) return \"55\" + ddd + local;\n\n    // qualquer outra coisa é invalida - a query nao deveria ter deixado chegar\n    // aqui; devolve vazio pro Meta recusar e a falha ficar visivel no log.\n    return \"\";\n  })()\n}}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"mensagem_1_sem_incorporadora\",\n    \"language\": { \"code\": \"pt_PT\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": {{ JSON.stringify([\n  { \"type\": \"text\", \"text\": String($('Intervalo entre mensagens1').first().json.clientes || \"\") }\n]) }}\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1376,
+        624
+      ],
+      "id": "96e7f7ee-56b4-4de8-a070-d9467c7f1c5b",
+      "name": "Enviar Template 1",
+      "retryOnFail": true,
+      "notesInFlow": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput",
+      "notes": "CORRIGIDO 26/08: o Template 1 estava com continueRegularOutput (falha de envio seguia como sucesso e gravava disparo_enviado no dash) e os Templates 2 e 3 sem onError (um numero ruim abortava a execucao inteira). Agora os tres usam saida de erro: sucesso -> historico/evento/planilha; erro -> validar_erros + evento disparo_falhou. CONFERIDO 26/08: language.code 'pt_PT' esta CORRETO - é assim que este template esta cadastrado no Meta. Os Templates 2 e 3 usam 'pt_BR', tambem correto. A divergencia é real mas intencional; nao 'padronizar' sem checar o cadastro de cada template no Business Manager. CORRIGIDO 26/08 (numero de 10 digitos): a funcao antiga inseria o 9 em TODO numero de 10 digitos. Fixo (local comecando em 2-5) nao tem 9 - o resultado era um celular de OUTRA pessoa recebendo o template. Agora o 9 só entra quando o local comeca em 6-9 (celular antigo de verdade); fixo vai como 55+DDD+8 digitos, que o WhatsApp Business aceita."
+    },
+    {
+      "parameters": {
+        "tableId": "finamob-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_usuario",
+              "fieldValue": "="
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "=Olá, {{ $('Iterar envio por lead2').item.json.clientes }}! Tudo bem?\nAqui é a Luiza, da Finamob. Vi que você se inscreveu na nossa campanha sobre Funding Imobiliário.\nVocês têm alguma operação em andamento ou em planejamento para os próximos meses que esteja precisando de funding?\nAbs!"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Enviar Template 1').item.json.contacts[0].input }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Iterar envio por lead2').item.json.clientes }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Enviar Template 1').item.json.contacts[0].input }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1392,
+        832
+      ],
+      "id": "3887914e-346f-4725-ba1a-0545cd586b48",
+      "name": "Cria Mensagem no Supabase2",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Historico em finamob-historico_mensagens. ATENCAO: o texto esta hardcoded aqui - se o template mudar no Meta Business Manager, o historico salvo divergen silenciosamente do que foi enviado. Idealmente montar o texto num unico node e reusar no envio, no historico e na memoria."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://finamob.com.br/api/update_mailing_api.php",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "***REMOVIDO***"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"phone\": \"{{ \n  (() => {\n    let phone = String($json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // Remove prefixo internacional com 00, ex: 005511989342471\n    if (phone.startsWith(\"00\")) {\n      phone = phone.slice(2);\n    }\n\n    // Se vier com 0 antes do DDD, ex: 011989342471\n    if (phone.startsWith(\"0\") && phone.length >= 11) {\n      phone = phone.slice(1);\n    }\n\n    // Se já vier com 55, mantém\n    if (phone.startsWith(\"55\")) {\n      return phone;\n    }\n\n    // Se vier DDD + número celular com 9 dígitos, ex: 11989342471\n    if (phone.length === 11) {\n      return \"55\" + phone;\n    }\n\n    // Se vier DDD + número com 8 dígitos, NÃO adiciona o 9\n    // Ex: 1188888888 vira 551188888888\n    if (phone.length === 10) {\n      return \"55\" + phone;\n    }\n\n    return phone;\n  })()\n}}\",\n    \"ultimo_contato\": \"{{ $now.toFormat('yyyy-MM-dd') }}\",\n    \"fup\": \"{{ $now.plus({ days: 2 }).toFormat('yyyy-MM-dd') }}\",\n    \"status_plano_acao\": \"ptentativaderreativaçãor\",\n    \"midia\": \"15\",\n    \"dono_do_lead\": \"29\"\n  } ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1088,
+        640
+      ],
+      "id": "7ed8657b-8d47-4128-ab84-62a60362c102",
+      "name": "API Finamob",
+      "retryOnFail": true,
+      "notesInFlow": true,
+      "onError": "continueErrorOutput",
+      "notes": "Atualiza o CRM ANTES do envio (status 1ª tentativa, ultimo_contato=hoje, fup=hoje+2, midia=15, dono_do_lead=29). Ordem intencional: garante idempotencia - reprocessar a execucao nao redispara, porque o lead sai da fila pelo status. Efeito colateral: se o envio falhar depois, o lead foi 'queimado' e vai receber a mensagem 2 sem ter recebido a 1 - por isso a falha de envio agora é registrada (ver Registra Evento - Falha no Envio 1).  DECIDIDO 26/08: a funcao de telefone DESTE node fica como esta. Ele usa o phone como CHAVE DE BUSCA no CRM (update_mailing_api.php), nao como numero discavel - por isso nao insere o 9. Os nodes Enviar Template usam outra funcao, com a regra de fixo x celular antigo. Consequencia conhecida e aceita: para celular antigo, historico_mensagens.telefone (que vem do Meta, com o 9) nao bate com o phone usado aqui - cruzamento entre as duas bases exige normalizar antes."
+    },
+    {
+      "parameters": {
+        "batchSize": "=1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        640,
+        624
+      ],
+      "id": "f12dae33-28e5-41b3-b4f9-7e5cb4791e71",
+      "name": "Iterar envio por lead2",
+      "notesInFlow": true,
+      "notes": "batchSize=1: um lead por vez. Saida 0 (\"done\") = fila terminou -> dispara o refresh do dash. Saida 1 (\"loop\") = proximo lead."
+    },
+    {
+      "parameters": {
+        "amount": "={{ 3 + Math.floor(Math.random() * 5) }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        640
+      ],
+      "id": "87ca0975-8303-4bea-882a-7133afd64999",
+      "name": "Intervalo entre mensagens1",
+      "webhookId": "9a320bdf-98b3-400d-8df6-db3f32de7e69",
+      "notesInFlow": true,
+      "notes": "Espera 3-7s (aleatorio) entre leads. ATENCAO: as 4 filas rodam intercaladas na mesma execucao, entao o intervalo REAL entre mensagens no mesmo numero WhatsApp é menor que isso. Com os limites em 100/100/100 (desde 26/08) sao até ~300 mensagens/dia num unico numero: se a qualidade cair no Business Manager, este é o primeiro lugar pra olhar."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT *\nFROM (\n  -- =========================================================================\n  -- CAMADA 3 - telefone \"canonico\" = DDD + 8 ultimos digitos.\n  -- Serve pra achar duplicata sem depender do 9 extra de celular.\n  -- =========================================================================\n  SELECT\n    e.*,\n    CONCAT(LEFT(e.whatsapp_digits_local, 2), RIGHT(e.whatsapp_digits_local, 8)) AS whatsapp_canonical\n  FROM (\n    -- =======================================================================\n    -- CAMADA 2 - (a) tem_operacao pelos 5 caminhos de vinculo;\n    --            (b) remove o \"55\" do telefone (fica DDD + local).\n    -- =======================================================================\n    SELECT\n      r.*,\n      CASE\n        -- (1) operacao criada apontando pro proprio mailing\n        WHEN EXISTS (SELECT 1 FROM operacao o WHERE o.mailing_id = r.id)\n        -- (2) via incorporadora: CNPJ da incorporadora do lead = CNPJ de alguma operacao\n        OR EXISTS (\n          SELECT 1 FROM incorporadoras i\n          JOIN operacao o2 ON o2.cnpj_digits = i.cnpj_digits\n          WHERE i.id = r.idincorporadora AND i.cnpj_digits IS NOT NULL\n        )\n        -- (3) via CNPJ do proprio mailing\n        OR EXISTS (\n          SELECT 1 FROM operacao o3\n          WHERE o3.cnpj_digits = r.cnpj_empresa\n            AND r.cnpj_empresa IS NOT NULL AND r.cnpj_empresa <> ''\n        )\n        -- (4) via idcliente: um cliente pode ter varios mailings; a operacao\n        --     fica no idclientes, nao no mailing_id mais recente\n        OR EXISTS (\n          SELECT 1 FROM operacao o4\n          WHERE o4.idclientes = r.idcliente AND r.idcliente IS NOT NULL\n        )\n        -- (5) mesmo vinculo do (4) no sentido inverso (clientes.mailing_id -> mailing.id)\n        OR EXISTS (\n          SELECT 1 FROM clientes c\n          JOIN operacao o5 ON o5.idclientes = c.id\n          WHERE c.mailing_id = r.id\n        )\n        THEN 'Sim' ELSE 'Não'\n      END AS tem_operacao,\n      CASE\n        WHEN LENGTH(r.whatsapp_digits_raw) IN (12, 13)\n             AND LEFT(r.whatsapp_digits_raw, 2) = '55'\n          THEN SUBSTRING(r.whatsapp_digits_raw, 3)\n        ELSE r.whatsapp_digits_raw\n      END AS whatsapp_digits_local\n    FROM (\n      -- =====================================================================\n      -- CAMADA 1 - limpeza basica do telefone. Esse MySQL nao tem\n      -- REGEXP_REPLACE (8.0.4+) nem CTE, por isso REPLACE encadeado dentro de\n      -- subconsulta. Novo separador no futuro: adicione UM replace aqui.\n      -- =====================================================================\n      SELECT\n        m.*,\n        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n          m.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''), '+', ''\n        ) AS whatsapp_digits_raw\n      FROM mailing m\n    ) AS r\n  ) AS e\n) AS mailing_enriched\nWHERE\n  -- ================== FILA: 2ª tentativa de reativacao ==================\n  -- Pesca quem JÁ recebeu a mensagem 2 e cujo fup venceu.\n  -- CADENCIA: o fup é gravado como hoje+2 e o teste é \"< CURDATE()\", entao o\n  -- lead é pescado em D+3. CONFIRMADO em 26/08: 3 dias é o intervalo desejado.\n  -- Nao \"corrigir\" isso para \"<=\" pensando que é bug - é intencional.\n  lixeira = 0\n\n  -- Nao considerar quem já virou operacao. Antes desta revisao esta fila\n  -- usava só 3 caminhos de vinculo: lead que fechou via idclientes continuava\n  -- recebendo mensagem 2 e 3. Agora usa os mesmos 5 caminhos da fila de entrada.\n  AND tem_operacao = 'Não'\n\n  AND status_plano_acao = 'ptentativaderreativaçãor'\n\n  AND fup IS NOT NULL\n  AND fup <> ''\n  AND DATE(fup) < CURDATE()\n\n  -- ---------------- WhatsApp valido ----------------\n  AND whatsapp IS NOT NULL\n  AND whatsapp <> ''\n  -- Tamanho E faixa (revisto em 26/08): o 1º digito do local distingue\n  -- celular antigo (6-9) de fixo (2-5), e o envio trata os dois diferente.\n  AND (\n    -- celular atual: DDD + 9 digitos, local comecando em 9\n    (LENGTH(whatsapp_digits_local) = 11 AND SUBSTRING(whatsapp_digits_local, 3, 1) = '9')\n    -- DDD + 8 digitos: celular antigo (local 6-9, ganha o 9 no envio) OU\n    -- fixo (local 2-5, NAO ganha o 9 - fixo pode ter WhatsApp Business, o que\n    -- ele nao pode é receber o 9, que criava um celular de outra pessoa).\n    OR (LENGTH(whatsapp_digits_local) = 10 AND SUBSTRING(whatsapp_digits_local, 3, 1) BETWEEN '2' AND '9')\n  )\n  -- Rejeita de quebra o que antes passava: 11 digitos cujo local nao comeca\n  -- em 9 (celular BR sempre comeca em 9) e 10 digitos comecando em 0 ou 1.\n  -- rejeita placeholder tipo 0000000000 / 1111111111\n  AND whatsapp_digits_local <> REPEAT(LEFT(whatsapp_digits_local, 1), LENGTH(whatsapp_digits_local))\n  -- DDD real comeca em 11\n  AND CAST(LEFT(whatsapp_digits_local, 2) AS UNSIGNED) BETWEEN 11 AND 99\n\n  -- ---------------- TIPO ----------------\n  -- REGRA UNIFICADA (decidido em 26/08/2026): WHITELIST nas 4 filas.\n  -- Investidor e qualquer outro tipo fora desta lista NAO entram em nenhuma\n  -- fila - inclusive na fila de entrada, que antes usava blacklist\n  -- (tipo <> 'Parceiro') e por isso deixava esses leads receberem a mensagem 1\n  -- e depois travarem para sempre (nenhuma fila de follow-up os pescava).\n  AND (\n    `Tipo` IS NULL\n    OR TRIM(`Tipo`) = ''\n    OR TRIM(`Tipo`) IN ('Cliente', 'Cliente/Parceiro', 'Outros')\n  )\n\n  -- ---------------- DEDUPLICACAO DE TELEFONE ----------------\n  -- update_mailing_api.php recusa com \"multiple_mailings_found\" quando 2+\n  -- mailings ativos tem o mesmo telefone. Aqui recalculamos o canonico de\n  -- QUALQUER outro mailing (m2) e comparamos.\n  -- ATENCAO: a comparacao é \"m2c.id < ...\", nao \"<>\". Com \"<>\" os DOIS lados\n  -- do par eram excluidos e ninguem era contatado. Com \"<\", o registro de\n  -- MENOR id passa e so o(s) outro(s) ficam de fora.\n  AND NOT EXISTS (\n    SELECT 1\n    FROM (\n      SELECT\n        m2r.id, m2r.lixeira,\n        CONCAT(\n          LEFT(CASE WHEN LENGTH(m2r.whatsapp_digits_raw) IN (12, 13)\n                         AND LEFT(m2r.whatsapp_digits_raw, 2) = '55'\n                    THEN SUBSTRING(m2r.whatsapp_digits_raw, 3)\n                    ELSE m2r.whatsapp_digits_raw END, 2),\n          RIGHT(CASE WHEN LENGTH(m2r.whatsapp_digits_raw) IN (12, 13)\n                          AND LEFT(m2r.whatsapp_digits_raw, 2) = '55'\n                     THEN SUBSTRING(m2r.whatsapp_digits_raw, 3)\n                     ELSE m2r.whatsapp_digits_raw END, 8)\n        ) AS whatsapp_canonical\n      FROM (\n        SELECT m2.id, m2.lixeira,\n          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n            m2.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''), '+', ''\n          ) AS whatsapp_digits_raw\n        FROM mailing m2\n      ) AS m2r\n    ) AS m2c\n    WHERE m2c.lixeira = 0\n      AND m2c.id <> mailing_enriched.id\n      AND m2c.whatsapp_canonical = mailing_enriched.whatsapp_canonical\n  )\n\n-- Follow-up mais antigo primeiro.\nORDER BY DATE(fup) ASC\nLIMIT 100;\n\n-- ============================================================================\n-- SOBRE ESSA QUERY - 2ª tentativa de reativacao\n-- ----------------------------------------------------------------------------\n-- Fila da 2ª tentativa de reativacao. Estrutura em 3 camadas identica à\n-- da fila de entrada (Execute a SQL query2) porque este MySQL nao tem CTE nem\n-- REGEXP_REPLACE - a limpeza do telefone é feita UMA vez, em subconsultas\n-- aninhadas no FROM, e reaproveitada por todos os filtros.\n--\n-- Revisao 26/08/2026 - o que mudou nesta query:\n--   1. tem_operacao passou de 3 para os 5 caminhos de vinculo da query2;\n--   2. entrou a validacao de WhatsApp (tamanho, DDD, placeholder);\n--   3. entrou o dedupe de telefone canonico (evita multiple_mailings_found);\n--   4. o dedupe usa \"id <\" em vez de \"id <>\", pra nao matar os dois lados do par.\n--\n-- NAO coloque comentario /* */ ANTES do SELECT: o node MySQL do n8n decide se\n-- a query é SELECT olhando se o texto comeca literalmente com \"SELECT\". Um\n-- comentario antes disso faz o node devolver {\"success\": true} em vez das linhas.\n-- ============================================================================",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        448,
+        1264
+      ],
+      "id": "7e608eef-a62e-45db-ac44-04c64389207d",
+      "name": "Execute a SQL query",
+      "notesInFlow": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "notes": "FILA 2ª TENTATIVA - quem tem status 'ptentativaderreativaçãor' e fup vencido. LIMIT 100."
+    },
+    {
+      "parameters": {
+        "tableId": "finamob-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_usuario",
+              "fieldValue": "="
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "=Oi {{ $('Iterar envio por lead').item.json.clientes }}, bom dia!\nLuiza da Finamob aqui. Vi que você se cadastrou no nosso material sobre Funding Imobiliário.\nO cenário de captação mudou bastante nos últimos meses, taxas, apetite de fundos e estruturas disponíveis para incorporadoras.\nVale uma call de 20 min pra eu te mostrar o que temos acesso? \nAbs!"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Enviar Template 2').item.json.contacts[0].input }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Iterar envio por lead').item.json.clientes }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Enviar Template 2').item.json.contacts[0].input }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        1456
+      ],
+      "id": "0bc223c4-a595-4986-8c4f-baa38146dd76",
+      "name": "Cria Mensagem no Supabase",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Historico em finamob-historico_mensagens. ATENCAO: o texto esta hardcoded aqui - se o template mudar no Meta Business Manager, o historico salvo divergen silenciosamente do que foi enviado. Idealmente montar o texto num unico node e reusar no envio, no historico e na memoria."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://finamob.com.br/api/update_mailing_api.php",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "***REMOVIDO***"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"phone\": \"{{ \n  (() => {\n    let phone = String($json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // Remove prefixo internacional com 00, ex: 005511989342471\n    if (phone.startsWith(\"00\")) {\n      phone = phone.slice(2);\n    }\n\n    // Se vier com 0 antes do DDD, ex: 011989342471\n    if (phone.startsWith(\"0\") && phone.length >= 11) {\n      phone = phone.slice(1);\n    }\n\n    // Se já vier com 55, mantém\n    if (phone.startsWith(\"55\")) {\n      return phone;\n    }\n\n    // Se vier DDD + número celular com 9 dígitos, ex: 11989342471\n    if (phone.length === 11) {\n      return \"55\" + phone;\n    }\n\n    // Se vier DDD + número com 8 dígitos, NÃO adiciona o 9\n    // Ex: 1188888888 vira 551188888888\n    if (phone.length === 10) {\n      return \"55\" + phone;\n    }\n\n    return phone;\n  })()\n}}\",\n    \"ultimo_contato\": \"{{ $now.toFormat('yyyy-MM-dd') }}\",\n    \"fup\": \"{{ $now.plus({ days: 2 }).toFormat('yyyy-MM-dd') }}\",\n    \"status_plano_acao\": \"stentativadereativaçãor\"\n  } ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1104,
+        1280
+      ],
+      "id": "d2daa77a-6c53-4956-a273-d8f5cce03e03",
+      "name": "API Finamob1",
+      "retryOnFail": true,
+      "notesInFlow": true,
+      "onError": "continueErrorOutput",
+      "notes": "Atualiza o CRM: status 2ª tentativa, fup=hoje+2. Nao grava midia/dono_do_lead (atribuicao acontece so na onda 1). DECIDIDO 26/08: a funcao de telefone DESTE node fica como esta. Ele usa o phone como CHAVE DE BUSCA no CRM (update_mailing_api.php), nao como numero discavel - por isso nao insere o 9. Os nodes Enviar Template usam outra funcao, com a regra de fixo x celular antigo. Consequencia conhecida e aceita: para celular antigo, historico_mensagens.telefone (que vem do Meta, com o 9) nao bate com o phone usado aqui - cruzamento entre as duas bases exige normalizar antes."
+    },
+    {
+      "parameters": {
+        "batchSize": "=1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        656,
+        1264
+      ],
+      "id": "cc28d2de-efab-422e-ba3e-8fd4c1913071",
+      "name": "Iterar envio por lead",
+      "notesInFlow": true,
+      "notes": "batchSize=1: um lead por vez. Saida 0 (\"done\") = fila terminou -> dispara o refresh do dash. Saida 1 (\"loop\") = proximo lead."
+    },
+    {
+      "parameters": {
+        "amount": "={{ 3 + Math.floor(Math.random() * 5) }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        1280
+      ],
+      "id": "f62e1298-5ed0-4aff-bf1c-604bb41c9e23",
+      "name": "Intervalo entre mensagens",
+      "webhookId": "2c19daef-cfe5-4861-8aae-1f7510b7fa0b",
+      "notesInFlow": true,
+      "notes": "Espera 3-7s (aleatorio) entre leads. ATENCAO: as 4 filas rodam intercaladas na mesma execucao, entao o intervalo REAL entre mensagens no mesmo numero WhatsApp é menor que isso. Com os limites em 100/100/100 (desde 26/08) sao até ~300 mensagens/dia num unico numero: se a qualidade cair no Business Manager, este é o primeiro lugar pra olhar."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT *\nFROM (\n  -- =========================================================================\n  -- CAMADA 3 - telefone \"canonico\" = DDD + 8 ultimos digitos.\n  -- Serve pra achar duplicata sem depender do 9 extra de celular.\n  -- =========================================================================\n  SELECT\n    e.*,\n    CONCAT(LEFT(e.whatsapp_digits_local, 2), RIGHT(e.whatsapp_digits_local, 8)) AS whatsapp_canonical\n  FROM (\n    -- =======================================================================\n    -- CAMADA 2 - (a) tem_operacao pelos 5 caminhos de vinculo;\n    --            (b) remove o \"55\" do telefone (fica DDD + local).\n    -- =======================================================================\n    SELECT\n      r.*,\n      CASE\n        -- (1) operacao criada apontando pro proprio mailing\n        WHEN EXISTS (SELECT 1 FROM operacao o WHERE o.mailing_id = r.id)\n        -- (2) via incorporadora: CNPJ da incorporadora do lead = CNPJ de alguma operacao\n        OR EXISTS (\n          SELECT 1 FROM incorporadoras i\n          JOIN operacao o2 ON o2.cnpj_digits = i.cnpj_digits\n          WHERE i.id = r.idincorporadora AND i.cnpj_digits IS NOT NULL\n        )\n        -- (3) via CNPJ do proprio mailing\n        OR EXISTS (\n          SELECT 1 FROM operacao o3\n          WHERE o3.cnpj_digits = r.cnpj_empresa\n            AND r.cnpj_empresa IS NOT NULL AND r.cnpj_empresa <> ''\n        )\n        -- (4) via idcliente: um cliente pode ter varios mailings; a operacao\n        --     fica no idclientes, nao no mailing_id mais recente\n        OR EXISTS (\n          SELECT 1 FROM operacao o4\n          WHERE o4.idclientes = r.idcliente AND r.idcliente IS NOT NULL\n        )\n        -- (5) mesmo vinculo do (4) no sentido inverso (clientes.mailing_id -> mailing.id)\n        OR EXISTS (\n          SELECT 1 FROM clientes c\n          JOIN operacao o5 ON o5.idclientes = c.id\n          WHERE c.mailing_id = r.id\n        )\n        THEN 'Sim' ELSE 'Não'\n      END AS tem_operacao,\n      CASE\n        WHEN LENGTH(r.whatsapp_digits_raw) IN (12, 13)\n             AND LEFT(r.whatsapp_digits_raw, 2) = '55'\n          THEN SUBSTRING(r.whatsapp_digits_raw, 3)\n        ELSE r.whatsapp_digits_raw\n      END AS whatsapp_digits_local\n    FROM (\n      -- =====================================================================\n      -- CAMADA 1 - limpeza basica do telefone. Esse MySQL nao tem\n      -- REGEXP_REPLACE (8.0.4+) nem CTE, por isso REPLACE encadeado dentro de\n      -- subconsulta. Novo separador no futuro: adicione UM replace aqui.\n      -- =====================================================================\n      SELECT\n        m.*,\n        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n          m.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''), '+', ''\n        ) AS whatsapp_digits_raw\n      FROM mailing m\n    ) AS r\n  ) AS e\n) AS mailing_enriched\nWHERE\n  -- ================== FILA: 3ª tentativa de reativacao ==================\n  -- Pesca quem JÁ recebeu a mensagem 3 e cujo fup venceu.\n  -- CADENCIA: o fup é gravado como hoje+2 e o teste é \"< CURDATE()\", entao o\n  -- lead é pescado em D+3. CONFIRMADO em 26/08: 3 dias é o intervalo desejado.\n  -- Nao \"corrigir\" isso para \"<=\" pensando que é bug - é intencional.\n  lixeira = 0\n\n  -- Nao considerar quem já virou operacao. Antes desta revisao esta fila\n  -- usava só 3 caminhos de vinculo: lead que fechou via idclientes continuava\n  -- recebendo mensagem 2 e 3. Agora usa os mesmos 5 caminhos da fila de entrada.\n  AND tem_operacao = 'Não'\n\n  AND status_plano_acao = 'stentativadereativaçãor'\n\n  AND fup IS NOT NULL\n  AND fup <> ''\n  AND DATE(fup) < CURDATE()\n\n  -- ---------------- WhatsApp valido ----------------\n  AND whatsapp IS NOT NULL\n  AND whatsapp <> ''\n  -- Tamanho E faixa (revisto em 26/08): o 1º digito do local distingue\n  -- celular antigo (6-9) de fixo (2-5), e o envio trata os dois diferente.\n  AND (\n    -- celular atual: DDD + 9 digitos, local comecando em 9\n    (LENGTH(whatsapp_digits_local) = 11 AND SUBSTRING(whatsapp_digits_local, 3, 1) = '9')\n    -- DDD + 8 digitos: celular antigo (local 6-9, ganha o 9 no envio) OU\n    -- fixo (local 2-5, NAO ganha o 9 - fixo pode ter WhatsApp Business, o que\n    -- ele nao pode é receber o 9, que criava um celular de outra pessoa).\n    OR (LENGTH(whatsapp_digits_local) = 10 AND SUBSTRING(whatsapp_digits_local, 3, 1) BETWEEN '2' AND '9')\n  )\n  -- Rejeita de quebra o que antes passava: 11 digitos cujo local nao comeca\n  -- em 9 (celular BR sempre comeca em 9) e 10 digitos comecando em 0 ou 1.\n  -- rejeita placeholder tipo 0000000000 / 1111111111\n  AND whatsapp_digits_local <> REPEAT(LEFT(whatsapp_digits_local, 1), LENGTH(whatsapp_digits_local))\n  -- DDD real comeca em 11\n  AND CAST(LEFT(whatsapp_digits_local, 2) AS UNSIGNED) BETWEEN 11 AND 99\n\n  -- ---------------- TIPO ----------------\n  -- REGRA UNIFICADA (decidido em 26/08/2026): WHITELIST nas 4 filas.\n  -- Investidor e qualquer outro tipo fora desta lista NAO entram em nenhuma\n  -- fila - inclusive na fila de entrada, que antes usava blacklist\n  -- (tipo <> 'Parceiro') e por isso deixava esses leads receberem a mensagem 1\n  -- e depois travarem para sempre (nenhuma fila de follow-up os pescava).\n  AND (\n    `Tipo` IS NULL\n    OR TRIM(`Tipo`) = ''\n    OR TRIM(`Tipo`) IN ('Cliente', 'Cliente/Parceiro', 'Outros')\n  )\n\n  -- ---------------- DEDUPLICACAO DE TELEFONE ----------------\n  -- update_mailing_api.php recusa com \"multiple_mailings_found\" quando 2+\n  -- mailings ativos tem o mesmo telefone. Aqui recalculamos o canonico de\n  -- QUALQUER outro mailing (m2) e comparamos.\n  -- ATENCAO: a comparacao é \"m2c.id < ...\", nao \"<>\". Com \"<>\" os DOIS lados\n  -- do par eram excluidos e ninguem era contatado. Com \"<\", o registro de\n  -- MENOR id passa e so o(s) outro(s) ficam de fora.\n  AND NOT EXISTS (\n    SELECT 1\n    FROM (\n      SELECT\n        m2r.id, m2r.lixeira,\n        CONCAT(\n          LEFT(CASE WHEN LENGTH(m2r.whatsapp_digits_raw) IN (12, 13)\n                         AND LEFT(m2r.whatsapp_digits_raw, 2) = '55'\n                    THEN SUBSTRING(m2r.whatsapp_digits_raw, 3)\n                    ELSE m2r.whatsapp_digits_raw END, 2),\n          RIGHT(CASE WHEN LENGTH(m2r.whatsapp_digits_raw) IN (12, 13)\n                          AND LEFT(m2r.whatsapp_digits_raw, 2) = '55'\n                     THEN SUBSTRING(m2r.whatsapp_digits_raw, 3)\n                     ELSE m2r.whatsapp_digits_raw END, 8)\n        ) AS whatsapp_canonical\n      FROM (\n        SELECT m2.id, m2.lixeira,\n          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n            m2.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''), '+', ''\n          ) AS whatsapp_digits_raw\n        FROM mailing m2\n      ) AS m2r\n    ) AS m2c\n    WHERE m2c.lixeira = 0\n      AND m2c.id <> mailing_enriched.id\n      AND m2c.whatsapp_canonical = mailing_enriched.whatsapp_canonical\n  )\n\n-- Follow-up mais antigo primeiro.\nORDER BY DATE(fup) ASC\nLIMIT 100;\n\n-- ============================================================================\n-- SOBRE ESSA QUERY - 3ª tentativa de reativacao\n-- ----------------------------------------------------------------------------\n-- Fila da 3ª tentativa de reativacao. Estrutura em 3 camadas identica à\n-- da fila de entrada (Execute a SQL query2) porque este MySQL nao tem CTE nem\n-- REGEXP_REPLACE - a limpeza do telefone é feita UMA vez, em subconsultas\n-- aninhadas no FROM, e reaproveitada por todos os filtros.\n--\n-- Revisao 26/08/2026 - o que mudou nesta query:\n--   1. tem_operacao passou de 3 para os 5 caminhos de vinculo da query2;\n--   2. entrou a validacao de WhatsApp (tamanho, DDD, placeholder);\n--   3. entrou o dedupe de telefone canonico (evita multiple_mailings_found);\n--   4. o dedupe usa \"id <\" em vez de \"id <>\", pra nao matar os dois lados do par.\n--\n-- NAO coloque comentario /* */ ANTES do SELECT: o node MySQL do n8n decide se\n-- a query é SELECT olhando se o texto comeca literalmente com \"SELECT\". Um\n-- comentario antes disso faz o node devolver {\"success\": true} em vez das linhas.\n-- ============================================================================",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        480,
+        1936
+      ],
+      "id": "dffaa907-8ecf-48d1-bed8-f7ce53d2ac16",
+      "name": "Execute a SQL query1",
+      "notesInFlow": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "notes": "FILA 3ª TENTATIVA - quem tem status 'stentativadereativaçãor' e fup vencido. LIMIT 100."
+    },
+    {
+      "parameters": {
+        "tableId": "finamob-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_usuario",
+              "fieldValue": "="
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "=Oi {{ $('Iterar envio por lead1').item.json.clientes }}\nLuiza, da Finamob. Você se inscreveu na nossa campanha de Funding Imobiliário e fiquei curioso pra saber o que te chamou atenção, se foi algo específico de captação, estruturação de operação ou só para entender como funciona.\nVocê tem algum tempo livre nessa semana ou na próxima para falarmos?"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Enviar Template 3').item.json.contacts[0].input }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Iterar envio por lead1').item.json.clientes }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Enviar Template 3').item.json.contacts[0].input }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1424,
+        2144
+      ],
+      "id": "295aa1bc-60f9-47ab-9bbb-87846d3a25e4",
+      "name": "Cria Mensagem no Supabase1",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Historico em finamob-historico_mensagens. ATENCAO: o texto esta hardcoded aqui - se o template mudar no Meta Business Manager, o historico salvo divergen silenciosamente do que foi enviado. Idealmente montar o texto num unico node e reusar no envio, no historico e na memoria."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://finamob.com.br/api/update_mailing_api.php",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "***REMOVIDO***"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"phone\": \"{{ \n  (() => {\n    let phone = String($json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // Remove prefixo internacional com 00, ex: 005511989342471\n    if (phone.startsWith(\"00\")) {\n      phone = phone.slice(2);\n    }\n\n    // Se vier com 0 antes do DDD, ex: 011989342471\n    if (phone.startsWith(\"0\") && phone.length >= 11) {\n      phone = phone.slice(1);\n    }\n\n    // Se já vier com 55, mantém\n    if (phone.startsWith(\"55\")) {\n      return phone;\n    }\n\n    // Se vier DDD + número celular com 9 dígitos, ex: 11989342471\n    if (phone.length === 11) {\n      return \"55\" + phone;\n    }\n\n    // Se vier DDD + número com 8 dígitos, NÃO adiciona o 9\n    // Ex: 1188888888 vira 551188888888\n    if (phone.length === 10) {\n      return \"55\" + phone;\n    }\n\n    return phone;\n  })()\n}}\",\n    \"ultimo_contato\": \"{{ $now.toFormat('yyyy-MM-dd') }}\",\n    \"fup\": \"{{ $now.plus({ days: 2 }).toFormat('yyyy-MM-dd') }}\",\n    \"status_plano_acao\": \"ttentativadereativaçãor\"\n  } ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1136,
+        1952
+      ],
+      "id": "25d49f5a-1193-4d90-a718-55b988af388a",
+      "name": "API Finamob2",
+      "retryOnFail": true,
+      "notesInFlow": true,
+      "onError": "continueErrorOutput",
+      "notes": "Atualiza o CRM: status 3ª tentativa, fup=hoje+2. DECIDIDO 26/08: a funcao de telefone DESTE node fica como esta. Ele usa o phone como CHAVE DE BUSCA no CRM (update_mailing_api.php), nao como numero discavel - por isso nao insere o 9. Os nodes Enviar Template usam outra funcao, com a regra de fixo x celular antigo. Consequencia conhecida e aceita: para celular antigo, historico_mensagens.telefone (que vem do Meta, com o 9) nao bate com o phone usado aqui - cruzamento entre as duas bases exige normalizar antes."
+    },
+    {
+      "parameters": {
+        "batchSize": "=1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        688,
+        1936
+      ],
+      "id": "2f52ee38-0744-4fa9-98f1-1e63562234da",
+      "name": "Iterar envio por lead1",
+      "notesInFlow": true,
+      "notes": "batchSize=1: um lead por vez. Saida 0 (\"done\") = fila terminou -> dispara o refresh do dash. Saida 1 (\"loop\") = proximo lead."
+    },
+    {
+      "parameters": {
+        "amount": "={{ 3 + Math.floor(Math.random() * 5) }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        928,
+        1952
+      ],
+      "id": "793b9f4d-e290-4ea8-b838-420a0737a8cd",
+      "name": "Intervalo entre mensagens2",
+      "webhookId": "45da990f-e556-4123-aa63-e35be4a12e45",
+      "notesInFlow": true,
+      "notes": "Espera 3-7s (aleatorio) entre leads. ATENCAO: as 4 filas rodam intercaladas na mesma execucao, entao o intervalo REAL entre mensagens no mesmo numero WhatsApp é menor que isso. Com os limites em 100/100/100 (desde 26/08) sao até ~300 mensagens/dia num unico numero: se a qualidade cair no Business Manager, este é o primeiro lugar pra olhar."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT *\nFROM (\n  -- =========================================================================\n  -- CAMADA 3 - telefone \"canonico\" = DDD + 8 ultimos digitos.\n  -- Serve pra achar duplicata sem depender do 9 extra de celular.\n  -- =========================================================================\n  SELECT\n    e.*,\n    CONCAT(LEFT(e.whatsapp_digits_local, 2), RIGHT(e.whatsapp_digits_local, 8)) AS whatsapp_canonical\n  FROM (\n    -- =======================================================================\n    -- CAMADA 2 - (a) tem_operacao pelos 5 caminhos de vinculo;\n    --            (b) remove o \"55\" do telefone (fica DDD + local).\n    -- =======================================================================\n    SELECT\n      r.*,\n      CASE\n        -- (1) operacao criada apontando pro proprio mailing\n        WHEN EXISTS (SELECT 1 FROM operacao o WHERE o.mailing_id = r.id)\n        -- (2) via incorporadora: CNPJ da incorporadora do lead = CNPJ de alguma operacao\n        OR EXISTS (\n          SELECT 1 FROM incorporadoras i\n          JOIN operacao o2 ON o2.cnpj_digits = i.cnpj_digits\n          WHERE i.id = r.idincorporadora AND i.cnpj_digits IS NOT NULL\n        )\n        -- (3) via CNPJ do proprio mailing\n        OR EXISTS (\n          SELECT 1 FROM operacao o3\n          WHERE o3.cnpj_digits = r.cnpj_empresa\n            AND r.cnpj_empresa IS NOT NULL AND r.cnpj_empresa <> ''\n        )\n        -- (4) via idcliente: um cliente pode ter varios mailings; a operacao\n        --     fica no idclientes, nao no mailing_id mais recente\n        OR EXISTS (\n          SELECT 1 FROM operacao o4\n          WHERE o4.idclientes = r.idcliente AND r.idcliente IS NOT NULL\n        )\n        -- (5) mesmo vinculo do (4) no sentido inverso (clientes.mailing_id -> mailing.id)\n        OR EXISTS (\n          SELECT 1 FROM clientes c\n          JOIN operacao o5 ON o5.idclientes = c.id\n          WHERE c.mailing_id = r.id\n        )\n        THEN 'Sim' ELSE 'Não'\n      END AS tem_operacao,\n      CASE\n        WHEN LENGTH(r.whatsapp_digits_raw) IN (12, 13)\n             AND LEFT(r.whatsapp_digits_raw, 2) = '55'\n          THEN SUBSTRING(r.whatsapp_digits_raw, 3)\n        ELSE r.whatsapp_digits_raw\n      END AS whatsapp_digits_local\n    FROM (\n      -- =====================================================================\n      -- CAMADA 1 - limpeza basica do telefone. Esse MySQL nao tem\n      -- REGEXP_REPLACE (8.0.4+) nem CTE, por isso REPLACE encadeado dentro de\n      -- subconsulta. Novo separador no futuro: adicione UM replace aqui.\n      -- =====================================================================\n      SELECT\n        m.*,\n        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n          m.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''), '+', ''\n        ) AS whatsapp_digits_raw\n      FROM mailing m\n    ) AS r\n  ) AS e\n) AS mailing_enriched\nWHERE\n  -- ================== FILA: esgotou as 3 tentativas -> retrabalhar no futuro ==================\n  -- Pesca quem JÁ recebeu a mensagem 4 e cujo fup venceu.\n  -- CADENCIA: o fup é gravado como hoje+2 e o teste é \"< CURDATE()\", entao o\n  -- lead é pescado em D+3. CONFIRMADO em 26/08: 3 dias é o intervalo desejado.\n  -- Nao \"corrigir\" isso para \"<=\" pensando que é bug - é intencional.\n  lixeira = 0\n\n  -- Nao considerar quem já virou operacao. Antes desta revisao esta fila\n  -- usava só 3 caminhos de vinculo: lead que fechou via idclientes continuava\n  -- recebendo mensagem 2 e 3. Agora usa os mesmos 5 caminhos da fila de entrada.\n  AND tem_operacao = 'Não'\n\n  AND status_plano_acao = 'ttentativadereativaçãor'\n\n  AND fup IS NOT NULL\n  AND fup <> ''\n  AND DATE(fup) < CURDATE()\n\n  -- ---------------- WhatsApp valido ----------------\n  AND whatsapp IS NOT NULL\n  AND whatsapp <> ''\n  -- Tamanho E faixa (revisto em 26/08): o 1º digito do local distingue\n  -- celular antigo (6-9) de fixo (2-5), e o envio trata os dois diferente.\n  AND (\n    -- celular atual: DDD + 9 digitos, local comecando em 9\n    (LENGTH(whatsapp_digits_local) = 11 AND SUBSTRING(whatsapp_digits_local, 3, 1) = '9')\n    -- DDD + 8 digitos: celular antigo (local 6-9, ganha o 9 no envio) OU\n    -- fixo (local 2-5, NAO ganha o 9 - fixo pode ter WhatsApp Business, o que\n    -- ele nao pode é receber o 9, que criava um celular de outra pessoa).\n    OR (LENGTH(whatsapp_digits_local) = 10 AND SUBSTRING(whatsapp_digits_local, 3, 1) BETWEEN '2' AND '9')\n  )\n  -- Rejeita de quebra o que antes passava: 11 digitos cujo local nao comeca\n  -- em 9 (celular BR sempre comeca em 9) e 10 digitos comecando em 0 ou 1.\n  -- rejeita placeholder tipo 0000000000 / 1111111111\n  AND whatsapp_digits_local <> REPEAT(LEFT(whatsapp_digits_local, 1), LENGTH(whatsapp_digits_local))\n  -- DDD real comeca em 11\n  AND CAST(LEFT(whatsapp_digits_local, 2) AS UNSIGNED) BETWEEN 11 AND 99\n\n  -- ---------------- TIPO ----------------\n  -- REGRA UNIFICADA (decidido em 26/08/2026): WHITELIST nas 4 filas.\n  -- Investidor e qualquer outro tipo fora desta lista NAO entram em nenhuma\n  -- fila - inclusive na fila de entrada, que antes usava blacklist\n  -- (tipo <> 'Parceiro') e por isso deixava esses leads receberem a mensagem 1\n  -- e depois travarem para sempre (nenhuma fila de follow-up os pescava).\n  AND (\n    `Tipo` IS NULL\n    OR TRIM(`Tipo`) = ''\n    OR TRIM(`Tipo`) IN ('Cliente', 'Cliente/Parceiro', 'Outros')\n  )\n\n  -- ---------------- DEDUPLICACAO DE TELEFONE ----------------\n  -- update_mailing_api.php recusa com \"multiple_mailings_found\" quando 2+\n  -- mailings ativos tem o mesmo telefone. Aqui recalculamos o canonico de\n  -- QUALQUER outro mailing (m2) e comparamos.\n  -- ATENCAO: a comparacao é \"m2c.id < ...\", nao \"<>\". Com \"<>\" os DOIS lados\n  -- do par eram excluidos e ninguem era contatado. Com \"<\", o registro de\n  -- MENOR id passa e so o(s) outro(s) ficam de fora.\n  AND NOT EXISTS (\n    SELECT 1\n    FROM (\n      SELECT\n        m2r.id, m2r.lixeira,\n        CONCAT(\n          LEFT(CASE WHEN LENGTH(m2r.whatsapp_digits_raw) IN (12, 13)\n                         AND LEFT(m2r.whatsapp_digits_raw, 2) = '55'\n                    THEN SUBSTRING(m2r.whatsapp_digits_raw, 3)\n                    ELSE m2r.whatsapp_digits_raw END, 2),\n          RIGHT(CASE WHEN LENGTH(m2r.whatsapp_digits_raw) IN (12, 13)\n                          AND LEFT(m2r.whatsapp_digits_raw, 2) = '55'\n                     THEN SUBSTRING(m2r.whatsapp_digits_raw, 3)\n                     ELSE m2r.whatsapp_digits_raw END, 8)\n        ) AS whatsapp_canonical\n      FROM (\n        SELECT m2.id, m2.lixeira,\n          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n            m2.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''), '+', ''\n          ) AS whatsapp_digits_raw\n        FROM mailing m2\n      ) AS m2r\n    ) AS m2c\n    WHERE m2c.lixeira = 0\n      AND m2c.id <> mailing_enriched.id\n      AND m2c.whatsapp_canonical = mailing_enriched.whatsapp_canonical\n  )\n\n-- Follow-up mais antigo primeiro.\nORDER BY DATE(fup) ASC\n-- >>> DECIDIR <<< esta fila NAO tem LIMIT. Com Wait de 3-7s por lead e\n-- executionTimeout de 7200s, o teto real é ~900 leads: acima disso a\n-- execucao morre no meio da fila.\n;\n\n-- ============================================================================\n-- SOBRE ESSA QUERY - esgotou as 3 tentativas -> retrabalhar no futuro\n-- ----------------------------------------------------------------------------\n-- Fila da 4ª tentativa de reativacao. Estrutura em 3 camadas identica à\n-- da fila de entrada (Execute a SQL query2) porque este MySQL nao tem CTE nem\n-- REGEXP_REPLACE - a limpeza do telefone é feita UMA vez, em subconsultas\n-- aninhadas no FROM, e reaproveitada por todos os filtros.\n--\n-- Revisao 26/08/2026 - o que mudou nesta query:\n--   1. tem_operacao passou de 3 para os 5 caminhos de vinculo da query2;\n--   2. entrou a validacao de WhatsApp (tamanho, DDD, placeholder);\n--   3. entrou o dedupe de telefone canonico (evita multiple_mailings_found);\n--   4. o dedupe usa \"id <\" em vez de \"id <>\", pra nao matar os dois lados do par.\n--\n-- NAO coloque comentario /* */ ANTES do SELECT: o node MySQL do n8n decide se\n-- a query é SELECT olhando se o texto comeca literalmente com \"SELECT\". Um\n-- comentario antes disso faz o node devolver {\"success\": true} em vez das linhas.\n-- ============================================================================",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        480,
+        2512
+      ],
+      "id": "32994ae6-a81b-491f-a1af-a52440ec8884",
+      "name": "Execute a SQL query3",
+      "notesInFlow": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "notes": "FILA DE ENCERRAMENTO - quem esgotou as 3 tentativas ('ttentativadereativaçãor') e nao respondeu. NAO envia mensagem: so empurra o fup +90 dias e marca 'retrabalharnofuturo'. SEM LIMIT."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://finamob.com.br/api/update_mailing_api.php",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "***REMOVIDO***"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"phone\": \"{{ \n  (() => {\n    let phone = String($json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // Remove prefixo internacional com 00, ex: 005511989342471\n    if (phone.startsWith(\"00\")) {\n      phone = phone.slice(2);\n    }\n\n    // Se vier com 0 antes do DDD, ex: 011989342471\n    if (phone.startsWith(\"0\") && phone.length >= 11) {\n      phone = phone.slice(1);\n    }\n\n    // Se já vier com 55, mantém\n    if (phone.startsWith(\"55\")) {\n      return phone;\n    }\n\n    // Se vier DDD + número celular com 9 dígitos, ex: 11989342471\n    if (phone.length === 11) {\n      return \"55\" + phone;\n    }\n\n    // Se vier DDD + número com 8 dígitos, NÃO adiciona o 9\n    // Ex: 1188888888 vira 551188888888\n    if (phone.length === 10) {\n      return \"55\" + phone;\n    }\n\n    return phone;\n  })()\n}}\",\n    \"fup\": \"{{ $now.plus({ days: 45 }).toFormat('yyyy-MM-dd') }}\",\n    \"status_plano_acao\": \"retrabalharnofuturo\"\n  } ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1168,
+        2528
+      ],
+      "id": "e728bda8-5828-44a9-99c8-d7172e081346",
+      "name": "API Finamob3",
+      "retryOnFail": true,
+      "notesInFlow": true,
+      "onError": "continueRegularOutput",
+      "notes": "Encerra o ciclo: fup=hoje+90, status 'retrabalharnofuturo'. Nao envia WhatsApp. ATENCAO: esta com continueRegularOutput, entao sucesso e falha caem na MESMA aba (validar_erros) e ficam indistinguiveis. Este ramo tambem nao grava nada em sdr_eventos - a transicao para 'retrabalhar no futuro' é invisivel no dash. DECIDIDO 26/08: a funcao de telefone DESTE node fica como esta. Ele usa o phone como CHAVE DE BUSCA no CRM (update_mailing_api.php), nao como numero discavel - por isso nao insere o 9. Os nodes Enviar Template usam outra funcao, com a regra de fixo x celular antigo. Consequencia conhecida e aceita: para celular antigo, historico_mensagens.telefone (que vem do Meta, com o 9) nao bate com o phone usado aqui - cruzamento entre as duas bases exige normalizar antes."
+    },
+    {
+      "parameters": {
+        "batchSize": "=1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        688,
+        2512
+      ],
+      "id": "528ef208-61b2-4e57-a58d-64fadb2bc7f7",
+      "name": "Iterar envio por lead3",
+      "notesInFlow": true,
+      "notes": "batchSize=1: um lead por vez. Saida 0 (\"done\") = fila terminou -> dispara o refresh do dash. Saida 1 (\"loop\") = proximo lead."
+    },
+    {
+      "parameters": {
+        "amount": "={{ 3 + Math.floor(Math.random() * 5) }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        928,
+        2528
+      ],
+      "id": "c836760d-b400-43eb-a5f5-7cbed8cdc086",
+      "name": "Intervalo entre mensagens3",
+      "webhookId": "2feda9ab-b9d7-4eab-942d-562b0a775312",
+      "notesInFlow": true,
+      "notes": "Espera 3-7s (aleatorio) entre leads. ATENCAO: as 4 filas rodam intercaladas na mesma execucao, entao o intervalo REAL entre mensagens no mesmo numero WhatsApp é menor que isso. Com os limites em 100/100/100 (desde 26/08) sao até ~300 mensagens/dia num unico numero: se a qualidade cair no Business Manager, este é o primeiro lugar pra olhar."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/1202871396233612/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ \n  (() => {\n    let p = String($('Intervalo entre mensagens').item.json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // prefixo internacional discado (00...) e 0 de operadora antes do DDD\n    if (p.startsWith(\"00\")) p = p.slice(2);\n    if (p.startsWith(\"0\") && p.length >= 11) p = p.slice(1);\n\n    // Remove o 55 SEMPRE que for codigo de pais, pra reavaliar o local pela\n    // mesma regra. Antes o codigo fazia \"return\" aqui sem tratar, entao um\n    // celular antigo gravado como 5511 8765-4321 (12 digitos, sem o 9) saia\n    // desse jeito e o Meta recusava - enquanto o MESMO numero sem o 55\n    // recebia o 9 corretamente. O guard de tamanho protege o DDD 55\n    // (Santa Maria/RS): 11 digitos comecando em 55 e DDD, nao codigo de pais.\n    if (p.length >= 12 && p.startsWith(\"55\")) p = p.slice(2);\n\n    const ddd = p.slice(0, 2);\n    const local = p.slice(2);\n\n    // celular atual: DDD + 9 digitos comecando em 9\n    if (local.length === 9 && local[0] === \"9\") return \"55\" + ddd + local;\n    // celular antigo: DDD + 8 digitos comecando em 6-9 -> falta o 9\n    if (local.length === 8 && /[6-9]/.test(local[0])) return \"55\" + ddd + \"9\" + local;\n    // FIXO: DDD + 8 digitos comecando em 2-5 -> pode ter WhatsApp Business,\n    // mas NAO leva o 9. Inserir o 9 aqui criava um celular de outra pessoa.\n    if (local.length === 8 && /[2-5]/.test(local[0])) return \"55\" + ddd + local;\n\n    // qualquer outra coisa é invalida - a query nao deveria ter deixado chegar\n    // aqui; devolve vazio pro Meta recusar e a falha ficar visivel no log.\n    return \"\";\n  })()\n}}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"mensagem_2_sem_incorporadora\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": {{ JSON.stringify([\n  { \"type\": \"text\", \"text\": String($('Intervalo entre mensagens').item.json.clientes || \"\") }\n]) }}\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1392,
+        1264
+      ],
+      "id": "7d2fa21f-9b01-4385-9b65-4af8bc785f31",
+      "name": "Enviar Template 2",
+      "retryOnFail": true,
+      "notesInFlow": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput",
+      "notes": "CORRIGIDO 26/08: o Template 1 estava com continueRegularOutput (falha de envio seguia como sucesso e gravava disparo_enviado no dash) e os Templates 2 e 3 sem onError (um numero ruim abortava a execucao inteira). Agora os tres usam saida de erro: sucesso -> historico/evento/planilha; erro -> validar_erros + evento disparo_falhou. CORRIGIDO 26/08 (numero de 10 digitos): a funcao antiga inseria o 9 em TODO numero de 10 digitos. Fixo (local comecando em 2-5) nao tem 9 - o resultado era um celular de OUTRA pessoa recebendo o template. Agora o 9 só entra quando o local comeca em 6-9 (celular antigo de verdade); fixo vai como 55+DDD+8 digitos, que o WhatsApp Business aceita."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/1202871396233612/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ \n  (() => {\n    let p = String($('Intervalo entre mensagens2').item.json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // prefixo internacional discado (00...) e 0 de operadora antes do DDD\n    if (p.startsWith(\"00\")) p = p.slice(2);\n    if (p.startsWith(\"0\") && p.length >= 11) p = p.slice(1);\n\n    // Remove o 55 SEMPRE que for codigo de pais, pra reavaliar o local pela\n    // mesma regra. Antes o codigo fazia \"return\" aqui sem tratar, entao um\n    // celular antigo gravado como 5511 8765-4321 (12 digitos, sem o 9) saia\n    // desse jeito e o Meta recusava - enquanto o MESMO numero sem o 55\n    // recebia o 9 corretamente. O guard de tamanho protege o DDD 55\n    // (Santa Maria/RS): 11 digitos comecando em 55 e DDD, nao codigo de pais.\n    if (p.length >= 12 && p.startsWith(\"55\")) p = p.slice(2);\n\n    const ddd = p.slice(0, 2);\n    const local = p.slice(2);\n\n    // celular atual: DDD + 9 digitos comecando em 9\n    if (local.length === 9 && local[0] === \"9\") return \"55\" + ddd + local;\n    // celular antigo: DDD + 8 digitos comecando em 6-9 -> falta o 9\n    if (local.length === 8 && /[6-9]/.test(local[0])) return \"55\" + ddd + \"9\" + local;\n    // FIXO: DDD + 8 digitos comecando em 2-5 -> pode ter WhatsApp Business,\n    // mas NAO leva o 9. Inserir o 9 aqui criava um celular de outra pessoa.\n    if (local.length === 8 && /[2-5]/.test(local[0])) return \"55\" + ddd + local;\n\n    // qualquer outra coisa é invalida - a query nao deveria ter deixado chegar\n    // aqui; devolve vazio pro Meta recusar e a falha ficar visivel no log.\n    return \"\";\n  })()\n}}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"mensagem_3_sem_incorporadora\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": {{ JSON.stringify([\n  { \"type\": \"text\", \"text\": String($('Intervalo entre mensagens2').item.json.clientes || \"\") }\n]) }}\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1424,
+        1936
+      ],
+      "id": "011383eb-cf32-4b25-992f-9d470deba35c",
+      "name": "Enviar Template 3",
+      "retryOnFail": true,
+      "notesInFlow": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput",
+      "notes": "CORRIGIDO 26/08: o Template 1 estava com continueRegularOutput (falha de envio seguia como sucesso e gravava disparo_enviado no dash) e os Templates 2 e 3 sem onError (um numero ruim abortava a execucao inteira). Agora os tres usam saida de erro: sucesso -> historico/evento/planilha; erro -> validar_erros + evento disparo_falhou. CORRIGIDO 26/08 (numero de 10 digitos): a funcao antiga inseria o 9 em TODO numero de 10 digitos. Fixo (local comecando em 2-5) nao tem 9 - o resultado era um celular de OUTRA pessoa recebendo o template. Agora o 9 só entra quando o local comeca em 6-9 (celular antigo de verdade); fixo vai como 55+DDD+8 digitos, que o WhatsApp Business aceita."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "KCm91mF91CPx1ysU",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/KCm91mF91CPx1ysU",
+          "cachedResultName": "Finamob - 0.02 - Atualização Bases Sistema Finamob"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        688,
+        3040
+      ],
+      "id": "e29fab15-74c0-4c30-9ef3-7eed4162f28c",
+      "name": "Call 'Dash - Finamob'",
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "notesInFlow": true,
+      "onError": "continueRegularOutput",
+      "notes": "Atualiza as bases/planilha que o dashboard le (fluxo 0.02). Roda uma vez, no fim das filas."
+    },
+    {
+      "parameters": {
+        "amount": "=30"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        3040
+      ],
+      "id": "2095a486-4c2e-4aa8-b6d7-154c74df3b8c",
+      "name": "Intervalo entre mensagens4",
+      "webhookId": "03b3d23c-7932-404d-beb5-b52aafa3354b",
+      "executeOnce": true,
+      "notesInFlow": true,
+      "notes": "CORRIGIDO 26/08: este ramo saia direto do Schedule, entao a base era atualizada 30s depois das 9h - ANTES dos disparos do dia. A planilha que o dash le nunca refletia o dia corrente. Agora recebe a saida \"done\" das 4 filas. executeOnce=true para nao rodar 4x. RESSALVA: se uma fila vier vazia o splitInBatches nao executa e nao emite \"done\"; se TODAS vierem vazias o refresh nao roda. O ideal é o refresh viver em fluxo proprio agendado apos a janela de disparo."
+    },
+    {
+      "parameters": {
+        "content": "## Filas de disparo - uma linha por onda\n\nCada linha é: **query** (quem entra) -> **loop 1 a 1** -> **espera** -> **atualiza CRM** -> **envia WhatsApp** -> **histórico + memória + evento**.\n\nO CRM é atualizado **antes** do envio. É de propósito: garante que reprocessar a execução não redispare (o lead sai da fila pelo status). O preço é que uma falha de envio \"queima\" o lead — por isso agora toda falha de envio é registrada.",
+        "height": 2592,
+        "width": 2112,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -240,
+        288
+      ],
+      "typeVersion": 1,
+      "id": "375db5f1-72cb-45f5-88eb-09abb48691df",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Atualização da base que o dashboard lê\n\nChama o fluxo **0.02 - Atualização Bases Sistema Finamob**. Desde 26/08 roda no **fim** das filas (saída \"done\" dos 4 loops), não mais 30s depois do trigger — antes a planilha era atualizada antes dos disparos do dia e o dash nunca mostrava o dia corrente.",
+        "height": 288,
+        "width": 2112,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -240,
+        2896
+      ],
+      "typeVersion": 1,
+      "id": "ab3b60e9-b260-4b96-9877-8b905a8e48fc",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM",
+          "mode": "list",
+          "cachedResultName": "Disparos SDR Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1419636200,
+          "mode": "list",
+          "cachedResultName": "validar_erros",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit#gid=1419636200"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "clientes": "={{ $json.clientes }}",
+            "plano_de_acao": "={{ $json.plano_de_acao }}",
+            "whatsapp": "={{ $json.whatsapp }}",
+            "email": "={{ $json.email }}",
+            "ultimo_contato": "={{ $json.ultimo_contato }}",
+            "fup": "={{ $json.fup }}",
+            "datacriacao": "={{ $json.datacriacao }}",
+            "lixeira": "={{ $json.lixeira }}",
+            "observacao": "={{ $json.observacao }}",
+            "status_plano_acao": "={{ $json.status_plano_acao }}",
+            "error": "={{ $json.error }}",
+            "Status": "Aguardando Tratativa",
+            "Etapa do Fluxo": "Retrabalhar no Futuro"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "clientes",
+              "displayName": "clientes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "plano_de_acao",
+              "displayName": "plano_de_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "whatsapp",
+              "displayName": "whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ultimo_contato",
+              "displayName": "ultimo_contato",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fup",
+              "displayName": "fup",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "datacriacao",
+              "displayName": "datacriacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lixeira",
+              "displayName": "lixeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "observacao",
+              "displayName": "observacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_plano_acao",
+              "displayName": "status_plano_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Etapa do Fluxo",
+              "displayName": "Etapa do Fluxo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1440,
+        2656
+      ],
+      "id": "fba2f6ad-7c61-4a81-95ee-a8192928bbaa",
+      "name": "Append row in sheet3",
+      "notesInFlow": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Grava na aba 'validar_erros' com Status='Aguardando Tratativa'. ATENCAO: aqui isso NAO é erro, é o encerramento normal do ciclo - sucesso e erro estao misturados na mesma aba. Separar em aba propria."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM",
+          "mode": "list",
+          "cachedResultName": "Disparos SDR Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "disparos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Intervalo entre mensagens1').item.json.id }}",
+            "clientes": "={{ $('Intervalo entre mensagens1').item.json.clientes }}",
+            "plano_de_acao": "={{ $('Intervalo entre mensagens1').item.json.plano_de_acao }}",
+            "whatsapp": "={{ $('Intervalo entre mensagens1').item.json.whatsapp }}",
+            "email": "={{ $('Intervalo entre mensagens1').item.json.email }}",
+            "ultimo_contato": "={{ $('Intervalo entre mensagens1').item.json.ultimo_contato }}",
+            "fup": "={{ $('Intervalo entre mensagens1').item.json.fup }}",
+            "datacriacao": "={{ $('Intervalo entre mensagens1').item.json.datacriacao }}",
+            "lixeira": "={{ $('Intervalo entre mensagens1').item.json.lixeira }}",
+            "observacao": "={{ $('Intervalo entre mensagens1').item.json.observacao }}",
+            "status_plano_acao": "={{ $('Intervalo entre mensagens1').item.json.status_plano_acao }}",
+            "Template": "mensagem_1_sem_incorporadora"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "clientes",
+              "displayName": "clientes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "plano_de_acao",
+              "displayName": "plano_de_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "whatsapp",
+              "displayName": "whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ultimo_contato",
+              "displayName": "ultimo_contato",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fup",
+              "displayName": "fup",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "datacriacao",
+              "displayName": "datacriacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lixeira",
+              "displayName": "lixeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "observacao",
+              "displayName": "observacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_plano_acao",
+              "displayName": "status_plano_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Template",
+              "displayName": "Template",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Obs",
+              "displayName": "Obs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1584,
+        448
+      ],
+      "id": "13704a08-6d80-4c06-bc00-57a9cd7743c3",
+      "name": "Atualiza Controle de Disparos",
+      "notesInFlow": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Aba 'disparos'. Desde 26/08 existe o equivalente nas ondas 2 e 3 (Atualiza Controle de Disparos 2 e 3), entao a planilha cobre as tres mensagens."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM",
+          "mode": "list",
+          "cachedResultName": "Disparos SDR Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1419636200,
+          "mode": "list",
+          "cachedResultName": "validar_erros",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit#gid=1419636200"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Iterar envio por lead2').first().json.id }}",
+            "clientes": "={{ $('Iterar envio por lead2').first().json.clientes }}",
+            "plano_de_acao": "={{ $('Iterar envio por lead2').first().json.plano_de_acao }}",
+            "whatsapp": "={{ $('Iterar envio por lead2').first().json.whatsapp }}",
+            "email": "={{ $('Iterar envio por lead2').first().json.email }}",
+            "ultimo_contato": "={{ $('Iterar envio por lead2').first().json.ultimo_contato }}",
+            "fup": "={{ $('Iterar envio por lead2').first().json.fup }}",
+            "datacriacao": "={{ $('Iterar envio por lead2').first().json.datacriacao }}",
+            "lixeira": "={{ $('Iterar envio por lead2').first().json.lixeira }}",
+            "observacao": "={{ $('Iterar envio por lead2').first().json.observacao }}",
+            "status_plano_acao": "={{ $('Iterar envio por lead2').first().json.status_plano_acao }}",
+            "error": "={{ JSON.stringify($json.error || $json) }}",
+            "Status": "Aguardando Tratativa",
+            "Etapa do Fluxo": "1º Tentativa de Reativação"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "clientes",
+              "displayName": "clientes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "plano_de_acao",
+              "displayName": "plano_de_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "whatsapp",
+              "displayName": "whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ultimo_contato",
+              "displayName": "ultimo_contato",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fup",
+              "displayName": "fup",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "datacriacao",
+              "displayName": "datacriacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lixeira",
+              "displayName": "lixeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "observacao",
+              "displayName": "observacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_plano_acao",
+              "displayName": "status_plano_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Etapa do Fluxo",
+              "displayName": "Etapa do Fluxo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1088,
+        832
+      ],
+      "id": "9602e61a-eb7c-41d6-a32e-bfc89191061c",
+      "name": "Atualiza Controle de Erros",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "notesInFlow": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput",
+      "notes": "CORRIGIDO 26/08: as colunas liam $json, que na saida de erro do Enviar Template é a resposta da API Finamob (nao o lead) - a linha sairia vazia. Agora leem o node do loop, que funciona vindo dos dois caminhos de erro (API Finamob e Enviar Template)."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM",
+          "mode": "list",
+          "cachedResultName": "Disparos SDR Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1419636200,
+          "mode": "list",
+          "cachedResultName": "validar_erros",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit#gid=1419636200"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Iterar envio por lead').first().json.id }}",
+            "clientes": "={{ $('Iterar envio por lead').first().json.clientes }}",
+            "plano_de_acao": "={{ $('Iterar envio por lead').first().json.plano_de_acao }}",
+            "whatsapp": "={{ $('Iterar envio por lead').first().json.whatsapp }}",
+            "email": "={{ $('Iterar envio por lead').first().json.email }}",
+            "ultimo_contato": "={{ $('Iterar envio por lead').first().json.ultimo_contato }}",
+            "fup": "={{ $('Iterar envio por lead').first().json.fup }}",
+            "datacriacao": "={{ $('Iterar envio por lead').first().json.datacriacao }}",
+            "lixeira": "={{ $('Iterar envio por lead').first().json.lixeira }}",
+            "observacao": "={{ $('Iterar envio por lead').first().json.observacao }}",
+            "status_plano_acao": "={{ $('Iterar envio por lead').first().json.status_plano_acao }}",
+            "error": "={{ JSON.stringify($json.error || $json) }}",
+            "Status": "Aguardando Tratativa",
+            "Etapa do Fluxo": "2º Tentativa de Reativação"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "clientes",
+              "displayName": "clientes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "plano_de_acao",
+              "displayName": "plano_de_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "whatsapp",
+              "displayName": "whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ultimo_contato",
+              "displayName": "ultimo_contato",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fup",
+              "displayName": "fup",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "datacriacao",
+              "displayName": "datacriacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lixeira",
+              "displayName": "lixeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "observacao",
+              "displayName": "observacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_plano_acao",
+              "displayName": "status_plano_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Etapa do Fluxo",
+              "displayName": "Etapa do Fluxo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1104,
+        1456
+      ],
+      "id": "7eb4a300-2426-476e-8692-4fb63197fde1",
+      "name": "Atualiza Controle de Erros 2",
+      "notesInFlow": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput",
+      "notes": "CORRIGIDO 26/08: as colunas liam $json, que na saida de erro do Enviar Template é a resposta da API Finamob (nao o lead) - a linha sairia vazia. Agora leem o node do loop, que funciona vindo dos dois caminhos de erro (API Finamob e Enviar Template)."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM",
+          "mode": "list",
+          "cachedResultName": "Disparos SDR Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1419636200,
+          "mode": "list",
+          "cachedResultName": "validar_erros",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit#gid=1419636200"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Iterar envio por lead1').first().json.id }}",
+            "clientes": "={{ $('Iterar envio por lead1').first().json.clientes }}",
+            "plano_de_acao": "={{ $('Iterar envio por lead1').first().json.plano_de_acao }}",
+            "whatsapp": "={{ $('Iterar envio por lead1').first().json.whatsapp }}",
+            "email": "={{ $('Iterar envio por lead1').first().json.email }}",
+            "ultimo_contato": "={{ $('Iterar envio por lead1').first().json.ultimo_contato }}",
+            "fup": "={{ $('Iterar envio por lead1').first().json.fup }}",
+            "datacriacao": "={{ $('Iterar envio por lead1').first().json.datacriacao }}",
+            "lixeira": "={{ $('Iterar envio por lead1').first().json.lixeira }}",
+            "observacao": "={{ $('Iterar envio por lead1').first().json.observacao }}",
+            "status_plano_acao": "={{ $('Iterar envio por lead1').first().json.status_plano_acao }}",
+            "error": "={{ JSON.stringify($json.error || $json) }}",
+            "Status": "Aguardando Tratativa",
+            "Etapa do Fluxo": "3º Tentativa de Reativação"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "clientes",
+              "displayName": "clientes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "plano_de_acao",
+              "displayName": "plano_de_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "whatsapp",
+              "displayName": "whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ultimo_contato",
+              "displayName": "ultimo_contato",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fup",
+              "displayName": "fup",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "datacriacao",
+              "displayName": "datacriacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lixeira",
+              "displayName": "lixeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "observacao",
+              "displayName": "observacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_plano_acao",
+              "displayName": "status_plano_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Etapa do Fluxo",
+              "displayName": "Etapa do Fluxo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1136,
+        2128
+      ],
+      "id": "7f0ae4fe-4322-494f-a591-9bb2cab6916e",
+      "name": "Atualiza Controle de Erros 3",
+      "notesInFlow": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput",
+      "notes": "CORRIGIDO 26/08: as colunas liam $json, que na saida de erro do Enviar Template é a resposta da API Finamob (nao o lead) - a linha sairia vazia. Agora leem o node do loop, que funciona vindo dos dois caminhos de erro (API Finamob e Enviar Template)."
+    },
+    {
+      "parameters": {
+        "tableId": "sdr_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mailing_id",
+              "fieldValue": "={{ $('Iterar envio por lead2').item.json.id }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Enviar Template 1').first().json.contacts[0].input }}"
+            },
+            {
+              "fieldId": "tipo_evento",
+              "fieldValue": "disparo_enviado"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "6.01-fup-atrasados"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ template: 'mensagem_1_sem_incorporadora' }) }}"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_1_sem_incorporadora"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        608
+      ],
+      "id": "6caf3ca7-bf3f-4d35-8c3f-73f00f96fe2d",
+      "name": "Registra Evento - Disparo Enviado 1",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Evento que o dashboard consome (sdr_eventos). Agora só roda na saida de SUCESSO do Enviar Template - antes, na onda 1, rodava tambem quando o envio falhava."
+    },
+    {
+      "parameters": {
+        "tableId": "sdr_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mailing_id",
+              "fieldValue": "={{ $('Iterar envio por lead2').item.json.id }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Iterar envio por lead2').item.json.whatsapp }}"
+            },
+            {
+              "fieldId": "tipo_evento",
+              "fieldValue": "disparo_falhou"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "6.01-fup-atrasados"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ etapa: 'api_finamob', template: 'mensagem_1_sem_incorporadora', erro: ($json.error && ($json.error.message || $json.error)) || $json }) }}"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_1_sem_incorporadora"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        1056
+      ],
+      "id": "b2c157d6-dd2a-455a-b90d-28381aca3700",
+      "name": "Registra Evento - Disparo Falhou 1",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Falha na atualizacao do CRM (update_mailing_api.php) - o lead NAO recebeu mensagem. CORRIGIDO 26/08: payload padronizado em $json (o node 1 lia $('API Finamob') e devolvia o corpo de sucesso quando nao havia .error) e ganhou tipo_disparo, que faltava para o dash segmentar falha por template."
+    },
+    {
+      "parameters": {
+        "tableId": "sdr_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mailing_id",
+              "fieldValue": "={{ $('Iterar envio por lead').item.json.id }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Enviar Template 2').item.json.contacts[0].input }}"
+            },
+            {
+              "fieldId": "tipo_evento",
+              "fieldValue": "disparo_enviado"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "6.01-fup-atrasados"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ template: 'mensagem_2_sem_incorporadora' }) }}"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_2_sem_incorporadora"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        1264
+      ],
+      "id": "06edcb4c-cf03-4f95-9511-d0e513230cec",
+      "name": "Registra Evento - Disparo Enviado 2",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Evento que o dashboard consome (sdr_eventos). Agora só roda na saida de SUCESSO do Enviar Template - antes, na onda 1, rodava tambem quando o envio falhava."
+    },
+    {
+      "parameters": {
+        "tableId": "sdr_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mailing_id",
+              "fieldValue": "={{ $('Iterar envio por lead').item.json.id }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Iterar envio por lead').item.json.whatsapp }}"
+            },
+            {
+              "fieldId": "tipo_evento",
+              "fieldValue": "disparo_falhou"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "6.01-fup-atrasados"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ etapa: 'api_finamob', template: 'mensagem_2_sem_incorporadora', erro: ($json.error && ($json.error.message || $json.error)) || $json }) }}"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_2_sem_incorporadora"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        1696
+      ],
+      "id": "041dfbca-446e-4853-a781-499f9324f303",
+      "name": "Registra Evento - Disparo Falhou 2",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Falha na atualizacao do CRM (update_mailing_api.php) - o lead NAO recebeu mensagem. CORRIGIDO 26/08: payload padronizado em $json (o node 1 lia $('API Finamob') e devolvia o corpo de sucesso quando nao havia .error) e ganhou tipo_disparo, que faltava para o dash segmentar falha por template."
+    },
+    {
+      "parameters": {
+        "tableId": "sdr_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mailing_id",
+              "fieldValue": "={{ $('Iterar envio por lead1').item.json.id }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Enviar Template 3').item.json.contacts[0].input }}"
+            },
+            {
+              "fieldId": "tipo_evento",
+              "fieldValue": "disparo_enviado"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "6.01-fup-atrasados"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ template: 'mensagem_3_sem_incorporadora' }) }}"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_3_sem_incorporadora"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        2016
+      ],
+      "id": "4b7af3fd-4aea-4dee-843a-71e7c7092c26",
+      "name": "Registra Evento - Disparo Enviado 3",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Evento que o dashboard consome (sdr_eventos). Agora só roda na saida de SUCESSO do Enviar Template - antes, na onda 1, rodava tambem quando o envio falhava."
+    },
+    {
+      "parameters": {
+        "tableId": "sdr_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mailing_id",
+              "fieldValue": "={{ $('Iterar envio por lead1').item.json.id }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Iterar envio por lead1').item.json.whatsapp }}"
+            },
+            {
+              "fieldId": "tipo_evento",
+              "fieldValue": "disparo_falhou"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "6.01-fup-atrasados"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ etapa: 'api_finamob', template: 'mensagem_3_sem_incorporadora', erro: ($json.error && ($json.error.message || $json.error)) || $json }) }}"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_3_sem_incorporadora"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        2448
+      ],
+      "id": "009c1c2f-ef0c-4475-a6b5-487469892bbb",
+      "name": "Registra Evento - Disparo Falhou 3",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Falha na atualizacao do CRM (update_mailing_api.php) - o lead NAO recebeu mensagem. CORRIGIDO 26/08: payload padronizado em $json (o node 1 lia $('API Finamob') e devolvia o corpo de sucesso quando nao havia .error) e ganhou tipo_disparo, que faltava para o dash segmentar falha por template."
+    },
+    {
+      "parameters": {
+        "content": "## Registro para o dash (`sdr_eventos`)\n\n`disparo_enviado` na saída de sucesso, `disparo_falhou` nas duas saídas de erro — `payload.etapa` diz se a falha foi na **API Finamob** (CRM, lead não recebeu nada) ou no **WhatsApp** (CRM já atualizado, mensagem não saiu).\n\nTodos têm `tipo_disparo` para o dash segmentar por template.",
+        "height": 3168
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1904,
+        32
+      ],
+      "id": "392255a0-bb49-45ea-b3dc-ee3047075d33",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{\n(() => {\n    let p = String($('Intervalo entre mensagens1').first().json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // prefixo internacional discado (00...) e 0 de operadora antes do DDD\n    if (p.startsWith(\"00\")) p = p.slice(2);\n    if (p.startsWith(\"0\") && p.length >= 11) p = p.slice(1);\n\n    // Remove o 55 SEMPRE que for codigo de pais, pra reavaliar o local pela\n    // mesma regra. Antes o codigo fazia \"return\" aqui sem tratar, entao um\n    // celular antigo gravado como 5511 8765-4321 (12 digitos, sem o 9) saia\n    // desse jeito e o Meta recusava - enquanto o MESMO numero sem o 55\n    // recebia o 9 corretamente. O guard de tamanho protege o DDD 55\n    // (Santa Maria/RS): 11 digitos comecando em 55 e DDD, nao codigo de pais.\n    if (p.length >= 12 && p.startsWith(\"55\")) p = p.slice(2);\n\n    const ddd = p.slice(0, 2);\n    const local = p.slice(2);\n\n    // celular atual: DDD + 9 digitos comecando em 9\n    if (local.length === 9 && local[0] === \"9\") return \"55\" + ddd + local;\n    // celular antigo: DDD + 8 digitos comecando em 6-9 -> falta o 9\n    if (local.length === 8 && /[6-9]/.test(local[0])) return \"55\" + ddd + \"9\" + local;\n    // FIXO: DDD + 8 digitos comecando em 2-5 -> pode ter WhatsApp Business,\n    // mas NAO leva o 9. Inserir o 9 aqui criava um celular de outra pessoa.\n    if (local.length === 8 && /[2-5]/.test(local[0])) return \"55\" + ddd + local;\n\n    // qualquer outra coisa é invalida - a query nao deveria ter deixado chegar\n    // aqui; devolve vazio pro Meta recusar e a falha ficar visivel no log.\n    return \"\";\n  })()\n}}_mem_agent_FINAMOB_SDR",
+        "messageData": "={{\nJSON.stringify({\n  type: \"ai\",\n  data: {\n    content: `Olá, ${$('Intervalo entre mensagens1').first().json.clientes}! Tudo bem?\nAqui é a Luiza, da Finamob. Vi que você se inscreveu na nossa campanha sobre Funding Imobiliário.\nVocês têm alguma operação em andamento ou em planejamento para os próximos meses que esteja precisando de funding?\nAbs!`,\n    additional_kwargs: {},\n    response_metadata: {}\n  }\n})\n}}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        832
+      ],
+      "id": "b0638941-9360-4bc9-871e-9e970432851a",
+      "name": "Adiciona Texto na Memoria1",
+      "notesInFlow": true,
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "CORRIGIDO 26/08: type era \"human\" - o agente de atendimento lia a propria mensagem de saida como se fosse fala do lead. Agora \"ai\". A chave tambem era montada por outra funcao, que devolvia numero SEM o 55 para telefones de 10 digitos: a chave gravada nao batia com a que o atendimento procura e o historico nao era achado. Agora usa a MESMA normalizacao dos nodes Enviar Template. onError: se o Redis cair, o loop continua. A chave usa a MESMA funcao dos nodes Enviar Template (atualizada em 26/08 com a regra de fixo x celular antigo): ela tem que dar exatamente o numero pelo qual a resposta vai chegar, senao o agente de atendimento nao acha o historico."
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{\n(() => {\n    let p = String($('Intervalo entre mensagens').first().json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // prefixo internacional discado (00...) e 0 de operadora antes do DDD\n    if (p.startsWith(\"00\")) p = p.slice(2);\n    if (p.startsWith(\"0\") && p.length >= 11) p = p.slice(1);\n\n    // Remove o 55 SEMPRE que for codigo de pais, pra reavaliar o local pela\n    // mesma regra. Antes o codigo fazia \"return\" aqui sem tratar, entao um\n    // celular antigo gravado como 5511 8765-4321 (12 digitos, sem o 9) saia\n    // desse jeito e o Meta recusava - enquanto o MESMO numero sem o 55\n    // recebia o 9 corretamente. O guard de tamanho protege o DDD 55\n    // (Santa Maria/RS): 11 digitos comecando em 55 e DDD, nao codigo de pais.\n    if (p.length >= 12 && p.startsWith(\"55\")) p = p.slice(2);\n\n    const ddd = p.slice(0, 2);\n    const local = p.slice(2);\n\n    // celular atual: DDD + 9 digitos comecando em 9\n    if (local.length === 9 && local[0] === \"9\") return \"55\" + ddd + local;\n    // celular antigo: DDD + 8 digitos comecando em 6-9 -> falta o 9\n    if (local.length === 8 && /[6-9]/.test(local[0])) return \"55\" + ddd + \"9\" + local;\n    // FIXO: DDD + 8 digitos comecando em 2-5 -> pode ter WhatsApp Business,\n    // mas NAO leva o 9. Inserir o 9 aqui criava um celular de outra pessoa.\n    if (local.length === 8 && /[2-5]/.test(local[0])) return \"55\" + ddd + local;\n\n    // qualquer outra coisa é invalida - a query nao deveria ter deixado chegar\n    // aqui; devolve vazio pro Meta recusar e a falha ficar visivel no log.\n    return \"\";\n  })()\n}}_mem_agent_FINAMOB_SDR",
+        "messageData": "={{\nJSON.stringify({\n  type: \"ai\",\n  data: {\n    content: `Oi ${$('Intervalo entre mensagens').first().json.clientes}, bom dia!\nLuiza da Finamob aqui. Vi que você se cadastrou no nosso material sobre Funding Imobiliário.\nO cenário de captação mudou bastante nos últimos meses, taxas, apetite de fundos e estruturas disponíveis para incorporadoras.\nVale uma call de 20 min pra eu te mostrar o que temos acesso?\nAbs!`,\n    additional_kwargs: {},\n    response_metadata: {}\n  }\n})\n}}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        1456
+      ],
+      "id": "da2e52bd-8400-4384-b36b-ea8173626e27",
+      "name": "Adiciona Texto na Memoria",
+      "notesInFlow": true,
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "CORRIGIDO 26/08: type era \"human\" - o agente de atendimento lia a propria mensagem de saida como se fosse fala do lead. Agora \"ai\". A chave tambem era montada por outra funcao, que devolvia numero SEM o 55 para telefones de 10 digitos: a chave gravada nao batia com a que o atendimento procura e o historico nao era achado. Agora usa a MESMA normalizacao dos nodes Enviar Template. onError: se o Redis cair, o loop continua. A chave usa a MESMA funcao dos nodes Enviar Template (atualizada em 26/08 com a regra de fixo x celular antigo): ela tem que dar exatamente o numero pelo qual a resposta vai chegar, senao o agente de atendimento nao acha o historico."
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{\n(() => {\n    let p = String($('Intervalo entre mensagens2').first().json.whatsapp || \"\").replace(/\\D/g, \"\");\n\n    // prefixo internacional discado (00...) e 0 de operadora antes do DDD\n    if (p.startsWith(\"00\")) p = p.slice(2);\n    if (p.startsWith(\"0\") && p.length >= 11) p = p.slice(1);\n\n    // Remove o 55 SEMPRE que for codigo de pais, pra reavaliar o local pela\n    // mesma regra. Antes o codigo fazia \"return\" aqui sem tratar, entao um\n    // celular antigo gravado como 5511 8765-4321 (12 digitos, sem o 9) saia\n    // desse jeito e o Meta recusava - enquanto o MESMO numero sem o 55\n    // recebia o 9 corretamente. O guard de tamanho protege o DDD 55\n    // (Santa Maria/RS): 11 digitos comecando em 55 e DDD, nao codigo de pais.\n    if (p.length >= 12 && p.startsWith(\"55\")) p = p.slice(2);\n\n    const ddd = p.slice(0, 2);\n    const local = p.slice(2);\n\n    // celular atual: DDD + 9 digitos comecando em 9\n    if (local.length === 9 && local[0] === \"9\") return \"55\" + ddd + local;\n    // celular antigo: DDD + 8 digitos comecando em 6-9 -> falta o 9\n    if (local.length === 8 && /[6-9]/.test(local[0])) return \"55\" + ddd + \"9\" + local;\n    // FIXO: DDD + 8 digitos comecando em 2-5 -> pode ter WhatsApp Business,\n    // mas NAO leva o 9. Inserir o 9 aqui criava um celular de outra pessoa.\n    if (local.length === 8 && /[2-5]/.test(local[0])) return \"55\" + ddd + local;\n\n    // qualquer outra coisa é invalida - a query nao deveria ter deixado chegar\n    // aqui; devolve vazio pro Meta recusar e a falha ficar visivel no log.\n    return \"\";\n  })()\n}}_mem_agent_FINAMOB_SDR",
+        "messageData": "={{\nJSON.stringify({\n  type: \"ai\",\n  data: {\n    content: `Oi ${$('Intervalo entre mensagens2').first().json.clientes}\nLuiza, da Finamob. Você se inscreveu na nossa campanha de Funding Imobiliário e fiquei curioso pra saber o que te chamou atenção, se foi algo específico de captação, estruturação de operação ou só para entender como funciona.\nVocê tem algum tempo livre nessa semana ou na próxima para falarmos?`,\n    additional_kwargs: {},\n    response_metadata: {}\n  }\n})\n}}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1632,
+        2144
+      ],
+      "id": "e8efb991-13d2-44f6-b4a4-c61304809109",
+      "name": "Adiciona Texto na Memoria2",
+      "notesInFlow": true,
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "CORRIGIDO 26/08: type era \"human\" - o agente de atendimento lia a propria mensagem de saida como se fosse fala do lead. Agora \"ai\". A chave tambem era montada por outra funcao, que devolvia numero SEM o 55 para telefones de 10 digitos: a chave gravada nao batia com a que o atendimento procura e o historico nao era achado. Agora usa a MESMA normalizacao dos nodes Enviar Template. onError: se o Redis cair, o loop continua. A chave usa a MESMA funcao dos nodes Enviar Template (atualizada em 26/08 com a regra de fixo x celular antigo): ela tem que dar exatamente o numero pelo qual a resposta vai chegar, senao o agente de atendimento nao acha o historico."
+    },
+    {
+      "parameters": {
+        "tableId": "sdr_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mailing_id",
+              "fieldValue": "={{ $('Iterar envio por lead2').first().json.id }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Iterar envio por lead2').first().json.whatsapp }}"
+            },
+            {
+              "fieldId": "tipo_evento",
+              "fieldValue": "disparo_falhou"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "6.01-fup-atrasados"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_1_sem_incorporadora"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ etapa: 'whatsapp', template: 'mensagem_1_sem_incorporadora', erro: ($json.error && ($json.error.message || $json.error)) || $json }) }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        832
+      ],
+      "id": "2db8c794-6d25-4f87-952b-c0b1b5a9fef5",
+      "name": "Registra Evento - Falha no Envio 1",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "NOVO 26/08: antes só existia evento de falha para erro da API Finamob. Falha do envio no WhatsApp era invisivel no dash (e, na onda 1, contada como sucesso). payload.etapa='whatsapp' separa os dois tipos de falha."
+    },
+    {
+      "parameters": {
+        "tableId": "sdr_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mailing_id",
+              "fieldValue": "={{ $('Iterar envio por lead').first().json.id }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Iterar envio por lead').first().json.whatsapp }}"
+            },
+            {
+              "fieldId": "tipo_evento",
+              "fieldValue": "disparo_falhou"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "6.01-fup-atrasados"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_2_sem_incorporadora"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ etapa: 'whatsapp', template: 'mensagem_2_sem_incorporadora', erro: ($json.error && ($json.error.message || $json.error)) || $json }) }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        1488
+      ],
+      "id": "1ced9241-36a0-4472-899f-8a0678b1b1e9",
+      "name": "Registra Evento - Falha no Envio 2",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "NOVO 26/08: antes só existia evento de falha para erro da API Finamob. Falha do envio no WhatsApp era invisivel no dash (e, na onda 1, contada como sucesso). payload.etapa='whatsapp' separa os dois tipos de falha."
+    },
+    {
+      "parameters": {
+        "tableId": "sdr_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mailing_id",
+              "fieldValue": "={{ $('Iterar envio por lead1').first().json.id }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Iterar envio por lead1').first().json.whatsapp }}"
+            },
+            {
+              "fieldId": "tipo_evento",
+              "fieldValue": "disparo_falhou"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "6.01-fup-atrasados"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-REMARKETING"
+            },
+            {
+              "fieldId": "tipo_disparo",
+              "fieldValue": "mensagem_3_sem_incorporadora"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ etapa: 'whatsapp', template: 'mensagem_3_sem_incorporadora', erro: ($json.error && ($json.error.message || $json.error)) || $json }) }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        2224
+      ],
+      "id": "a9427a47-7709-4268-9671-117d5b63a39e",
+      "name": "Registra Evento - Falha no Envio 3",
+      "notesInFlow": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "NOVO 26/08: antes só existia evento de falha para erro da API Finamob. Falha do envio no WhatsApp era invisivel no dash (e, na onda 1, contada como sucesso). payload.etapa='whatsapp' separa os dois tipos de falha."
+    },
+    {
+      "parameters": {
+        "content": "# 6.01 - SDR Remarketing - FUPs Atrasados\n**Roda 9h, todo dia.** Puxa lead do MySQL (`mailing`), dispara template do WhatsApp, atualiza o CRM via `update_mailing_api.php`, grava histórico no Supabase + memória no Redis, e loga erro na planilha `Disparos SDR Finamob`.\n\n**Cadência:** entrada -> msg 1 -> (3 dias) msg 2 -> (3 dias) msg 3 -> (3 dias) encerra com fup +90d e status `retrabalharnofuturo`. Os 3 dias são intencionais (`fup = hoje+2` com teste `< CURDATE()`).\n**Capacidade:** 100 leads/dia em cada uma das 3 filas de envio (a 4ª, de encerramento, é sem teto) = até ~300 mensagens/dia num único número WhatsApp.\n**Quem entra:** `tipo` = Cliente, Cliente/Parceiro, Outros, nulo ou vazio (whitelist nas 4 filas) · sem operação vinculada (5 caminhos) · WhatsApp válido e não duplicado.\n\n**Revisão 26/08/2026 — todas as pendências fechadas.** Whitelist de `tipo` unificada nas 4 filas · limites igualados em 100 · `tem_operacao` nos 5 caminhos nas 4 filas · validação de telefone e dedupe propagados · dedupe de `id <>` para `id <` · regra de fixo x celular antigo no envio (o 9 só entra quando é celular antigo) · `onError` coerente nos 3 templates + evento de falha de envio · Redis gravava a mensagem do robô como `type: \"human\"` e montava a chave sem o `55` · `Atualiza Controle de Disparos` nas ondas 2 e 3 · refresh do dash movido para o fim das filas · nodes órfãos removidos.",
+        "height": 240,
+        "width": 2104,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        32
+      ],
+      "id": "e6849765-bd0d-4cae-b4a7-1ed5e65d17a3",
+      "name": "Doc -560 -620"
+    },
+    {
+      "parameters": {
+        "content": "### Onda 1 — primeira tentativa\n`query2` (LIMIT 100, whitelist de tipo) -> template `mensagem_1_sem_incorporadora` -> status `ptentativaderreativaçãor`, fup +2, midia 15, dono 29.",
+        "height": 88,
+        "width": 900,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        416,
+        464
+      ],
+      "id": "f54cb055-ec91-4ac8-9d89-a84ef5064b77",
+      "name": "Doc 140 -116"
+    },
+    {
+      "parameters": {
+        "content": "### Onda 2 — segunda tentativa\n`query` (LIMIT 100) -> template `mensagem_2_sem_incorporadora` -> status `stentativadereativaçãor`, fup +2. Registra na aba `disparos` .",
+        "height": 88,
+        "width": 900,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        416,
+        1136
+      ],
+      "id": "e8169267-757a-4f7b-99ad-171b65c4b9ce",
+      "name": "Doc 140 306"
+    },
+    {
+      "parameters": {
+        "content": "### Onda 3 — terceira tentativa\n`query1` (LIMIT 100) -> template `mensagem_3_sem_incorporadora` -> status `ttentativadereativaçãor`, fup +2. Registra na aba `disparos` .",
+        "height": 88,
+        "width": 900,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        480,
+        1808
+      ],
+      "id": "6deecf20-947e-48cf-8807-82f367acbc0b",
+      "name": "Doc 140 738"
+    },
+    {
+      "parameters": {
+        "content": "### Onda 4 — encerramento (não envia mensagem)\n`query3` (sem LIMIT) -> só CRM: fup +45 dias, status `retrabalharnofuturo`. Loga na aba `validar_erros` mesmo quando dá certo, e não gera evento no dash.",
+        "height": 88,
+        "width": 900,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        464,
+        2384
+      ],
+      "id": "c5de04c8-bfd9-4978-a91c-f05a47ec3eaf",
+      "name": "Doc 140 1150"
+    },
+    {
+      "parameters": {
+        "content": "# Acompanhar\n**Volume no Meta** — ~300 msgs/dia num só número, com as 4 filas intercaladas (o intervalo real entre mensagens é menor que os 3–7 s do node `Wait`). Se a *quality rating* cair, aumentar o `Wait` é o primeiro ajuste.\n\n**Leads travados pela regra antiga de `tipo`** — quem tem tipo fora da whitelist e já recebeu a mensagem 1 antes de 26/08 continua com status de tentativa e fup vencido. Nenhuma fila os pesca (correto agora), mas contam no card de FUPs Atrasados até serem marcados como `naoeoICP`. Limpeza manual pendente.\n",
+        "height": 268,
+        "width": 520,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2384,
+        400
+      ],
+      "id": "b9515eca-b110-4b34-af55-1372c7c69b79",
+      "name": "Doc 2060 -620"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM",
+          "mode": "list",
+          "cachedResultName": "Disparos SDR Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "disparos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Iterar envio por lead').item.json.id }}",
+            "clientes": "={{ $('Iterar envio por lead').item.json.clientes }}",
+            "plano_de_acao": "={{ $('Iterar envio por lead').item.json.plano_de_acao }}",
+            "whatsapp": "={{ $('Iterar envio por lead').item.json.whatsapp }}",
+            "email": "={{ $('Iterar envio por lead').item.json.email }}",
+            "ultimo_contato": "={{ $('Iterar envio por lead').item.json.ultimo_contato }}",
+            "fup": "={{ $('Iterar envio por lead').item.json.fup }}",
+            "datacriacao": "={{ $('Iterar envio por lead').item.json.datacriacao }}",
+            "lixeira": "={{ $('Iterar envio por lead').item.json.lixeira }}",
+            "observacao": "={{ $('Iterar envio por lead').item.json.observacao }}",
+            "status_plano_acao": "={{ $('Iterar envio por lead').item.json.status_plano_acao }}",
+            "Template": "mensagem_2_sem_incorporadora"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "clientes",
+              "displayName": "clientes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "plano_de_acao",
+              "displayName": "plano_de_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "whatsapp",
+              "displayName": "whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ultimo_contato",
+              "displayName": "ultimo_contato",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fup",
+              "displayName": "fup",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "datacriacao",
+              "displayName": "datacriacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lixeira",
+              "displayName": "lixeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "observacao",
+              "displayName": "observacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_plano_acao",
+              "displayName": "status_plano_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Template",
+              "displayName": "Template",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Obs",
+              "displayName": "Obs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1648,
+        1120
+      ],
+      "id": "15995ac2-5018-447e-9111-27691c7b6596",
+      "name": "Atualiza Controle de Disparos 2",
+      "notesInFlow": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput",
+      "notes": "NOVO 26/08: a aba 'disparos' só tinha registro da mensagem 1 - as ondas 2 e 3 nao escreviam nada. Agora as tres ondas registram, e a planilha de controle fica completa."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM",
+          "mode": "list",
+          "cachedResultName": "Disparos SDR Finamob",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "disparos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14iz2CCrBpQc8kYX9tKDXIiVupELulc0M1mvmrLPEtlM/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Iterar envio por lead1').item.json.id }}",
+            "clientes": "={{ $('Iterar envio por lead1').item.json.clientes }}",
+            "plano_de_acao": "={{ $('Iterar envio por lead1').item.json.plano_de_acao }}",
+            "whatsapp": "={{ $('Iterar envio por lead1').item.json.whatsapp }}",
+            "email": "={{ $('Iterar envio por lead1').item.json.email }}",
+            "ultimo_contato": "={{ $('Iterar envio por lead1').item.json.ultimo_contato }}",
+            "fup": "={{ $('Iterar envio por lead1').item.json.fup }}",
+            "datacriacao": "={{ $('Iterar envio por lead1').item.json.datacriacao }}",
+            "lixeira": "={{ $('Iterar envio por lead1').item.json.lixeira }}",
+            "observacao": "={{ $('Iterar envio por lead1').item.json.observacao }}",
+            "status_plano_acao": "={{ $('Iterar envio por lead1').item.json.status_plano_acao }}",
+            "Template": "mensagem_3_sem_incorporadora"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "clientes",
+              "displayName": "clientes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "plano_de_acao",
+              "displayName": "plano_de_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "whatsapp",
+              "displayName": "whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ultimo_contato",
+              "displayName": "ultimo_contato",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fup",
+              "displayName": "fup",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "datacriacao",
+              "displayName": "datacriacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lixeira",
+              "displayName": "lixeira",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "observacao",
+              "displayName": "observacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_plano_acao",
+              "displayName": "status_plano_acao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Template",
+              "displayName": "Template",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Obs",
+              "displayName": "Obs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1664,
+        1760
+      ],
+      "id": "80ca8310-5165-481f-b1e4-54be9437a00d",
+      "name": "Atualiza Controle de Disparos 3",
+      "notesInFlow": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput",
+      "notes": "NOVO 26/08: a aba 'disparos' só tinha registro da mensagem 1 - as ondas 2 e 3 nao escreviam nada. Agora as tres ondas registram, e a planilha de controle fica completa."
+    },
+    {
+      "parameters": {
+        "content": "## Padronização de telefone — a regra\n| Tamanho (sem 55) | 1º dígito do local | O que é | Vai pro Meta como |\n|---|---|---|---|\n| 11 (DDD + 9) | `9` | celular atual | `55` + DDD + 9 dígitos |\n| 10 (DDD + 8) | `6`–`9` | celular antigo | `55` + DDD + **`9`** + 8 dígitos |\n| 10 (DDD + 8) | `2`–`5` | fixo | `55` + DDD + 8 dígitos, **sem** o 9 |\n| outro | — | inválido | barrado na query |\n\nFixo **pode** ter WhatsApp Business — o que ele não pode é ganhar o 9. Antes de 26/08 o 9 era inserido em todo número de 10 dígitos, e no caso de fixo isso produzia um celular de outra pessoa (as faixas são separadas: celular antigo começava em 6–9, fixo começa em 2–5).\n\nA mesma função vive em 3 nodes por onda: `Enviar Template`, e a chave do `Adiciona Texto na Memoria` (que tem que ser o número pelo qual a resposta chega). Os nodes `API Finamob` usam outra função **de propósito** — ali o telefone é chave de busca no CRM, não número discável.",
+        "height": 444,
+        "width": 528,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2384,
+        704
+      ],
+      "id": "5caf9d8f-d5f8-4a21-8ac3-318ca3fb9e81",
+      "name": "Doc telefone"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Execute a SQL query3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query2": {
+      "main": [
+        [
+          {
+            "node": "Iterar envio por lead2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Template 1": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Atualiza Controle de Disparos",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registra Evento - Disparo Enviado 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Atualiza Controle de Erros",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registra Evento - Falha no Envio 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase2": {
+      "main": [
+        [
+          {
+            "node": "Adiciona Texto na Memoria1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Finamob": {
+      "main": [
+        [
+          {
+            "node": "Enviar Template 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Atualiza Controle de Erros",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registra Evento - Disparo Falhou 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Iterar envio por lead2": {
+      "main": [
+        [
+          {
+            "node": "Intervalo entre mensagens4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Intervalo entre mensagens1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intervalo entre mensagens1": {
+      "main": [
+        [
+          {
+            "node": "API Finamob",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Iterar envio por lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase": {
+      "main": [
+        [
+          {
+            "node": "Adiciona Texto na Memoria",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Finamob1": {
+      "main": [
+        [
+          {
+            "node": "Enviar Template 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Atualiza Controle de Erros 2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registra Evento - Disparo Falhou 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Iterar envio por lead": {
+      "main": [
+        [
+          {
+            "node": "Intervalo entre mensagens4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Intervalo entre mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intervalo entre mensagens": {
+      "main": [
+        [
+          {
+            "node": "API Finamob1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query1": {
+      "main": [
+        [
+          {
+            "node": "Iterar envio por lead1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase1": {
+      "main": [
+        [
+          {
+            "node": "Adiciona Texto na Memoria2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Finamob2": {
+      "main": [
+        [
+          {
+            "node": "Enviar Template 3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Atualiza Controle de Erros 3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registra Evento - Disparo Falhou 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Iterar envio por lead1": {
+      "main": [
+        [
+          {
+            "node": "Intervalo entre mensagens4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Intervalo entre mensagens2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intervalo entre mensagens2": {
+      "main": [
+        [
+          {
+            "node": "API Finamob2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query3": {
+      "main": [
+        [
+          {
+            "node": "Iterar envio por lead3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Finamob3": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Iterar envio por lead3": {
+      "main": [
+        [
+          {
+            "node": "Intervalo entre mensagens4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Intervalo entre mensagens3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intervalo entre mensagens3": {
+      "main": [
+        [
+          {
+            "node": "API Finamob3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Template 2": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registra Evento - Disparo Enviado 2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Atualiza Controle de Disparos 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Atualiza Controle de Erros 2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registra Evento - Falha no Envio 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Template 3": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registra Evento - Disparo Enviado 3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Atualiza Controle de Disparos 3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Atualiza Controle de Erros 3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registra Evento - Falha no Envio 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intervalo entre mensagens4": {
+      "main": [
+        [
+          {
+            "node": "Call 'Dash - Finamob'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet3": {
+      "main": [
+        [
+          {
+            "node": "Iterar envio por lead3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza Controle de Erros": {
+      "main": [
+        [
+          {
+            "node": "Iterar envio por lead2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza Controle de Erros 2": {
+      "main": [
+        [
+          {
+            "node": "Iterar envio por lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza Controle de Erros 3": {
+      "main": [
+        [
+          {
+            "node": "Iterar envio por lead1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adiciona Texto na Memoria1": {
+      "main": [
+        [
+          {
+            "node": "Iterar envio por lead2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adiciona Texto na Memoria": {
+      "main": [
+        [
+          {
+            "node": "Iterar envio por lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adiciona Texto na Memoria2": {
+      "main": [
+        [
+          {
+            "node": "Iterar envio por lead1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "executionTimeout": 7200,
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "60d617db-5176-418c-9082-9b54834693a5",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "CfFquAV2LjsbKpFj",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-02T21:34:10.794Z",
+      "updatedAt": "2026-09-02T21:34:10.794Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
