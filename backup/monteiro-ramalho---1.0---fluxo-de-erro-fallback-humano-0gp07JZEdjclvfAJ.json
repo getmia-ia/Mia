@@ -3,7 +3,7 @@
   "createdAt": "2026-08-12T22:54:17.483Z",
   "id": "0gp07JZEdjclvfAJ",
   "name": "Monteiro Ramalho - 1.0 - Fluxo de Erro (Fallback Humano)",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
@@ -573,17 +573,584 @@
   "staticData": null,
   "meta": null,
   "versionId": "40dbdb66-e487-4001-b7b8-2568871a99c7",
-  "activeVersionId": null,
+  "activeVersionId": "40dbdb66-e487-4001-b7b8-2568871a99c7",
   "triggerCount": 0,
   "shared": [
     {
-      "updatedAt": "2026-08-12T22:54:17.483Z",
-      "createdAt": "2026-08-12T22:54:17.483Z",
       "role": "workflow:owner",
       "workflowId": "0gp07JZEdjclvfAJ",
-      "projectId": "nRxOu1L1N41Jyveq"
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-08-12T22:54:17.483Z",
+      "updatedAt": "2026-08-12T22:54:17.483Z"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "versionId": "40dbdb66-e487-4001-b7b8-2568871a99c7",
+    "workflowId": "0gp07JZEdjclvfAJ",
+    "nodes": [
+      {
+        "parameters": {
+          "content": "## O que este fluxo faz\nSempre que qualquer parte de um fluxo do agente falhar (erro de tool, timeout, erro de API, etc.), o n8n aciona automaticamente este fluxo, que: (a) localiza o telefone do lead na execução que falhou, (b) desativa a IA para aquele lead (mesmo endpoint usado pelas tools 'desativa-ia'), (c) avisa o lead por WhatsApp que o Dr. Lucas vai continuar o atendimento, e (d) registra o erro numa tabela para vocês auditarem depois.",
+          "height": 728,
+          "width": 2252,
+          "color": 7
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          144,
+          256
+        ],
+        "id": "5c40b7bf-3519-46e5-8b3d-e9bdc7afa265",
+        "name": "LEIA-ME — Setup"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.errorTrigger",
+        "typeVersion": 1,
+        "position": [
+          208,
+          736
+        ],
+        "id": "98674d08-bfe6-467e-af23-910f9164483b",
+        "name": "Error Trigger"
+      },
+      {
+        "parameters": {
+          "jsCode": "const N8N_BASE_URL = \"https://n8n.miabuilder.com\";\n\nconst data = $input.first().json;\n\nreturn [{\n  json: {\n    n8nBaseUrl: N8N_BASE_URL,\n    executionId: data.execution?.id || '',\n    workflowId: data.workflow?.id || '',\n    workflowName: data.workflow?.name || '',\n    errorMessage: data.execution?.error?.message || 'Erro desconhecido',\n    nodeFalhou: data.execution?.lastNodeExecuted || 'desconhecido',\n    executionUrl: data.execution?.url || ''\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          448,
+          736
+        ],
+        "id": "d6632a09-9de8-44d9-8429-22d46aa2681b",
+        "name": "Extrai Dados do Erro"
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.n8nBaseUrl }}/api/v1/executions/{{ $json.executionId }}?includeData=true",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          688,
+          736
+        ],
+        "id": "a5ee4bd6-c70b-4c85-aa41-a5e6686bf6d4",
+        "name": "Busca Execução Completa",
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "function buscarValor(obj, chaves, depth = 0) {\n  if (!obj || typeof obj !== 'object' || depth > 10) return null;\n  for (const chave of chaves) {\n    if (typeof obj[chave] === 'string' && obj[chave].trim() !== '') return obj[chave];\n  }\n  for (const key of Object.keys(obj)) {\n    const found = buscarValor(obj[key], chaves, depth + 1);\n    if (found) return found;\n  }\n  return null;\n}\n\nconst prev = $('Extrai Dados do Erro').first().json;\nlet telefone = null;\n\ntry {\n  const execData = $input.first().json;\n  const runData = execData?.data?.resultData?.runData || {};\n\n  for (const nodeName of Object.keys(runData)) {\n    const runs = runData[nodeName] || [];\n    for (const run of runs) {\n      const outputs = run?.data?.main || [];\n      for (const branch of outputs) {\n        for (const item of (branch || [])) {\n          const found = buscarValor(item?.json, ['telefone', 'botPhoneNumber']);\n          if (found) { telefone = found; break; }\n        }\n        if (telefone) break;\n      }\n      if (telefone) break;\n    }\n    if (telefone) break;\n  }\n} catch (e) {\n  telefone = null;\n}\n\nconst workflowName = prev.workflowName || '';\nlet nomeApp = 'SISTEMA';\nif (/previdenc/i.test(workflowName)) nomeApp = 'previdenciario';\nelse if (/trabalhista/i.test(workflowName)) nomeApp = 'trabalhista';\nelse if (/SDR/i.test(workflowName)) nomeApp = 'SDR-MONTEIRO';\nelse if (/entrevista/i.test(workflowName)) nomeApp = 'entrevista-peticao';\n\nreturn [{\n  json: {\n    ...prev,\n    telefone,\n    nomeApp\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          928,
+          736
+        ],
+        "id": "6fb46c1d-4f64-4edb-867e-549d1979be38",
+        "name": "Extrai Telefone e Nome App"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "tel-notempty",
+                "leftValue": "={{ $json.telefone }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1168,
+          736
+        ],
+        "id": "8c3e0eaf-6c96-4bbf-bef4-42c8884031a2",
+        "name": "Telefone Encontrado?"
+      },
+      {
+        "parameters": {
+          "tableId": "erros_agente",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "workflow_name",
+                "fieldValue": "={{ $json.workflowName }}"
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": "={{ $json.executionId }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $json.telefone }}"
+              },
+              {
+                "fieldId": "node_falhou",
+                "fieldValue": "={{ $json.nodeFalhou }}"
+              },
+              {
+                "fieldId": "error_message",
+                "fieldValue": "={{ $json.errorMessage }}"
+              },
+              {
+                "fieldId": "ia_desativada",
+                "fieldValue": "={{ $json.telefone ? true : false }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1408,
+          400
+        ],
+        "id": "0e2527ae-d9c7-4862-99b3-6081340f7edc",
+        "name": "Loga Erro no Supabase",
+        "credentials": {
+          "supabaseApi": {
+            "id": "FcbZyD53kbkf6Vxp",
+            "name": "Monteiro - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "MIA-LOGS",
+          "remoteJid": "120363421402105782@g.us",
+          "messageText": "=⚠️ Erro no fluxo *{{ $json.workflowName }}* (nó: {{ $json.nodeFalhou }}).\nLead: {{ $json.telefone || 'telefone não identificado' }}\nErro: {{ $json.errorMessage }}\nExecução: {{ $json.executionUrl }}\n\nA IA foi desativada para este lead e ele já foi avisado que você vai continuar o atendimento.",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1408,
+          800
+        ],
+        "id": "1cf44104-c594-476a-85b0-ceea79e8897f",
+        "name": "Avisa Equipe sobre Erro",
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "content": "## Telefone não encontrado\nSem telefone não dá pra desativar a IA nem avisar o lead automaticamente. Este ramo só loga o erro para checagem manual — confira a execução pelo link salvo no Supabase.",
+          "height": 312,
+          "width": 652
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1056,
+          1040
+        ],
+        "id": "de96ad34-9f7e-4209-a81a-335c44a1238a",
+        "name": "Nota — sem telefone"
+      },
+      {
+        "parameters": {
+          "tableId": "erros_agente",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "workflow_name",
+                "fieldValue": "={{ $json.workflowName }}"
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": "={{ $json.executionId }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $json.telefone }}"
+              },
+              {
+                "fieldId": "node_falhou",
+                "fieldValue": "={{ $json.nodeFalhou }}"
+              },
+              {
+                "fieldId": "error_message",
+                "fieldValue": "={{ $json.errorMessage }}"
+              },
+              {
+                "fieldId": "ia_desativada",
+                "fieldValue": "false"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1184,
+          1184
+        ],
+        "id": "ae6789e6-a714-431c-aae2-1cc036d4a75e",
+        "name": "Loga Erro (sem telefone)",
+        "credentials": {
+          "supabaseApi": {
+            "id": "FcbZyD53kbkf6Vxp",
+            "name": "Monteiro - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "create table public.erros_agente (\n  id bigint generated by default as identity not null,\n  created_at timestamp with time zone not null default now(),\n  workflow_name text null,\n  execution_id text null,\n  telefone text null,\n  node_falhou text null,\n  error_message text null,\n  ia_desativada boolean null default false,\n  constraint erros_agente_pkey primary key (id)\n) TABLESPACE pg_default;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1184,
+          1424
+        ],
+        "id": "6b413718-e087-4f89-9d67-68ae8ca97c9b",
+        "name": "Cria tabela erros_agente",
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        },
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "operation": "update",
+          "tableId": "leads_crm",
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "telefone",
+                "condition": "eq",
+                "keyValue": "={{ $json.telefone }}"
+              }
+            ]
+          },
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "inteligencia",
+                "fieldValue": "={{ false }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1408,
+          592
+        ],
+        "id": "8db1e781-b3e2-4ed0-9c04-e44a6d78688e",
+        "name": "Desativa IA",
+        "credentials": {
+          "supabaseApi": {
+            "id": "FcbZyD53kbkf6Vxp",
+            "name": "Monteiro - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "tableId": "historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "Oi! Passamos por uma instabilidade técnica aqui agora do nosso lado. Já encaminhei seu atendimento direto pro Dr. Lucas — ele entra em contato com você em breve. Desculpa o transtorno!"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Extrai Telefone e Nome App').first().json.telefone }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "=text"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "=SDR-MONTEIRO"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1808,
+          592
+        ],
+        "id": "634b8aeb-6071-4baf-b02b-6254d9bdc9c4",
+        "name": "Cria Mensagem no Supabase3",
+        "credentials": {
+          "supabaseApi": {
+            "id": "FcbZyD53kbkf6Vxp",
+            "name": "Monteiro - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Este fluxo é de propriedade da FORMAÇÃO AGENTES DE IA COM N8N -BY RICNEVES"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://graph.facebook.com/v22.0/1037049099499145/messages",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({\n  messaging_product: \"whatsapp\",\n  to: $('Extrai Telefone e Nome App').first().json.telefone,\n  type: \"text\",\n  text: {\n    preview_url: false,\n    body: \"Oi! Passamos por uma instabilidade técnica aqui agora do nosso lado. Já encaminhei seu atendimento direto pro Dr. Lucas — ele entra em contato com você em breve. Desculpa o transtorno!\"\n  }\n}) }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1600,
+          592
+        ],
+        "id": "3e2f909f-8569-4525-bd98-e8bc4b8bdec0",
+        "name": "Enviar mensagem no WhatsApp sem template",
+        "retryOnFail": true,
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "operation": "push",
+          "list": "={{ $('Extrai Telefone e Nome App').first().json.telefone }}_mem_agent_Monteiro_SDR",
+          "messageData": "={\"type\":\"ai\",\"data\":{\"content\":\"Oi! Passamos por uma instabilidade técnica aqui agora do nosso lado. Já encaminhei seu atendimento direto pro Dr. Lucas — ele entra em contato com você em breve. Desculpa o transtorno!\",\"additional_kwargs\":{},\"response_metadata\":{}}}"
+        },
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          2000,
+          592
+        ],
+        "id": "3a640b70-0a94-47be-8a40-67ffa9bd38cf",
+        "name": "Adiciona Texto na Memoria1",
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "MIA-LOGS",
+          "remoteJid": "120363421402105782@g.us",
+          "messageText": "=⚠️ Erro no fluxo *{{ $json.workflowName }}* (nó: {{ $json.nodeFalhou }}).\nLead: {{ $json.telefone || 'telefone não identificado' }}\nErro: {{ $json.errorMessage }}\nExecução: {{ $json.executionUrl }}\n\nA IA não foi desativada para este lead, pois não encontrou telefone",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1472,
+          1184
+        ],
+        "id": "df3fcb75-ea5f-421c-a35c-8d6581e69d04",
+        "name": "Avisa Equipe sobre Erro1",
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        },
+        "onError": "continueRegularOutput"
+      }
+    ],
+    "connections": {
+      "Error Trigger": {
+        "main": [
+          [
+            {
+              "node": "Extrai Dados do Erro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai Dados do Erro": {
+        "main": [
+          [
+            {
+              "node": "Busca Execução Completa",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca Execução Completa": {
+        "main": [
+          [
+            {
+              "node": "Extrai Telefone e Nome App",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Extrai Telefone e Nome App",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai Telefone e Nome App": {
+        "main": [
+          [
+            {
+              "node": "Telefone Encontrado?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Telefone Encontrado?": {
+        "main": [
+          [
+            {
+              "node": "Desativa IA",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Avisa Equipe sobre Erro",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Loga Erro no Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Loga Erro (sem telefone)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Desativa IA": {
+        "main": [
+          [
+            {
+              "node": "Enviar mensagem no WhatsApp sem template",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar mensagem no WhatsApp sem template": {
+        "main": [
+          [
+            {
+              "node": "Cria Mensagem no Supabase3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cria Mensagem no Supabase3": {
+        "main": [
+          [
+            {
+              "node": "Adiciona Texto na Memoria1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loga Erro (sem telefone)": {
+        "main": [
+          [
+            {
+              "node": "Avisa Equipe sobre Erro1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version 40dbdb66",
+    "description": "",
+    "autosaved": false,
+    "createdAt": "2026-08-12T23:37:16.617Z",
+    "updatedAt": "2026-09-02T19:22:21.268Z"
+  },
   "tags": []
 }
