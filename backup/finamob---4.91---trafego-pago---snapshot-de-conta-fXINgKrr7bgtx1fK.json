@@ -3,7 +3,7 @@
   "createdAt": "2026-09-01T18:47:53.105Z",
   "id": "fXINgKrr7bgtx1fK",
   "name": "Finamob - 4.91 - Trafego Pago - Snapshot de Conta",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
@@ -261,29 +261,296 @@
     "availableInMCP": false,
     "errorWorkflow": "xfondpEOYdGLoDo4"
   },
-  "staticData": null,
+  "staticData": {
+    "node:Agendamento": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
   "meta": {
     "templateCredsSetupCompleted": true
   },
   "versionId": "24d03298-5182-4d47-a655-3c8b507ba623",
-  "activeVersionId": null,
-  "triggerCount": 0,
+  "activeVersionId": "24d03298-5182-4d47-a655-3c8b507ba623",
+  "triggerCount": 1,
   "shared": [
     {
-      "updatedAt": "2026-09-01T18:47:53.105Z",
-      "createdAt": "2026-09-01T18:47:53.105Z",
       "role": "workflow:owner",
       "workflowId": "fXINgKrr7bgtx1fK",
-      "projectId": "nRxOu1L1N41Jyveq"
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-01T18:47:53.105Z",
+      "updatedAt": "2026-09-01T18:47:53.105Z"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "versionId": "24d03298-5182-4d47-a655-3c8b507ba623",
+    "workflowId": "fXINgKrr7bgtx1fK",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 7,
+                "triggerAtMinute": 20
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          432,
+          416
+        ],
+        "id": "8460b0fc-413f-40a0-9847-084199a50b53",
+        "name": "Agendamento"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          432,
+          592
+        ],
+        "id": "1a7415c1-f5b6-492e-b022-d5a81ed002f6",
+        "name": "Manual"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "select conta_id from ads_conta where ativo order by conta_id;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          656,
+          416
+        ],
+        "id": "c9fff13e-6ba0-4e4b-91e9-3ceb49039268",
+        "name": "Contas Ativas",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const ids = $input.all().map(i => 'act_' + i.json.conta_id);\nreturn [{ json: { ids: ids.join(',') } }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          880,
+          416
+        ],
+        "id": "26e8136d-1d5a-422d-b7e7-81bb1864ea82",
+        "name": "Monta ids"
+      },
+      {
+        "parameters": {
+          "url": "=https://graph.facebook.com/v23.0/?ids={{ $json.ids }}&fields=account_id,name,currency,account_status,timezone_name,timezone_offset_hours_utc,balance,spend_cap,amount_spent,funding_source_details{type,display_string}",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "facebookGraphApi",
+          "options": {
+            "timeout": 60000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1104,
+          416
+        ],
+        "id": "0dad0039-5e98-4741-9e5b-b06b07792309",
+        "name": "Meta Conta",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 4000,
+        "credentials": {
+          "facebookGraphApi": {
+            "id": "bqvhO7I9HxNLrUbM",
+            "name": "app-mia-finamob"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// balance e amount_spent vêm em centavos.\nconst cent = v => v == null ? null : Number(v) / 100;\nconst rows = [];\nfor (const item of $input.all()) {\n  for (const o of Object.values(item.json)) {\n    if (!o || typeof o !== 'object' || !o.account_id) continue;\n    rows.push({\n      conta_id: String(o.account_id),\n      nome_conta: o.name ?? null,\n      moeda: o.currency ?? null,\n      saldo: cent(o.balance),\n      spend_cap: cent(o.spend_cap),\n      amount_spent: cent(o.amount_spent),\n      status_conta: o.account_status ?? null,\n      fonte_pagamento: o.funding_source_details?.type != null ? String(o.funding_source_details.type) : null,\n      funding_display: o.funding_source_details?.display_string ?? null,\n      limite_restante: (o.spend_cap && Number(o.spend_cap) > 0)\n        ? cent(Number(o.spend_cap) - Number(o.amount_spent ?? 0))\n        : null,\n      timezone_name: o.timezone_name ?? null,\n      tz_offset_utc: o.timezone_offset_hours_utc ?? null,\n    });\n  }\n}\nreturn [{ json: { linhas: rows.length, payload: JSON.stringify(rows) } }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1312,
+          416
+        ],
+        "id": "eab231ec-adaa-4a09-b166-523ab7b49117",
+        "name": "Normaliza"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "insert into ads_conta_saldo\n  (dia, conta_id, nome_conta, moeda, saldo, spend_cap, amount_spent,\n   status_conta, fonte_pagamento, funding_display, limite_restante)\nselect current_date, x.conta_id, x.nome_conta, x.moeda, x.saldo,\n       x.spend_cap, x.amount_spent, x.status_conta, x.fonte_pagamento,\n       x.funding_display, x.limite_restante\nfrom jsonb_to_recordset($1::jsonb) as x(\n  conta_id text, nome_conta text, moeda text, saldo numeric,\n  spend_cap numeric, amount_spent numeric, status_conta int,\n  fonte_pagamento text, funding_display text, limite_restante numeric\n)\non conflict (dia, conta_id) do update set\n  saldo           = excluded.saldo,\n  spend_cap       = excluded.spend_cap,\n  amount_spent    = excluded.amount_spent,\n  status_conta    = excluded.status_conta,\n  fonte_pagamento = excluded.fonte_pagamento,\n  funding_display = excluded.funding_display,\n  limite_restante = excluded.limite_restante,\n  coletado_em     = now()\nreturning conta_id;",
+          "options": {
+            "queryReplacement": "={{ [$json.payload] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1536,
+          416
+        ],
+        "id": "d971fa58-c50b-4985-bbc3-52d7086b30c2",
+        "name": "Grava Snapshot",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- O fuso vem da PRÓPRIA conta de anúncios. Ninguém precisa saber a resposta:\n-- a API responde `timezone_name`, e é ele que define o corte de \"ontem\".\nupdate ads_conta c set\n  timezone         = coalesce(x.timezone_name, c.timezone),\n  tz_offset_utc    = coalesce(x.tz_offset_utc, c.tz_offset_utc),\n  moeda            = coalesce(x.moeda, c.moeda),\n  tz_confirmado_em = now()\nfrom jsonb_to_recordset($1::jsonb) as x(\n  conta_id text, timezone_name text, tz_offset_utc int, moeda text\n)\nwhere c.conta_id = x.conta_id\n  and (c.timezone is distinct from x.timezone_name\n    or c.moeda    is distinct from x.moeda\n    or c.tz_offset_utc is distinct from x.tz_offset_utc\n    or c.tz_confirmado_em is null)\nreturning c.conta_id, c.timezone, c.tz_offset_utc, c.moeda;",
+          "options": {
+            "queryReplacement": "={{ [$('Normaliza').first().json.payload] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1760,
+          416
+        ],
+        "id": "4f4873c6-bf34-44a5-bd2c-80fa414aab88",
+        "name": "Sincroniza Fuso e Moeda",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## 4.91 · Snapshot de conta\n\nSubstitui a MetaAds4. Uma chamada para **todas** as contas.\n\n**Atenção ao `balance`:** em conta de faturamento automático ele é *valor em aberto*, não crédito disponível. Por isso o alerta de saldo em `vw_ads_alerta` só dispara quando `ads_conta.prepaga = true`. Para conta automática o sinal útil é `limite_restante` (`spend_cap − amount_spent`) e o alerta `gasto_zerado`.\n\n**Descobre o fuso sozinho.** `timezone_name` vem na resposta e é escrito de volta em `ads_conta` — é ele que define o corte de \"ontem\" no 4.01. Rodar este fluxo ANTES do primeiro 4.01.",
+          "height": 340,
+          "width": 520,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          432,
+          32
+        ],
+        "id": "a5a838f1-1427-48df-b04e-ffbbd690c303",
+        "name": "Nota -400-380"
+      }
+    ],
+    "connections": {
+      "Agendamento": {
+        "main": [
+          [
+            {
+              "node": "Contas Ativas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Manual": {
+        "main": [
+          [
+            {
+              "node": "Contas Ativas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Contas Ativas": {
+        "main": [
+          [
+            {
+              "node": "Monta ids",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta ids": {
+        "main": [
+          [
+            {
+              "node": "Meta Conta",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Meta Conta": {
+        "main": [
+          [
+            {
+              "node": "Normaliza",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normaliza": {
+        "main": [
+          [
+            {
+              "node": "Grava Snapshot",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Grava Snapshot": {
+        "main": [
+          [
+            {
+              "node": "Sincroniza Fuso e Moeda",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version 24d03298",
+    "description": "",
+    "autosaved": false,
+    "createdAt": "2026-09-01T19:41:39.665Z",
+    "updatedAt": "2026-09-02T20:08:24.495Z"
+  },
   "tags": [
     {
-      "updatedAt": "2026-09-01T19:39:38.763Z",
-      "createdAt": "2026-09-01T19:39:38.763Z",
       "id": "oge68DCELclv7rhu",
-      "name": "trafego-meta"
+      "name": "trafego-meta",
+      "createdAt": "2026-09-01T19:39:38.763Z",
+      "updatedAt": "2026-09-01T19:39:38.763Z"
     }
   ]
 }
