@@ -1,0 +1,745 @@
+{
+  "updatedAt": "2026-09-03T23:37:16.076Z",
+  "createdAt": "2026-09-03T20:23:03.511Z",
+  "id": "Vq9ie8NCdDgOm6At",
+  "name": "Monteiro Ramalho - 2.7 - Fluxo de Erro (Notificações)",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Fluxo de erro — Notificações de Infração (Condominial)\n\nAcionado automaticamente quando o fluxo **2.2 - Criar Notificação** falha (erro de tool, timeout, Google Docs fora do ar, LLM sem resposta, etc.).\n\n**O que ele faz:**\n1. Busca a execução que falhou na API do n8n e varre o `runData` procurando o `notificacao_id`.\n2. Se achar → chama o callback do app com `status: \"erro\"`. A notificação passa a aparecer como **Erro** na lista e o botão **Reenviar para n8n** fica disponível no detalhe.\n3. Avisa a equipe no grupo do WhatsApp (MIA-LOGS).\n4. Registra o erro na tabela `erros_agente` do Supabase.\n",
+        "height": 380,
+        "width": 640,
+        "color": 7
+      },
+      "id": "c35bb47d-510d-4a33-8afa-f68e8e03d277",
+      "name": "LEIA-ME — Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Sem `notificacao_id`\n\nAcontece quando o 2.2 quebra **antes** de o registro existir no app — por exemplo, no `Trata os dados` ou no `Valida dados necessarios` de uma chamada vinda do WhatsApp (origem N8N).\n\nNesse caso não há o que marcar como erro no app; só o aviso para a equipe.",
+        "height": 260,
+        "width": 420,
+        "color": 3
+      },
+      "id": "a8963643-e326-414a-b488-929d58d39507",
+      "name": "Nota — sem ID",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        880
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "addac045-97f4-4ccc-86c7-24aff9b9c52d",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const N8N_BASE_URL = \"https://n8n.miabuilder.com\";\n\nconst data = $input.first().json;\n\nreturn [{\n  json: {\n    n8nBaseUrl: N8N_BASE_URL,\n    executionId: data.execution?.id || '',\n    workflowId: data.workflow?.id || '',\n    workflowName: data.workflow?.name || '',\n    errorMessage: data.execution?.error?.message || 'Erro desconhecido',\n    nodeFalhou: data.execution?.lastNodeExecuted || 'desconhecido',\n    executionUrl: data.execution?.url || ''\n  }\n}];"
+      },
+      "id": "83174e0c-f53a-460a-88af-6211b8118085",
+      "name": "Extrai Dados do Erro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.n8nBaseUrl }}/api/v1/executions/{{ $json.executionId }}?includeData=true",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "897a9406-58cb-4396-8a5c-9dc695d3afad",
+      "name": "Busca Execução Completa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        720
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =========================================================\n// Localiza a notificacao que estava sendo gerada quando o\n// fluxo 2.2 quebrou, varrendo o runData da execucao que falhou.\n// =========================================================\n\nconst CALLBACK_PADRAO =\n  'https://monteiroramalho.getmia.com.br/api/public/n8n-notificacao-callback';\n\nconst UUID_RE =\n  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n\n// Nos do fluxo 2.2 onde o id da notificacao aparece, em ordem de confianca.\nconst NODES_PRIORITARIOS = [\n  'Organiza os dados',\n  'id_notificacao',\n  'Cria notificação no sistema',\n  'Retorno para o sistema',\n  'Webhook'\n];\n\nconst CHAVES_ID = ['notificacao_id', 'id_notificacao'];\n\nfunction buscaChave(obj, chaves, depth = 0) {\n  if (!obj || typeof obj !== 'object' || depth > 12) return null;\n  for (const chave of chaves) {\n    const v = obj[chave];\n    if (typeof v === 'string' && v.trim() !== '') return v.trim();\n    if (typeof v === 'number') return String(v);\n  }\n  for (const key of Object.keys(obj)) {\n    const achou = buscaChave(obj[key], chaves, depth + 1);\n    if (achou) return achou;\n  }\n  return null;\n}\n\nfunction coletaItens(runData) {\n  const out = [];\n  for (const nodeName of Object.keys(runData)) {\n    for (const run of (runData[nodeName] || [])) {\n      for (const branch of (run?.data?.main || [])) {\n        for (const item of (branch || [])) {\n          if (item && item.json) out.push({ node: nodeName, json: item.json });\n        }\n      }\n    }\n  }\n  return out;\n}\n\nconst prev = $('Extrai Dados do Erro').first().json;\n\nlet runData = {};\ntry {\n  runData = $input.first().json?.data?.resultData?.runData || {};\n} catch (e) {\n  runData = {};\n}\n\nconst itens = coletaItens(runData);\n\n// ---------- id da notificacao ----------\nlet notificacaoId = null;\n\nfor (const nome of NODES_PRIORITARIOS) {\n  for (const it of itens) {\n    if (it.node !== nome) continue;\n    const achado = buscaChave(it.json, CHAVES_ID);\n    if (achado && UUID_RE.test(achado)) { notificacaoId = achado; break; }\n  }\n  if (notificacaoId) break;\n}\n\nif (!notificacaoId) {\n  for (const it of itens) {\n    const achado = buscaChave(it.json, CHAVES_ID);\n    if (achado && UUID_RE.test(achado)) { notificacaoId = achado; break; }\n  }\n}\n\n// ---------- contexto para a mensagem da equipe ----------\nfunction buscaEmTodos(chaves) {\n  for (const it of itens) {\n    const achado = buscaChave(it.json, chaves);\n    if (achado) return achado;\n  }\n  return null;\n}\n\nconst nomeCondominio = buscaEmTodos(['nome_condominio']) || '';\nconst bloco = buscaEmTodos(['numero_bloco', 'bloco']) || '';\nconst unidade = buscaEmTodos(['numero_unidade', 'unidade']) || '';\nconst origem = buscaEmTodos(['origem']) || '';\nconst telefone = buscaEmTodos(['botPhoneNumber', 'telefone']) || '';\n\nconst unidadeLabel = [\n  bloco ? `Bloco ${bloco}` : null,\n  unidade ? `Unidade ${unidade}` : null\n].filter(Boolean).join(' / ') || '';\n\n// ---------- url de callback ----------\nlet callbackUrl = buscaEmTodos(['callback_url']) || '';\nif (!/^https?:\\/\\//i.test(callbackUrl)) callbackUrl = CALLBACK_PADRAO;\n\n// ---------- mensagem gravada em notificacoes.n8n_error ----------\nconst erroCallback = `[${prev.nodeFalhou}] ${prev.errorMessage} (execução ${prev.executionId})`\n  .slice(0, 1500);\n\nreturn [{\n  json: {\n    ...prev,\n    notificacaoId: notificacaoId || '',\n    temNotificacao: !!notificacaoId,\n    callbackUrl,\n    nomeCondominio,\n    unidadeLabel,\n    origem,\n    telefone,\n    erroCallback\n  }\n}];"
+      },
+      "id": "4a02777f-6c2e-4159-8c1d-8b390a39f28f",
+      "name": "Extrai Dados da Notificação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "tem-notificacao",
+              "leftValue": "={{ $json.temNotificacao }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9ab6bba5-e50c-4c84-9b6a-e7fa25e78d04",
+      "name": "Achou a notificação?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.callbackUrl }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Callback-Secret",
+              "value": "Mia@2025"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"notificacao_id\": \"{{ $json.notificacaoId }}\",\n  \"status\": \"erro\",\n  \"error\": {{ JSON.stringify($json.erroCallback) }}\n}",
+        "options": {}
+      },
+      "id": "5ec08eb2-e29b-4879-adfe-b65eb7fef6a1",
+      "name": "Marca erro no app",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1248,
+        592
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "120363421402105782@g.us",
+        "messageText": "=🚨 *Falha ao gerar notificação de infração*\n\nFluxo: *{{ $('Extrai Dados do Erro').first().json.workflowName }}*\nNó que quebrou: {{ $('Extrai Dados do Erro').first().json.nodeFalhou }}\nErro: {{ $('Extrai Dados do Erro').first().json.errorMessage }}\n\nNotificação: `{{ $('Extrai Dados da Notificação').first().json.notificacaoId }}`\nCondomínio: {{ $('Extrai Dados da Notificação').first().json.nomeCondominio || 'não identificado' }}\nUnidade: {{ $('Extrai Dados da Notificação').first().json.unidadeLabel || '—' }}\nOrigem: {{ $('Extrai Dados da Notificação').first().json.origem || '—' }}\n\nExecução: {{ $('Extrai Dados do Erro').first().json.executionUrl }}\n\n✅ A notificação já foi marcada como *Erro* no app. Basta abrir a notificação e clicar em *Reenviar para n8n* para gerar de novo com os mesmos dados.",
+        "options_message": {}
+      },
+      "id": "548f994c-d4a6-4a06-a1f5-8c969b4133b0",
+      "name": "Avisa Equipe (notificação marcada)",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        592
+      ],
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "120363421402105782@g.us",
+        "messageText": "=⚠️ *Erro no fluxo de notificação — sem ID identificado*\n\nFluxo: *{{ $('Extrai Dados do Erro').first().json.workflowName }}*\nNó que quebrou: {{ $('Extrai Dados do Erro').first().json.nodeFalhou }}\nErro: {{ $('Extrai Dados do Erro').first().json.errorMessage }}\nCondomínio: {{ $('Extrai Dados da Notificação').first().json.nomeCondominio || 'não identificado' }}\nUnidade: {{ $('Extrai Dados da Notificação').first().json.unidadeLabel || '—' }}\n\nExecução: {{ $('Extrai Dados do Erro').first().json.executionUrl }}\n\n❌ Não foi possível identificar a notificação no app — *nada foi marcado como erro por lá*. Provavelmente o fluxo quebrou antes de criar o registro. Verifique a execução manualmente.",
+        "options_message": {}
+      },
+      "id": "399619bc-98fb-4fed-bf1f-863fafe83f80",
+      "name": "Avisa Equipe (sem ID)",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1248,
+        912
+      ],
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "tableId": "erros_agente",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "workflow_name",
+              "fieldValue": "={{ $json.workflowName }}"
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": "={{ $json.executionId }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $json.telefone || '' }}"
+            },
+            {
+              "fieldId": "node_falhou",
+              "fieldValue": "={{ $json.nodeFalhou }}"
+            },
+            {
+              "fieldId": "error_message",
+              "fieldValue": "={{ ($json.temNotificacao ? '[notificacao ' + $json.notificacaoId + '] ' : '') + $json.errorMessage }}"
+            },
+            {
+              "fieldId": "ia_desativada",
+              "fieldValue": "={{ false }}"
+            }
+          ]
+        }
+      },
+      "id": "81d09a58-dbd9-4089-a763-0538cae1753a",
+      "name": "Loga Erro no Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        960,
+        992
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "FcbZyD53kbkf6Vxp",
+          "name": "Monteiro - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extrai Dados do Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai Dados do Erro": {
+      "main": [
+        [
+          {
+            "node": "Busca Execução Completa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca Execução Completa": {
+      "main": [
+        [
+          {
+            "node": "Extrai Dados da Notificação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai Dados da Notificação": {
+      "main": [
+        [
+          {
+            "node": "Achou a notificação?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Loga Erro no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Achou a notificação?": {
+      "main": [
+        [
+          {
+            "node": "Marca erro no app",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avisa Equipe (sem ID)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca erro no app": {
+      "main": [
+        [
+          {
+            "node": "Avisa Equipe (notificação marcada)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "5f908871-f994-4c29-b03b-358dfc4fcccc",
+  "activeVersionId": "5f908871-f994-4c29-b03b-358dfc4fcccc",
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "Vq9ie8NCdDgOm6At",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-03T20:23:03.511Z",
+      "updatedAt": "2026-09-03T20:23:03.511Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "5f908871-f994-4c29-b03b-358dfc4fcccc",
+    "workflowId": "Vq9ie8NCdDgOm6At",
+    "nodes": [
+      {
+        "parameters": {
+          "content": "## Fluxo de erro — Notificações de Infração (Condominial)\n\nAcionado automaticamente quando o fluxo **2.2 - Criar Notificação** falha (erro de tool, timeout, Google Docs fora do ar, LLM sem resposta, etc.).\n\n**O que ele faz:**\n1. Busca a execução que falhou na API do n8n e varre o `runData` procurando o `notificacao_id`.\n2. Se achar → chama o callback do app com `status: \"erro\"`. A notificação passa a aparecer como **Erro** na lista e o botão **Reenviar para n8n** fica disponível no detalhe.\n3. Avisa a equipe no grupo do WhatsApp (MIA-LOGS).\n4. Registra o erro na tabela `erros_agente` do Supabase.\n",
+          "height": 380,
+          "width": 640,
+          "color": 7
+        },
+        "id": "c35bb47d-510d-4a33-8afa-f68e8e03d277",
+        "name": "LEIA-ME — Setup",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -80,
+          240
+        ]
+      },
+      {
+        "parameters": {
+          "content": "### Sem `notificacao_id`\n\nAcontece quando o 2.2 quebra **antes** de o registro existir no app — por exemplo, no `Trata os dados` ou no `Valida dados necessarios` de uma chamada vinda do WhatsApp (origem N8N).\n\nNesse caso não há o que marcar como erro no app; só o aviso para a equipe.",
+          "height": 260,
+          "width": 420,
+          "color": 3
+        },
+        "id": "a8963643-e326-414a-b488-929d58d39507",
+        "name": "Nota — sem ID",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1600,
+          880
+        ]
+      },
+      {
+        "parameters": {},
+        "id": "addac045-97f4-4ccc-86c7-24aff9b9c52d",
+        "name": "Error Trigger",
+        "type": "n8n-nodes-base.errorTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          720
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const N8N_BASE_URL = \"https://n8n.miabuilder.com\";\n\nconst data = $input.first().json;\n\nreturn [{\n  json: {\n    n8nBaseUrl: N8N_BASE_URL,\n    executionId: data.execution?.id || '',\n    workflowId: data.workflow?.id || '',\n    workflowName: data.workflow?.name || '',\n    errorMessage: data.execution?.error?.message || 'Erro desconhecido',\n    nodeFalhou: data.execution?.lastNodeExecuted || 'desconhecido',\n    executionUrl: data.execution?.url || ''\n  }\n}];"
+        },
+        "id": "83174e0c-f53a-460a-88af-6211b8118085",
+        "name": "Extrai Dados do Erro",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          240,
+          720
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.n8nBaseUrl }}/api/v1/executions/{{ $json.executionId }}?includeData=true",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "897a9406-58cb-4396-8a5c-9dc695d3afad",
+        "name": "Busca Execução Completa",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          480,
+          720
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true,
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "// =========================================================\n// Localiza a notificacao que estava sendo gerada quando o\n// fluxo 2.2 quebrou, varrendo o runData da execucao que falhou.\n// =========================================================\n\nconst CALLBACK_PADRAO =\n  'https://monteiroramalho.getmia.com.br/api/public/n8n-notificacao-callback';\n\nconst UUID_RE =\n  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n\n// Nos do fluxo 2.2 onde o id da notificacao aparece, em ordem de confianca.\nconst NODES_PRIORITARIOS = [\n  'Organiza os dados',\n  'id_notificacao',\n  'Cria notificação no sistema',\n  'Retorno para o sistema',\n  'Webhook'\n];\n\nconst CHAVES_ID = ['notificacao_id', 'id_notificacao'];\n\nfunction buscaChave(obj, chaves, depth = 0) {\n  if (!obj || typeof obj !== 'object' || depth > 12) return null;\n  for (const chave of chaves) {\n    const v = obj[chave];\n    if (typeof v === 'string' && v.trim() !== '') return v.trim();\n    if (typeof v === 'number') return String(v);\n  }\n  for (const key of Object.keys(obj)) {\n    const achou = buscaChave(obj[key], chaves, depth + 1);\n    if (achou) return achou;\n  }\n  return null;\n}\n\nfunction coletaItens(runData) {\n  const out = [];\n  for (const nodeName of Object.keys(runData)) {\n    for (const run of (runData[nodeName] || [])) {\n      for (const branch of (run?.data?.main || [])) {\n        for (const item of (branch || [])) {\n          if (item && item.json) out.push({ node: nodeName, json: item.json });\n        }\n      }\n    }\n  }\n  return out;\n}\n\nconst prev = $('Extrai Dados do Erro').first().json;\n\nlet runData = {};\ntry {\n  runData = $input.first().json?.data?.resultData?.runData || {};\n} catch (e) {\n  runData = {};\n}\n\nconst itens = coletaItens(runData);\n\n// ---------- id da notificacao ----------\nlet notificacaoId = null;\n\nfor (const nome of NODES_PRIORITARIOS) {\n  for (const it of itens) {\n    if (it.node !== nome) continue;\n    const achado = buscaChave(it.json, CHAVES_ID);\n    if (achado && UUID_RE.test(achado)) { notificacaoId = achado; break; }\n  }\n  if (notificacaoId) break;\n}\n\nif (!notificacaoId) {\n  for (const it of itens) {\n    const achado = buscaChave(it.json, CHAVES_ID);\n    if (achado && UUID_RE.test(achado)) { notificacaoId = achado; break; }\n  }\n}\n\n// ---------- contexto para a mensagem da equipe ----------\nfunction buscaEmTodos(chaves) {\n  for (const it of itens) {\n    const achado = buscaChave(it.json, chaves);\n    if (achado) return achado;\n  }\n  return null;\n}\n\nconst nomeCondominio = buscaEmTodos(['nome_condominio']) || '';\nconst bloco = buscaEmTodos(['numero_bloco', 'bloco']) || '';\nconst unidade = buscaEmTodos(['numero_unidade', 'unidade']) || '';\nconst origem = buscaEmTodos(['origem']) || '';\nconst telefone = buscaEmTodos(['botPhoneNumber', 'telefone']) || '';\n\nconst unidadeLabel = [\n  bloco ? `Bloco ${bloco}` : null,\n  unidade ? `Unidade ${unidade}` : null\n].filter(Boolean).join(' / ') || '';\n\n// ---------- url de callback ----------\nlet callbackUrl = buscaEmTodos(['callback_url']) || '';\nif (!/^https?:\\/\\//i.test(callbackUrl)) callbackUrl = CALLBACK_PADRAO;\n\n// ---------- mensagem gravada em notificacoes.n8n_error ----------\nconst erroCallback = `[${prev.nodeFalhou}] ${prev.errorMessage} (execução ${prev.executionId})`\n  .slice(0, 1500);\n\nreturn [{\n  json: {\n    ...prev,\n    notificacaoId: notificacaoId || '',\n    temNotificacao: !!notificacaoId,\n    callbackUrl,\n    nomeCondominio,\n    unidadeLabel,\n    origem,\n    telefone,\n    erroCallback\n  }\n}];"
+        },
+        "id": "4a02777f-6c2e-4159-8c1d-8b390a39f28f",
+        "name": "Extrai Dados da Notificação",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          720,
+          720
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "tem-notificacao",
+                "leftValue": "={{ $json.temNotificacao }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "9ab6bba5-e50c-4c84-9b6a-e7fa25e78d04",
+        "name": "Achou a notificação?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          960,
+          720
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $json.callbackUrl }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-Callback-Secret",
+                "value": "Mia@2025"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"notificacao_id\": \"{{ $json.notificacaoId }}\",\n  \"status\": \"erro\",\n  \"error\": {{ JSON.stringify($json.erroCallback) }}\n}",
+          "options": {}
+        },
+        "id": "5ec08eb2-e29b-4879-adfe-b65eb7fef6a1",
+        "name": "Marca erro no app",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1248,
+          592
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "MIA-LOGS",
+          "remoteJid": "120363421402105782@g.us",
+          "messageText": "=🚨 *Falha ao gerar notificação de infração*\n\nFluxo: *{{ $('Extrai Dados do Erro').first().json.workflowName }}*\nNó que quebrou: {{ $('Extrai Dados do Erro').first().json.nodeFalhou }}\nErro: {{ $('Extrai Dados do Erro').first().json.errorMessage }}\n\nNotificação: `{{ $('Extrai Dados da Notificação').first().json.notificacaoId }}`\nCondomínio: {{ $('Extrai Dados da Notificação').first().json.nomeCondominio || 'não identificado' }}\nUnidade: {{ $('Extrai Dados da Notificação').first().json.unidadeLabel || '—' }}\nOrigem: {{ $('Extrai Dados da Notificação').first().json.origem || '—' }}\n\nExecução: {{ $('Extrai Dados do Erro').first().json.executionUrl }}\n\n✅ A notificação já foi marcada como *Erro* no app. Basta abrir a notificação e clicar em *Reenviar para n8n* para gerar de novo com os mesmos dados.",
+          "options_message": {}
+        },
+        "id": "548f994c-d4a6-4a06-a1f5-8c969b4133b0",
+        "name": "Avisa Equipe (notificação marcada)",
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1520,
+          592
+        ],
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "MIA-LOGS",
+          "remoteJid": "120363421402105782@g.us",
+          "messageText": "=⚠️ *Erro no fluxo de notificação — sem ID identificado*\n\nFluxo: *{{ $('Extrai Dados do Erro').first().json.workflowName }}*\nNó que quebrou: {{ $('Extrai Dados do Erro').first().json.nodeFalhou }}\nErro: {{ $('Extrai Dados do Erro').first().json.errorMessage }}\nCondomínio: {{ $('Extrai Dados da Notificação').first().json.nomeCondominio || 'não identificado' }}\nUnidade: {{ $('Extrai Dados da Notificação').first().json.unidadeLabel || '—' }}\n\nExecução: {{ $('Extrai Dados do Erro').first().json.executionUrl }}\n\n❌ Não foi possível identificar a notificação no app — *nada foi marcado como erro por lá*. Provavelmente o fluxo quebrou antes de criar o registro. Verifique a execução manualmente.",
+          "options_message": {}
+        },
+        "id": "399619bc-98fb-4fed-bf1f-863fafe83f80",
+        "name": "Avisa Equipe (sem ID)",
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1248,
+          912
+        ],
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "tableId": "erros_agente",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "workflow_name",
+                "fieldValue": "={{ $json.workflowName }}"
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": "={{ $json.executionId }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $json.telefone || '' }}"
+              },
+              {
+                "fieldId": "node_falhou",
+                "fieldValue": "={{ $json.nodeFalhou }}"
+              },
+              {
+                "fieldId": "error_message",
+                "fieldValue": "={{ ($json.temNotificacao ? '[notificacao ' + $json.notificacaoId + '] ' : '') + $json.errorMessage }}"
+              },
+              {
+                "fieldId": "ia_desativada",
+                "fieldValue": "={{ false }}"
+              }
+            ]
+          }
+        },
+        "id": "81d09a58-dbd9-4089-a763-0538cae1753a",
+        "name": "Loga Erro no Supabase",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          960,
+          992
+        ],
+        "credentials": {
+          "supabaseApi": {
+            "id": "FcbZyD53kbkf6Vxp",
+            "name": "Monteiro - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput"
+      }
+    ],
+    "connections": {
+      "Error Trigger": {
+        "main": [
+          [
+            {
+              "node": "Extrai Dados do Erro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai Dados do Erro": {
+        "main": [
+          [
+            {
+              "node": "Busca Execução Completa",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca Execução Completa": {
+        "main": [
+          [
+            {
+              "node": "Extrai Dados da Notificação",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai Dados da Notificação": {
+        "main": [
+          [
+            {
+              "node": "Achou a notificação?",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Loga Erro no Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Achou a notificação?": {
+        "main": [
+          [
+            {
+              "node": "Marca erro no app",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Avisa Equipe (sem ID)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marca erro no app": {
+        "main": [
+          [
+            {
+              "node": "Avisa Equipe (notificação marcada)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version 5f908871",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-09-03T23:37:16.077Z",
+    "updatedAt": "2026-09-03T23:37:35.779Z"
+  },
+  "tags": []
+}
