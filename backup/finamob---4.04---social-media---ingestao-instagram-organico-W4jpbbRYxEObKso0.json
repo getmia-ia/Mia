@@ -1,0 +1,1392 @@
+{
+  "updatedAt": "2026-09-03T20:57:13.591Z",
+  "createdAt": "2026-09-03T15:58:38.492Z",
+  "id": "W4jpbbRYxEObKso0",
+  "name": "Finamob - 4.04 - Social Media - Ingestao Instagram Organico",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6,
+              "triggerAtMinute": 50
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -288,
+        928
+      ],
+      "id": "8b12b868-79f4-4e74-be47-65b37eca11ed",
+      "name": "Agendamento"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -288,
+        1104
+      ],
+      "id": "83faa3e7-a759-4af9-89ff-700fe51ab03c",
+      "name": "Manual"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select perfil_id, username, nome, timezone,\n       janela_insights, janela_posts\n  from ig_perfil\n where ativo\n order by perfil_id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -64,
+        928
+      ],
+      "id": "bf1d0ef6-8078-4e6b-8967-338169c3da1e",
+      "name": "Perfis Ativos",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        160,
+        928
+      ],
+      "id": "b2e1ff37-9d8f-462d-98d5-a88597b10461",
+      "name": "Loop Perfis"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Monta as janelas e as URLs da Instagram Graph API, no fuso do perfil.\n// Sem URLSearchParams e sem Intl: o sandbox do task runner do n8n nao expoe\n// nenhum dos dois. A data sai do $now (Luxon).\nconst p  = $input.first().json;\nconst tz = p.timezone || 'America/Sao_Paulo';\n\nconst base = $now.setZone(tz).startOf('day');       // hoje 00:00 no fuso\nconst dia  = base.minus({ days: 1 }).toFormat('yyyy-MM-dd');   // D-1\n\n// BORDAS COMO UNIX TIMESTAMP DE MEIA-NOITE NO FUSO DO PERFIL.\n//\n// Passar data como string faz a Meta cravar a janela na meia-noite UTC.\n// Medido na API: since=2026-09-01 devolveu a janela\n//   2026-09-01 00:00 UTC -> 2026-09-02 00:00 UTC\n// que em Sao Paulo e 31/08 21:00 -> 01/09 21:00. Tres horas deslocado, e as\n// tres primeiras horas do dia caem no bucket seguinte.\n//\n// Com timestamp a janela e o dia de Sao Paulo de verdade, e casa com o dia\n// de ads_insight_dia — que e o que torna o custo por seguidor um join direto.\nconst ts = (dt) => String(Math.floor(dt.toSeconds()));\n\nconst d1_de  = ts(base.minus({ days: 1 }));   // D-1 00:00 no fuso\nconst d1_ate = ts(base);                      // D   00:00 no fuso\n\nconst jIns  = Math.min(Number(p.janela_insights || 30), 30);  // teto da API\nconst jPost = Number(p.janela_posts || 90);\n\nconst G = 'https://graph.facebook.com/v23.0/';\nconst q = (o) => Object.keys(o)\n  .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(o[k]))\n  .join('&');\n\n// 1. O SNAPSHOT. followers_count e o valor do INSTANTE — a Meta nao guarda\n//    historico. Esta e a unica chamada cuja falha e irrecuperavel.\nconst url_perfil = G + p.perfil_id + '?' + q({\n  fields: 'id,username,name,followers_count,follows_count,media_count'\n});\n\n// 2. Os tres agregados. `views` substituiu `impressions` em 03/2025 e as tres\n//    SO existem como metric_type=total_value — perderam a serie diaria. Logo:\n//    uma chamada por dia, e nada de historico para tras.\nconst url_totais = G + p.perfil_id + '/insights?' + q({\n  metric: 'views,profile_views,website_clicks',\n  metric_type: 'total_value', period: 'day',\n  since: d1_de, until: d1_ate\n});\n\n// 3. Ganhos e perdas. Breakdown por follow_type devolve FOLLOWER e\n//    NON_FOLLOWER. Confirmado na API.\nconst url_follows = G + p.perfil_id + '/insights?' + q({\n  metric: 'follows_and_unfollows', metric_type: 'total_value',\n  breakdown: 'follow_type', period: 'day',\n  since: d1_de, until: d1_ate\n});\n\n// 4. Alcance: a UNICA das quatro que mantem serie diaria, entao vem em bloco\n//    de 30 dias. O bucket dela e do Pacifico, nao do fuso do perfil — o\n//    Code node rotula com isso em mente.\nconst url_alcance = G + p.perfil_id + '/insights?' + q({\n  metric: 'reach', period: 'day',\n  since: ts(base.minus({ days: jIns })), until: ts(base)\n});\n\n// 5. Posts. like_count e comments_count vem no proprio no de midia — nao\n//    precisa de uma chamada de insights por post.\nconst url_midias = G + p.perfil_id + '/media?' + q({\n  fields: 'id,caption,media_type,media_product_type,permalink,thumbnail_url,'\n        + 'timestamp,like_count,comments_count',\n  since: ts(base.minus({ days: jPost })), limit: '50'\n});\n\nreturn [{ json: { ...p, dia, d1_de, d1_ate,\n                  url_perfil, url_totais, url_follows, url_alcance,\n                  url_midias } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        1056
+      ],
+      "id": "3e64b076-6eca-4111-8479-ca7c78133b47",
+      "name": "Janela"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into ads_ingestao_log (fluxo, conta_id, janela_de, janela_ate, status)\nvalues ('4.04', $1, $2::date, $3::date, 'rodando')\nreturning id;",
+        "options": {
+          "queryReplacement": "={{ [$json.perfil_id, $json.dia, $json.dia] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        624,
+        1056
+      ],
+      "id": "42ddc807-5f0b-4b3b-b541-fbd199caa6c2",
+      "name": "Log Inicio",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Janela').first().json.url_perfil }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "facebookGraphApi",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        832,
+        1056
+      ],
+      "id": "6aab5b09-0344-4e55-bff7-834c6c9713ba",
+      "name": "Perfil Agora",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "bqvhO7I9HxNLrUbM",
+          "name": "app-mia-finamob"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- O PASSO SAGRADO. followers_count e um retrato do instante: se este\n-- insert nao acontecer hoje, o ponto de hoje na curva nao existe nunca mais.\n-- Por isso ele vem ANTES dos insights e dos posts — se qualquer coisa depois\n-- falhar, o snapshot ja esta gravado.\ninsert into ig_perfil_dia (dia, perfil_id, seguidores_total)\nvalues ($1::date, $2, $3::bigint)\non conflict (dia, perfil_id) do update set\n  seguidores_total = coalesce(excluded.seguidores_total, ig_perfil_dia.seguidores_total),\n  -- valor medido derruba valor deduzido\n  reconstruido = case when excluded.seguidores_total is not null\n                      then false else ig_perfil_dia.reconstruido end,\n  coletado_em = now()\nreturning dia, perfil_id, seguidores_total;\n\n-- Mantem username/nome em dia sem uma chamada extra.\nupdate ig_perfil\n   set username = coalesce($4, username),\n       nome     = coalesce($5, nome)\n where perfil_id = $2;",
+        "options": {
+          "queryReplacement": "={{ [$('Janela').first().json.dia, $('Janela').first().json.perfil_id, $json.followers_count ?? null, $json.username ?? null, $json.name ?? null] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1056,
+        976
+      ],
+      "id": "e495ac46-a39b-4d6b-943b-898071abbd95",
+      "name": "Grava Snapshot",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Janela').first().json.url_totais }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "facebookGraphApi",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1280,
+        976
+      ],
+      "id": "93989f18-7424-46f4-9595-3edefc144893",
+      "name": "Totais do Dia",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "bqvhO7I9HxNLrUbM",
+          "name": "app-mia-finamob"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Janela').first().json.url_follows }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "facebookGraphApi",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1504,
+        976
+      ],
+      "id": "b25ce367-6cc1-4a27-92bd-748adee239ae",
+      "name": "Follows e Unfollows",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "bqvhO7I9HxNLrUbM",
+          "name": "app-mia-finamob"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Janela').first().json.url_alcance }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "facebookGraphApi",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1728,
+        976
+      ],
+      "id": "792c5d0b-34bb-4362-aa04-bd02ab6e1494",
+      "name": "Alcance 30d",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "bqvhO7I9HxNLrUbM",
+          "name": "app-mia-finamob"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $('Janela').first().json;\nconst porDia = {};\n\nconst linha = (d) => (porDia[d] = porDia[d] || {\n  dia: d, perfil_id: String(j.perfil_id),\n  ganhos: null, perdidos: null,\n  alcance: null, visualizacoes: null, visitas_perfil: null, cliques_site: null,\n});\n\nconst PACIFICO = 'America/Los_Angeles';\nconst diaDoBucket = (endTime) =>\n  DateTime.fromISO(endTime, { zone: 'utc' })\n          .setZone(PACIFICO)\n          .minus({ days: 1 })\n          .toFormat('yyyy-MM-dd');\n\nconst COL_TOTAL = { views: 'visualizacoes', profile_views: 'visitas_perfil',\n                    website_clicks: 'cliques_site' };\nconst COL_SERIE = { reach: 'alcance' };\n\nconst allItems = [];\nfor (const src of ['Totais do Dia', 'Follows e Unfollows', 'Alcance 30d']) {\n  try { allItems.push(...$(src).all()); } catch(e) {}\n}\nfor (const item of allItems) {\n  const body = item.json || {};\n  if (body.error) continue;\n  for (const m of (body.data || [])) {\n    const nome = m.name;\n    const tv   = m.total_value;\n\n    if (tv && tv.value !== undefined && tv.value !== null && COL_TOTAL[nome]) {\n      linha(j.dia)[COL_TOTAL[nome]] = Number(tv.value);\n    }\n\n    if (tv && tv.breakdowns) {\n      const L = linha(j.dia);\n      for (const b of tv.breakdowns) {\n        for (const r of (b.results || [])) {\n          const k = String((r.dimension_values || [])[0] || '').toUpperCase();\n          if (k === 'NON_FOLLOWER' || k.indexOf('UNFOLLOW') >= 0) {\n            L.perdidos = Number(r.value ?? 0);\n          } else if (k === 'FOLLOWER' || k === 'FOLLOW') {\n            L.ganhos = Number(r.value ?? 0);\n          }\n        }\n      }\n    }\n\n    for (const v of (m.values || [])) {\n      if (!v.end_time || !COL_SERIE[nome]) continue;\n      linha(diaDoBucket(v.end_time))[COL_SERIE[nome]] = Number(v.value ?? 0);\n    }\n  }\n}\n\nconst rows = Object.keys(porDia).sort().map(k => porDia[k]);\nreturn [{ json: {\n  perfil_id: String(j.perfil_id), dia: j.dia,\n  linhas: rows.length,\n  payload: JSON.stringify(rows),\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1952,
+        976
+      ],
+      "id": "b46ee4ef-98d7-4417-b8dc-4dfcc9839e73",
+      "name": "Normaliza Serie"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Preenche ganhos/perdas/alcance dos ultimos ~30 dias. Cria linhas para dias\n-- passados com seguidores_total null — que e exatamente do que\n-- fn_ig_reconstroi_seguidores() precisa para desenhar a curva para tras.\nwith src as (\n  select * from jsonb_to_recordset($1::jsonb) as x(\n    dia            date,\n    perfil_id      text,\n    ganhos         bigint,\n    perdidos       bigint,\n    alcance        bigint,\n    visualizacoes  bigint,\n    visitas_perfil bigint,\n    cliques_site   bigint\n  )\n),\ngravado as (\n  insert into ig_perfil_dia\n    (dia, perfil_id, seguidores_ganhos, seguidores_perdidos,\n     alcance, visualizacoes, visitas_perfil, cliques_site)\n  select dia, perfil_id, ganhos, perdidos,\n         alcance, visualizacoes, visitas_perfil, cliques_site\n  from src\n  on conflict (dia, perfil_id) do update set\n    -- coalesce em todas: uma chamada que falhou e voltou null nunca apaga\n    -- um valor que ja estava gravado.\n    seguidores_ganhos   = coalesce(excluded.seguidores_ganhos,   ig_perfil_dia.seguidores_ganhos),\n    seguidores_perdidos = coalesce(excluded.seguidores_perdidos, ig_perfil_dia.seguidores_perdidos),\n    alcance             = coalesce(excluded.alcance,             ig_perfil_dia.alcance),\n    visualizacoes       = coalesce(excluded.visualizacoes,       ig_perfil_dia.visualizacoes),\n    visitas_perfil      = coalesce(excluded.visitas_perfil,      ig_perfil_dia.visitas_perfil),\n    cliques_site        = coalesce(excluded.cliques_site,        ig_perfil_dia.cliques_site),\n    coletado_em         = now()\n  returning 1\n)\nselect (select count(*) from gravado)                         as dias_gravados,\n       fn_ig_reconstroi_seguidores($2)                        as dias_reconstruidos;",
+        "options": {
+          "queryReplacement": "={{ [$json.payload, $json.perfil_id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2176,
+        976
+      ],
+      "id": "3070d8ba-e680-41d1-937f-859a45f3320c",
+      "name": "Atualiza Serie",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Janela').first().json.url_midias }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "facebookGraphApi",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body.paging?.next }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.paging?.next }}",
+              "limitPagesFetched": true,
+              "requestInterval": 250
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        976
+      ],
+      "id": "93ddcb0c-5917-48d7-8c6b-d86854ce7c64",
+      "name": "Midias",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "bqvhO7I9HxNLrUbM",
+          "name": "app-mia-finamob"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Uma linha por post. `dia` = D-1, o mesmo do fato de perfil, para a taxa\n// de engajamento ter denominador do mesmo dia.\n//\n// ATENCAO: curtidas e comentarios sao ACUMULADOS do post, nao do dia. O\n// snapshot diario e proposital — vw_ig_post_delta tira a diferenca quando\n// alguem quiser \"curtidas do dia\".\nconst j = $('Janela').first().json;\nconst rows = [];\nlet paginas = 0;\n\nfor (const item of $input.all()) {\n  const body = item.json || {};\n  if (body.error) continue;\n  paginas++;\n  for (const m of (body.data || [])) {\n    rows.push({\n      dia: j.dia,\n      post_id: String(m.id),\n      perfil_id: String(j.perfil_id),\n      tipo: m.media_type || null,\n      produto: m.media_product_type || null,\n      caption: m.caption ? String(m.caption).slice(0, 2200) : null,\n      permalink: m.permalink || null,\n      thumbnail_url: m.thumbnail_url || null,\n      publicado_em: m.timestamp || null,\n      curtidas: m.like_count === undefined ? null : Number(m.like_count),\n      comentarios: m.comments_count === undefined ? null : Number(m.comments_count),\n    });\n  }\n}\n\nreturn [{ json: {\n  perfil_id: String(j.perfil_id), dia: j.dia,\n  paginas, posts: rows.length,\n  payload: JSON.stringify(rows),\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2624,
+        976
+      ],
+      "id": "d0171ec7-5c47-4a37-8c43-1d76a69e0151",
+      "name": "Normaliza Posts"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with src as (\n  select * from jsonb_to_recordset($1::jsonb) as x(\n    dia           date,\n    post_id       text,\n    perfil_id     text,\n    tipo          text,\n    produto       text,\n    caption       text,\n    permalink     text,\n    thumbnail_url text,\n    publicado_em  timestamptz,\n    curtidas      bigint,\n    comentarios   bigint\n  )\n),\ndim as (\n  insert into ig_post\n    (post_id, perfil_id, tipo, produto, caption, permalink, thumbnail_url, publicado_em)\n  select distinct on (post_id)\n         post_id, perfil_id, tipo, produto, caption, permalink, thumbnail_url, publicado_em\n  from src\n  order by post_id\n  on conflict (post_id) do update set\n    caption       = coalesce(excluded.caption,       ig_post.caption),\n    permalink     = coalesce(excluded.permalink,     ig_post.permalink),\n    thumbnail_url = coalesce(excluded.thumbnail_url, ig_post.thumbnail_url),\n    tipo          = coalesce(excluded.tipo,          ig_post.tipo),\n    produto       = coalesce(excluded.produto,       ig_post.produto),\n    publicado_em  = coalesce(excluded.publicado_em,  ig_post.publicado_em),\n    atualizado_em = now()\n  returning 1\n),\nfato as (\n  insert into ig_post_dia (dia, post_id, curtidas, comentarios)\n  select dia, post_id, curtidas, comentarios from src\n  on conflict (dia, post_id) do update set\n    curtidas    = coalesce(excluded.curtidas,    ig_post_dia.curtidas),\n    comentarios = coalesce(excluded.comentarios, ig_post_dia.comentarios),\n    coletado_em = now()\n  returning 1\n)\nselect (select count(*) from fato) as snapshots,\n       (select count(*) from dim)  as posts_tocados;",
+        "options": {
+          "queryReplacement": "={{ [$json.payload] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2848,
+        976
+      ],
+      "id": "087d0597-0d14-4ee1-b214-b9a917464efb",
+      "name": "Upsert Posts",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update ads_ingestao_log\n   set status = 'ok',\n       linhas = $2::int,\n       paginas = $3::int,\n       terminado_em = now()\n where id = $1::bigint\nreturning conta_id, linhas;",
+        "options": {
+          "queryReplacement": "={{ [$('Log Inicio').first().json.id, $('Normaliza Posts').first().json.posts, $('Normaliza Posts').first().json.paginas] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3072,
+        976
+      ],
+      "id": "a2cd3d60-4d1d-4dff-90dc-f270230e1cc5",
+      "name": "Log Fim",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update ads_ingestao_log\n   set status = 'erro', erro = $2, terminado_em = now()\n where id = $1::bigint\nreturning conta_id;",
+        "options": {
+          "queryReplacement": "={{ [$('Log Inicio').first().json.id, JSON.stringify($json.error ?? $json).slice(0, 1800)] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1056,
+        1184
+      ],
+      "id": "6c1db9b4-3281-41e5-9780-f3d51a4b72ea",
+      "name": "Log Erro",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "5534992150692",
+        "messageText": "=📸 *INSTAGRAM ORGANICO FALHOU*\n\nPerfil: @{{ $('Janela').first().json.username }}\nDia perdido: {{ $('Janela').first().json.dia }}\n\n```{{ JSON.stringify($('Log Erro').first().json).slice(0,300) }}```\n\n_O total de seguidores deste dia NAO tem como ser recuperado depois._",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        1184
+      ],
+      "id": "5fa21046-8b32-42d6-9a7d-c2b890b240a5",
+      "name": "Avisa Falha",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4.04 · Ingestão Instagram Orgânico\n\n**Outra API.** Aqui é a Instagram Graph API (conteúdo), não a Marketing API. Precisa de `instagram_basic`, `instagram_manage_insights` e `pages_read_engagement` — permissões que o app **não** ganha junto com as de anúncios. Se o 4.01 funciona e este dá `(#200)`, é isso.\n\n**O snapshot não tem backfill.** `followers_count` é o valor do instante; a Meta não guarda histórico de total de seguidores. Dia sem execução = ponto que não existe mais. É o único fluxo em que perder um dia é permanente.\n\n**Por isso a ordem.** `Grava Snapshot` vem ANTES dos insights e dos posts. Se qualquer coisa depois falhar, o ponto do dia já está no banco.\n\n**Ganhos e perdas seguem mesmo com erro.** `follows_and_unfollows` é de 01/2026 e pode não estar liberado. O nó está em `continueRegularOutput`: falhando, as colunas ficam `null` e o snapshot sobrevive.\n\n**A curva para trás é dedutível, uma vez.** Com o total de hoje e o líquido de cada dia, `fn_ig_reconstroi_seguidores()` deduz uns 30 dias de curva. Marca as linhas com `reconstruido = true` — dado deduzido, não medido.\n\n**Curtidas são acumuladas.** `ig_post_dia` é snapshot diário do total do post, não do dia. Diferença do dia: `vw_ig_post_delta`.\n\n**Custo por seguidor cruza duas fontes.** Gasto de `ads_insight_dia`, seguidores de `ig_perfil_dia`, ligados por `ig_perfil_conta`. Usa `spend` bruto: campanha de engajamento tem `entra_no_custo = false`, então filtrar por custo de aquisição daria zero.",
+        "height": 792,
+        "width": 560,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -288,
+        64
+      ],
+      "id": "0e374af9-bafd-4776-8f1c-dbea3887201b",
+      "name": "Nota"
+    },
+    {
+      "parameters": {
+        "content": "O fluxo:\n\nTodo dia às 06:50, ele pergunta quatro coisas ao Instagram sobre cada perfil e anota as respostas no banco.\n\nAs quatro perguntas:\n\nQuantos seguidores você tem agora? → 26.520\nOntem, quantas pessoas começaram a te seguir e quantas deixaram? → 17 entraram, 18 saíram\nOntem, quantas visualizações, visitas ao perfil e cliques no link? → 6.490 / 93 / 0\nQuais são seus posts, e quantas curtidas e comentários cada um tem? → 42 posts\n\nAnota tudo com a etiqueta \"ontem\", porque ele roda de manhã e o dia de ontem já fechou. E faz isso para os cinco perfis, um por vez.\n\nO banco: duas famílias de tabelas\n\nFamília ads_ — dinheiro gasto em anúncio\nFamília ig_ — o que acontece no perfil do Instagram sem pagar\n\nSão separadas porque vêm de lugares diferentes do Instagram e respondem perguntas diferentes.",
+        "height": 528,
+        "width": 912
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        400,
+        112
+      ],
+      "id": "1bc4e63a-46da-4d5b-a9eb-ab02fbe8fd65",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "Agendamento": {
+      "main": [
+        [
+          {
+            "node": "Perfis Ativos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual": {
+      "main": [
+        [
+          {
+            "node": "Perfis Ativos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Perfis Ativos": {
+      "main": [
+        [
+          {
+            "node": "Loop Perfis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Perfis": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Janela",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Janela": {
+      "main": [
+        [
+          {
+            "node": "Log Inicio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Inicio": {
+      "main": [
+        [
+          {
+            "node": "Perfil Agora",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Perfil Agora": {
+      "main": [
+        [
+          {
+            "node": "Grava Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Grava Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Totais do Dia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Totais do Dia": {
+      "main": [
+        [
+          {
+            "node": "Follows e Unfollows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Follows e Unfollows": {
+      "main": [
+        [
+          {
+            "node": "Alcance 30d",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alcance 30d": {
+      "main": [
+        [
+          {
+            "node": "Normaliza Serie",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliza Serie": {
+      "main": [
+        [
+          {
+            "node": "Atualiza Serie",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza Serie": {
+      "main": [
+        [
+          {
+            "node": "Midias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Midias": {
+      "main": [
+        [
+          {
+            "node": "Normaliza Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliza Posts": {
+      "main": [
+        [
+          {
+            "node": "Upsert Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Posts": {
+      "main": [
+        [
+          {
+            "node": "Log Fim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Fim": {
+      "main": [
+        [
+          {
+            "node": "Loop Perfis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Erro": {
+      "main": [
+        [
+          {
+            "node": "Avisa Falha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisa Falha": {
+      "main": [
+        [
+          {
+            "node": "Loop Perfis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "node:Agendamento": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": null,
+  "versionId": "70cac048-546f-4ea3-b091-760376c8d45a",
+  "activeVersionId": "70cac048-546f-4ea3-b091-760376c8d45a",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "W4jpbbRYxEObKso0",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-03T15:58:38.492Z",
+      "updatedAt": "2026-09-03T15:58:38.492Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "70cac048-546f-4ea3-b091-760376c8d45a",
+    "workflowId": "W4jpbbRYxEObKso0",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 6,
+                "triggerAtMinute": 50
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -288,
+          928
+        ],
+        "id": "8b12b868-79f4-4e74-be47-65b37eca11ed",
+        "name": "Agendamento"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          -288,
+          1104
+        ],
+        "id": "83faa3e7-a759-4af9-89ff-700fe51ab03c",
+        "name": "Manual"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "select perfil_id, username, nome, timezone,\n       janela_insights, janela_posts\n  from ig_perfil\n where ativo\n order by perfil_id;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -64,
+          928
+        ],
+        "id": "bf1d0ef6-8078-4e6b-8967-338169c3da1e",
+        "name": "Perfis Ativos",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "options": {
+            "reset": false
+          }
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          160,
+          928
+        ],
+        "id": "b2e1ff37-9d8f-462d-98d5-a88597b10461",
+        "name": "Loop Perfis"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Monta as janelas e as URLs da Instagram Graph API, no fuso do perfil.\n// Sem URLSearchParams e sem Intl: o sandbox do task runner do n8n nao expoe\n// nenhum dos dois. A data sai do $now (Luxon).\nconst p  = $input.first().json;\nconst tz = p.timezone || 'America/Sao_Paulo';\n\nconst base = $now.setZone(tz).startOf('day');       // hoje 00:00 no fuso\nconst dia  = base.minus({ days: 1 }).toFormat('yyyy-MM-dd');   // D-1\n\n// BORDAS COMO UNIX TIMESTAMP DE MEIA-NOITE NO FUSO DO PERFIL.\n//\n// Passar data como string faz a Meta cravar a janela na meia-noite UTC.\n// Medido na API: since=2026-09-01 devolveu a janela\n//   2026-09-01 00:00 UTC -> 2026-09-02 00:00 UTC\n// que em Sao Paulo e 31/08 21:00 -> 01/09 21:00. Tres horas deslocado, e as\n// tres primeiras horas do dia caem no bucket seguinte.\n//\n// Com timestamp a janela e o dia de Sao Paulo de verdade, e casa com o dia\n// de ads_insight_dia — que e o que torna o custo por seguidor um join direto.\nconst ts = (dt) => String(Math.floor(dt.toSeconds()));\n\nconst d1_de  = ts(base.minus({ days: 1 }));   // D-1 00:00 no fuso\nconst d1_ate = ts(base);                      // D   00:00 no fuso\n\nconst jIns  = Math.min(Number(p.janela_insights || 30), 30);  // teto da API\nconst jPost = Number(p.janela_posts || 90);\n\nconst G = 'https://graph.facebook.com/v23.0/';\nconst q = (o) => Object.keys(o)\n  .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(o[k]))\n  .join('&');\n\n// 1. O SNAPSHOT. followers_count e o valor do INSTANTE — a Meta nao guarda\n//    historico. Esta e a unica chamada cuja falha e irrecuperavel.\nconst url_perfil = G + p.perfil_id + '?' + q({\n  fields: 'id,username,name,followers_count,follows_count,media_count'\n});\n\n// 2. Os tres agregados. `views` substituiu `impressions` em 03/2025 e as tres\n//    SO existem como metric_type=total_value — perderam a serie diaria. Logo:\n//    uma chamada por dia, e nada de historico para tras.\nconst url_totais = G + p.perfil_id + '/insights?' + q({\n  metric: 'views,profile_views,website_clicks',\n  metric_type: 'total_value', period: 'day',\n  since: d1_de, until: d1_ate\n});\n\n// 3. Ganhos e perdas. Breakdown por follow_type devolve FOLLOWER e\n//    NON_FOLLOWER. Confirmado na API.\nconst url_follows = G + p.perfil_id + '/insights?' + q({\n  metric: 'follows_and_unfollows', metric_type: 'total_value',\n  breakdown: 'follow_type', period: 'day',\n  since: d1_de, until: d1_ate\n});\n\n// 4. Alcance: a UNICA das quatro que mantem serie diaria, entao vem em bloco\n//    de 30 dias. O bucket dela e do Pacifico, nao do fuso do perfil — o\n//    Code node rotula com isso em mente.\nconst url_alcance = G + p.perfil_id + '/insights?' + q({\n  metric: 'reach', period: 'day',\n  since: ts(base.minus({ days: jIns })), until: ts(base)\n});\n\n// 5. Posts. like_count e comments_count vem no proprio no de midia — nao\n//    precisa de uma chamada de insights por post.\nconst url_midias = G + p.perfil_id + '/media?' + q({\n  fields: 'id,caption,media_type,media_product_type,permalink,thumbnail_url,'\n        + 'timestamp,like_count,comments_count',\n  since: ts(base.minus({ days: jPost })), limit: '50'\n});\n\nreturn [{ json: { ...p, dia, d1_de, d1_ate,\n                  url_perfil, url_totais, url_follows, url_alcance,\n                  url_midias } }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          400,
+          1056
+        ],
+        "id": "3e64b076-6eca-4111-8479-ca7c78133b47",
+        "name": "Janela"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "insert into ads_ingestao_log (fluxo, conta_id, janela_de, janela_ate, status)\nvalues ('4.04', $1, $2::date, $3::date, 'rodando')\nreturning id;",
+          "options": {
+            "queryReplacement": "={{ [$json.perfil_id, $json.dia, $json.dia] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          624,
+          1056
+        ],
+        "id": "42ddc807-5f0b-4b3b-b541-fbd199caa6c2",
+        "name": "Log Inicio",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Janela').first().json.url_perfil }}",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "facebookGraphApi",
+          "options": {
+            "timeout": 120000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          832,
+          1056
+        ],
+        "id": "6aab5b09-0344-4e55-bff7-834c6c9713ba",
+        "name": "Perfil Agora",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "facebookGraphApi": {
+            "id": "bqvhO7I9HxNLrUbM",
+            "name": "app-mia-finamob"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- O PASSO SAGRADO. followers_count e um retrato do instante: se este\n-- insert nao acontecer hoje, o ponto de hoje na curva nao existe nunca mais.\n-- Por isso ele vem ANTES dos insights e dos posts — se qualquer coisa depois\n-- falhar, o snapshot ja esta gravado.\ninsert into ig_perfil_dia (dia, perfil_id, seguidores_total)\nvalues ($1::date, $2, $3::bigint)\non conflict (dia, perfil_id) do update set\n  seguidores_total = coalesce(excluded.seguidores_total, ig_perfil_dia.seguidores_total),\n  -- valor medido derruba valor deduzido\n  reconstruido = case when excluded.seguidores_total is not null\n                      then false else ig_perfil_dia.reconstruido end,\n  coletado_em = now()\nreturning dia, perfil_id, seguidores_total;\n\n-- Mantem username/nome em dia sem uma chamada extra.\nupdate ig_perfil\n   set username = coalesce($4, username),\n       nome     = coalesce($5, nome)\n where perfil_id = $2;",
+          "options": {
+            "queryReplacement": "={{ [$('Janela').first().json.dia, $('Janela').first().json.perfil_id, $json.followers_count ?? null, $json.username ?? null, $json.name ?? null] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1056,
+          976
+        ],
+        "id": "e495ac46-a39b-4d6b-943b-898071abbd95",
+        "name": "Grava Snapshot",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Janela').first().json.url_totais }}",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "facebookGraphApi",
+          "options": {
+            "timeout": 120000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1280,
+          976
+        ],
+        "id": "93989f18-7424-46f4-9595-3edefc144893",
+        "name": "Totais do Dia",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "facebookGraphApi": {
+            "id": "bqvhO7I9HxNLrUbM",
+            "name": "app-mia-finamob"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Janela').first().json.url_follows }}",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "facebookGraphApi",
+          "options": {
+            "timeout": 120000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1504,
+          976
+        ],
+        "id": "b25ce367-6cc1-4a27-92bd-748adee239ae",
+        "name": "Follows e Unfollows",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "facebookGraphApi": {
+            "id": "bqvhO7I9HxNLrUbM",
+            "name": "app-mia-finamob"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Janela').first().json.url_alcance }}",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "facebookGraphApi",
+          "options": {
+            "timeout": 120000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1728,
+          976
+        ],
+        "id": "792c5d0b-34bb-4362-aa04-bd02ab6e1494",
+        "name": "Alcance 30d",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "facebookGraphApi": {
+            "id": "bqvhO7I9HxNLrUbM",
+            "name": "app-mia-finamob"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const j = $('Janela').first().json;\nconst porDia = {};\n\nconst linha = (d) => (porDia[d] = porDia[d] || {\n  dia: d, perfil_id: String(j.perfil_id),\n  ganhos: null, perdidos: null,\n  alcance: null, visualizacoes: null, visitas_perfil: null, cliques_site: null,\n});\n\nconst PACIFICO = 'America/Los_Angeles';\nconst diaDoBucket = (endTime) =>\n  DateTime.fromISO(endTime, { zone: 'utc' })\n          .setZone(PACIFICO)\n          .minus({ days: 1 })\n          .toFormat('yyyy-MM-dd');\n\nconst COL_TOTAL = { views: 'visualizacoes', profile_views: 'visitas_perfil',\n                    website_clicks: 'cliques_site' };\nconst COL_SERIE = { reach: 'alcance' };\n\nconst allItems = [];\nfor (const src of ['Totais do Dia', 'Follows e Unfollows', 'Alcance 30d']) {\n  try { allItems.push(...$(src).all()); } catch(e) {}\n}\nfor (const item of allItems) {\n  const body = item.json || {};\n  if (body.error) continue;\n  for (const m of (body.data || [])) {\n    const nome = m.name;\n    const tv   = m.total_value;\n\n    if (tv && tv.value !== undefined && tv.value !== null && COL_TOTAL[nome]) {\n      linha(j.dia)[COL_TOTAL[nome]] = Number(tv.value);\n    }\n\n    if (tv && tv.breakdowns) {\n      const L = linha(j.dia);\n      for (const b of tv.breakdowns) {\n        for (const r of (b.results || [])) {\n          const k = String((r.dimension_values || [])[0] || '').toUpperCase();\n          if (k === 'NON_FOLLOWER' || k.indexOf('UNFOLLOW') >= 0) {\n            L.perdidos = Number(r.value ?? 0);\n          } else if (k === 'FOLLOWER' || k === 'FOLLOW') {\n            L.ganhos = Number(r.value ?? 0);\n          }\n        }\n      }\n    }\n\n    for (const v of (m.values || [])) {\n      if (!v.end_time || !COL_SERIE[nome]) continue;\n      linha(diaDoBucket(v.end_time))[COL_SERIE[nome]] = Number(v.value ?? 0);\n    }\n  }\n}\n\nconst rows = Object.keys(porDia).sort().map(k => porDia[k]);\nreturn [{ json: {\n  perfil_id: String(j.perfil_id), dia: j.dia,\n  linhas: rows.length,\n  payload: JSON.stringify(rows),\n} }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1952,
+          976
+        ],
+        "id": "b46ee4ef-98d7-4417-b8dc-4dfcc9839e73",
+        "name": "Normaliza Serie"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- Preenche ganhos/perdas/alcance dos ultimos ~30 dias. Cria linhas para dias\n-- passados com seguidores_total null — que e exatamente do que\n-- fn_ig_reconstroi_seguidores() precisa para desenhar a curva para tras.\nwith src as (\n  select * from jsonb_to_recordset($1::jsonb) as x(\n    dia            date,\n    perfil_id      text,\n    ganhos         bigint,\n    perdidos       bigint,\n    alcance        bigint,\n    visualizacoes  bigint,\n    visitas_perfil bigint,\n    cliques_site   bigint\n  )\n),\ngravado as (\n  insert into ig_perfil_dia\n    (dia, perfil_id, seguidores_ganhos, seguidores_perdidos,\n     alcance, visualizacoes, visitas_perfil, cliques_site)\n  select dia, perfil_id, ganhos, perdidos,\n         alcance, visualizacoes, visitas_perfil, cliques_site\n  from src\n  on conflict (dia, perfil_id) do update set\n    -- coalesce em todas: uma chamada que falhou e voltou null nunca apaga\n    -- um valor que ja estava gravado.\n    seguidores_ganhos   = coalesce(excluded.seguidores_ganhos,   ig_perfil_dia.seguidores_ganhos),\n    seguidores_perdidos = coalesce(excluded.seguidores_perdidos, ig_perfil_dia.seguidores_perdidos),\n    alcance             = coalesce(excluded.alcance,             ig_perfil_dia.alcance),\n    visualizacoes       = coalesce(excluded.visualizacoes,       ig_perfil_dia.visualizacoes),\n    visitas_perfil      = coalesce(excluded.visitas_perfil,      ig_perfil_dia.visitas_perfil),\n    cliques_site        = coalesce(excluded.cliques_site,        ig_perfil_dia.cliques_site),\n    coletado_em         = now()\n  returning 1\n)\nselect (select count(*) from gravado)                         as dias_gravados,\n       fn_ig_reconstroi_seguidores($2)                        as dias_reconstruidos;",
+          "options": {
+            "queryReplacement": "={{ [$json.payload, $json.perfil_id] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          2176,
+          976
+        ],
+        "id": "3070d8ba-e680-41d1-937f-859a45f3320c",
+        "name": "Atualiza Serie",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Janela').first().json.url_midias }}",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "facebookGraphApi",
+          "options": {
+            "pagination": {
+              "pagination": {
+                "paginationMode": "responseContainsNextURL",
+                "nextURL": "={{ $response.body.paging?.next }}",
+                "paginationCompleteWhen": "other",
+                "completeExpression": "={{ !$response.body.paging?.next }}",
+                "limitPagesFetched": true,
+                "requestInterval": 250
+              }
+            },
+            "timeout": 120000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2400,
+          976
+        ],
+        "id": "93ddcb0c-5917-48d7-8c6b-d86854ce7c64",
+        "name": "Midias",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "facebookGraphApi": {
+            "id": "bqvhO7I9HxNLrUbM",
+            "name": "app-mia-finamob"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Uma linha por post. `dia` = D-1, o mesmo do fato de perfil, para a taxa\n// de engajamento ter denominador do mesmo dia.\n//\n// ATENCAO: curtidas e comentarios sao ACUMULADOS do post, nao do dia. O\n// snapshot diario e proposital — vw_ig_post_delta tira a diferenca quando\n// alguem quiser \"curtidas do dia\".\nconst j = $('Janela').first().json;\nconst rows = [];\nlet paginas = 0;\n\nfor (const item of $input.all()) {\n  const body = item.json || {};\n  if (body.error) continue;\n  paginas++;\n  for (const m of (body.data || [])) {\n    rows.push({\n      dia: j.dia,\n      post_id: String(m.id),\n      perfil_id: String(j.perfil_id),\n      tipo: m.media_type || null,\n      produto: m.media_product_type || null,\n      caption: m.caption ? String(m.caption).slice(0, 2200) : null,\n      permalink: m.permalink || null,\n      thumbnail_url: m.thumbnail_url || null,\n      publicado_em: m.timestamp || null,\n      curtidas: m.like_count === undefined ? null : Number(m.like_count),\n      comentarios: m.comments_count === undefined ? null : Number(m.comments_count),\n    });\n  }\n}\n\nreturn [{ json: {\n  perfil_id: String(j.perfil_id), dia: j.dia,\n  paginas, posts: rows.length,\n  payload: JSON.stringify(rows),\n} }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2624,
+          976
+        ],
+        "id": "d0171ec7-5c47-4a37-8c43-1d76a69e0151",
+        "name": "Normaliza Posts"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "with src as (\n  select * from jsonb_to_recordset($1::jsonb) as x(\n    dia           date,\n    post_id       text,\n    perfil_id     text,\n    tipo          text,\n    produto       text,\n    caption       text,\n    permalink     text,\n    thumbnail_url text,\n    publicado_em  timestamptz,\n    curtidas      bigint,\n    comentarios   bigint\n  )\n),\ndim as (\n  insert into ig_post\n    (post_id, perfil_id, tipo, produto, caption, permalink, thumbnail_url, publicado_em)\n  select distinct on (post_id)\n         post_id, perfil_id, tipo, produto, caption, permalink, thumbnail_url, publicado_em\n  from src\n  order by post_id\n  on conflict (post_id) do update set\n    caption       = coalesce(excluded.caption,       ig_post.caption),\n    permalink     = coalesce(excluded.permalink,     ig_post.permalink),\n    thumbnail_url = coalesce(excluded.thumbnail_url, ig_post.thumbnail_url),\n    tipo          = coalesce(excluded.tipo,          ig_post.tipo),\n    produto       = coalesce(excluded.produto,       ig_post.produto),\n    publicado_em  = coalesce(excluded.publicado_em,  ig_post.publicado_em),\n    atualizado_em = now()\n  returning 1\n),\nfato as (\n  insert into ig_post_dia (dia, post_id, curtidas, comentarios)\n  select dia, post_id, curtidas, comentarios from src\n  on conflict (dia, post_id) do update set\n    curtidas    = coalesce(excluded.curtidas,    ig_post_dia.curtidas),\n    comentarios = coalesce(excluded.comentarios, ig_post_dia.comentarios),\n    coletado_em = now()\n  returning 1\n)\nselect (select count(*) from fato) as snapshots,\n       (select count(*) from dim)  as posts_tocados;",
+          "options": {
+            "queryReplacement": "={{ [$json.payload] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          2848,
+          976
+        ],
+        "id": "087d0597-0d14-4ee1-b214-b9a917464efb",
+        "name": "Upsert Posts",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "update ads_ingestao_log\n   set status = 'ok',\n       linhas = $2::int,\n       paginas = $3::int,\n       terminado_em = now()\n where id = $1::bigint\nreturning conta_id, linhas;",
+          "options": {
+            "queryReplacement": "={{ [$('Log Inicio').first().json.id, $('Normaliza Posts').first().json.posts, $('Normaliza Posts').first().json.paginas] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          3072,
+          976
+        ],
+        "id": "a2cd3d60-4d1d-4dff-90dc-f270230e1cc5",
+        "name": "Log Fim",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "update ads_ingestao_log\n   set status = 'erro', erro = $2, terminado_em = now()\n where id = $1::bigint\nreturning conta_id;",
+          "options": {
+            "queryReplacement": "={{ [$('Log Inicio').first().json.id, JSON.stringify($json.error ?? $json).slice(0, 1800)] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1056,
+          1184
+        ],
+        "id": "6c1db9b4-3281-41e5-9780-f3d51a4b72ea",
+        "name": "Log Erro",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "EMI-SDR-DIOGO",
+          "remoteJid": "5534992150692",
+          "messageText": "=📸 *INSTAGRAM ORGANICO FALHOU*\n\nPerfil: @{{ $('Janela').first().json.username }}\nDia perdido: {{ $('Janela').first().json.dia }}\n\n```{{ JSON.stringify($('Log Erro').first().json).slice(0,300) }}```\n\n_O total de seguidores deste dia NAO tem como ser recuperado depois._",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1280,
+          1184
+        ],
+        "id": "5fa21046-8b32-42d6-9a7d-c2b890b240a5",
+        "name": "Avisa Falha",
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## 4.04 · Ingestão Instagram Orgânico\n\n**Outra API.** Aqui é a Instagram Graph API (conteúdo), não a Marketing API. Precisa de `instagram_basic`, `instagram_manage_insights` e `pages_read_engagement` — permissões que o app **não** ganha junto com as de anúncios. Se o 4.01 funciona e este dá `(#200)`, é isso.\n\n**O snapshot não tem backfill.** `followers_count` é o valor do instante; a Meta não guarda histórico de total de seguidores. Dia sem execução = ponto que não existe mais. É o único fluxo em que perder um dia é permanente.\n\n**Por isso a ordem.** `Grava Snapshot` vem ANTES dos insights e dos posts. Se qualquer coisa depois falhar, o ponto do dia já está no banco.\n\n**Ganhos e perdas seguem mesmo com erro.** `follows_and_unfollows` é de 01/2026 e pode não estar liberado. O nó está em `continueRegularOutput`: falhando, as colunas ficam `null` e o snapshot sobrevive.\n\n**A curva para trás é dedutível, uma vez.** Com o total de hoje e o líquido de cada dia, `fn_ig_reconstroi_seguidores()` deduz uns 30 dias de curva. Marca as linhas com `reconstruido = true` — dado deduzido, não medido.\n\n**Curtidas são acumuladas.** `ig_post_dia` é snapshot diário do total do post, não do dia. Diferença do dia: `vw_ig_post_delta`.\n\n**Custo por seguidor cruza duas fontes.** Gasto de `ads_insight_dia`, seguidores de `ig_perfil_dia`, ligados por `ig_perfil_conta`. Usa `spend` bruto: campanha de engajamento tem `entra_no_custo = false`, então filtrar por custo de aquisição daria zero.",
+          "height": 792,
+          "width": 560,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -288,
+          64
+        ],
+        "id": "0e374af9-bafd-4776-8f1c-dbea3887201b",
+        "name": "Nota"
+      },
+      {
+        "parameters": {
+          "content": "O fluxo:\n\nTodo dia às 06:50, ele pergunta quatro coisas ao Instagram sobre cada perfil e anota as respostas no banco.\n\nAs quatro perguntas:\n\nQuantos seguidores você tem agora? → 26.520\nOntem, quantas pessoas começaram a te seguir e quantas deixaram? → 17 entraram, 18 saíram\nOntem, quantas visualizações, visitas ao perfil e cliques no link? → 6.490 / 93 / 0\nQuais são seus posts, e quantas curtidas e comentários cada um tem? → 42 posts\n\nAnota tudo com a etiqueta \"ontem\", porque ele roda de manhã e o dia de ontem já fechou. E faz isso para os cinco perfis, um por vez.\n\nO banco: duas famílias de tabelas\n\nFamília ads_ — dinheiro gasto em anúncio\nFamília ig_ — o que acontece no perfil do Instagram sem pagar\n\nSão separadas porque vêm de lugares diferentes do Instagram e respondem perguntas diferentes.",
+          "height": 528,
+          "width": 912
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          400,
+          112
+        ],
+        "id": "1bc4e63a-46da-4d5b-a9eb-ab02fbe8fd65",
+        "name": "Sticky Note"
+      }
+    ],
+    "connections": {
+      "Agendamento": {
+        "main": [
+          [
+            {
+              "node": "Perfis Ativos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Manual": {
+        "main": [
+          [
+            {
+              "node": "Perfis Ativos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Perfis Ativos": {
+        "main": [
+          [
+            {
+              "node": "Loop Perfis",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Perfis": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Janela",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Janela": {
+        "main": [
+          [
+            {
+              "node": "Log Inicio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log Inicio": {
+        "main": [
+          [
+            {
+              "node": "Perfil Agora",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Perfil Agora": {
+        "main": [
+          [
+            {
+              "node": "Grava Snapshot",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log Erro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Grava Snapshot": {
+        "main": [
+          [
+            {
+              "node": "Totais do Dia",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Totais do Dia": {
+        "main": [
+          [
+            {
+              "node": "Follows e Unfollows",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Follows e Unfollows": {
+        "main": [
+          [
+            {
+              "node": "Alcance 30d",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Alcance 30d": {
+        "main": [
+          [
+            {
+              "node": "Normaliza Serie",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normaliza Serie": {
+        "main": [
+          [
+            {
+              "node": "Atualiza Serie",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Atualiza Serie": {
+        "main": [
+          [
+            {
+              "node": "Midias",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Midias": {
+        "main": [
+          [
+            {
+              "node": "Normaliza Posts",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normaliza Posts": {
+        "main": [
+          [
+            {
+              "node": "Upsert Posts",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upsert Posts": {
+        "main": [
+          [
+            {
+              "node": "Log Fim",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log Fim": {
+        "main": [
+          [
+            {
+              "node": "Loop Perfis",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log Erro": {
+        "main": [
+          [
+            {
+              "node": "Avisa Falha",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Avisa Falha": {
+        "main": [
+          [
+            {
+              "node": "Loop Perfis",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version 70cac048",
+    "description": "",
+    "autosaved": false,
+    "createdAt": "2026-09-03T20:57:13.593Z",
+    "updatedAt": "2026-09-03T22:08:16.998Z"
+  },
+  "tags": [
+    {
+      "id": "ELYt2EllMwwIO1k1",
+      "name": "instagram-insights",
+      "createdAt": "2026-09-03T19:32:55.891Z",
+      "updatedAt": "2026-09-03T19:32:55.891Z"
+    }
+  ]
+}
