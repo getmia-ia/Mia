@@ -1,0 +1,796 @@
+{
+  "updatedAt": "2026-09-03T22:07:44.135Z",
+  "createdAt": "2026-09-03T18:06:30.381Z",
+  "id": "9fIuMmvO8aSTJEoG",
+  "name": "Finamob - 4.92 - Descoberta de Ativos Meta",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6,
+              "triggerAtMinute": 40
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -112,
+        848
+      ],
+      "id": "a770bd91-339d-4367-ac6c-0cd4fa385fb0",
+      "name": "Agendamento"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -112,
+        1024
+      ],
+      "id": "1f297bdc-a7d1-494e-a738-8393dca896a1",
+      "name": "Manual"
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v23.0/me/adaccounts?fields=id,account_id,name,account_status,currency,timezone_name&limit=100",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "facebookGraphApi",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body.paging?.next }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.paging?.next }}",
+              "limitPagesFetched": true,
+              "requestInterval": 250
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        128,
+        848
+      ],
+      "id": "51a814d0-3f5f-4b29-b179-cfa25b63e782",
+      "name": "Contas de Anuncio",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "bqvhO7I9HxNLrUbM",
+          "name": "app-mia-finamob"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Achata /me/adaccounts. `account_id` e o numero puro, que e o que\n// ads_conta.conta_id guarda — `id` vem como 'act_<numero>' e nao serve.\nconst rows = [];\nfor (const item of $input.all()) {\n  const body = item.json || {};\n  if (body.error) continue;\n  for (const a of (body.data || [])) {\n    rows.push({\n      conta_id: String(a.account_id || String(a.id || '').replace('act_', '')),\n      nome: a.name || null,\n      moeda: a.currency || null,\n      timezone: a.timezone_name || null,\n      status_meta: a.account_status === undefined ? null : Number(a.account_status),\n    });\n  }\n}\nreturn [{ json: { total: rows.length, payload: JSON.stringify(rows) } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        352,
+        848
+      ],
+      "id": "67aa9367-a680-4909-9338-17fc8dd67576",
+      "name": "Normaliza Contas"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Descobre contas de anuncio. `ativo` e `reportar` SO no insert.\n--\n-- Numa linha que ja existe, tocar em `ativo` desfaria decisao humana: se\n-- alguem desativou uma conta ontem, a varredura de hoje a religaria e a\n-- ingestao voltaria sozinha. Por isso o `do update` lista nome, moeda,\n-- fuso, status e visto_em — e mais nada.\nwith src as (\n  select * from jsonb_to_recordset($1::jsonb) as x(\n    conta_id    text,\n    nome        text,\n    moeda       text,\n    timezone    text,\n    status_meta int\n  )\n),\nhoje as (select (now() at time zone 'America/Sao_Paulo')::date as d),\ngravado as (\n  insert into ads_conta\n    (conta_id, nome, cliente, moeda, timezone, status_meta,\n     ativo, reportar, visto_em, descoberto_em)\n  select s.conta_id,\n         coalesce(s.nome, 'conta ' || s.conta_id),\n         'a_classificar',                       -- cliente e not null; humano decide\n         coalesce(s.moeda, 'BRL'),\n         coalesce(s.timezone, 'America/Sao_Paulo'),\n         s.status_meta,\n         coalesce(s.status_meta, 1) in (1, 9),  -- ativa ou em tolerancia\n         false,                                 -- nunca reporta ao ser descoberta\n         h.d, now()\n  from src s cross join hoje h\n  on conflict (conta_id) do update set\n    nome        = coalesce(excluded.nome,     ads_conta.nome),\n    moeda       = coalesce(excluded.moeda,    ads_conta.moeda),\n    timezone    = coalesce(excluded.timezone, ads_conta.timezone),\n    status_meta = excluded.status_meta,\n    visto_em    = excluded.visto_em\n  returning conta_id, nome, (xmax = 0) as e_novo\n)\nselect\n  (select count(*) from gravado)                              as vistas,\n  coalesce((select jsonb_agg(jsonb_build_object('conta_id', conta_id, 'nome', nome))\n              from gravado where e_novo), '[]'::jsonb)        as novos,\n  -- sumidos: EXATAMENTE 3 dias sem aparecer, para o aviso sair uma vez\n  coalesce((select jsonb_agg(jsonb_build_object('conta_id', conta_id, 'nome', nome))\n              from ads_conta, hoje\n             where ativo and visto_em = hoje.d - 3), '[]'::jsonb) as sumidos;",
+        "options": {
+          "queryReplacement": "={{ [$json.payload] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        576,
+        848
+      ],
+      "id": "b96a3d67-7fb9-4813-a279-644e641ba6dd",
+      "name": "Upsert Contas",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v23.0/me/accounts?fields=id,name,instagram_business_account%7Bid,username,name%7D&limit=100",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "facebookGraphApi",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body.paging?.next }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.paging?.next }}",
+              "limitPagesFetched": true,
+              "requestInterval": 250
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        848
+      ],
+      "id": "6d564b96-74b1-44c6-acfc-d8270b178d99",
+      "name": "Paginas e Instagram",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "bqvhO7I9HxNLrUbM",
+          "name": "app-mia-finamob"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Achata /me/accounts. Uma Pagina pode nao ter Instagram vinculado — foi o\n// caso da pagina Finamob na varredura de 03/09. Essas sao ignoradas: o que\n// interessa aqui e o perfil, nao a Pagina.\nconst rows = [];\nlet paginas = 0, sem_ig = 0;\nfor (const item of $input.all()) {\n  const body = item.json || {};\n  if (body.error) continue;\n  for (const p of (body.data || [])) {\n    paginas++;\n    const ig = p.instagram_business_account;\n    if (!ig || !ig.id) { sem_ig++; continue; }\n    rows.push({\n      perfil_id: String(ig.id),\n      username: ig.username || null,\n      nome: p.name || ig.name || null,     // o nome da Pagina e mais legivel\n      page_id: String(p.id),\n    });\n  }\n}\nreturn [{ json: {\n  total: rows.length, paginas_vistas: paginas, paginas_sem_instagram: sem_ig,\n  payload: JSON.stringify(rows),\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        848
+      ],
+      "id": "0f17ebdc-9ea2-494a-9feb-022aa49fcfe9",
+      "name": "Normaliza Perfis"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Descobre perfis de Instagram. Mesma regra: `ativo`/`reportar` so no insert.\n--\n-- E aqui a descoberta vale MAIS que no trafego. `followers_count` nao tem\n-- historico na API: um perfil vinculado hoje e cadastrado em duas semanas\n-- perde duas semanas de curva, para sempre. Entrar com `ativo = true` faz a\n-- coleta comecar no dia em que o ativo aparece, nao no dia em que alguem\n-- percebe.\nwith src as (\n  select * from jsonb_to_recordset($1::jsonb) as x(\n    perfil_id text,\n    username  text,\n    nome      text,\n    page_id   text\n  )\n),\nhoje as (select (now() at time zone 'America/Sao_Paulo')::date as d),\ngravado as (\n  insert into ig_perfil\n    (perfil_id, username, nome, page_id, cliente,\n     ativo, reportar, visto_em, descoberto_em)\n  select s.perfil_id, s.username, s.nome, s.page_id,\n         'a_classificar',\n         true,                                  -- comeca a coletar hoje\n         false,                                 -- nao entra em report\n         h.d, now()\n  from src s cross join hoje h\n  on conflict (perfil_id) do update set\n    username = coalesce(excluded.username, ig_perfil.username),\n    nome     = coalesce(excluded.nome,     ig_perfil.nome),\n    page_id  = coalesce(excluded.page_id,  ig_perfil.page_id),\n    visto_em = excluded.visto_em\n  returning perfil_id, username, (xmax = 0) as e_novo\n)\nselect\n  (select count(*) from gravado)                                    as vistos,\n  coalesce((select jsonb_agg(jsonb_build_object('perfil_id', perfil_id, 'username', username))\n              from gravado where e_novo), '[]'::jsonb)              as novos,\n  coalesce((select jsonb_agg(jsonb_build_object('perfil_id', perfil_id, 'username', username))\n              from ig_perfil, hoje\n             where ativo and visto_em = hoje.d - 3), '[]'::jsonb)   as sumidos;",
+        "options": {
+          "queryReplacement": "={{ [$json.payload] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1248,
+        848
+      ],
+      "id": "f49aea05-b3af-49ad-8236-f5c327ad3903",
+      "name": "Upsert Perfis",
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Junta os dois upserts num aviso unico, e decide se vale mandar.\n//\n// Novos sao auto-limitantes: a linha e inserida uma vez, entao o aviso sai\n// uma vez. `sumidos` seriam ruido diario, por isso o SQL so devolve os que\n// estao com EXATAMENTE 3 dias sem aparecer — dispara uma vez, tres dias\n// depois, o que filtra soluco de API sem esconder desvinculo de verdade.\nconst c = $('Upsert Contas').first().json  || {};\nconst p = $('Upsert Perfis').first().json  || {};\n\nconst nc = c.novos  || [];\nconst np = p.novos  || [];\nconst sc = c.sumidos || [];\nconst sp = p.sumidos || [];\n\nconst linhas = [];\n\nif (nc.length) {\n  linhas.push('*Contas de anuncio novas*');\n  for (const x of nc) linhas.push('- ' + x.nome + '  `' + x.conta_id + '`');\n  linhas.push('');\n}\nif (np.length) {\n  linhas.push('*Perfis de Instagram novos*');\n  for (const x of np) linhas.push('- @' + x.username + '  `' + x.perfil_id + '`');\n  linhas.push('');\n}\nif (sc.length || sp.length) {\n  linhas.push('*Sumiram da API ha 3 dias*');\n  for (const x of sc) linhas.push('- conta ' + x.nome + '  `' + x.conta_id + '`');\n  for (const x of sp) linhas.push('- perfil @' + x.username + '  `' + x.perfil_id + '`');\n  linhas.push('');\n}\n\nconst novidade = nc.length + np.length + sc.length + sp.length;\n\nif (nc.length || np.length) {\n  linhas.push('_Ja estao coletando (`ativo = true`) e NAO entram em report '\n            + '(`reportar = false`). Falta definir o `cliente`: estao como '\n            + '`a_classificar` em `vw_ads_a_classificar`._');\n}\nif (sc.length || sp.length) {\n  linhas.push('_Nada foi desativado. Se o desvinculo foi de proposito, '\n            + '`ativo = false` na mao._');\n}\n\nreturn [{ json: {\n  novidade,\n  novas_contas: nc.length, novos_perfis: np.length,\n  sumidos: sc.length + sp.length,\n  texto: linhas.join('\\n'),\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1472,
+        848
+      ],
+      "id": "be07d85b-6d7b-4d10-9224-7ad12895f33f",
+      "name": "Monta Aviso"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "nov",
+              "leftValue": "={{ $json.novidade }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1696,
+        848
+      ],
+      "id": "0f0892d0-c209-4ad8-95a7-a7d80ee73916",
+      "name": "Tem Novidade?"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "120363423041053494@g.us",
+        "messageText": "=🔍 *INVENTARIO META MUDOU*\n\n{{ $json.texto }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        752
+      ],
+      "id": "a07b7009-a67c-4b34-b156-a7eae42a7825",
+      "name": "Avisa MIA-LOGS",
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4.92 · Descoberta de Ativos da Meta\n\n**O que resolve.** `ads_conta` e `ig_perfil` eram preenchidas à mão. Conta nova ou Instagram novo só existia no banco quando alguém lembrava. Este fluxo varre o que o token vê e cadastra sozinho.\n\n**Roda 06:40, antes de todos os outros.** Descoberta tem que preceder ingestão: ativo que aparece hoje já é coletado hoje, na mesma manhã.\n\n**Por que isso importa mais no Instagram.** `followers_count` não tem histórico na API. Perfil vinculado hoje e cadastrado em duas semanas perde duas semanas de curva, para sempre. No tráfego, o mesmo atraso custa um backfill.\n\n**Entra ativo, entra calado.** Insere com `ativo = true` (coleta começa hoje) e `reportar = false` (não fala com ninguém até um humano decidir). São as duas dimensões separadas desde o `04_report_e_custo.sql`.\n\n**E NUNCA religa o que você desligou.** Numa linha que já existe, o `do update` toca em nome, moeda, fuso, status e `visto_em` — e nada mais. Se você desativou um perfil ontem, ele continua desativado amanhã.\n\n**Não desativa nada sozinho.** Ativo que sai da API cai em `vw_ads_sumido`, e o aviso sai uma única vez, três dias depois — filtra soluço de API sem esconder desvínculo real. Desativar é decisão humana: some tanto por conta encerrada quanto por acesso revogado temporário.\n\n**`cliente` fica `a_classificar`.** É `not null` e a varredura não tem como adivinhar. A fila de trabalho é `vw_ads_a_classificar`.\n\n**Só avisa quando há novidade.** Sem conta nova, sem perfil novo e sem sumiço, o fluxo roda em silêncio.",
+        "height": 862,
+        "width": 560,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -112,
+        -96
+      ],
+      "id": "44d85a6e-1218-4df8-8bbd-b1023e0cb790",
+      "name": "Nota"
+    }
+  ],
+  "connections": {
+    "Agendamento": {
+      "main": [
+        [
+          {
+            "node": "Contas de Anuncio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual": {
+      "main": [
+        [
+          {
+            "node": "Contas de Anuncio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contas de Anuncio": {
+      "main": [
+        [
+          {
+            "node": "Normaliza Contas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliza Contas": {
+      "main": [
+        [
+          {
+            "node": "Upsert Contas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Contas": {
+      "main": [
+        [
+          {
+            "node": "Paginas e Instagram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Paginas e Instagram": {
+      "main": [
+        [
+          {
+            "node": "Normaliza Perfis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliza Perfis": {
+      "main": [
+        [
+          {
+            "node": "Upsert Perfis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Perfis": {
+      "main": [
+        [
+          {
+            "node": "Monta Aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta Aviso": {
+      "main": [
+        [
+          {
+            "node": "Tem Novidade?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem Novidade?": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "node:Agendamento": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": null,
+  "versionId": "41608856-eab9-402e-a2da-3bc1b31d2089",
+  "activeVersionId": "41608856-eab9-402e-a2da-3bc1b31d2089",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "9fIuMmvO8aSTJEoG",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-03T18:06:30.381Z",
+      "updatedAt": "2026-09-03T18:06:30.381Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "41608856-eab9-402e-a2da-3bc1b31d2089",
+    "workflowId": "9fIuMmvO8aSTJEoG",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 6,
+                "triggerAtMinute": 40
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -112,
+          848
+        ],
+        "id": "a770bd91-339d-4367-ac6c-0cd4fa385fb0",
+        "name": "Agendamento"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          -112,
+          1024
+        ],
+        "id": "1f297bdc-a7d1-494e-a738-8393dca896a1",
+        "name": "Manual"
+      },
+      {
+        "parameters": {
+          "url": "https://graph.facebook.com/v23.0/me/adaccounts?fields=id,account_id,name,account_status,currency,timezone_name&limit=100",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "facebookGraphApi",
+          "options": {
+            "pagination": {
+              "pagination": {
+                "paginationMode": "responseContainsNextURL",
+                "nextURL": "={{ $response.body.paging?.next }}",
+                "paginationCompleteWhen": "other",
+                "completeExpression": "={{ !$response.body.paging?.next }}",
+                "limitPagesFetched": true,
+                "requestInterval": 250
+              }
+            },
+            "timeout": 120000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          128,
+          848
+        ],
+        "id": "51a814d0-3f5f-4b29-b179-cfa25b63e782",
+        "name": "Contas de Anuncio",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "facebookGraphApi": {
+            "id": "bqvhO7I9HxNLrUbM",
+            "name": "app-mia-finamob"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Achata /me/adaccounts. `account_id` e o numero puro, que e o que\n// ads_conta.conta_id guarda — `id` vem como 'act_<numero>' e nao serve.\nconst rows = [];\nfor (const item of $input.all()) {\n  const body = item.json || {};\n  if (body.error) continue;\n  for (const a of (body.data || [])) {\n    rows.push({\n      conta_id: String(a.account_id || String(a.id || '').replace('act_', '')),\n      nome: a.name || null,\n      moeda: a.currency || null,\n      timezone: a.timezone_name || null,\n      status_meta: a.account_status === undefined ? null : Number(a.account_status),\n    });\n  }\n}\nreturn [{ json: { total: rows.length, payload: JSON.stringify(rows) } }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          352,
+          848
+        ],
+        "id": "67aa9367-a680-4909-9338-17fc8dd67576",
+        "name": "Normaliza Contas"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- Descobre contas de anuncio. `ativo` e `reportar` SO no insert.\n--\n-- Numa linha que ja existe, tocar em `ativo` desfaria decisao humana: se\n-- alguem desativou uma conta ontem, a varredura de hoje a religaria e a\n-- ingestao voltaria sozinha. Por isso o `do update` lista nome, moeda,\n-- fuso, status e visto_em — e mais nada.\nwith src as (\n  select * from jsonb_to_recordset($1::jsonb) as x(\n    conta_id    text,\n    nome        text,\n    moeda       text,\n    timezone    text,\n    status_meta int\n  )\n),\nhoje as (select (now() at time zone 'America/Sao_Paulo')::date as d),\ngravado as (\n  insert into ads_conta\n    (conta_id, nome, cliente, moeda, timezone, status_meta,\n     ativo, reportar, visto_em, descoberto_em)\n  select s.conta_id,\n         coalesce(s.nome, 'conta ' || s.conta_id),\n         'a_classificar',                       -- cliente e not null; humano decide\n         coalesce(s.moeda, 'BRL'),\n         coalesce(s.timezone, 'America/Sao_Paulo'),\n         s.status_meta,\n         coalesce(s.status_meta, 1) in (1, 9),  -- ativa ou em tolerancia\n         false,                                 -- nunca reporta ao ser descoberta\n         h.d, now()\n  from src s cross join hoje h\n  on conflict (conta_id) do update set\n    nome        = coalesce(excluded.nome,     ads_conta.nome),\n    moeda       = coalesce(excluded.moeda,    ads_conta.moeda),\n    timezone    = coalesce(excluded.timezone, ads_conta.timezone),\n    status_meta = excluded.status_meta,\n    visto_em    = excluded.visto_em\n  returning conta_id, nome, (xmax = 0) as e_novo\n)\nselect\n  (select count(*) from gravado)                              as vistas,\n  coalesce((select jsonb_agg(jsonb_build_object('conta_id', conta_id, 'nome', nome))\n              from gravado where e_novo), '[]'::jsonb)        as novos,\n  -- sumidos: EXATAMENTE 3 dias sem aparecer, para o aviso sair uma vez\n  coalesce((select jsonb_agg(jsonb_build_object('conta_id', conta_id, 'nome', nome))\n              from ads_conta, hoje\n             where ativo and visto_em = hoje.d - 3), '[]'::jsonb) as sumidos;",
+          "options": {
+            "queryReplacement": "={{ [$json.payload] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          576,
+          848
+        ],
+        "id": "b96a3d67-7fb9-4813-a279-644e641ba6dd",
+        "name": "Upsert Contas",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "https://graph.facebook.com/v23.0/me/accounts?fields=id,name,instagram_business_account%7Bid,username,name%7D&limit=100",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "facebookGraphApi",
+          "options": {
+            "pagination": {
+              "pagination": {
+                "paginationMode": "responseContainsNextURL",
+                "nextURL": "={{ $response.body.paging?.next }}",
+                "paginationCompleteWhen": "other",
+                "completeExpression": "={{ !$response.body.paging?.next }}",
+                "limitPagesFetched": true,
+                "requestInterval": 250
+              }
+            },
+            "timeout": 120000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          800,
+          848
+        ],
+        "id": "6d564b96-74b1-44c6-acfc-d8270b178d99",
+        "name": "Paginas e Instagram",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "facebookGraphApi": {
+            "id": "bqvhO7I9HxNLrUbM",
+            "name": "app-mia-finamob"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Achata /me/accounts. Uma Pagina pode nao ter Instagram vinculado — foi o\n// caso da pagina Finamob na varredura de 03/09. Essas sao ignoradas: o que\n// interessa aqui e o perfil, nao a Pagina.\nconst rows = [];\nlet paginas = 0, sem_ig = 0;\nfor (const item of $input.all()) {\n  const body = item.json || {};\n  if (body.error) continue;\n  for (const p of (body.data || [])) {\n    paginas++;\n    const ig = p.instagram_business_account;\n    if (!ig || !ig.id) { sem_ig++; continue; }\n    rows.push({\n      perfil_id: String(ig.id),\n      username: ig.username || null,\n      nome: p.name || ig.name || null,     // o nome da Pagina e mais legivel\n      page_id: String(p.id),\n    });\n  }\n}\nreturn [{ json: {\n  total: rows.length, paginas_vistas: paginas, paginas_sem_instagram: sem_ig,\n  payload: JSON.stringify(rows),\n} }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1024,
+          848
+        ],
+        "id": "0f17ebdc-9ea2-494a-9feb-022aa49fcfe9",
+        "name": "Normaliza Perfis"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- Descobre perfis de Instagram. Mesma regra: `ativo`/`reportar` so no insert.\n--\n-- E aqui a descoberta vale MAIS que no trafego. `followers_count` nao tem\n-- historico na API: um perfil vinculado hoje e cadastrado em duas semanas\n-- perde duas semanas de curva, para sempre. Entrar com `ativo = true` faz a\n-- coleta comecar no dia em que o ativo aparece, nao no dia em que alguem\n-- percebe.\nwith src as (\n  select * from jsonb_to_recordset($1::jsonb) as x(\n    perfil_id text,\n    username  text,\n    nome      text,\n    page_id   text\n  )\n),\nhoje as (select (now() at time zone 'America/Sao_Paulo')::date as d),\ngravado as (\n  insert into ig_perfil\n    (perfil_id, username, nome, page_id, cliente,\n     ativo, reportar, visto_em, descoberto_em)\n  select s.perfil_id, s.username, s.nome, s.page_id,\n         'a_classificar',\n         true,                                  -- comeca a coletar hoje\n         false,                                 -- nao entra em report\n         h.d, now()\n  from src s cross join hoje h\n  on conflict (perfil_id) do update set\n    username = coalesce(excluded.username, ig_perfil.username),\n    nome     = coalesce(excluded.nome,     ig_perfil.nome),\n    page_id  = coalesce(excluded.page_id,  ig_perfil.page_id),\n    visto_em = excluded.visto_em\n  returning perfil_id, username, (xmax = 0) as e_novo\n)\nselect\n  (select count(*) from gravado)                                    as vistos,\n  coalesce((select jsonb_agg(jsonb_build_object('perfil_id', perfil_id, 'username', username))\n              from gravado where e_novo), '[]'::jsonb)              as novos,\n  coalesce((select jsonb_agg(jsonb_build_object('perfil_id', perfil_id, 'username', username))\n              from ig_perfil, hoje\n             where ativo and visto_em = hoje.d - 3), '[]'::jsonb)   as sumidos;",
+          "options": {
+            "queryReplacement": "={{ [$json.payload] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1248,
+          848
+        ],
+        "id": "f49aea05-b3af-49ad-8236-f5c327ad3903",
+        "name": "Upsert Perfis",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Junta os dois upserts num aviso unico, e decide se vale mandar.\n//\n// Novos sao auto-limitantes: a linha e inserida uma vez, entao o aviso sai\n// uma vez. `sumidos` seriam ruido diario, por isso o SQL so devolve os que\n// estao com EXATAMENTE 3 dias sem aparecer — dispara uma vez, tres dias\n// depois, o que filtra soluco de API sem esconder desvinculo de verdade.\nconst c = $('Upsert Contas').first().json  || {};\nconst p = $('Upsert Perfis').first().json  || {};\n\nconst nc = c.novos  || [];\nconst np = p.novos  || [];\nconst sc = c.sumidos || [];\nconst sp = p.sumidos || [];\n\nconst linhas = [];\n\nif (nc.length) {\n  linhas.push('*Contas de anuncio novas*');\n  for (const x of nc) linhas.push('- ' + x.nome + '  `' + x.conta_id + '`');\n  linhas.push('');\n}\nif (np.length) {\n  linhas.push('*Perfis de Instagram novos*');\n  for (const x of np) linhas.push('- @' + x.username + '  `' + x.perfil_id + '`');\n  linhas.push('');\n}\nif (sc.length || sp.length) {\n  linhas.push('*Sumiram da API ha 3 dias*');\n  for (const x of sc) linhas.push('- conta ' + x.nome + '  `' + x.conta_id + '`');\n  for (const x of sp) linhas.push('- perfil @' + x.username + '  `' + x.perfil_id + '`');\n  linhas.push('');\n}\n\nconst novidade = nc.length + np.length + sc.length + sp.length;\n\nif (nc.length || np.length) {\n  linhas.push('_Ja estao coletando (`ativo = true`) e NAO entram em report '\n            + '(`reportar = false`). Falta definir o `cliente`: estao como '\n            + '`a_classificar` em `vw_ads_a_classificar`._');\n}\nif (sc.length || sp.length) {\n  linhas.push('_Nada foi desativado. Se o desvinculo foi de proposito, '\n            + '`ativo = false` na mao._');\n}\n\nreturn [{ json: {\n  novidade,\n  novas_contas: nc.length, novos_perfis: np.length,\n  sumidos: sc.length + sp.length,\n  texto: linhas.join('\\n'),\n} }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1472,
+          848
+        ],
+        "id": "be07d85b-6d7b-4d10-9224-7ad12895f33f",
+        "name": "Monta Aviso"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "nov",
+                "leftValue": "={{ $json.novidade }}",
+                "rightValue": 0,
+                "operator": {
+                  "type": "number",
+                  "operation": "gt"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "looseTypeValidation": true,
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1696,
+          848
+        ],
+        "id": "0f0892d0-c209-4ad8-95a7-a7d80ee73916",
+        "name": "Tem Novidade?"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "EMI-SDR-DIOGO",
+          "remoteJid": "120363423041053494@g.us",
+          "messageText": "=🔍 *INVENTARIO META MUDOU*\n\n{{ $json.texto }}",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1920,
+          752
+        ],
+        "id": "a07b7009-a67c-4b34-b156-a7eae42a7825",
+        "name": "Avisa MIA-LOGS",
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## 4.92 · Descoberta de Ativos da Meta\n\n**O que resolve.** `ads_conta` e `ig_perfil` eram preenchidas à mão. Conta nova ou Instagram novo só existia no banco quando alguém lembrava. Este fluxo varre o que o token vê e cadastra sozinho.\n\n**Roda 06:40, antes de todos os outros.** Descoberta tem que preceder ingestão: ativo que aparece hoje já é coletado hoje, na mesma manhã.\n\n**Por que isso importa mais no Instagram.** `followers_count` não tem histórico na API. Perfil vinculado hoje e cadastrado em duas semanas perde duas semanas de curva, para sempre. No tráfego, o mesmo atraso custa um backfill.\n\n**Entra ativo, entra calado.** Insere com `ativo = true` (coleta começa hoje) e `reportar = false` (não fala com ninguém até um humano decidir). São as duas dimensões separadas desde o `04_report_e_custo.sql`.\n\n**E NUNCA religa o que você desligou.** Numa linha que já existe, o `do update` toca em nome, moeda, fuso, status e `visto_em` — e nada mais. Se você desativou um perfil ontem, ele continua desativado amanhã.\n\n**Não desativa nada sozinho.** Ativo que sai da API cai em `vw_ads_sumido`, e o aviso sai uma única vez, três dias depois — filtra soluço de API sem esconder desvínculo real. Desativar é decisão humana: some tanto por conta encerrada quanto por acesso revogado temporário.\n\n**`cliente` fica `a_classificar`.** É `not null` e a varredura não tem como adivinhar. A fila de trabalho é `vw_ads_a_classificar`.\n\n**Só avisa quando há novidade.** Sem conta nova, sem perfil novo e sem sumiço, o fluxo roda em silêncio.",
+          "height": 862,
+          "width": 560,
+          "color": 3
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -112,
+          -96
+        ],
+        "id": "44d85a6e-1218-4df8-8bbd-b1023e0cb790",
+        "name": "Nota"
+      }
+    ],
+    "connections": {
+      "Agendamento": {
+        "main": [
+          [
+            {
+              "node": "Contas de Anuncio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Manual": {
+        "main": [
+          [
+            {
+              "node": "Contas de Anuncio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Contas de Anuncio": {
+        "main": [
+          [
+            {
+              "node": "Normaliza Contas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normaliza Contas": {
+        "main": [
+          [
+            {
+              "node": "Upsert Contas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upsert Contas": {
+        "main": [
+          [
+            {
+              "node": "Paginas e Instagram",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Paginas e Instagram": {
+        "main": [
+          [
+            {
+              "node": "Normaliza Perfis",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normaliza Perfis": {
+        "main": [
+          [
+            {
+              "node": "Upsert Perfis",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upsert Perfis": {
+        "main": [
+          [
+            {
+              "node": "Monta Aviso",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta Aviso": {
+        "main": [
+          [
+            {
+              "node": "Tem Novidade?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tem Novidade?": {
+        "main": [
+          []
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version 41608856",
+    "description": "",
+    "autosaved": false,
+    "createdAt": "2026-09-03T22:07:44.139Z",
+    "updatedAt": "2026-09-03T22:07:45.267Z"
+  },
+  "tags": [
+    {
+      "id": "ELYt2EllMwwIO1k1",
+      "name": "instagram-insights",
+      "createdAt": "2026-09-03T19:32:55.891Z",
+      "updatedAt": "2026-09-03T19:32:55.891Z"
+    }
+  ]
+}
