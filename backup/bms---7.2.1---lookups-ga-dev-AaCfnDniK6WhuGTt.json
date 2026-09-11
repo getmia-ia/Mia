@@ -1,0 +1,428 @@
+{
+  "updatedAt": "2026-09-10T21:49:34.063Z",
+  "createdAt": "2026-09-10T21:49:05.998Z",
+  "id": "AaCfnDniK6WhuGTt",
+  "name": "BMS - 7.2.1 - Lookups GA DEV",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "acao"
+            },
+            {
+              "name": "termo"
+            },
+            {
+              "name": "dataset"
+            },
+            {
+              "name": "campo"
+            },
+            {
+              "name": "empresas_ids"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -176,
+        272
+      ],
+      "id": "9ac056bb-0882-47e4-889f-aef4fc61f683",
+      "name": "Quando chamado por uma tool"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// Roteador dos lookups. Um sub-workflow atende as três tools.\n// Cada consulta é parametrizada pelo escopo do gestor: uma tool nunca\n// devolve dado de empresa que ele não pode ver.\n// =====================================================================\n\nconst inp = $input.first().json;\nconst acao = String(inp.acao || '').trim();\nconst termo = String(inp.termo || '').trim();\nconst dataset = String(inp.dataset || 'afastamento').trim().toLowerCase();\nconst campo = String(inp.campo || '').trim().toLowerCase();\n\nconst empresas = String(inp.empresas_ids || '')\n  .split(/[;,]/).map((s) => s.trim()).filter((s) => /^\\d+$/.test(s));\n\nif (!empresas.length) {\n  return [{ json: { erro: 'Sem empresa autorizada; lookup bloqueado.', sql: null } }];\n}\nconst escopo = empresas.join(', ');\nconst esc = (s) => String(s).replace(/'/g, \"''\").replace(/[\\x00-\\x1f\\x7f]/g, '');\n\n// Campos de domínio que podem ser listados, e de onde cada um vem.\nconst DOMINIOS = {\n  situacao:          \"SELECT DISTINCT gs.[description] AS valor FROM [ga_situation] gs INNER JOIN [user_steps] us ON us.gaSituationIdGaSituation = gs.id_ga_situation INNER JOIN [employee] e ON us.employeeIdEmployee = e.id_Employee WHERE us.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n  etapa:             \"SELECT DISTINCT CASE s.[name] WHEN 'steps.register' THEN 'Cadastro' WHEN 'steps.scheduling' THEN 'Agendamento de perícia' WHEN 'steps.benefits' THEN 'Benefício' WHEN 'steps.renew' THEN 'Prorrogação' WHEN 'steps.exam' THEN 'Exame de retorno' WHEN 'steps.return' THEN 'Retorno ao trabalho' ELSE s.[name] END AS valor FROM [steps] s INNER JOIN [user_steps] us ON us.stepsIdSteps = s.id_steps INNER JOIN [employee] e ON us.employeeIdEmployee = e.id_Employee WHERE us.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n  especie_beneficio: \"SELECT DISTINCT bt.benefit_type_description AS valor FROM [benefit_type] bt INNER JOIN [user_benefit] ub ON ub.benefitTypeIdBenefitType = bt.id_benefit_type INNER JOIN [user_steps] us ON ub.userStepsIdUserSteps = us.id_user_steps INNER JOIN [employee] e ON us.employeeIdEmployee = e.id_Employee WHERE ub.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n  status_beneficio:  \"SELECT DISTINCT CASE bs.[description] WHEN 'benefit_status.deferido' THEN 'Deferido' WHEN 'benefit_status.indeferido' THEN 'Indeferido' WHEN 'benefit_status.cessado' THEN 'Cessado' ELSE bs.[description] END AS valor FROM [benefit_status] bs INNER JOIN [user_benefit] ub ON ub.benefitStatusIdBenefitStatus = bs.id_benefit_status INNER JOIN [user_steps] us ON ub.userStepsIdUserSteps = us.id_user_steps INNER JOIN [employee] e ON us.employeeIdEmployee = e.id_Employee WHERE ub.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n  status_atestado:   \"SELECT DISTINCT CASE umi.statusMedicalIdStatusMedical WHEN 1 THEN 'Aguardando' WHEN 2 THEN 'Aprovado' WHEN 3 THEN 'Recusado' ELSE 'Outro' END AS valor FROM [user_medical_info] umi INNER JOIN [employee] e ON umi.employeeIdEmployee = e.id_Employee WHERE umi.delete_datetime IS NULL AND e.company_id IN (@ESCOPO)\",\n  departamento:      \"SELECT DISTINCT d.[name] AS valor FROM [department] d INNER JOIN [employee] e ON e.department_id = d.id WHERE d.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n  filial:            \"SELECT DISTINCT COALESCE(cf.companyName, cm.companyName) AS valor FROM [employee] e INNER JOIN [company] cm ON e.company_id = cm.id LEFT JOIN [company] cf ON e.branch_id = cf.id WHERE e.company_id IN (@ESCOPO)\",\n  cargo:             \"SELECT DISTINCT p.position_name AS valor FROM [position] p INNER JOIN [employee] e ON e.position_id = p.id_position WHERE e.company_id IN (@ESCOPO)\",\n  centro_custo:      \"SELECT DISTINCT cc.[name] AS valor FROM [cost_center] cc INNER JOIN [employee] e ON e.cost_center_id = cc.cost_center_id WHERE e.company_id IN (@ESCOPO)\",\n  motivo_afastamento: \"SELECT DISTINCT CASE ar.[name] WHEN 'absenceReason.accidentAtWork' THEN 'Acidente de trabalho' WHEN 'absenceReason.commutingAccident' THEN 'Acidente de trajeto' WHEN 'absenceReason.occupationalDisease' THEN 'Doença ocupacional' WHEN 'absenceReason.ordinaryIllness' THEN 'Doença comum' WHEN 'absenceReason.domesticAccident' THEN 'Acidente doméstico' WHEN 'absenceReason.pregnancy' THEN 'Gestação / maternidade' WHEN 'absenceReason.companion' THEN 'Acompanhante' ELSE ar.[name] END AS valor FROM [absence_reason] ar INNER JOIN [user_steps] us ON us.absenceReasonIdAbsenceReason = ar.id_absence_reason INNER JOIN [employee] e ON us.employeeIdEmployee = e.id_Employee WHERE us.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n};\n\nlet sql = null;\n\nif (acao === 'buscar_colaborador') {\n  if (termo.length < 3) {\n    return [{ json: { erro: 'Termo curto: informe ao menos 3 letras do nome.', sql: null } }];\n  }\n  sql = `SELECT TOP 15\n             e.id_Employee AS colaborador_id,\n             u.[name]      AS nome,\n             p.position_name AS cargo,\n             COALESCE(cf.companyName, cm.companyName) AS filial,\n             CASE WHEN e.active = 1 THEN 'Ativo' ELSE 'Inativo' END AS situacao_cadastro\n         FROM [employee] e\n         INNER JOIN [user] u ON e.user_id = u.id_user\n         INNER JOIN [company] cm ON e.company_id = cm.id\n         LEFT  JOIN [company] cf ON e.branch_id = cf.id\n         LEFT  JOIN [position] p ON e.position_id = p.id_position\n         WHERE e.[delete] = 'N'\n           AND e.company_id IN (${escopo})\n           AND u.[name] LIKE '%${esc(termo)}%'\n         ORDER BY CASE WHEN e.active = 1 THEN 0 ELSE 1 END, u.[name]`;\n}\n\nelse if (acao === 'buscar_cid') {\n  if (termo.length < 3) {\n    return [{ json: { erro: 'Termo curto: informe ao menos 3 letras da doença ou o código.', sql: null } }];\n  }\n  sql = `SELECT TOP 15\n             c.code_cid    AS cid_codigo,\n             c.[description] AS cid_descricao\n         FROM [cid] c\n         WHERE c.[description] LIKE '%${esc(termo)}%'\n            OR c.code_cid LIKE '${esc(termo)}%'\n         ORDER BY CASE WHEN c.code_cid LIKE '${esc(termo)}%' THEN 0 ELSE 1 END, c.code_cid`;\n}\n\nelse if (acao === 'listar_valores') {\n  const base = DOMINIOS[campo];\n  if (!base) {\n    return [{ json: {\n      erro: `Campo \"${campo}\" não é listável.`,\n      campos_listaveis: Object.keys(DOMINIOS), sql: null } }];\n  }\n  sql = base.replace('@ESCOPO', escopo);\n  sql = sql.replace(/^SELECT DISTINCT/, 'SELECT DISTINCT TOP 60');\n  sql += ' ORDER BY valor';\n}\n\nelse {\n  return [{ json: { erro: `Ação \"${acao}\" desconhecida.`,\n                    acoes: ['buscar_colaborador', 'buscar_cid', 'listar_valores'], sql: null } }];\n}\n\nreturn [{ json: { acao, sql } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        272
+      ],
+      "id": "7d7290be-a68b-4b4c-b3a2-67e83590d083",
+      "name": "Roteador do lookup"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "7594922d-36f9-43ff-97f5-6ff2e63d8630",
+              "leftValue": "={{ $json.sql }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        288,
+        272
+      ],
+      "id": "b5cc3b65-e349-4116-9597-8419813c3f7d",
+      "name": "Tem SQL?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        512,
+        160
+      ],
+      "id": "2a2fb509-66a1-4886-bfa8-def53b20b9ca",
+      "name": "Consultar",
+      "alwaysOutputData": true,
+      "credentials": {
+        "microsoftSql": {
+          "id": "iVVw5uK4EaGT0dRw",
+          "name": "BMS - Amb Teste"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Devolve para a tool um texto curto e literal. Nada de prosa: o agente\n// precisa dos VALORES para colocar no spec.\nconst roteador = $('Roteador do lookup').first().json;\n\nif (roteador.erro) {\n  return [{ json: { resposta: 'ERRO: ' + roteador.erro +\n    (roteador.campos_listaveis ? ' Campos listáveis: ' + roteador.campos_listaveis.join(', ') : '') } }];\n}\n\nconst linhas = $input.all().map((i) => i.json).filter((j) => j && Object.keys(j).length);\n\nif (!linhas.length) {\n  return [{ json: { resposta: 'Nenhum resultado. Não invente valor: peça ao gestor para especificar melhor.' } }];\n}\n\nconst texto = linhas.map((l) => Object.entries(l)\n  .map(([k, v]) => `${k}=${v === null ? '-' : v}`).join(' | ')).join('\\n');\n\nreturn [{ json: { resposta: `${linhas.length} resultado(s):\\n${texto}` } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        288
+      ],
+      "id": "aa104f3b-30f8-4643-bb15-9cc4fcff5504",
+      "name": "Formatar para a tool",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "content": "## 7.2.1 — Lookups GA\n\nAtende as três tools do Interpretador: `buscar_colaborador`, `buscar_cid` e `listar_valores`.\n\nÉ isto que faz o agente **consultar** em vez de adivinhar. Antes, um nome de doença inventado ia direto para um `LIKE '%...%'` e voltava vazio — e para o gestor isso parecia 'não funciona'.\n\nTodo lookup é recortado por `empresas_ids`: uma tool nunca devolve dado de empresa que o gestor não pode ver.",
+        "height": 200,
+        "width": 660,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -192,
+        0
+      ],
+      "id": "5a939b6c-d2fe-472c-963d-bd7305d3d1c6",
+      "name": "Nota 5ebd96"
+    }
+  ],
+  "connections": {
+    "Quando chamado por uma tool": {
+      "main": [
+        [
+          {
+            "node": "Roteador do lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Roteador do lookup": {
+      "main": [
+        [
+          {
+            "node": "Tem SQL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem SQL?": {
+      "main": [
+        [
+          {
+            "node": "Consultar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Formatar para a tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar": {
+      "main": [
+        [
+          {
+            "node": "Formatar para a tool",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Formatar para a tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "6dea659c-0de3-45e3-8969-2d4211646f89",
+  "activeVersionId": "6dea659c-0de3-45e3-8969-2d4211646f89",
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "AaCfnDniK6WhuGTt",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-10T21:49:05.998Z",
+      "updatedAt": "2026-09-10T21:49:05.998Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "6dea659c-0de3-45e3-8969-2d4211646f89",
+    "workflowId": "AaCfnDniK6WhuGTt",
+    "nodes": [
+      {
+        "parameters": {
+          "workflowInputs": {
+            "values": [
+              {
+                "name": "acao"
+              },
+              {
+                "name": "termo"
+              },
+              {
+                "name": "dataset"
+              },
+              {
+                "name": "campo"
+              },
+              {
+                "name": "empresas_ids"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -176,
+          272
+        ],
+        "id": "9ac056bb-0882-47e4-889f-aef4fc61f683",
+        "name": "Quando chamado por uma tool"
+      },
+      {
+        "parameters": {
+          "jsCode": "// =====================================================================\n// Roteador dos lookups. Um sub-workflow atende as três tools.\n// Cada consulta é parametrizada pelo escopo do gestor: uma tool nunca\n// devolve dado de empresa que ele não pode ver.\n// =====================================================================\n\nconst inp = $input.first().json;\nconst acao = String(inp.acao || '').trim();\nconst termo = String(inp.termo || '').trim();\nconst dataset = String(inp.dataset || 'afastamento').trim().toLowerCase();\nconst campo = String(inp.campo || '').trim().toLowerCase();\n\nconst empresas = String(inp.empresas_ids || '')\n  .split(/[;,]/).map((s) => s.trim()).filter((s) => /^\\d+$/.test(s));\n\nif (!empresas.length) {\n  return [{ json: { erro: 'Sem empresa autorizada; lookup bloqueado.', sql: null } }];\n}\nconst escopo = empresas.join(', ');\nconst esc = (s) => String(s).replace(/'/g, \"''\").replace(/[\\x00-\\x1f\\x7f]/g, '');\n\n// Campos de domínio que podem ser listados, e de onde cada um vem.\nconst DOMINIOS = {\n  situacao:          \"SELECT DISTINCT gs.[description] AS valor FROM [ga_situation] gs INNER JOIN [user_steps] us ON us.gaSituationIdGaSituation = gs.id_ga_situation INNER JOIN [employee] e ON us.employeeIdEmployee = e.id_Employee WHERE us.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n  etapa:             \"SELECT DISTINCT CASE s.[name] WHEN 'steps.register' THEN 'Cadastro' WHEN 'steps.scheduling' THEN 'Agendamento de perícia' WHEN 'steps.benefits' THEN 'Benefício' WHEN 'steps.renew' THEN 'Prorrogação' WHEN 'steps.exam' THEN 'Exame de retorno' WHEN 'steps.return' THEN 'Retorno ao trabalho' ELSE s.[name] END AS valor FROM [steps] s INNER JOIN [user_steps] us ON us.stepsIdSteps = s.id_steps INNER JOIN [employee] e ON us.employeeIdEmployee = e.id_Employee WHERE us.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n  especie_beneficio: \"SELECT DISTINCT bt.benefit_type_description AS valor FROM [benefit_type] bt INNER JOIN [user_benefit] ub ON ub.benefitTypeIdBenefitType = bt.id_benefit_type INNER JOIN [user_steps] us ON ub.userStepsIdUserSteps = us.id_user_steps INNER JOIN [employee] e ON us.employeeIdEmployee = e.id_Employee WHERE ub.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n  status_beneficio:  \"SELECT DISTINCT CASE bs.[description] WHEN 'benefit_status.deferido' THEN 'Deferido' WHEN 'benefit_status.indeferido' THEN 'Indeferido' WHEN 'benefit_status.cessado' THEN 'Cessado' ELSE bs.[description] END AS valor FROM [benefit_status] bs INNER JOIN [user_benefit] ub ON ub.benefitStatusIdBenefitStatus = bs.id_benefit_status INNER JOIN [user_steps] us ON ub.userStepsIdUserSteps = us.id_user_steps INNER JOIN [employee] e ON us.employeeIdEmployee = e.id_Employee WHERE ub.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n  status_atestado:   \"SELECT DISTINCT CASE umi.statusMedicalIdStatusMedical WHEN 1 THEN 'Aguardando' WHEN 2 THEN 'Aprovado' WHEN 3 THEN 'Recusado' ELSE 'Outro' END AS valor FROM [user_medical_info] umi INNER JOIN [employee] e ON umi.employeeIdEmployee = e.id_Employee WHERE umi.delete_datetime IS NULL AND e.company_id IN (@ESCOPO)\",\n  departamento:      \"SELECT DISTINCT d.[name] AS valor FROM [department] d INNER JOIN [employee] e ON e.department_id = d.id WHERE d.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n  filial:            \"SELECT DISTINCT COALESCE(cf.companyName, cm.companyName) AS valor FROM [employee] e INNER JOIN [company] cm ON e.company_id = cm.id LEFT JOIN [company] cf ON e.branch_id = cf.id WHERE e.company_id IN (@ESCOPO)\",\n  cargo:             \"SELECT DISTINCT p.position_name AS valor FROM [position] p INNER JOIN [employee] e ON e.position_id = p.id_position WHERE e.company_id IN (@ESCOPO)\",\n  centro_custo:      \"SELECT DISTINCT cc.[name] AS valor FROM [cost_center] cc INNER JOIN [employee] e ON e.cost_center_id = cc.cost_center_id WHERE e.company_id IN (@ESCOPO)\",\n  motivo_afastamento: \"SELECT DISTINCT CASE ar.[name] WHEN 'absenceReason.accidentAtWork' THEN 'Acidente de trabalho' WHEN 'absenceReason.commutingAccident' THEN 'Acidente de trajeto' WHEN 'absenceReason.occupationalDisease' THEN 'Doença ocupacional' WHEN 'absenceReason.ordinaryIllness' THEN 'Doença comum' WHEN 'absenceReason.domesticAccident' THEN 'Acidente doméstico' WHEN 'absenceReason.pregnancy' THEN 'Gestação / maternidade' WHEN 'absenceReason.companion' THEN 'Acompanhante' ELSE ar.[name] END AS valor FROM [absence_reason] ar INNER JOIN [user_steps] us ON us.absenceReasonIdAbsenceReason = ar.id_absence_reason INNER JOIN [employee] e ON us.employeeIdEmployee = e.id_Employee WHERE us.[delete] = 'N' AND e.company_id IN (@ESCOPO)\",\n};\n\nlet sql = null;\n\nif (acao === 'buscar_colaborador') {\n  if (termo.length < 3) {\n    return [{ json: { erro: 'Termo curto: informe ao menos 3 letras do nome.', sql: null } }];\n  }\n  sql = `SELECT TOP 15\n             e.id_Employee AS colaborador_id,\n             u.[name]      AS nome,\n             p.position_name AS cargo,\n             COALESCE(cf.companyName, cm.companyName) AS filial,\n             CASE WHEN e.active = 1 THEN 'Ativo' ELSE 'Inativo' END AS situacao_cadastro\n         FROM [employee] e\n         INNER JOIN [user] u ON e.user_id = u.id_user\n         INNER JOIN [company] cm ON e.company_id = cm.id\n         LEFT  JOIN [company] cf ON e.branch_id = cf.id\n         LEFT  JOIN [position] p ON e.position_id = p.id_position\n         WHERE e.[delete] = 'N'\n           AND e.company_id IN (${escopo})\n           AND u.[name] LIKE '%${esc(termo)}%'\n         ORDER BY CASE WHEN e.active = 1 THEN 0 ELSE 1 END, u.[name]`;\n}\n\nelse if (acao === 'buscar_cid') {\n  if (termo.length < 3) {\n    return [{ json: { erro: 'Termo curto: informe ao menos 3 letras da doença ou o código.', sql: null } }];\n  }\n  sql = `SELECT TOP 15\n             c.code_cid    AS cid_codigo,\n             c.[description] AS cid_descricao\n         FROM [cid] c\n         WHERE c.[description] LIKE '%${esc(termo)}%'\n            OR c.code_cid LIKE '${esc(termo)}%'\n         ORDER BY CASE WHEN c.code_cid LIKE '${esc(termo)}%' THEN 0 ELSE 1 END, c.code_cid`;\n}\n\nelse if (acao === 'listar_valores') {\n  const base = DOMINIOS[campo];\n  if (!base) {\n    return [{ json: {\n      erro: `Campo \"${campo}\" não é listável.`,\n      campos_listaveis: Object.keys(DOMINIOS), sql: null } }];\n  }\n  sql = base.replace('@ESCOPO', escopo);\n  sql = sql.replace(/^SELECT DISTINCT/, 'SELECT DISTINCT TOP 60');\n  sql += ' ORDER BY valor';\n}\n\nelse {\n  return [{ json: { erro: `Ação \"${acao}\" desconhecida.`,\n                    acoes: ['buscar_colaborador', 'buscar_cid', 'listar_valores'], sql: null } }];\n}\n\nreturn [{ json: { acao, sql } }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          80,
+          272
+        ],
+        "id": "7d7290be-a68b-4b4c-b3a2-67e83590d083",
+        "name": "Roteador do lookup"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "7594922d-36f9-43ff-97f5-6ff2e63d8630",
+                "leftValue": "={{ $json.sql }}",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                },
+                "rightValue": ""
+              }
+            ],
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            }
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          288,
+          272
+        ],
+        "id": "b5cc3b65-e349-4116-9597-8419813c3f7d",
+        "name": "Tem SQL?"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "{{ $json.sql }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.microsoftSql",
+        "typeVersion": 1.1,
+        "position": [
+          512,
+          160
+        ],
+        "id": "2a2fb509-66a1-4886-bfa8-def53b20b9ca",
+        "name": "Consultar",
+        "alwaysOutputData": true,
+        "credentials": {
+          "microsoftSql": {
+            "id": "iVVw5uK4EaGT0dRw",
+            "name": "BMS - Amb Teste"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Devolve para a tool um texto curto e literal. Nada de prosa: o agente\n// precisa dos VALORES para colocar no spec.\nconst roteador = $('Roteador do lookup').first().json;\n\nif (roteador.erro) {\n  return [{ json: { resposta: 'ERRO: ' + roteador.erro +\n    (roteador.campos_listaveis ? ' Campos listáveis: ' + roteador.campos_listaveis.join(', ') : '') } }];\n}\n\nconst linhas = $input.all().map((i) => i.json).filter((j) => j && Object.keys(j).length);\n\nif (!linhas.length) {\n  return [{ json: { resposta: 'Nenhum resultado. Não invente valor: peça ao gestor para especificar melhor.' } }];\n}\n\nconst texto = linhas.map((l) => Object.entries(l)\n  .map(([k, v]) => `${k}=${v === null ? '-' : v}`).join(' | ')).join('\\n');\n\nreturn [{ json: { resposta: `${linhas.length} resultado(s):\\n${texto}` } }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          752,
+          288
+        ],
+        "id": "aa104f3b-30f8-4643-bb15-9cc4fcff5504",
+        "name": "Formatar para a tool",
+        "alwaysOutputData": true
+      },
+      {
+        "parameters": {
+          "content": "## 7.2.1 — Lookups GA\n\nAtende as três tools do Interpretador: `buscar_colaborador`, `buscar_cid` e `listar_valores`.\n\nÉ isto que faz o agente **consultar** em vez de adivinhar. Antes, um nome de doença inventado ia direto para um `LIKE '%...%'` e voltava vazio — e para o gestor isso parecia 'não funciona'.\n\nTodo lookup é recortado por `empresas_ids`: uma tool nunca devolve dado de empresa que o gestor não pode ver.",
+          "height": 200,
+          "width": 660,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -192,
+          0
+        ],
+        "id": "5a939b6c-d2fe-472c-963d-bd7305d3d1c6",
+        "name": "Nota 5ebd96"
+      }
+    ],
+    "connections": {
+      "Quando chamado por uma tool": {
+        "main": [
+          [
+            {
+              "node": "Roteador do lookup",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Roteador do lookup": {
+        "main": [
+          [
+            {
+              "node": "Tem SQL?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tem SQL?": {
+        "main": [
+          [
+            {
+              "node": "Consultar",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Formatar para a tool",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Consultar": {
+        "main": [
+          [
+            {
+              "node": "Formatar para a tool",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Formatar para a tool",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version 6dea659c",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-09-10T21:49:09.631Z",
+    "updatedAt": "2026-09-10T21:49:15.493Z"
+  },
+  "tags": []
+}
