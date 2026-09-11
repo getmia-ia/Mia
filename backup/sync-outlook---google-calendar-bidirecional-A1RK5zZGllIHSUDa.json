@@ -1,0 +1,1268 @@
+{
+  "updatedAt": "2026-09-10T19:47:08.642Z",
+  "createdAt": "2026-09-10T19:43:10.968Z",
+  "id": "A1RK5zZGllIHSUDa",
+  "name": "Sync Outlook <-> Google Calendar (bidirecional)",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "a4537f3b-7979-4d57-9b65-c75a8f3ced32",
+      "name": "Agendador",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        128,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4575f087-f3d2-5055-9580-567cb026fb7f",
+              "name": "googleCalendarId",
+              "type": "string",
+              "value": "primary"
+            },
+            {
+              "id": "4698398e-8dee-5929-b985-f15df3392b11",
+              "name": "outlookCalendarBase",
+              "type": "string",
+              "value": "https://graph.microsoft.com/v1.0/me/calendar"
+            },
+            {
+              "id": "4da4854a-54a2-5d0d-a149-76a80b6eeeec",
+              "name": "mirrorCategory",
+              "type": "string",
+              "value": "Sync Google"
+            },
+            {
+              "id": "337444f3-4355-54b4-b1bd-f5cb8ff37833",
+              "name": "graphPropGuid",
+              "type": "string",
+              "value": "9b1f0c2e-5a3d-4f6b-8c71-2f4d6a8b0c11"
+            },
+            {
+              "id": "a32e373d-888f-55f4-94e7-af7fda0251e0",
+              "name": "skipRegex",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "d908c257-66ea-5a40-9b72-da5556741609",
+              "name": "windowPastDays",
+              "type": "number",
+              "value": 7
+            },
+            {
+              "id": "c7026604-7f7a-56e4-ab6e-6f9338fc33aa",
+              "name": "windowFutureDays",
+              "type": "number",
+              "value": 180
+            },
+            {
+              "id": "af16a57b-d785-5fee-8aa8-88f0debdce38",
+              "name": "initialLookbackDays",
+              "type": "number",
+              "value": 7
+            },
+            {
+              "id": "6752ab76-e1cc-5f7b-8417-0762e52888c2",
+              "name": "overlapMinutes",
+              "type": "number",
+              "value": 15
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3d7d071d-5a83-487d-bd5f-3ed5176e80e6",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        336,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.calendar_sync_state (id) values (1)\non conflict (id) do update\n  set last_run_at = public.calendar_sync_state.last_run_at\nreturning *;",
+        "options": {}
+      },
+      "id": "1a3c04c3-a519-40f2-94ef-2c307e872e42",
+      "name": "Carregar Estado",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        560,
+        464
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Preparar Janela ===\n// Calcula a janela de tempo da execução e monta a URL do delta do Outlook.\nconst cfg = $('Config').first().json;\nconst state = $input.first()?.json ?? {};\n\nconst now = new Date();\nconst DAY = 86400000;\nconst overlapMs = Number(cfg.overlapMinutes) * 60000;\n\n// Janela de eventos considerada (passado curto + futuro).\nconst timeMin = new Date(now.getTime() - Number(cfg.windowPastDays) * DAY).toISOString();\nconst timeMax = new Date(now.getTime() + Number(cfg.windowFutureDays) * DAY).toISOString();\n\n// Google: filtro incremental por data de modificação.\n// Na 1a execução volta initialLookbackDays; depois usa o último run\n// menos uma sobreposição de segurança (evita perder eventos na borda).\nconst lastGoogleSync = state.last_google_sync ? new Date(state.last_google_sync) : null;\nconst updatedMinBase = lastGoogleSync\n  ? lastGoogleSync.getTime()\n  : now.getTime() - Number(cfg.initialLookbackDays) * DAY;\nconst updatedMin = new Date(updatedMinBase - overlapMs).toISOString();\n\n// Outlook: usa o deltaLink guardado; se não existir, abre um novo delta.\nconst outlookUrl = state.outlook_delta_link\n  ? state.outlook_delta_link\n  : `${cfg.outlookCalendarBase}/calendarView/delta`\n    + `?startDateTime=${encodeURIComponent(timeMin)}`\n    + `&endDateTime=${encodeURIComponent(timeMax)}`;\n\nreturn [{\n  json: {\n    runAt: now.toISOString(),\n    updatedMin,\n    timeMin,\n    timeMax,\n    outlookUrl,\n    outlookDeltaReused: Boolean(state.outlook_delta_link),\n    firstRun: !lastGoogleSync && !state.outlook_delta_link,\n  },\n}];\n"
+      },
+      "id": "d729a3fe-4c62-4b61-aec2-7cb209948d38",
+      "name": "Preparar Janela",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent($('Config').first().json.googleCalendarId) + '/events' }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "singleEvents",
+              "value": "true"
+            },
+            {
+              "name": "showDeleted",
+              "value": "true"
+            },
+            {
+              "name": "maxResults",
+              "value": "250"
+            },
+            {
+              "name": "updatedMin",
+              "value": "={{ $json.updatedMin }}"
+            },
+            {
+              "name": "timeMin",
+              "value": "={{ $json.timeMin }}"
+            },
+            {
+              "name": "timeMax",
+              "value": "={{ $json.timeMax }}"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "name": "pageToken",
+                    "value": "={{ $response.body.nextPageToken }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.nextPageToken }}",
+              "limitPagesFetched": true,
+              "maxRequests": 20,
+              "requestInterval": 200
+            }
+          }
+        }
+      },
+      "id": "18472ef9-c6e0-4f2d-84a4-711a3caa5a5f",
+      "name": "Google: Listar Eventos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1008,
+        464
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "googleCalendarOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Coletar Google ===\n// A paginação do nó HTTP devolve um item por página. Aqui achatamos\n// tudo em UM item, para que o nó do Outlook execute apenas uma vez.\nconst events = [];\nlet pages = 0;\n\nfor (const item of $input.all()) {\n  const body = item.json ?? {};\n  pages += 1;\n  if (Array.isArray(body.items)) events.push(...body.items);\n}\n\nreturn [{ json: { source: 'google', pages, count: events.length, events } }];\n"
+      },
+      "id": "9333cbe9-8740-480a-996d-062c10340380",
+      "name": "Coletar Google",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Preparar Janela').first().json.outlookUrl }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "microsoftOutlookOAuth2Api",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "odata.track-changes, odata.maxpagesize=200, outlook.timezone=\"UTC\""
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body[\"@odata.nextLink\"] }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body[\"@odata.nextLink\"] }}",
+              "limitPagesFetched": true,
+              "maxRequests": 20,
+              "requestInterval": 200
+            }
+          }
+        }
+      },
+      "id": "0ac7b034-e426-42be-9448-5b5a54733ee1",
+      "name": "Outlook: Delta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        464
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Coletar Outlook ===\n// Achata as páginas do delta e captura o @odata.deltaLink da última\n// página — é o token que será guardado para a próxima execução.\nconst events = [];\nlet deltaLink = null;\nlet pages = 0;\n\nfor (const item of $input.all()) {\n  const body = item.json ?? {};\n  pages += 1;\n  if (Array.isArray(body.value)) events.push(...body.value);\n  if (body['@odata.deltaLink']) deltaLink = body['@odata.deltaLink'];\n}\n\nreturn [{ json: { source: 'outlook', pages, count: events.length, deltaLink, events } }];\n"
+      },
+      "id": "e5f46b30-b9df-4812-b435-8a766b718196",
+      "name": "Coletar Outlook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1664,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id, google_event_id, outlook_event_id, origin,\n       last_hash, google_updated, outlook_updated\nfrom public.calendar_sync_map\nwhere deleted_at is null;",
+        "options": {}
+      },
+      "id": "34b097b3-c82c-4780-80df-ed2b151aa91f",
+      "name": "Carregar Mapeamento",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1888,
+        464
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// === Reconciliar ===\n// Cérebro do fluxo. Compara o que mudou em cada lado com a tabela de\n// mapeamento e decide o que criar / atualizar / apagar no outro lado.\n//\n// Garantias:\n//  - ANTI-LOOP: alteração cujo hash de conteúdo é igual ao já registrado\n//    é um eco da nossa própria escrita e é descartada.\n//  - ANTI-DUPLICATA: eventos marcados como espelho (extendedProperties no\n//    Google, categoria no Outlook) nunca geram um novo espelho.\n//  - CONFLITO: last-write-wins por lastModifiedDateTime / updated.\n//    Exclusão sempre vence uma edição concorrente.\n// =====================================================================\n\nconst cfg = $('Config').first().json;\nconst gData = $('Coletar Google').first().json;\nconst oData = $('Coletar Outlook').first().json;\n\n// O nó de mapeamento tem alwaysOutputData=true, então na primeira\n// execução chega um item vazio — filtramos pelo id.\nconst mappings = $input.all().map((i) => i.json).filter((r) => r && r.id != null);\n\n// <<<PURE\nconst MARKER = 'n8n-cal-sync';\n\n// ---------------------------------------------------------------------\n// Utilidades\n// ---------------------------------------------------------------------\nfunction fnv1a(str) {\n  let h = 0x811c9dc5;\n  for (let i = 0; i < str.length; i++) {\n    h ^= str.charCodeAt(i);\n    h = Math.imul(h, 0x01000193) >>> 0;\n  }\n  return h.toString(16).padStart(8, '0');\n}\n\nfunction contentHash(n) {\n  const key = [n.subject, n.location, n.allDay ? 'AD' : 'TS', n.start, n.end].join('\u0001');\n  return `${fnv1a(key)}${fnv1a(key.split('').reverse().join(''))}`;\n}\n\nfunction isoUtc(value) {\n  if (!value) return null;\n  const d = new Date(value);\n  return Number.isNaN(d.getTime()) ? null : d.toISOString();\n}\n\n// Graph devolve \"2026-09-10T14:00:00.0000000\" + timeZone (UTC via header Prefer)\nfunction graphToIso(slot) {\n  if (!slot || !slot.dateTime) return null;\n  const raw = String(slot.dateTime);\n  const hasZone = /(Z|[+-]\\d{2}:?\\d{2})$/.test(raw);\n  return isoUtc(hasZone ? raw : `${raw}Z`);\n}\n\nfunction truncate(text, max) {\n  const s = String(text ?? '').trim();\n  return s.length > max ? `${s.slice(0, max - 1)}…` : s;\n}\n\n// ---------------------------------------------------------------------\n// Normalização: reduz os dois formatos ao mesmo objeto canônico\n// (apenas assunto + horário + local — sem participantes, sem descrição)\n// ---------------------------------------------------------------------\nfunction normalizeGoogle(ev) {\n  const allDay = Boolean(ev.start && ev.start.date);\n  const n = {\n    subject: truncate(ev.summary || '(sem título)', 250),\n    location: truncate(ev.location || '', 250),\n    allDay,\n    start: allDay ? ev.start.date : isoUtc(ev.start && ev.start.dateTime),\n    end: allDay ? ev.end.date : isoUtc(ev.end && ev.end.dateTime),\n  };\n  n.hash = contentHash(n);\n  return n;\n}\n\nfunction normalizeOutlook(ev) {\n  const allDay = Boolean(ev.isAllDay);\n  const startIso = graphToIso(ev.start);\n  const endIso = graphToIso(ev.end);\n  const n = {\n    subject: truncate(ev.subject || '(sem título)', 250),\n    location: truncate((ev.location && ev.location.displayName) || '', 250),\n    allDay,\n    start: allDay && startIso ? startIso.slice(0, 10) : startIso,\n    end: allDay && endIso ? endIso.slice(0, 10) : endIso,\n  };\n  n.hash = contentHash(n);\n  return n;\n}\n\n// ---------------------------------------------------------------------\n// Payloads de escrita\n// ---------------------------------------------------------------------\nfunction googleBody(n, opts) {\n  const body = {\n    summary: n.subject,\n    location: n.location || undefined,\n    start: n.allDay ? { date: n.start } : { dateTime: n.start, timeZone: 'UTC' },\n    end: n.allDay ? { date: n.end } : { dateTime: n.end, timeZone: 'UTC' },\n    reminders: { useDefault: false, overrides: [] },\n  };\n  if (opts && opts.sourceId) {\n    body.extendedProperties = {\n      private: { syncApp: MARKER, syncSource: 'outlook', syncSourceId: opts.sourceId },\n    };\n  }\n  return body;\n}\n\nfunction outlookBody(n, opts, conf) {\n  const toGraph = (value, isEnd) => (n.allDay\n    ? { dateTime: `${value}T00:00:00`, timeZone: 'UTC' }\n    : { dateTime: String(value).replace(/\\.\\d+Z$|Z$/, ''), timeZone: 'UTC' });\n  const body = {\n    subject: n.subject,\n    isAllDay: n.allDay,\n    isReminderOn: false,\n    start: toGraph(n.start, false),\n    end: toGraph(n.end, true),\n    location: { displayName: n.location || '' },\n  };\n  if (opts && opts.sourceId) {\n    body.categories = [conf.mirrorCategory];\n    body.singleValueExtendedProperties = [\n      { id: `String {${conf.graphPropGuid}} Name SyncApp`, value: MARKER },\n      { id: `String {${conf.graphPropGuid}} Name SyncSourceId`, value: opts.sourceId },\n    ];\n  }\n  return body;\n}\n\n// ---------------------------------------------------------------------\n// Reconciliação\n// ---------------------------------------------------------------------\nfunction reconcile(conf, googleEvents, outlookEvents, mapRows) {\n  const stats = {\n    googleRecebidos: googleEvents.length,\n    outlookRecebidos: outlookEvents.length,\n    mapeamentos: mapRows.length,\n    ecos: 0,\n    espelhosIgnorados: 0,\n    fora_da_janela: 0,\n    conflitos: 0,\n    ignorados_por_filtro: 0,\n  };\n\n  const byGoogle = new Map();\n  const byOutlook = new Map();\n  for (const m of mapRows) {\n    if (m.google_event_id) byGoogle.set(String(m.google_event_id), m);\n    if (m.outlook_event_id) byOutlook.set(String(m.outlook_event_id), m);\n  }\n\n  const skipRe = conf.skipRegex ? new RegExp(conf.skipRegex, 'i') : null;\n  const pending = [];\n  const seen = new Set();\n\n  const windowStart = conf.timeMin ? new Date(conf.timeMin).getTime() : null;\n  const windowEnd = conf.timeMax ? new Date(conf.timeMax).getTime() : null;\n  const inWindow = (n) => {\n    if (!windowStart || !windowEnd || !n.start) return true;\n    const t = new Date(n.allDay ? `${n.start}T12:00:00Z` : n.start).getTime();\n    return t >= windowStart && t <= windowEnd;\n  };\n\n  // ---------- lado Google ----------\n  for (const ev of googleEvents) {\n    if (!ev || !ev.id) continue;\n    const key = `g:${ev.id}`;\n    if (seen.has(key)) continue;\n    seen.add(key);\n\n    const mapping = byGoogle.get(String(ev.id)) || null;\n    const isMirror = ev.extendedProperties\n      && ev.extendedProperties.private\n      && ev.extendedProperties.private.syncApp === MARKER;\n\n    // Cancelado / apagado\n    if (ev.status === 'cancelled') {\n      if (mapping) {\n        pending.push({\n          side: 'google', type: 'delete', mapping,\n          srcUpdated: isoUtc(ev.updated) || new Date().toISOString(),\n        });\n      }\n      continue;\n    }\n\n    const n = normalizeGoogle(ev);\n    if (!n.start || !n.end) continue;\n\n    if (skipRe && skipRe.test(n.subject)) { stats.ignorados_por_filtro++; continue; }\n\n    if (!mapping) {\n      if (isMirror) { stats.espelhosIgnorados++; continue; } // espelho órfão: nunca duplicar\n      if (!inWindow(n)) { stats.fora_da_janela++; continue; }\n      pending.push({\n        side: 'google', type: 'create', n,\n        sourceId: String(ev.id), srcUpdated: isoUtc(ev.updated),\n      });\n      continue;\n    }\n\n    if (n.hash === mapping.last_hash) { stats.ecos++; continue; } // ANTI-LOOP\n\n    pending.push({\n      side: 'google', type: 'update', mapping, n, srcUpdated: isoUtc(ev.updated),\n    });\n  }\n\n  // ---------- lado Outlook ----------\n  for (const ev of outlookEvents) {\n    if (!ev || !ev.id) continue;\n    const key = `o:${ev.id}`;\n    if (seen.has(key)) continue;\n    seen.add(key);\n\n    const mapping = byOutlook.get(String(ev.id)) || null;\n\n    if (ev['@removed']) {\n      if (mapping) {\n        pending.push({\n          side: 'outlook', type: 'delete', mapping, srcUpdated: new Date().toISOString(),\n        });\n      }\n      continue;\n    }\n\n    if (ev.isCancelled === true) {\n      if (mapping) {\n        pending.push({\n          side: 'outlook', type: 'delete', mapping,\n          srcUpdated: isoUtc(ev.lastModifiedDateTime) || new Date().toISOString(),\n        });\n      }\n      continue;\n    }\n\n    const n = normalizeOutlook(ev);\n    if (!n.start || !n.end) continue;\n\n    if (skipRe && skipRe.test(n.subject)) { stats.ignorados_por_filtro++; continue; }\n\n    const isMirror = Array.isArray(ev.categories) && ev.categories.includes(conf.mirrorCategory);\n\n    if (!mapping) {\n      if (isMirror) { stats.espelhosIgnorados++; continue; }\n      if (!inWindow(n)) { stats.fora_da_janela++; continue; }\n      pending.push({\n        side: 'outlook', type: 'create', n,\n        sourceId: String(ev.id), srcUpdated: isoUtc(ev.lastModifiedDateTime),\n      });\n      continue;\n    }\n\n    if (n.hash === mapping.last_hash) { stats.ecos++; continue; } // ANTI-LOOP\n\n    pending.push({\n      side: 'outlook', type: 'update', mapping, n, srcUpdated: isoUtc(ev.lastModifiedDateTime),\n    });\n  }\n\n  // ---------- resolução de conflitos (mesmo par alterado nos 2 lados) ----------\n  const byPair = new Map();\n  const resolved = [];\n  for (const p of pending) {\n    if (!p.mapping) { resolved.push(p); continue; }\n    const id = String(p.mapping.id);\n    if (!byPair.has(id)) { byPair.set(id, p); continue; }\n\n    stats.conflitos++;\n    const other = byPair.get(id);\n\n    // Exclusão sempre vence uma edição concorrente.\n    if (p.type === 'delete' && other.type !== 'delete') { byPair.set(id, p); continue; }\n    if (other.type === 'delete' && p.type !== 'delete') { continue; }\n    if (p.type === 'delete' && other.type === 'delete') { continue; } // já apagado nos dois lados\n\n    // last-write-wins\n    const tP = p.srcUpdated ? new Date(p.srcUpdated).getTime() : 0;\n    const tO = other.srcUpdated ? new Date(other.srcUpdated).getTime() : 0;\n    if (tP > tO) byPair.set(id, p);\n  }\n  resolved.push(...byPair.values());\n\n  // ---------- geração das ações ----------\n  const actions = [];\n  for (const p of resolved) {\n    const m = p.mapping;\n\n    if (p.type === 'delete') {\n      if (p.side === 'google') {\n        // apagado no Google -> apagar no Outlook\n        actions.push({\n          action: 'o_delete',\n          targetEventId: m.outlook_event_id,\n          ctx: { mappingId: m.id, reason: 'deleted-on-google' },\n        });\n      } else {\n        actions.push({\n          action: 'g_delete',\n          targetEventId: m.google_event_id,\n          ctx: { mappingId: m.id, reason: 'deleted-on-outlook' },\n        });\n      }\n      continue;\n    }\n\n    if (p.type === 'create') {\n      if (p.side === 'google') {\n        actions.push({\n          action: 'o_create',\n          payload: outlookBody(p.n, { sourceId: p.sourceId }, conf),\n          ctx: {\n            origin: 'google',\n            googleEventId: p.sourceId,\n            googleUpdated: p.srcUpdated,\n            hash: p.n.hash,\n            subject: p.n.subject,\n          },\n        });\n      } else {\n        actions.push({\n          action: 'g_create',\n          payload: googleBody(p.n, { sourceId: p.sourceId }),\n          ctx: {\n            origin: 'outlook',\n            outlookEventId: p.sourceId,\n            outlookUpdated: p.srcUpdated,\n            hash: p.n.hash,\n            subject: p.n.subject,\n          },\n        });\n      }\n      continue;\n    }\n\n    // update\n    if (p.side === 'google') {\n      actions.push({\n        action: 'o_update',\n        targetEventId: m.outlook_event_id,\n        payload: outlookBody(p.n, null, conf),\n        ctx: {\n          mappingId: m.id,\n          hash: p.n.hash,\n          googleUpdated: p.srcUpdated,\n          subject: p.n.subject,\n        },\n      });\n    } else {\n      actions.push({\n        action: 'g_update',\n        targetEventId: m.google_event_id,\n        payload: googleBody(p.n, null),\n        ctx: {\n          mappingId: m.id,\n          hash: p.n.hash,\n          outlookUpdated: p.srcUpdated,\n          subject: p.n.subject,\n        },\n      });\n    }\n  }\n\n  stats.acoes = actions.length;\n  return { actions, stats };\n}\n// PURE>>>\n\nconst conf = {\n  mirrorCategory: cfg.mirrorCategory,\n  graphPropGuid: cfg.graphPropGuid,\n  skipRegex: cfg.skipRegex || '',\n  timeMin: $('Preparar Janela').first().json.timeMin,\n  timeMax: $('Preparar Janela').first().json.timeMax,\n};\n\nconst { actions, stats } = reconcile(\n  conf,\n  gData.events || [],\n  oData.events || [],\n  mappings,\n);\n\n// O item sentinela garante que o ramo \"Nada a Fazer\" -> \"Salvar Estado\"\n// execute mesmo quando não há nenhuma alteração a propagar.\nconst out = actions.map((a) => ({ json: a }));\nout.push({ json: { action: 'noop', stats } });\nreturn out;\n"
+      },
+      "id": "4248d3e5-40b0-462d-ad78-d9e869116f85",
+      "name": "Reconciliar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2096,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a4c01570-e347-5e40-a313-c63632e4f5f7",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "g_create",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "g_create"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "f12d807f-8c8a-598f-8910-aea6a0b6d668",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "g_update",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "g_update"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c913a0fb-811e-5610-83d0-4b860c50ac07",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "g_delete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "g_delete"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "85662b95-9954-5474-9766-bae87a5f3538",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "o_create",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "o_create"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "7c0fe969-38e7-59b9-82e7-1e6558d97b79",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "o_update",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "o_update"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "bb3de691-8556-59fc-9449-fb1df09021d1",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "o_delete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "o_delete"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "sem_ação"
+        }
+      },
+      "id": "5d8bb83a-acdd-4a06-9127-28f13e72331f",
+      "name": "Rotear Ações",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2320,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent($('Config').first().json.googleCalendarId) + '/events' }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "id": "6be2db08-2976-4a0c-ac3a-e58bc843ce11",
+      "name": "Google: Criar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2608,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent($('Config').first().json.googleCalendarId) + '/events/' + encodeURIComponent($json.targetEventId) }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "id": "ee4f6ea7-dc1d-4117-b1c4-53284194cd93",
+      "name": "Google: Atualizar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2608,
+        240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent($('Config').first().json.googleCalendarId) + '/events/' + encodeURIComponent($json.targetEventId) }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {}
+      },
+      "id": "0b38abc2-962c-4cc5-9ac6-e8b4e7c4fcf4",
+      "name": "Google: Apagar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2608,
+        384
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.outlookCalendarBase + '/events' }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "microsoftOutlookOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "id": "5cfa91ff-99c5-4a1e-bf09-ebcf47a0ccd5",
+      "name": "Outlook: Criar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2608,
+        528
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://graph.microsoft.com/v1.0/me/events/' + encodeURIComponent($json.targetEventId) }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "microsoftOutlookOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "id": "81284e82-7777-45d8-a99b-a55d3546a716",
+      "name": "Outlook: Atualizar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2608,
+        672
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://graph.microsoft.com/v1.0/me/events/' + encodeURIComponent($json.targetEventId) }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "microsoftOutlookOAuth2Api",
+        "options": {}
+      },
+      "id": "1e646785-f553-4a08-ae2b-8d1a861d75f5",
+      "name": "Outlook: Apagar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2608,
+        800
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "017e1f05-4574-44a8-865f-33cc7f26d237",
+      "name": "Nada a Fazer",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2608,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// === Consolidar Escritas ===\n// Roda uma vez por item (Run Once for Each Item) para poder usar\n// $('Reconciliar').item, que resolve o item de origem pareado.\n// Junta a resposta da API com o contexto da ação e decide a operação\n// que será feita na tabela de mapeamento.\n\nconst src = $('Reconciliar').item.json;\nconst res = $json ?? {};\nconst ctx = src.ctx ?? {};\n\n// Se a chamada HTTP falhou (onError = continue), não mexemos no mapeamento:\n// o evento continua \"pendente\" e será reprocessado na próxima execução.\nif (res.error || res.__ok === false) {\n  return {\n    json: {\n      op: 'skip',\n      action: src.action,\n      subject: ctx.subject ?? null,\n      erro: typeof res.error === 'object' ? JSON.stringify(res.error).slice(0, 500) : String(res.error ?? 'desconhecido'),\n    },\n  };\n}\n\nswitch (src.action) {\n  case 'o_create':\n    return {\n      json: {\n        op: 'insert',\n        action: src.action,\n        subject: ctx.subject ?? null,\n        googleEventId: ctx.googleEventId,\n        outlookEventId: res.id,\n        origin: 'google',\n        hash: ctx.hash,\n        googleUpdated: ctx.googleUpdated ?? null,\n        outlookUpdated: res.lastModifiedDateTime ?? null,\n      },\n    };\n\n  case 'g_create':\n    return {\n      json: {\n        op: 'insert',\n        action: src.action,\n        subject: ctx.subject ?? null,\n        googleEventId: res.id,\n        outlookEventId: ctx.outlookEventId,\n        origin: 'outlook',\n        hash: ctx.hash,\n        googleUpdated: res.updated ?? null,\n        outlookUpdated: ctx.outlookUpdated ?? null,\n      },\n    };\n\n  case 'o_update':\n    return {\n      json: {\n        op: 'update',\n        action: src.action,\n        subject: ctx.subject ?? null,\n        mappingId: ctx.mappingId,\n        hash: ctx.hash,\n        googleUpdated: ctx.googleUpdated ?? null,\n        outlookUpdated: res.lastModifiedDateTime ?? null,\n      },\n    };\n\n  case 'g_update':\n    return {\n      json: {\n        op: 'update',\n        action: src.action,\n        subject: ctx.subject ?? null,\n        mappingId: ctx.mappingId,\n        hash: ctx.hash,\n        googleUpdated: res.updated ?? null,\n        outlookUpdated: ctx.outlookUpdated ?? null,\n      },\n    };\n\n  case 'g_delete':\n  case 'o_delete':\n    return {\n      json: {\n        op: 'delete',\n        action: src.action,\n        mappingId: ctx.mappingId,\n        reason: ctx.reason ?? null,\n      },\n    };\n\n  default:\n    return { json: { op: 'skip', action: src.action ?? 'desconhecida' } };\n}\n"
+      },
+      "id": "528a0872-3104-4ba7-acd6-6322f07e3d11",
+      "name": "Consolidar Escritas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2848,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "27a207e3-00bd-5164-838e-8edcea013b70",
+                    "leftValue": "={{ $json.op }}",
+                    "rightValue": "insert",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "insert"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "717a9162-8c67-576d-ad86-8e94ea7e31d1",
+                    "leftValue": "={{ $json.op }}",
+                    "rightValue": "update",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "update"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ccc65ecf-43ae-534f-8a31-9d518e971872",
+                    "leftValue": "={{ $json.op }}",
+                    "rightValue": "delete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "delete"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "falhas"
+        }
+      },
+      "id": "8e85c15a-bbb5-43a0-90e3-86b56ac1b8ad",
+      "name": "Rotear Persistência",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        3056,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.calendar_sync_map\n  (google_event_id, outlook_event_id, origin, last_hash,\n   google_updated, outlook_updated)\nvalues ($1, $2, $3, $4, $5, $6)\non conflict (google_event_id) do update set\n  outlook_event_id = excluded.outlook_event_id,\n  last_hash        = excluded.last_hash,\n  google_updated   = excluded.google_updated,\n  outlook_updated  = excluded.outlook_updated,\n  deleted_at       = null,\n  updated_at       = now()\nreturning id;",
+        "options": {
+          "queryReplacement": "={{ $json.googleEventId }}, {{ $json.outlookEventId }}, {{ $json.origin }}, {{ $json.hash }}, {{ $json.googleUpdated || null }}, {{ $json.outlookUpdated || null }}"
+        }
+      },
+      "id": "c7e3ec27-f6d8-481b-9330-8e3d67989d19",
+      "name": "Mapa: Inserir Par",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3296,
+        272
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update public.calendar_sync_map set\n  last_hash       = $1,\n  google_updated  = coalesce($2, google_updated),\n  outlook_updated = coalesce($3, outlook_updated),\n  updated_at      = now()\nwhere id = $4\nreturning id;",
+        "options": {
+          "queryReplacement": "={{ $json.hash }}, {{ $json.googleUpdated || null }}, {{ $json.outlookUpdated || null }}, {{ $json.mappingId }}"
+        }
+      },
+      "id": "7c4dae5b-c552-4a23-bf3a-bd84c576c138",
+      "name": "Mapa: Atualizar Hash",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3296,
+        448
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "delete from public.calendar_sync_map where id = $1 returning id;",
+        "options": {
+          "queryReplacement": "={{ $json.mappingId }}"
+        }
+      },
+      "id": "0db5a2eb-7ea3-4917-8445-48105798dd5a",
+      "name": "Mapa: Remover Par",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3296,
+        624
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "230c9fa2-50de-41f5-8d57-9e6bb73c3150",
+      "name": "Falhas de Escrita",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3296,
+        800
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "e73c85e2-9573-48f0-b4bc-de8c57a473c5",
+      "name": "Finalizar",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3536,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update public.calendar_sync_state set\n  outlook_delta_link = coalesce($1, outlook_delta_link),\n  last_google_sync   = $2,\n  last_run_at        = now()\nwhere id = 1\nreturning last_run_at;",
+        "options": {
+          "queryReplacement": "={{ $('Coletar Outlook').first().json.deltaLink || null }}, {{ $('Preparar Janela').first().json.runAt }}"
+        }
+      },
+      "id": "505d2ae5-fef3-47be-98c9-1c7c77f5caeb",
+      "name": "Salvar Estado",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3760,
+        512
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 1. Leitura incremental\n\n**Google** usa `events.list` com `updatedMin` (só o que mudou) + `showDeleted=true` para capturar cancelamentos, e `singleEvents=true` para receber ocorrências já expandidas.\n\n**Outlook** usa `calendarView/delta`: o `deltaLink` guardado no Postgres devolve apenas o que mudou desde a última execução, incluindo exclusões (`@removed`).",
+        "height": 300,
+        "width": 640
+      },
+      "id": "3ef3e59f-974c-4fa3-ab11-3acdb2b41ccf",
+      "name": "Nota 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        96,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Reconciliação\n\n**Anti-loop:** cada par guarda o hash do conteúdo. Quando o espelho volta no feed com o mesmo hash, é um eco da nossa própria escrita e é descartado.\n\n**Conflito:** last-write-wins por `updated` / `lastModifiedDateTime`. Exclusão vence edição.",
+        "height": 300,
+        "width": 480
+      },
+      "id": "74b0775e-e08e-4f88-b80e-3d69452402ba",
+      "name": "Nota 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2064,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Estado\n\n`Salvar Estado` só roda **depois** das escritas: se uma chamada de API falhar, o `deltaLink` não avança e o evento é reprocessado na próxima execução.\n\nO item sentinela `noop` garante que este ramo execute mesmo quando não houve nenhuma mudança.",
+        "height": 300,
+        "width": 520
+      },
+      "id": "885b21b4-4db7-4414-8882-ccdf03266bf1",
+      "name": "Nota 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3520,
+        -80
+      ]
+    }
+  ],
+  "connections": {
+    "Agendador": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Carregar Estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carregar Estado": {
+      "main": [
+        [
+          {
+            "node": "Preparar Janela",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Janela": {
+      "main": [
+        [
+          {
+            "node": "Google: Listar Eventos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google: Listar Eventos": {
+      "main": [
+        [
+          {
+            "node": "Coletar Google",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Coletar Google": {
+      "main": [
+        [
+          {
+            "node": "Outlook: Delta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook: Delta": {
+      "main": [
+        [
+          {
+            "node": "Coletar Outlook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Coletar Outlook": {
+      "main": [
+        [
+          {
+            "node": "Carregar Mapeamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carregar Mapeamento": {
+      "main": [
+        [
+          {
+            "node": "Reconciliar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconciliar": {
+      "main": [
+        [
+          {
+            "node": "Rotear Ações",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rotear Ações": {
+      "main": [
+        [
+          {
+            "node": "Google: Criar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google: Atualizar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google: Apagar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Outlook: Criar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Outlook: Atualizar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Outlook: Apagar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nada a Fazer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google: Criar": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Escritas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google: Atualizar": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Escritas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google: Apagar": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Escritas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook: Criar": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Escritas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook: Atualizar": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Escritas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook: Apagar": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Escritas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidar Escritas": {
+      "main": [
+        [
+          {
+            "node": "Rotear Persistência",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rotear Persistência": {
+      "main": [
+        [
+          {
+            "node": "Mapa: Inserir Par",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mapa: Atualizar Hash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mapa: Remover Par",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falhas de Escrita",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mapa: Inserir Par": {
+      "main": [
+        [
+          {
+            "node": "Finalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mapa: Atualizar Hash": {
+      "main": [
+        [
+          {
+            "node": "Finalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mapa: Remover Par": {
+      "main": [
+        [
+          {
+            "node": "Finalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falhas de Escrita": {
+      "main": [
+        [
+          {
+            "node": "Finalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nada a Fazer": {
+      "main": [
+        [
+          {
+            "node": "Finalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalizar": {
+      "main": [
+        [
+          {
+            "node": "Salvar Estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "41bc2e72-4e52-4065-9d6a-72a5e5076e3b",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "A1RK5zZGllIHSUDa",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-10T19:43:10.968Z",
+      "updatedAt": "2026-09-10T19:43:10.968Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
