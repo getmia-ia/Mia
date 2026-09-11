@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-02T19:44:32.195Z",
+  "updatedAt": "2026-09-10T17:27:02.911Z",
   "createdAt": "2025-12-04T16:13:08.388Z",
   "id": "4hvpgYDDakswW7fB",
   "name": "BMS - 5.2 - Defesa Administrativa Recurso Hierarquico",
@@ -86,7 +86,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $json.body.pdfUrl }}",
+        "url": "={{ $json.body.midias[0].url }}",
         "options": {
           "response": {
             "response": {
@@ -505,7 +505,7 @@
     },
     {
       "parameters": {
-        "jsCode": "async function main() {\n  // 1. AGREGAÇÃO DE DADOS\n  // Pega todos os itens que chegaram no input (não apenas o primeiro)\n  const allItems = $input.all();\n  \n  let dadosUnificados = {};\n  let arquivosDrive = [];\n\n  // Percorre cada item recebido para juntar tudo em um lugar só\n  for (const item of allItems) {\n    const json = item.json;\n\n    if (json.output) {\n      // Se tem a chave \"output\", espalha o conteúdo dentro dos dados unificados\n      // Isso vai juntar {cidade...} com {codigo_receita...} com {totais...}\n      Object.assign(dadosUnificados, json.output);\n    } else if (json.kind === 'drive#file') {\n      // Se for um arquivo do Drive, guarda numa lista separada\n      arquivosDrive.push(json);\n    } else {\n      // Caso sobre algo que não é output nem arquivo, joga no bolo principal\n      Object.assign(dadosUnificados, json);\n    }\n  }\n\n  // --- 1.5 LÓGICA DO VALOR ORIGINAL PERDCOMP 1 (NOVO TRECHO) ---\n  let valorOriginalPerdcomp1 = null;\n  const codigoFinal = dadosUnificados.codigo_receita_final;\n\n  // Verifica qual código bate e pega o valor correspondente\n  if (codigoFinal) {\n    // Usamos .trim() para evitar erros caso venha com espaços extras\n    const cod1 = dadosUnificados.codigo_da_receita_1;\n    const cod2 = dadosUnificados.codigo_da_receita_2;\n    const cod3 = dadosUnificados.codigo_da_receita_3;\n\n    if (cod1 && codigoFinal.trim() === cod1.trim()) {\n        valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_1;\n    } else if (cod2 && codigoFinal.trim() === cod2.trim()) {\n        valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_2;\n    } else if (cod3 && codigoFinal.trim() === cod3.trim()) {\n        valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_3;\n    }\n  }\n  // -------------------------------------------------------------\n\n  // Agora 'dadosUnificados' tem: cidade, data_ciencia, valores, códigos, etc.\n  \n  // 2. VALIDAÇÃO\n  // Certifique-se de que data_ciencia existe nos dados unificados\n  if (!dadosUnificados.data_ciencia) {\n    // Se não achar a data, retorna os dados como chegaram sem calcular (evita erro fatal)\n    return {\n      ...dadosUnificados,\n      arquivos_drive: arquivosDrive,\n      erro: \"Campo 'data_ciencia' não encontrado para cálculo.\"\n    };\n  }\n\n  // 3. PREPARAÇÃO DA DATA\n  const parts = dadosUnificados.data_ciencia.split(\"/\");\n  const dataCiencia = new Date(parts[2], parts[1] - 1, parts[0]);\n  const ano = dataCiencia.getFullYear();\n\n  // 4. FERIADOS (BrasilAPI)\n  let feriadosNacionais = [];\n  try {\n    const feriados = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://brasilapi.com.br/api/feriados/v1/${ano}`,\n      json: true\n    });\n    feriadosNacionais = feriados.map(f => f.date); \n  } catch (error) {\n    feriadosNacionais = [\n      `${ano}-01-01`, `${ano}-04-21`, `${ano}-05-01`,\n      `${ano}-09-07`, `${ano}-10-12`, `${ano}-11-02`,\n      `${ano}-11-15`, `${ano}-12-25`\n    ];\n  }\n\n  // --- Funções auxiliares ---\n  function isWeekend(date) {\n    const day = date.getDay();\n    return day === 0 || day === 6;\n  }\n\n  function isFeriado(date) {\n    const dateStr = date.toISOString().split(\"T\")[0];\n    return feriadosNacionais.includes(dateStr);\n  }\n\n  function proximoDiaUtil(date) {\n    let novaData = new Date(date);\n    while (isWeekend(novaData) || isFeriado(novaData)) {\n      novaData.setDate(novaData.getDate() + 1);\n    }\n    return novaData;\n  }\n\n  function formatDate(date) {\n    const d = String(date.getDate()).padStart(2, \"0\");\n    const m = String(date.getMonth() + 1).padStart(2, \"0\");\n    const y = date.getFullYear();\n    return `${d}/${m}/${y}`;\n  }\n\n  // 5. CÁLCULO DO PRAZO\n  let dataInicio = new Date(dataCiencia);\n  dataInicio.setDate(dataInicio.getDate() + 1); // Dia seguinte\n  dataInicio = proximoDiaUtil(dataInicio);     // Próximo útil\n\n  let dataFim = new Date(dataInicio);\n  dataFim.setDate(dataFim.getDate() + 9);     // +10 dias contando o dia de inicio \n  dataFim = proximoDiaUtil(dataFim);           // Próximo útil se cair em feriado/fds\n\n  // --- NOVA FUNÇÃO PARA FORMATAR \"1 de dezembro de 2025\" ---\nfunction formatarDataPorExtenso(date) {\n  const meses = [\n    \"janeiro\", \"fevereiro\", \"março\", \"abril\", \"maio\", \"junho\",\n    \"julho\", \"agosto\", \"setembro\", \"outubro\", \"novembro\", \"dezembro\"\n  ];\n  return `${date.getDate()} de ${meses[date.getMonth()]} de ${date.getFullYear()}`;\n}\n\n// Data de submissão = data atual\nconst dataSubmissao = new Date();\n\n  // 6. RETORNO FINAL\n  // Retorna tudo unificado + datas calculadas + arquivos do drive\n  return {\n    ...dadosUnificados, // Todos os campos de texto/valores juntos\n    valor_original_perdcomp1: valorOriginalPerdcomp1,\n    data_inicio_prazo: formatDate(dataInicio),\n    data_fim_prazo: formatDate(dataFim),\n    data_submissao: formatarDataPorExtenso(dataSubmissao),\n    arquivos_anexos: arquivosDrive // Lista com os metadados dos arquivos (PDF/PNG)\n  };\n}\n\nreturn main();"
+        "jsCode": "async function main() {\n  // 1. AGREGAÇÃO DE DADOS\n  const allItems = $input.all();\n\n  let dadosUnificados = {};\n  let arquivosS3 = [];\n\n  for (const item of allItems) {\n    const json = item.json;\n\n    if (json.output) {\n      Object.assign(dadosUnificados, json.output);\n\n    } else if (json.Location && json.Key) {\n      // Arquivo armazenado no S3\n      arquivosS3.push({\n        nome: json.Key.split('/').pop(),\n        link: json.Location\n      });\n\n    } else {\n      Object.assign(dadosUnificados, json);\n    }\n  }\n\n  // 1.5 LÓGICA DO VALOR ORIGINAL PERDCOMP 1\n  let valorOriginalPerdcomp1 = null;\n  const codigoFinal = dadosUnificados.codigo_receita_final;\n\n  if (codigoFinal) {\n    const cod1 = dadosUnificados.codigo_da_receita_1;\n    const cod2 = dadosUnificados.codigo_da_receita_2;\n    const cod3 = dadosUnificados.codigo_da_receita_3;\n\n    if (cod1 && codigoFinal.trim() === cod1.trim()) {\n      valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_1;\n    } else if (cod2 && codigoFinal.trim() === cod2.trim()) {\n      valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_2;\n    } else if (cod3 && codigoFinal.trim() === cod3.trim()) {\n      valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_3;\n    }\n  }\n\n  // 2. VALIDAÇÃO\n  if (!dadosUnificados.data_ciencia) {\n    return {\n      ...dadosUnificados,\n      valor_original_perdcomp1: valorOriginalPerdcomp1,\n      arquivos_s3: arquivosS3,\n      erro: \"Campo 'data_ciencia' não encontrado para cálculo.\"\n    };\n  }\n\n  // 3. PREPARAÇÃO DA DATA\n  const parts = dadosUnificados.data_ciencia.split(\"/\");\n  const dataCiencia = new Date(parts[2], parts[1] - 1, parts[0]);\n  const ano = dataCiencia.getFullYear();\n\n  // 4. FERIADOS\n  let feriadosNacionais = [];\n\n  try {\n    const feriados = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://brasilapi.com.br/api/feriados/v1/${ano}`,\n      json: true\n    });\n\n    feriadosNacionais = feriados.map(f => f.date);\n\n  } catch (error) {\n    feriadosNacionais = [\n      `${ano}-01-01`,\n      `${ano}-04-21`,\n      `${ano}-05-01`,\n      `${ano}-09-07`,\n      `${ano}-10-12`,\n      `${ano}-11-02`,\n      `${ano}-11-15`,\n      `${ano}-12-25`\n    ];\n  }\n\n  // Funções auxiliares\n  function isWeekend(date) {\n    const day = date.getDay();\n    return day === 0 || day === 6;\n  }\n\n  function isFeriado(date) {\n    const dateStr = date.toISOString().split(\"T\")[0];\n    return feriadosNacionais.includes(dateStr);\n  }\n\n  function proximoDiaUtil(date) {\n    let novaData = new Date(date);\n\n    while (isWeekend(novaData) || isFeriado(novaData)) {\n      novaData.setDate(novaData.getDate() + 1);\n    }\n\n    return novaData;\n  }\n\n  function formatDate(date) {\n    const d = String(date.getDate()).padStart(2, \"0\");\n    const m = String(date.getMonth() + 1).padStart(2, \"0\");\n    const y = date.getFullYear();\n\n    return `${d}/${m}/${y}`;\n  }\n\n  function formatarDataPorExtenso(date) {\n    const meses = [\n      \"janeiro\",\n      \"fevereiro\",\n      \"março\",\n      \"abril\",\n      \"maio\",\n      \"junho\",\n      \"julho\",\n      \"agosto\",\n      \"setembro\",\n      \"outubro\",\n      \"novembro\",\n      \"dezembro\"\n    ];\n\n    return `${date.getDate()} de ${meses[date.getMonth()]} de ${date.getFullYear()}`;\n  }\n\n  // 5. CÁLCULO DO PRAZO\n  let dataInicio = new Date(dataCiencia);\n\n  dataInicio.setDate(dataInicio.getDate() + 1);\n  dataInicio = proximoDiaUtil(dataInicio);\n\n  let dataFim = new Date(dataInicio);\n\n  dataFim.setDate(dataFim.getDate() + 9);\n  dataFim = proximoDiaUtil(dataFim);\n\n  const dataSubmissao = new Date();\n\n  // 6. RETORNO FINAL\n  return {\n    ...dadosUnificados,\n\n    valor_original_perdcomp1: valorOriginalPerdcomp1,\n\n    data_inicio_prazo: formatDate(dataInicio),\n\n    data_fim_prazo: formatDate(dataFim),\n\n    data_submissao: formatarDataPorExtenso(dataSubmissao),\n\n    // Links dos arquivos no S3\n    arquivos_s3: arquivosS3\n  };\n}\n\nreturn main();"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -515,39 +515,6 @@
       ],
       "id": "e17f6bab-b5c6-4bde-af91-2ec1a58297ec",
       "name": "Cálculo das datas em dias úteis1"
-    },
-    {
-      "parameters": {
-        "name": "=imagem_pdf_1_pg2_{{ $('Identificaçao dos arquivos').item.json.pdf1.fileName }}.png",
-        "driveId": {
-          "__rl": true,
-          "value": "0AK_twHdfTBV0Uk9PVA",
-          "mode": "list",
-          "cachedResultName": "BMS",
-          "cachedResultUrl": "https://drive.google.com/drive/folders/0AK_twHdfTBV0Uk9PVA"
-        },
-        "folderId": {
-          "__rl": true,
-          "value": "1gIy8GoeTjJ53I7X_3K2AHrhFMWiL8KD-",
-          "mode": "list",
-          "cachedResultName": "Imgs - RH",
-          "cachedResultUrl": "https://drive.google.com/drive/folders/1gIy8GoeTjJ53I7X_3K2AHrhFMWiL8KD-"
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
-      "position": [
-        544,
-        1120
-      ],
-      "id": "428ac9dc-b523-487a-bc00-6de8c59dcb24",
-      "name": "Upload file1",
-      "retryOnFail": true,
-      "waitBetweenTries": 5000,
-      "credentials": {
-        "googleDriveOAuth2Api": "***REMOVIDO***"
-      }
     },
     {
       "parameters": {
@@ -561,39 +528,6 @@
       ],
       "id": "0b30ea02-a1db-4910-ab9c-21117c5e8958",
       "name": "Merge2"
-    },
-    {
-      "parameters": {
-        "name": "=imagem_pdf_1_pg2_parcial_{{ $('Identificaçao dos arquivos').item.json.pdf1.fileName }}",
-        "driveId": {
-          "__rl": true,
-          "value": "0AK_twHdfTBV0Uk9PVA",
-          "mode": "list",
-          "cachedResultName": "BMS",
-          "cachedResultUrl": "https://drive.google.com/drive/folders/0AK_twHdfTBV0Uk9PVA"
-        },
-        "folderId": {
-          "__rl": true,
-          "value": "1gIy8GoeTjJ53I7X_3K2AHrhFMWiL8KD-",
-          "mode": "list",
-          "cachedResultName": "Imgs - RH",
-          "cachedResultUrl": "https://drive.google.com/drive/folders/1gIy8GoeTjJ53I7X_3K2AHrhFMWiL8KD-"
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
-      "position": [
-        544,
-        1312
-      ],
-      "id": "5c993611-be85-4656-a13a-bd57582779c6",
-      "name": "Upload file2",
-      "retryOnFail": true,
-      "waitBetweenTries": 5000,
-      "credentials": {
-        "googleDriveOAuth2Api": "***REMOVIDO***"
-      }
     },
     {
       "parameters": {
@@ -662,13 +596,13 @@
             {
               "id": "c460c2ed-cb4b-4bc7-98d0-4906d1cf7192",
               "name": "imagem_pdf_1_pg2",
-              "value": "={{ $('Cálculo das datas em dias úteis1').item.json.arquivos_anexos[0].webContentLink }}",
+              "value": "={{ $('Cálculo das datas em dias úteis1').item.json.arquivos_s3[0].link }}",
               "type": "string"
             },
             {
               "id": "da1af457-3d19-491b-8e65-d6d7b675a54a",
               "name": "image_pdf_1_pg2_parcial",
-              "value": "={{ $('Cálculo das datas em dias úteis1').item.json.arquivos_anexos[1].webContentLink }}",
+              "value": "={{ $('Cálculo das datas em dias úteis1').item.json.arquivos_s3[1].link }}",
               "type": "string"
             },
             {
@@ -957,19 +891,19 @@
             {
               "id": "06762f92-f585-4365-a4d3-425ce27c0bbd",
               "name": "url_view",
-              "value": "=https://docs.google.com/document/d/{{$('Insere img no docs1').first().json.documentId}}/edit",
+              "value": "=https://docs.google.com/document/d/{{ $('duplica o template').first().json.id }}/edit",
               "type": "string"
             },
             {
               "id": "de434c15-557a-4ee5-b0f9-a4bd8bef15cd",
               "name": "url_docx",
-              "value": "=https://docs.google.com/document/d/{{$('Insere img no docs1').first().json.documentId}}/export?format=docx",
+              "value": "=https://docs.google.com/document/d/{{ $('duplica o template').first().json.id }}/export?format=docx",
               "type": "string"
             },
             {
               "id": "3dd1d764-0d04-4192-9b3a-56902528d59b",
               "name": "url_pdf",
-              "value": "=https://docs.google.com/document/d/{{$('Insere img no docs1').first().json.documentId}}/export?format=pdf",
+              "value": "=https://docs.google.com/document/d/{{ $('duplica o template').first().json.id }}/export?format=pdf",
               "type": "string"
             }
           ]
@@ -1145,7 +1079,7 @@
         "operation": "deleteFile",
         "fileId": {
           "__rl": true,
-          "value": "={{ $('Upload file1').first().json.id }}",
+          "value": "={{ $('Upload file12').first().json.id }}",
           "mode": "id"
         },
         "options": {}
@@ -1475,7 +1409,7 @@
         "operation": "deleteFile",
         "fileId": {
           "__rl": true,
-          "value": "={{ $('Upload file2').first().json.id }}",
+          "value": "={{ $('Upload file22').first().json.id }}",
           "mode": "id"
         },
         "options": {}
@@ -2295,6 +2229,52 @@
       ],
       "id": "dd6af81f-9131-40f5-8372-147a205e3003",
       "name": "Verifica se tem placeholder da img1"
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "cdn.miabuilder.com",
+        "fileName": "=BMS/DefesasAdministrativas/imagem_pdf_1_pg2_{{ $('Identificaçao dos arquivos').first().json.pdf1.fileName.replace(/\\.pdf$/i, '.png') }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 2,
+      "position": [
+        560,
+        1120
+      ],
+      "id": "abf076bf-96f1-4f24-9c9a-0b1e24aadea3",
+      "name": "Upload file1",
+      "credentials": {
+        "aws": {
+          "id": "NL1DGPqJZ3XHyml8",
+          "name": "MIA CDN AWS S3"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "cdn.miabuilder.com",
+        "fileName": "=BMS/DefesasAdministrativas/imagem_pdf_1_pg2_parcial_{{ $('Identificaçao dos arquivos').first().json.pdf1.fileName.replace(/\\.pdf$/i, '.png') }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 2,
+      "position": [
+        560,
+        1312
+      ],
+      "id": "2e19c994-d06b-422e-b4e6-40d791baae9b",
+      "name": "Upload file2",
+      "credentials": {
+        "aws": {
+          "id": "NL1DGPqJZ3XHyml8",
+          "name": "MIA CDN AWS S3"
+        }
+      },
+      "onError": "continueErrorOutput"
     }
   ],
   "connections": {
@@ -2495,17 +2475,6 @@
         ]
       ]
     },
-    "Upload file1": {
-      "main": [
-        [
-          {
-            "node": "Merge",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Cálculo das datas em dias úteis1": {
       "main": [
         [
@@ -2586,17 +2555,6 @@
             "node": "Upload file1",
             "type": "main",
             "index": 0
-          }
-        ]
-      ]
-    },
-    "Upload file2": {
-      "main": [
-        [
-          {
-            "node": "Merge",
-            "type": "main",
-            "index": 1
           }
         ]
       ]
@@ -3102,6 +3060,28 @@
           }
         ]
       ]
+    },
+    "Upload file1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload file2": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -3119,8 +3099,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "fdd73770-75e0-4267-ad34-938541d93287",
-  "activeVersionId": "fdd73770-75e0-4267-ad34-938541d93287",
+  "versionId": "3adb5b31-e7f6-4e0e-b04a-39e8b59db05c",
+  "activeVersionId": "3adb5b31-e7f6-4e0e-b04a-39e8b59db05c",
   "triggerCount": 1,
   "shared": [
     {
@@ -3132,7 +3112,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "fdd73770-75e0-4267-ad34-938541d93287",
+    "versionId": "3adb5b31-e7f6-4e0e-b04a-39e8b59db05c",
     "workflowId": "4hvpgYDDakswW7fB",
     "nodes": [
       {
@@ -3215,7 +3195,7 @@
       },
       {
         "parameters": {
-          "url": "={{ $json.body.pdfUrl }}",
+          "url": "={{ $json.body.midias[0].url }}",
           "options": {
             "response": {
               "response": {
@@ -3634,7 +3614,7 @@
       },
       {
         "parameters": {
-          "jsCode": "async function main() {\n  // 1. AGREGAÇÃO DE DADOS\n  // Pega todos os itens que chegaram no input (não apenas o primeiro)\n  const allItems = $input.all();\n  \n  let dadosUnificados = {};\n  let arquivosDrive = [];\n\n  // Percorre cada item recebido para juntar tudo em um lugar só\n  for (const item of allItems) {\n    const json = item.json;\n\n    if (json.output) {\n      // Se tem a chave \"output\", espalha o conteúdo dentro dos dados unificados\n      // Isso vai juntar {cidade...} com {codigo_receita...} com {totais...}\n      Object.assign(dadosUnificados, json.output);\n    } else if (json.kind === 'drive#file') {\n      // Se for um arquivo do Drive, guarda numa lista separada\n      arquivosDrive.push(json);\n    } else {\n      // Caso sobre algo que não é output nem arquivo, joga no bolo principal\n      Object.assign(dadosUnificados, json);\n    }\n  }\n\n  // --- 1.5 LÓGICA DO VALOR ORIGINAL PERDCOMP 1 (NOVO TRECHO) ---\n  let valorOriginalPerdcomp1 = null;\n  const codigoFinal = dadosUnificados.codigo_receita_final;\n\n  // Verifica qual código bate e pega o valor correspondente\n  if (codigoFinal) {\n    // Usamos .trim() para evitar erros caso venha com espaços extras\n    const cod1 = dadosUnificados.codigo_da_receita_1;\n    const cod2 = dadosUnificados.codigo_da_receita_2;\n    const cod3 = dadosUnificados.codigo_da_receita_3;\n\n    if (cod1 && codigoFinal.trim() === cod1.trim()) {\n        valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_1;\n    } else if (cod2 && codigoFinal.trim() === cod2.trim()) {\n        valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_2;\n    } else if (cod3 && codigoFinal.trim() === cod3.trim()) {\n        valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_3;\n    }\n  }\n  // -------------------------------------------------------------\n\n  // Agora 'dadosUnificados' tem: cidade, data_ciencia, valores, códigos, etc.\n  \n  // 2. VALIDAÇÃO\n  // Certifique-se de que data_ciencia existe nos dados unificados\n  if (!dadosUnificados.data_ciencia) {\n    // Se não achar a data, retorna os dados como chegaram sem calcular (evita erro fatal)\n    return {\n      ...dadosUnificados,\n      arquivos_drive: arquivosDrive,\n      erro: \"Campo 'data_ciencia' não encontrado para cálculo.\"\n    };\n  }\n\n  // 3. PREPARAÇÃO DA DATA\n  const parts = dadosUnificados.data_ciencia.split(\"/\");\n  const dataCiencia = new Date(parts[2], parts[1] - 1, parts[0]);\n  const ano = dataCiencia.getFullYear();\n\n  // 4. FERIADOS (BrasilAPI)\n  let feriadosNacionais = [];\n  try {\n    const feriados = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://brasilapi.com.br/api/feriados/v1/${ano}`,\n      json: true\n    });\n    feriadosNacionais = feriados.map(f => f.date); \n  } catch (error) {\n    feriadosNacionais = [\n      `${ano}-01-01`, `${ano}-04-21`, `${ano}-05-01`,\n      `${ano}-09-07`, `${ano}-10-12`, `${ano}-11-02`,\n      `${ano}-11-15`, `${ano}-12-25`\n    ];\n  }\n\n  // --- Funções auxiliares ---\n  function isWeekend(date) {\n    const day = date.getDay();\n    return day === 0 || day === 6;\n  }\n\n  function isFeriado(date) {\n    const dateStr = date.toISOString().split(\"T\")[0];\n    return feriadosNacionais.includes(dateStr);\n  }\n\n  function proximoDiaUtil(date) {\n    let novaData = new Date(date);\n    while (isWeekend(novaData) || isFeriado(novaData)) {\n      novaData.setDate(novaData.getDate() + 1);\n    }\n    return novaData;\n  }\n\n  function formatDate(date) {\n    const d = String(date.getDate()).padStart(2, \"0\");\n    const m = String(date.getMonth() + 1).padStart(2, \"0\");\n    const y = date.getFullYear();\n    return `${d}/${m}/${y}`;\n  }\n\n  // 5. CÁLCULO DO PRAZO\n  let dataInicio = new Date(dataCiencia);\n  dataInicio.setDate(dataInicio.getDate() + 1); // Dia seguinte\n  dataInicio = proximoDiaUtil(dataInicio);     // Próximo útil\n\n  let dataFim = new Date(dataInicio);\n  dataFim.setDate(dataFim.getDate() + 9);     // +10 dias contando o dia de inicio \n  dataFim = proximoDiaUtil(dataFim);           // Próximo útil se cair em feriado/fds\n\n  // --- NOVA FUNÇÃO PARA FORMATAR \"1 de dezembro de 2025\" ---\nfunction formatarDataPorExtenso(date) {\n  const meses = [\n    \"janeiro\", \"fevereiro\", \"março\", \"abril\", \"maio\", \"junho\",\n    \"julho\", \"agosto\", \"setembro\", \"outubro\", \"novembro\", \"dezembro\"\n  ];\n  return `${date.getDate()} de ${meses[date.getMonth()]} de ${date.getFullYear()}`;\n}\n\n// Data de submissão = data atual\nconst dataSubmissao = new Date();\n\n  // 6. RETORNO FINAL\n  // Retorna tudo unificado + datas calculadas + arquivos do drive\n  return {\n    ...dadosUnificados, // Todos os campos de texto/valores juntos\n    valor_original_perdcomp1: valorOriginalPerdcomp1,\n    data_inicio_prazo: formatDate(dataInicio),\n    data_fim_prazo: formatDate(dataFim),\n    data_submissao: formatarDataPorExtenso(dataSubmissao),\n    arquivos_anexos: arquivosDrive // Lista com os metadados dos arquivos (PDF/PNG)\n  };\n}\n\nreturn main();"
+          "jsCode": "async function main() {\n  // 1. AGREGAÇÃO DE DADOS\n  const allItems = $input.all();\n\n  let dadosUnificados = {};\n  let arquivosS3 = [];\n\n  for (const item of allItems) {\n    const json = item.json;\n\n    if (json.output) {\n      Object.assign(dadosUnificados, json.output);\n\n    } else if (json.Location && json.Key) {\n      // Arquivo armazenado no S3\n      arquivosS3.push({\n        nome: json.Key.split('/').pop(),\n        link: json.Location\n      });\n\n    } else {\n      Object.assign(dadosUnificados, json);\n    }\n  }\n\n  // 1.5 LÓGICA DO VALOR ORIGINAL PERDCOMP 1\n  let valorOriginalPerdcomp1 = null;\n  const codigoFinal = dadosUnificados.codigo_receita_final;\n\n  if (codigoFinal) {\n    const cod1 = dadosUnificados.codigo_da_receita_1;\n    const cod2 = dadosUnificados.codigo_da_receita_2;\n    const cod3 = dadosUnificados.codigo_da_receita_3;\n\n    if (cod1 && codigoFinal.trim() === cod1.trim()) {\n      valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_1;\n    } else if (cod2 && codigoFinal.trim() === cod2.trim()) {\n      valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_2;\n    } else if (cod3 && codigoFinal.trim() === cod3.trim()) {\n      valorOriginalPerdcomp1 = dadosUnificados.valor_original_credito_3;\n    }\n  }\n\n  // 2. VALIDAÇÃO\n  if (!dadosUnificados.data_ciencia) {\n    return {\n      ...dadosUnificados,\n      valor_original_perdcomp1: valorOriginalPerdcomp1,\n      arquivos_s3: arquivosS3,\n      erro: \"Campo 'data_ciencia' não encontrado para cálculo.\"\n    };\n  }\n\n  // 3. PREPARAÇÃO DA DATA\n  const parts = dadosUnificados.data_ciencia.split(\"/\");\n  const dataCiencia = new Date(parts[2], parts[1] - 1, parts[0]);\n  const ano = dataCiencia.getFullYear();\n\n  // 4. FERIADOS\n  let feriadosNacionais = [];\n\n  try {\n    const feriados = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://brasilapi.com.br/api/feriados/v1/${ano}`,\n      json: true\n    });\n\n    feriadosNacionais = feriados.map(f => f.date);\n\n  } catch (error) {\n    feriadosNacionais = [\n      `${ano}-01-01`,\n      `${ano}-04-21`,\n      `${ano}-05-01`,\n      `${ano}-09-07`,\n      `${ano}-10-12`,\n      `${ano}-11-02`,\n      `${ano}-11-15`,\n      `${ano}-12-25`\n    ];\n  }\n\n  // Funções auxiliares\n  function isWeekend(date) {\n    const day = date.getDay();\n    return day === 0 || day === 6;\n  }\n\n  function isFeriado(date) {\n    const dateStr = date.toISOString().split(\"T\")[0];\n    return feriadosNacionais.includes(dateStr);\n  }\n\n  function proximoDiaUtil(date) {\n    let novaData = new Date(date);\n\n    while (isWeekend(novaData) || isFeriado(novaData)) {\n      novaData.setDate(novaData.getDate() + 1);\n    }\n\n    return novaData;\n  }\n\n  function formatDate(date) {\n    const d = String(date.getDate()).padStart(2, \"0\");\n    const m = String(date.getMonth() + 1).padStart(2, \"0\");\n    const y = date.getFullYear();\n\n    return `${d}/${m}/${y}`;\n  }\n\n  function formatarDataPorExtenso(date) {\n    const meses = [\n      \"janeiro\",\n      \"fevereiro\",\n      \"março\",\n      \"abril\",\n      \"maio\",\n      \"junho\",\n      \"julho\",\n      \"agosto\",\n      \"setembro\",\n      \"outubro\",\n      \"novembro\",\n      \"dezembro\"\n    ];\n\n    return `${date.getDate()} de ${meses[date.getMonth()]} de ${date.getFullYear()}`;\n  }\n\n  // 5. CÁLCULO DO PRAZO\n  let dataInicio = new Date(dataCiencia);\n\n  dataInicio.setDate(dataInicio.getDate() + 1);\n  dataInicio = proximoDiaUtil(dataInicio);\n\n  let dataFim = new Date(dataInicio);\n\n  dataFim.setDate(dataFim.getDate() + 9);\n  dataFim = proximoDiaUtil(dataFim);\n\n  const dataSubmissao = new Date();\n\n  // 6. RETORNO FINAL\n  return {\n    ...dadosUnificados,\n\n    valor_original_perdcomp1: valorOriginalPerdcomp1,\n\n    data_inicio_prazo: formatDate(dataInicio),\n\n    data_fim_prazo: formatDate(dataFim),\n\n    data_submissao: formatarDataPorExtenso(dataSubmissao),\n\n    // Links dos arquivos no S3\n    arquivos_s3: arquivosS3\n  };\n}\n\nreturn main();"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -3644,39 +3624,6 @@
         ],
         "id": "e17f6bab-b5c6-4bde-af91-2ec1a58297ec",
         "name": "Cálculo das datas em dias úteis1"
-      },
-      {
-        "parameters": {
-          "name": "=imagem_pdf_1_pg2_{{ $('Identificaçao dos arquivos').item.json.pdf1.fileName }}.png",
-          "driveId": {
-            "__rl": true,
-            "value": "0AK_twHdfTBV0Uk9PVA",
-            "mode": "list",
-            "cachedResultName": "BMS",
-            "cachedResultUrl": "https://drive.google.com/drive/folders/0AK_twHdfTBV0Uk9PVA"
-          },
-          "folderId": {
-            "__rl": true,
-            "value": "1gIy8GoeTjJ53I7X_3K2AHrhFMWiL8KD-",
-            "mode": "list",
-            "cachedResultName": "Imgs - RH",
-            "cachedResultUrl": "https://drive.google.com/drive/folders/1gIy8GoeTjJ53I7X_3K2AHrhFMWiL8KD-"
-          },
-          "options": {}
-        },
-        "type": "n8n-nodes-base.googleDrive",
-        "typeVersion": 3,
-        "position": [
-          544,
-          1120
-        ],
-        "id": "428ac9dc-b523-487a-bc00-6de8c59dcb24",
-        "name": "Upload file1",
-        "retryOnFail": true,
-        "waitBetweenTries": 5000,
-        "credentials": {
-          "googleDriveOAuth2Api": "***REMOVIDO***"
-        }
       },
       {
         "parameters": {
@@ -3690,39 +3637,6 @@
         ],
         "id": "0b30ea02-a1db-4910-ab9c-21117c5e8958",
         "name": "Merge2"
-      },
-      {
-        "parameters": {
-          "name": "=imagem_pdf_1_pg2_parcial_{{ $('Identificaçao dos arquivos').item.json.pdf1.fileName }}",
-          "driveId": {
-            "__rl": true,
-            "value": "0AK_twHdfTBV0Uk9PVA",
-            "mode": "list",
-            "cachedResultName": "BMS",
-            "cachedResultUrl": "https://drive.google.com/drive/folders/0AK_twHdfTBV0Uk9PVA"
-          },
-          "folderId": {
-            "__rl": true,
-            "value": "1gIy8GoeTjJ53I7X_3K2AHrhFMWiL8KD-",
-            "mode": "list",
-            "cachedResultName": "Imgs - RH",
-            "cachedResultUrl": "https://drive.google.com/drive/folders/1gIy8GoeTjJ53I7X_3K2AHrhFMWiL8KD-"
-          },
-          "options": {}
-        },
-        "type": "n8n-nodes-base.googleDrive",
-        "typeVersion": 3,
-        "position": [
-          544,
-          1312
-        ],
-        "id": "5c993611-be85-4656-a13a-bd57582779c6",
-        "name": "Upload file2",
-        "retryOnFail": true,
-        "waitBetweenTries": 5000,
-        "credentials": {
-          "googleDriveOAuth2Api": "***REMOVIDO***"
-        }
       },
       {
         "parameters": {
@@ -3791,13 +3705,13 @@
               {
                 "id": "c460c2ed-cb4b-4bc7-98d0-4906d1cf7192",
                 "name": "imagem_pdf_1_pg2",
-                "value": "={{ $('Cálculo das datas em dias úteis1').item.json.arquivos_anexos[0].webContentLink }}",
+                "value": "={{ $('Cálculo das datas em dias úteis1').item.json.arquivos_s3[0].link }}",
                 "type": "string"
               },
               {
                 "id": "da1af457-3d19-491b-8e65-d6d7b675a54a",
                 "name": "image_pdf_1_pg2_parcial",
-                "value": "={{ $('Cálculo das datas em dias úteis1').item.json.arquivos_anexos[1].webContentLink }}",
+                "value": "={{ $('Cálculo das datas em dias úteis1').item.json.arquivos_s3[1].link }}",
                 "type": "string"
               },
               {
@@ -4086,19 +4000,19 @@
               {
                 "id": "06762f92-f585-4365-a4d3-425ce27c0bbd",
                 "name": "url_view",
-                "value": "=https://docs.google.com/document/d/{{$('Insere img no docs1').first().json.documentId}}/edit",
+                "value": "=https://docs.google.com/document/d/{{ $('duplica o template').first().json.id }}/edit",
                 "type": "string"
               },
               {
                 "id": "de434c15-557a-4ee5-b0f9-a4bd8bef15cd",
                 "name": "url_docx",
-                "value": "=https://docs.google.com/document/d/{{$('Insere img no docs1').first().json.documentId}}/export?format=docx",
+                "value": "=https://docs.google.com/document/d/{{ $('duplica o template').first().json.id }}/export?format=docx",
                 "type": "string"
               },
               {
                 "id": "3dd1d764-0d04-4192-9b3a-56902528d59b",
                 "name": "url_pdf",
-                "value": "=https://docs.google.com/document/d/{{$('Insere img no docs1').first().json.documentId}}/export?format=pdf",
+                "value": "=https://docs.google.com/document/d/{{ $('duplica o template').first().json.id }}/export?format=pdf",
                 "type": "string"
               }
             ]
@@ -4274,7 +4188,7 @@
           "operation": "deleteFile",
           "fileId": {
             "__rl": true,
-            "value": "={{ $('Upload file1').first().json.id }}",
+            "value": "={{ $('Upload file12').first().json.id }}",
             "mode": "id"
           },
           "options": {}
@@ -4604,7 +4518,7 @@
           "operation": "deleteFile",
           "fileId": {
             "__rl": true,
-            "value": "={{ $('Upload file2').first().json.id }}",
+            "value": "={{ $('Upload file22').first().json.id }}",
             "mode": "id"
           },
           "options": {}
@@ -5424,6 +5338,52 @@
         ],
         "id": "dd6af81f-9131-40f5-8372-147a205e3003",
         "name": "Verifica se tem placeholder da img1"
+      },
+      {
+        "parameters": {
+          "operation": "upload",
+          "bucketName": "cdn.miabuilder.com",
+          "fileName": "=BMS/DefesasAdministrativas/imagem_pdf_1_pg2_{{ $('Identificaçao dos arquivos').first().json.pdf1.fileName.replace(/\\.pdf$/i, '.png') }}",
+          "additionalFields": {}
+        },
+        "type": "n8n-nodes-base.awsS3",
+        "typeVersion": 2,
+        "position": [
+          560,
+          1120
+        ],
+        "id": "abf076bf-96f1-4f24-9c9a-0b1e24aadea3",
+        "name": "Upload file1",
+        "credentials": {
+          "aws": {
+            "id": "NL1DGPqJZ3XHyml8",
+            "name": "MIA CDN AWS S3"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "operation": "upload",
+          "bucketName": "cdn.miabuilder.com",
+          "fileName": "=BMS/DefesasAdministrativas/imagem_pdf_1_pg2_parcial_{{ $('Identificaçao dos arquivos').first().json.pdf1.fileName.replace(/\\.pdf$/i, '.png') }}",
+          "additionalFields": {}
+        },
+        "type": "n8n-nodes-base.awsS3",
+        "typeVersion": 2,
+        "position": [
+          560,
+          1312
+        ],
+        "id": "2e19c994-d06b-422e-b4e6-40d791baae9b",
+        "name": "Upload file2",
+        "credentials": {
+          "aws": {
+            "id": "NL1DGPqJZ3XHyml8",
+            "name": "MIA CDN AWS S3"
+          }
+        },
+        "onError": "continueErrorOutput"
       }
     ],
     "connections": {
@@ -5624,17 +5584,6 @@
           ]
         ]
       },
-      "Upload file1": {
-        "main": [
-          [
-            {
-              "node": "Merge",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "Cálculo das datas em dias úteis1": {
         "main": [
           [
@@ -5715,17 +5664,6 @@
               "node": "Upload file1",
               "type": "main",
               "index": 0
-            }
-          ]
-        ]
-      },
-      "Upload file2": {
-        "main": [
-          [
-            {
-              "node": "Merge",
-              "type": "main",
-              "index": 1
             }
           ]
         ]
@@ -6231,15 +6169,37 @@
             }
           ]
         ]
+      },
+      "Upload file1": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upload file2": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
       }
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Version fdd73770",
+    "name": "Version 3adb5b31",
     "description": "",
     "autosaved": true,
-    "createdAt": "2026-09-02T19:44:32.198Z",
-    "updatedAt": "2026-09-02T19:44:43.994Z"
+    "createdAt": "2026-09-10T17:27:02.939Z",
+    "updatedAt": "2026-09-10T17:27:08.125Z"
   },
   "tags": []
 }
