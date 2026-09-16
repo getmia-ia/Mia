@@ -1,0 +1,358 @@
+{
+  "updatedAt": "2026-09-14T19:25:29.609Z",
+  "createdAt": "2026-09-14T17:42:33.986Z",
+  "id": "XWSUsVyLfMcNdb67",
+  "name": "Eleva - 1.09 - Inserir Lead",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "nome"
+            },
+            {
+              "name": "telefone"
+            },
+            {
+              "name": "ocupacao"
+            },
+            {
+              "name": "faixa_renda"
+            },
+            {
+              "name": "renda_estimada"
+            },
+            {
+              "name": "decisoes_financeiras"
+            },
+            {
+              "name": "momento_financeiro"
+            }
+          ]
+        }
+      },
+      "id": "63ff02b7-f6f8-4711-8374-28e1a0d692ba",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -96,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const dados = $input.first().json;\n\nfunction limpo(v) {\n  return (v === undefined || v === null) ? '' : String(v).trim();\n}\n\n// Telefone: guarda só os dígitos (phone_digits) e uma versão formatada (phone),\n// no mesmo padrão que o app usa quando o planejador cadastra o lead na mão.\nconst digitos = limpo(dados.telefone).replace(/\\D/g, '');\nconst semPais = digitos.startsWith('55') && digitos.length > 11 ? digitos.slice(2) : digitos;\n\nlet telefoneFormatado = limpo(dados.telefone);\nif (semPais.length === 11) {\n  telefoneFormatado = `(${semPais.slice(0,2)}) ${semPais.slice(2,7)}-${semPais.slice(7)}`;\n} else if (semPais.length === 10) {\n  telefoneFormatado = `(${semPais.slice(0,2)}) ${semPais.slice(2,6)}-${semPais.slice(6)}`;\n}\n\n// As respostas 2, 4 e 5 do questionário viram o texto de observações do lead.\nconst linhas = [];\nif (limpo(dados.ocupacao)) linhas.push(`Ocupação: ${limpo(dados.ocupacao)}`);\nif (limpo(dados.faixa_renda)) linhas.push(`Faixa de renda informada: ${limpo(dados.faixa_renda)}`);\nif (limpo(dados.decisoes_financeiras)) linhas.push(`Decisões financeiras: ${limpo(dados.decisoes_financeiras)}`);\nif (limpo(dados.momento_financeiro)) linhas.push(`Momento financeiro: ${limpo(dados.momento_financeiro)}`);\nlinhas.push('');\nlinhas.push('Respondido pela assistente da Eleva no WhatsApp (landing page).');\n\n// Renda: aceita número puro ou texto com R$/pontuação brasileira.\nconst rendaBruta = limpo(dados.renda_estimada).replace(/[^0-9,.-]/g, '').replace(/\\./g, '').replace(',', '.');\nconst renda = Number(rendaBruta);\n\nreturn [{ json: {\n  name: limpo(dados.nome),\n  phone: telefoneFormatado,\n  phone_digits: semPais,\n  notes: linhas.join('\\n'),\n  estimated_income: Number.isFinite(renda) && renda > 0 ? renda : 0\n} }];"
+      },
+      "id": "2ae10dcf-9495-4e07-a525-426aa16913a5",
+      "name": "Preparar Dados do Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "tableId": "leads",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "name",
+              "fieldValue": "={{ $json.name }}"
+            },
+            {
+              "fieldId": "phone",
+              "fieldValue": "={{ $json.phone }}"
+            },
+            {
+              "fieldId": "phone_digits",
+              "fieldValue": "={{ $json.phone_digits }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "lead"
+            },
+            {
+              "fieldId": "notes",
+              "fieldValue": "={{ $json.notes }}"
+            },
+            {
+              "fieldId": "origin",
+              "fieldValue": "Site"
+            },
+            {
+              "fieldId": "priority",
+              "fieldValue": "media"
+            },
+            {
+              "fieldId": "estimated_income",
+              "fieldValue": "={{ $json.estimated_income }}"
+            },
+            {
+              "fieldId": "organization_id",
+              "fieldValue": "f6d1b40f-6430-47fe-8286-730ea960ba29"
+            }
+          ]
+        }
+      },
+      "id": "0e174677-ba2c-4e4c-bada-35c7feb9f726",
+      "name": "Inserir Lead no Sollo",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        368,
+        16
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "kajlEDhCYmeLcxgQ",
+          "name": "ELEVA - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json)\n  .filter(r => Object.values(r).some(v => v !== null && v !== undefined));\n\nif (rows.length === 0 || !rows[0].id) {\n  return [{ json: {\n    cadastrado: false,\n    mensagem: 'Não foi possível registrar o lead. Não confirme o cadastro para a pessoa.'\n  } }];\n}\n\nconst row = rows[0];\nreturn [{ json: {\n  cadastrado: true,\n  lead_id: row.id,\n  nome: row.name,\n  mensagem: 'Lead registrado com sucesso na etapa Lead do CRM da Eleva.'\n} }];"
+      },
+      "id": "69a5e99f-26ec-4e97-86e3-3c8406a31962",
+      "name": "Resposta para o Agente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        16
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Preparar Dados do Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Dados do Lead": {
+      "main": [
+        [
+          {
+            "node": "Inserir Lead no Sollo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inserir Lead no Sollo": {
+      "main": [
+        [
+          {
+            "node": "Resposta para o Agente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "e436eccd-1ed1-4180-9248-bd92e647afc1",
+  "activeVersionId": "e436eccd-1ed1-4180-9248-bd92e647afc1",
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "XWSUsVyLfMcNdb67",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-14T17:42:33.986Z",
+      "updatedAt": "2026-09-14T17:42:33.986Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "e436eccd-1ed1-4180-9248-bd92e647afc1",
+    "workflowId": "XWSUsVyLfMcNdb67",
+    "nodes": [
+      {
+        "parameters": {
+          "workflowInputs": {
+            "values": [
+              {
+                "name": "nome"
+              },
+              {
+                "name": "telefone"
+              },
+              {
+                "name": "ocupacao"
+              },
+              {
+                "name": "faixa_renda"
+              },
+              {
+                "name": "renda_estimada"
+              },
+              {
+                "name": "decisoes_financeiras"
+              },
+              {
+                "name": "momento_financeiro"
+              }
+            ]
+          }
+        },
+        "id": "63ff02b7-f6f8-4711-8374-28e1a0d692ba",
+        "name": "When Executed by Another Workflow",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -96,
+          16
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const dados = $input.first().json;\n\nfunction limpo(v) {\n  return (v === undefined || v === null) ? '' : String(v).trim();\n}\n\n// Telefone: guarda só os dígitos (phone_digits) e uma versão formatada (phone),\n// no mesmo padrão que o app usa quando o planejador cadastra o lead na mão.\nconst digitos = limpo(dados.telefone).replace(/\\D/g, '');\nconst semPais = digitos.startsWith('55') && digitos.length > 11 ? digitos.slice(2) : digitos;\n\nlet telefoneFormatado = limpo(dados.telefone);\nif (semPais.length === 11) {\n  telefoneFormatado = `(${semPais.slice(0,2)}) ${semPais.slice(2,7)}-${semPais.slice(7)}`;\n} else if (semPais.length === 10) {\n  telefoneFormatado = `(${semPais.slice(0,2)}) ${semPais.slice(2,6)}-${semPais.slice(6)}`;\n}\n\n// As respostas 2, 4 e 5 do questionário viram o texto de observações do lead.\nconst linhas = [];\nif (limpo(dados.ocupacao)) linhas.push(`Ocupação: ${limpo(dados.ocupacao)}`);\nif (limpo(dados.faixa_renda)) linhas.push(`Faixa de renda informada: ${limpo(dados.faixa_renda)}`);\nif (limpo(dados.decisoes_financeiras)) linhas.push(`Decisões financeiras: ${limpo(dados.decisoes_financeiras)}`);\nif (limpo(dados.momento_financeiro)) linhas.push(`Momento financeiro: ${limpo(dados.momento_financeiro)}`);\nlinhas.push('');\nlinhas.push('Respondido pela assistente da Eleva no WhatsApp (landing page).');\n\n// Renda: aceita número puro ou texto com R$/pontuação brasileira.\nconst rendaBruta = limpo(dados.renda_estimada).replace(/[^0-9,.-]/g, '').replace(/\\./g, '').replace(',', '.');\nconst renda = Number(rendaBruta);\n\nreturn [{ json: {\n  name: limpo(dados.nome),\n  phone: telefoneFormatado,\n  phone_digits: semPais,\n  notes: linhas.join('\\n'),\n  estimated_income: Number.isFinite(renda) && renda > 0 ? renda : 0\n} }];"
+        },
+        "id": "2ae10dcf-9495-4e07-a525-426aa16913a5",
+        "name": "Preparar Dados do Lead",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          144,
+          16
+        ]
+      },
+      {
+        "parameters": {
+          "tableId": "leads",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "name",
+                "fieldValue": "={{ $json.name }}"
+              },
+              {
+                "fieldId": "phone",
+                "fieldValue": "={{ $json.phone }}"
+              },
+              {
+                "fieldId": "phone_digits",
+                "fieldValue": "={{ $json.phone_digits }}"
+              },
+              {
+                "fieldId": "status",
+                "fieldValue": "lead"
+              },
+              {
+                "fieldId": "notes",
+                "fieldValue": "={{ $json.notes }}"
+              },
+              {
+                "fieldId": "origin",
+                "fieldValue": "Site"
+              },
+              {
+                "fieldId": "priority",
+                "fieldValue": "media"
+              },
+              {
+                "fieldId": "estimated_income",
+                "fieldValue": "={{ $json.estimated_income }}"
+              },
+              {
+                "fieldId": "organization_id",
+                "fieldValue": "f6d1b40f-6430-47fe-8286-730ea960ba29"
+              }
+            ]
+          }
+        },
+        "id": "0e174677-ba2c-4e4c-bada-35c7feb9f726",
+        "name": "Inserir Lead no Sollo",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          368,
+          16
+        ],
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "kajlEDhCYmeLcxgQ",
+            "name": "ELEVA - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const rows = $input.all().map(i => i.json)\n  .filter(r => Object.values(r).some(v => v !== null && v !== undefined));\n\nif (rows.length === 0 || !rows[0].id) {\n  return [{ json: {\n    cadastrado: false,\n    mensagem: 'Não foi possível registrar o lead. Não confirme o cadastro para a pessoa.'\n  } }];\n}\n\nconst row = rows[0];\nreturn [{ json: {\n  cadastrado: true,\n  lead_id: row.id,\n  nome: row.name,\n  mensagem: 'Lead registrado com sucesso na etapa Lead do CRM da Eleva.'\n} }];"
+        },
+        "id": "69a5e99f-26ec-4e97-86e3-3c8406a31962",
+        "name": "Resposta para o Agente",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          608,
+          16
+        ]
+      }
+    ],
+    "connections": {
+      "When Executed by Another Workflow": {
+        "main": [
+          [
+            {
+              "node": "Preparar Dados do Lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Preparar Dados do Lead": {
+        "main": [
+          [
+            {
+              "node": "Inserir Lead no Sollo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Inserir Lead no Sollo": {
+        "main": [
+          [
+            {
+              "node": "Resposta para o Agente",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version e436eccd",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-09-14T19:25:29.612Z",
+    "updatedAt": "2026-09-14T19:25:50.902Z"
+  },
+  "tags": []
+}
