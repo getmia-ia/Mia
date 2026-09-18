@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-15T21:01:34.848Z",
+  "updatedAt": "2026-09-17T18:57:35.971Z",
   "createdAt": "2026-09-15T18:37:26.405Z",
   "id": "3od0Qk1dn846jvWk",
   "name": "Finamob - 3.05 - SDR Advisor - Atualizar Mailing",
@@ -9,29 +9,65 @@
     {
       "parameters": {
         "inputSource": "jsonExample",
-        "jsonExample": "{\n  \"telefone\": \"5511990000000\",\n  \"site\": \"\",\n  \"cidade\": \"\",\n  \"uf\": \"\",\n  \"cargo\": \"\",\n  \"cnpj_empresa\": \"\",\n  \"cidade_de_atuacao\": \"\",\n  \"estado_de_atuacao\": \"\",\n  \"email\": \"\",\n  \"status_plano_acao\": \"\",\n  \"obs\": \"\",\n  \"fup\": \"\"\n}"
+        "jsonExample": "{\n  \"telefone\": \"5511990000000\",\n  \"site\": \"\",\n  \"cidade\": \"\",\n  \"uf\": \"\",\n  \"cargo\": \"\",\n  \"cnpj_empresa\": \"\",\n  \"cidade_de_atuacao\": \"\",\n  \"estado_de_atuacao\": \"\",\n  \"email\": \"\",\n  \"status_plano_acao\": \"\",\n  \"observacao\": \"\",\n  \"fup\": \"\"\n}"
       },
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
       "position": [
-        -128,
-        0
+        -384,
+        -64
       ],
-      "id": "a1780130-ea1a-4ffd-bed8-a6b2599cfda8",
+      "id": "1824c6a5-e982-468c-8483-cbda26d2dbd7",
       "name": "When Executed by Another Workflow",
       "alwaysOutputData": false
     },
     {
       "parameters": {
-        "jsCode": "const inc = $input.item.json;\nconst body = { phone: inc.telefone };\n\n// Campos cadastrais (sem validacao, entram como vierem)\nconst campos = [\n  \"email\",\n  \"site\",\n  \"cidade\",\n  \"uf\",\n  \"cargo\",\n  \"cnpj_empresa\",\n  \"cidade_de_atuacao\",\n  \"estado_de_atuacao\",\n  \"obs\"\n];\nfor (const c of campos) {\n  if (inc[c] && inc[c].toString().trim() !== \"\") body[c] = inc[c].toString().trim();\n}\n\n// Status: so aceita valor da lista branca, normalizado\nconst STATUS_VALIDOS = [\n  \"em atendimento\",\n  \"retrabalharnofuturo\",\n  \"naoeoICP\",\n  \"encaminhar parcerias\"\n];\nif (inc.status_plano_acao && inc.status_plano_acao.toString().trim() !== \"\") {\n  const bruto = inc.status_plano_acao.toString().trim();\n  const match = STATUS_VALIDOS.find(s => s.toLowerCase() === bruto.toLowerCase());\n  if (match) {\n    body.status_plano_acao = match;\n  } else {\n    throw new Error(`status_plano_acao invalido: \"${bruto}\". Validos: ${STATUS_VALIDOS.join(\", \")}`);\n  }\n}\n\n// fup: so YYYY-MM-DD, e so faz sentido com retrabalharnofuturo\nif (inc.fup && inc.fup.toString().trim() !== \"\") {\n  const fup = inc.fup.toString().trim();\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(fup)) {\n    throw new Error(`fup invalido: \"${fup}\". Formato esperado YYYY-MM-DD.`);\n  }\n  body.fup = fup;\n}\nif (body.status_plano_acao === \"retrabalharnofuturo\" && !body.fup) {\n  throw new Error(\"status retrabalharnofuturo exige o campo fup (YYYY-MM-DD).\");\n}\n\n// obs obrigatorio nos status terminais\nconst EXIGEM_OBS = [\"naoeoICP\", \"encaminhar parcerias\"];\nif (EXIGEM_OBS.includes(body.status_plano_acao) && !body.obs) {\n  throw new Error(`status ${body.status_plano_acao} exige o campo obs preenchido.`);\n}\n\nreturn { json: { body } };"
+        "jsCode": "const inc = $input.item.json;\n\n// Gera as duas variantes do WhatsApp no formato salvo no mailing: com e sem o 9.\nfunction fmt(telefone){\n  let phone = String(telefone || '').replace(/\\D/g, '');\n  if (phone.startsWith('55')) phone = phone.slice(2);\n  const ddd = phone.slice(0, 2);\n  const numero = phone.slice(2);\n  const com9 = numero.length === 8 ? '9' + numero : numero;\n  const sem9 = (numero.length === 9 && numero.startsWith('9')) ? numero.slice(1) : numero;\n  const f = (n) => n.length === 9\n    ? `(${ddd}) ${n.slice(0,5)}-${n.slice(5)}`\n    : `(${ddd}) ${n.slice(0,4)}-${n.slice(4)}`;\n  return { com9: f(com9), sem9: f(sem9) };\n}\n\nconst v = fmt(inc.telefone);\nreturn { json: { inc, wpp_com9: v.com9, wpp_sem9: v.sem9 } };"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        112,
-        0
+        -160,
+        -64
       ],
-      "id": "2f38f7cb-6727-4146-a539-36daf429c17e",
+      "id": "b85b96c6-af28-4962-88cf-5b2dfac842ba",
+      "name": "Prepara Telefone e Inc"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT observacao\nFROM mailing\nWHERE whatsapp IN (\"{{ $json.wpp_com9 }}\", \"{{ $json.wpp_sem9 }}\")\nORDER BY id DESC\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        64,
+        -64
+      ],
+      "id": "45c64293-e300-4918-80e1-d0e6fc64ebd3",
+      "name": "Busca Observação Atual",
+      "alwaysOutputData": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('Prepara Telefone e Inc').first().json;\nconst inc = prep.inc;\n\n// Observacao que JA existe no banco (pode nao existir).\nlet obsAntiga = \"\";\ntry {\n  const row = $('Busca Observação Atual').first().json;\n  if (row && row.observacao != null) obsAntiga = String(row.observacao).trim();\n} catch (e) { obsAntiga = \"\"; }\n\nconst body = { phone: inc.telefone };\n\n// Campos cadastrais (entram como vierem, sem validacao).\nconst campos = [\"email\",\"site\",\"cidade\",\"uf\",\"cargo\",\"cnpj_empresa\",\"cidade_de_atuacao\",\"estado_de_atuacao\"];\nfor (const c of campos) {\n  if (inc[c] && inc[c].toString().trim() !== \"\") body[c] = inc[c].toString().trim();\n}\n\n// Status: so aceita valor da lista branca, normalizado.\nconst STATUS_VALIDOS = [\"em atendimento\",\"retrabalharnofuturo\",\"naoeoICP\",\"encaminhar parcerias\"];\nif (inc.status_plano_acao && inc.status_plano_acao.toString().trim() !== \"\") {\n  const bruto = inc.status_plano_acao.toString().trim();\n  const match = STATUS_VALIDOS.find(s => s.toLowerCase() === bruto.toLowerCase());\n  if (match) body.status_plano_acao = match;\n  else throw new Error(`status_plano_acao invalido: \"${bruto}\". Validos: ${STATUS_VALIDOS.join(\", \")}`);\n}\n\n// fup: so YYYY-MM-DD.\nif (inc.fup && inc.fup.toString().trim() !== \"\") {\n  const fup = inc.fup.toString().trim();\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(fup)) throw new Error(`fup invalido: \"${fup}\". Formato esperado YYYY-MM-DD.`);\n  body.fup = fup;\n}\nif (body.status_plano_acao === \"retrabalharnofuturo\" && !body.fup)\n  throw new Error(\"status retrabalharnofuturo exige o campo fup (YYYY-MM-DD).\");\n\n// Observacao NOVA que a IA mandou nesta chamada.\nconst obsNova = (inc.observacao != null ? String(inc.observacao) : \"\").trim();\n\n// obs obrigatoria nos status terminais: valida a NOVA (a mesclada quase sempre existe).\nconst EXIGEM_OBS = [\"naoeoICP\",\"encaminhar parcerias\"];\nif (EXIGEM_OBS.includes(body.status_plano_acao) && !obsNova)\n  throw new Error(`status ${body.status_plano_acao} exige o campo observacao preenchido.`);\n\n// ===== MESCLA: nunca sobrescreve. Integra a nova nota ao historico. =====\nfunction hoje() {\n  const d = new Date();\n  const p = (x) => String(x).padStart(2, \"0\");\n  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;\n}\nfunction norm(s) { return String(s || \"\").replace(/\\s+/g, \" \").trim().toLowerCase(); }\n\nif (obsNova) {\n  const SEP = \"\\n\\n--- historico ---\\n\";\n  const bloco = `[${hoje()}] ${obsNova}`;\n\n  if (!obsAntiga) {\n    // Primeira nota do lead.\n    body.observacao = bloco;\n  } else if (norm(obsAntiga).includes(norm(obsNova))) {\n    // Mesma nota reenviada no mesmo caso: nao duplica, mantem o que ja tem.\n    body.observacao = obsAntiga;\n  } else {\n    // Nota nova no topo, historico anterior preservado abaixo.\n    let merged = `${bloco}${SEP}${obsAntiga}`;\n    const LIMITE = 4000; // evita crescimento sem fim: corta o rabo do historico\n    if (merged.length > LIMITE) merged = merged.slice(0, LIMITE).trim() + \"\\n[...]\";\n    body.observacao = merged;\n  }\n}\n// Se a IA NAO mandou observacao nova, o campo nao vai no body -> a API preserva o texto atual.\n\nreturn { json: { body } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        -64
+      ],
+      "id": "e31728e8-9612-4edb-a1cb-0c19e9310b68",
       "name": "Monta Body Mailing"
     },
     {
@@ -59,16 +95,38 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        352,
-        0
+        512,
+        -64
       ],
-      "id": "c64c4279-5b80-4060-a0c7-4af88dd749a8",
+      "id": "e295422f-f2b6-4745-9b72-eb8b2e6c2d71",
       "name": "API Update Mailing",
       "onError": "continueRegularOutput"
     }
   ],
   "connections": {
     "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Prepara Telefone e Inc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara Telefone e Inc": {
+      "main": [
+        [
+          {
+            "node": "Busca Observação Atual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca Observação Atual": {
       "main": [
         [
           {
@@ -104,8 +162,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "1e04e2ce-1800-4179-b55c-4930ed7ca6b7",
-  "activeVersionId": "7a323dd0-feed-4482-8b53-c8eacd68781d",
+  "versionId": "79f2767e-2371-40a8-85a4-c76617247b03",
+  "activeVersionId": "79f2767e-2371-40a8-85a4-c76617247b03",
   "triggerCount": 0,
   "shared": [
     {
@@ -117,35 +175,71 @@
     }
   ],
   "activeVersion": {
-    "versionId": "7a323dd0-feed-4482-8b53-c8eacd68781d",
+    "versionId": "79f2767e-2371-40a8-85a4-c76617247b03",
     "workflowId": "3od0Qk1dn846jvWk",
     "nodes": [
       {
         "parameters": {
           "inputSource": "jsonExample",
-          "jsonExample": "{\n  \"telefone\": \"5511990000000\",\n  \"site\": \"\",\n  \"cidade\": \"\",\n  \"uf\": \"\",\n  \"cargo\": \"\",\n  \"cnpj_empresa\": \"\",\n  \"cidade_de_atuacao\": \"\",\n  \"estado_de_atuacao\": \"\",\n  \"email\": \"\",\n  \"nome\": \"\",\n  \"status_plano_acao\": \"\",\n  \"obs\": \"\",\n  \"fup\": \"\"\n}"
+          "jsonExample": "{\n  \"telefone\": \"5511990000000\",\n  \"site\": \"\",\n  \"cidade\": \"\",\n  \"uf\": \"\",\n  \"cargo\": \"\",\n  \"cnpj_empresa\": \"\",\n  \"cidade_de_atuacao\": \"\",\n  \"estado_de_atuacao\": \"\",\n  \"email\": \"\",\n  \"status_plano_acao\": \"\",\n  \"observacao\": \"\",\n  \"fup\": \"\"\n}"
         },
         "type": "n8n-nodes-base.executeWorkflowTrigger",
         "typeVersion": 1.1,
         "position": [
-          -128,
-          0
+          -384,
+          -64
         ],
-        "id": "a1780130-ea1a-4ffd-bed8-a6b2599cfda8",
+        "id": "1824c6a5-e982-468c-8483-cbda26d2dbd7",
         "name": "When Executed by Another Workflow",
         "alwaysOutputData": false
       },
       {
         "parameters": {
-          "jsCode": "const inc = $input.item.json;\nconst body = { phone: inc.telefone };\n\n// Campos cadastrais (sem validacao, entram como vierem)\nconst campos = [\n  \"email\",\n  \"nome\",\n  \"site\",\n  \"cidade\",\n  \"uf\",\n  \"cargo\",\n  \"cnpj_empresa\",\n  \"cidade_de_atuacao\",\n  \"estado_de_atuacao\",\n  \"obs\"\n];\nfor (const c of campos) {\n  if (inc[c] && inc[c].toString().trim() !== \"\") body[c] = inc[c].toString().trim();\n}\n\n// Status: so aceita valor da lista branca, normalizado\nconst STATUS_VALIDOS = [\n  \"em atendimento\",\n  \"retrabalharnofuturo\",\n  \"naoeoICP\",\n  \"encaminhar parcerias\"\n];\nif (inc.status_plano_acao && inc.status_plano_acao.toString().trim() !== \"\") {\n  const bruto = inc.status_plano_acao.toString().trim();\n  const match = STATUS_VALIDOS.find(s => s.toLowerCase() === bruto.toLowerCase());\n  if (match) {\n    body.status_plano_acao = match;\n  } else {\n    throw new Error(`status_plano_acao invalido: \"${bruto}\". Validos: ${STATUS_VALIDOS.join(\", \")}`);\n  }\n}\n\n// fup: so YYYY-MM-DD, e so faz sentido com retrabalharnofuturo\nif (inc.fup && inc.fup.toString().trim() !== \"\") {\n  const fup = inc.fup.toString().trim();\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(fup)) {\n    throw new Error(`fup invalido: \"${fup}\". Formato esperado YYYY-MM-DD.`);\n  }\n  body.fup = fup;\n}\nif (body.status_plano_acao === \"retrabalharnofuturo\" && !body.fup) {\n  throw new Error(\"status retrabalharnofuturo exige o campo fup (YYYY-MM-DD).\");\n}\n\n// obs obrigatorio nos status terminais\nconst EXIGEM_OBS = [\"naoeoICP\", \"encaminhar parcerias\"];\nif (EXIGEM_OBS.includes(body.status_plano_acao) && !body.obs) {\n  throw new Error(`status ${body.status_plano_acao} exige o campo obs preenchido.`);\n}\n\nreturn { json: { body } };"
+          "jsCode": "const inc = $input.item.json;\n\n// Gera as duas variantes do WhatsApp no formato salvo no mailing: com e sem o 9.\nfunction fmt(telefone){\n  let phone = String(telefone || '').replace(/\\D/g, '');\n  if (phone.startsWith('55')) phone = phone.slice(2);\n  const ddd = phone.slice(0, 2);\n  const numero = phone.slice(2);\n  const com9 = numero.length === 8 ? '9' + numero : numero;\n  const sem9 = (numero.length === 9 && numero.startsWith('9')) ? numero.slice(1) : numero;\n  const f = (n) => n.length === 9\n    ? `(${ddd}) ${n.slice(0,5)}-${n.slice(5)}`\n    : `(${ddd}) ${n.slice(0,4)}-${n.slice(4)}`;\n  return { com9: f(com9), sem9: f(sem9) };\n}\n\nconst v = fmt(inc.telefone);\nreturn { json: { inc, wpp_com9: v.com9, wpp_sem9: v.sem9 } };"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          112,
-          0
+          -160,
+          -64
         ],
-        "id": "2f38f7cb-6727-4146-a539-36daf429c17e",
+        "id": "b85b96c6-af28-4962-88cf-5b2dfac842ba",
+        "name": "Prepara Telefone e Inc"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT observacao\nFROM mailing\nWHERE whatsapp IN (\"{{ $json.wpp_com9 }}\", \"{{ $json.wpp_sem9 }}\")\nORDER BY id DESC\nLIMIT 1;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.5,
+        "position": [
+          64,
+          -64
+        ],
+        "id": "45c64293-e300-4918-80e1-d0e6fc64ebd3",
+        "name": "Busca Observação Atual",
+        "alwaysOutputData": true,
+        "credentials": {
+          "mySql": {
+            "id": "8ItpiHe2joMjz6qf",
+            "name": "Finamob database"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const prep = $('Prepara Telefone e Inc').first().json;\nconst inc = prep.inc;\n\n// Observacao que JA existe no banco (pode nao existir).\nlet obsAntiga = \"\";\ntry {\n  const row = $('Busca Observação Atual').first().json;\n  if (row && row.observacao != null) obsAntiga = String(row.observacao).trim();\n} catch (e) { obsAntiga = \"\"; }\n\nconst body = { phone: inc.telefone };\n\n// Campos cadastrais (entram como vierem, sem validacao).\nconst campos = [\"email\",\"site\",\"cidade\",\"uf\",\"cargo\",\"cnpj_empresa\",\"cidade_de_atuacao\",\"estado_de_atuacao\"];\nfor (const c of campos) {\n  if (inc[c] && inc[c].toString().trim() !== \"\") body[c] = inc[c].toString().trim();\n}\n\n// Status: so aceita valor da lista branca, normalizado.\nconst STATUS_VALIDOS = [\"em atendimento\",\"retrabalharnofuturo\",\"naoeoICP\",\"encaminhar parcerias\"];\nif (inc.status_plano_acao && inc.status_plano_acao.toString().trim() !== \"\") {\n  const bruto = inc.status_plano_acao.toString().trim();\n  const match = STATUS_VALIDOS.find(s => s.toLowerCase() === bruto.toLowerCase());\n  if (match) body.status_plano_acao = match;\n  else throw new Error(`status_plano_acao invalido: \"${bruto}\". Validos: ${STATUS_VALIDOS.join(\", \")}`);\n}\n\n// fup: so YYYY-MM-DD.\nif (inc.fup && inc.fup.toString().trim() !== \"\") {\n  const fup = inc.fup.toString().trim();\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(fup)) throw new Error(`fup invalido: \"${fup}\". Formato esperado YYYY-MM-DD.`);\n  body.fup = fup;\n}\nif (body.status_plano_acao === \"retrabalharnofuturo\" && !body.fup)\n  throw new Error(\"status retrabalharnofuturo exige o campo fup (YYYY-MM-DD).\");\n\n// Observacao NOVA que a IA mandou nesta chamada.\nconst obsNova = (inc.observacao != null ? String(inc.observacao) : \"\").trim();\n\n// obs obrigatoria nos status terminais: valida a NOVA (a mesclada quase sempre existe).\nconst EXIGEM_OBS = [\"naoeoICP\",\"encaminhar parcerias\"];\nif (EXIGEM_OBS.includes(body.status_plano_acao) && !obsNova)\n  throw new Error(`status ${body.status_plano_acao} exige o campo observacao preenchido.`);\n\n// ===== MESCLA: nunca sobrescreve. Integra a nova nota ao historico. =====\nfunction hoje() {\n  const d = new Date();\n  const p = (x) => String(x).padStart(2, \"0\");\n  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;\n}\nfunction norm(s) { return String(s || \"\").replace(/\\s+/g, \" \").trim().toLowerCase(); }\n\nif (obsNova) {\n  const SEP = \"\\n\\n--- historico ---\\n\";\n  const bloco = `[${hoje()}] ${obsNova}`;\n\n  if (!obsAntiga) {\n    // Primeira nota do lead.\n    body.observacao = bloco;\n  } else if (norm(obsAntiga).includes(norm(obsNova))) {\n    // Mesma nota reenviada no mesmo caso: nao duplica, mantem o que ja tem.\n    body.observacao = obsAntiga;\n  } else {\n    // Nota nova no topo, historico anterior preservado abaixo.\n    let merged = `${bloco}${SEP}${obsAntiga}`;\n    const LIMITE = 4000; // evita crescimento sem fim: corta o rabo do historico\n    if (merged.length > LIMITE) merged = merged.slice(0, LIMITE).trim() + \"\\n[...]\";\n    body.observacao = merged;\n  }\n}\n// Se a IA NAO mandou observacao nova, o campo nao vai no body -> a API preserva o texto atual.\n\nreturn { json: { body } };"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          288,
+          -64
+        ],
+        "id": "e31728e8-9612-4edb-a1cb-0c19e9310b68",
         "name": "Monta Body Mailing"
       },
       {
@@ -173,16 +267,38 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.3,
         "position": [
-          352,
-          0
+          512,
+          -64
         ],
-        "id": "c64c4279-5b80-4060-a0c7-4af88dd749a8",
+        "id": "e295422f-f2b6-4745-9b72-eb8b2e6c2d71",
         "name": "API Update Mailing",
         "onError": "continueRegularOutput"
       }
     ],
     "connections": {
       "When Executed by Another Workflow": {
+        "main": [
+          [
+            {
+              "node": "Prepara Telefone e Inc",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepara Telefone e Inc": {
+        "main": [
+          [
+            {
+              "node": "Busca Observação Atual",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca Observação Atual": {
         "main": [
           [
             {
@@ -207,11 +323,11 @@
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Version 7a323dd0",
+    "name": "Version 79f2767e",
     "description": "",
-    "autosaved": false,
-    "createdAt": "2026-09-15T20:39:45.213Z",
-    "updatedAt": "2026-09-15T20:39:47.099Z"
+    "autosaved": true,
+    "createdAt": "2026-09-17T18:57:35.996Z",
+    "updatedAt": "2026-09-17T19:21:49.395Z"
   },
   "tags": []
 }
