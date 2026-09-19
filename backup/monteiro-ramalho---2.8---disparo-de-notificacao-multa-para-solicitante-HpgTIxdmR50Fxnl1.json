@@ -1,0 +1,830 @@
+{
+  "updatedAt": "2026-09-18T17:16:20.685Z",
+  "createdAt": "2026-09-18T15:53:25.193Z",
+  "id": "HpgTIxdmR50Fxnl1",
+  "name": "Monteiro Ramalho - 2.8 - Disparo de Notificação/Multa para solicitante",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "monteiro-ramalho-disparo-solicitante",
+        "options": {}
+      },
+      "id": "b145e42b-e397-4a8b-b532-02fa1310bc15",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -800,
+        400
+      ],
+      "webhookId": "5e80a28c-de17-4afd-817b-98dc50d04fd9"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  let data = item.json.body || item.json;\n\n  const camposObrigatorios = ['tipo', 'id', 'pdf_url', 'solicitante_nome', 'solicitante_telefone'];\n\n  for (const campo of camposObrigatorios) {\n    if (data[campo] === undefined || data[campo] === null || String(data[campo]).trim() === '') {\n      throw new Error(`Campo obrigatório \"${campo}\" não informado.`);\n    }\n  }\n\n  if (data.tipo !== 'multa' && data.tipo !== 'notificacao') {\n    throw new Error('tipo deve ser \"multa\" ou \"notificacao\".');\n  }\n\n  const telefone = (raw => {\n    let t = (raw || \"\").toString().replace(/\\s+/g, \"\").replace(/\\D/g, \"\");\n    t = t.replace(/^0+/, \"\");\n    if (t.length === 8) {\n      t = \"11\" + \"9\" + t;\n    } else if (t.length === 9) {\n      t = \"11\" + t;\n    } else if (t.length === 10) {\n      t = t.replace(/^(\\d{2})(\\d{8})$/, \"$19$2\");\n    } else if (t.length === 11) {\n      t = \"55\" + t;\n    } else if (t.length === 12) {\n      t = t.slice(0, 4) + \"9\" + t.slice(4);\n    } else if (t.length > 13) {\n      t = t.slice(-13);\n    }\n    return t;\n  })(data.solicitante_telefone);\n\n  return {\n    json: {\n      tipo: data.tipo,\n      id: String(data.id),\n      pdf_url: data.pdf_url,\n      solicitante_nome: data.solicitante_nome,\n      telefone: telefone\n    }\n  };\n});"
+      },
+      "id": "cd11146c-7a70-4d03-bdeb-4926ab1905df",
+      "name": "Trata os dados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1b0e1a1-0001-4a1a-8a1a-000000000001",
+              "name": "erro",
+              "type": "string",
+              "value": "={{ $json.error }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fae92885-1637-4c31-bb50-fedaa7cb2e36",
+      "name": "Informa Erro",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -336,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT (\n  SELECT created_at FROM historico_mensagens\n  WHERE telefone = $1 AND nome_app = 'MONTEIRO-CONDOMINIAL'\n  ORDER BY created_at DESC\n  LIMIT 1\n) AS ultima_mensagem_em;",
+        "options": {
+          "queryReplacement": "={{ [ $('Trata os dados').first().json.telefone ] }}"
+        }
+      },
+      "id": "e34d19fb-af73-4d28-8e8e-7b9a0b6e2681",
+      "name": "Busca Última Mensagem",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        160,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b1c2d3e4-0001-4a1a-8a1a-000000000002",
+              "leftValue": "={{ $json.ultima_mensagem_em ? (Date.now() - new Date($json.ultima_mensagem_em).getTime()) < (24*60*60*1000) : false }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": "={{ true }}"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      },
+      "id": "d80f16c5-77a8-4775-a978-c01134885777",
+      "name": "Está dentro de 24h?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        400,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Trata os dados').first().json.pdf_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "b4c68de5-2dbc-4675-9977-4338cb900eae",
+      "name": "Baixa o PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -320,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "media",
+        "phoneNumberId": "1150042498190368",
+        "additionalFields": {}
+      },
+      "id": "b6a3ed23-8b4d-4747-a8a9-0c5c38ff2d41",
+      "name": "Upload media",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        -80,
+        400
+      ],
+      "webhookId": "18088382-06bd-4121-8725-98106c4ad331",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "Ksmd12PV3S3XJmoe",
+          "name": "Monteiro - Condominial"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "1150042498190368",
+        "recipientPhoneNumber": "={{ $('Trata os dados').first().json.telefone }}",
+        "messageType": "document",
+        "mediaPath": "useMediaId",
+        "mediaId": "={{ $('Upload media').first().json.id }}",
+        "mediaFilename": "={{ ($('Trata os dados').first().json.tipo === 'multa' ? 'MULTA' : 'NOTIFICACAO') + '_' + $('Trata os dados').first().json.id.slice(0,8) + '.pdf' }}",
+        "additionalFields": {}
+      },
+      "id": "8cd1fafc-2371-4c4e-9a2b-aedb84d45f95",
+      "name": "Envia Documento",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        640,
+        272
+      ],
+      "webhookId": "98801a11-b628-476e-88b5-57838c7f553d",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "Ksmd12PV3S3XJmoe",
+          "name": "Monteiro - Condominial"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const nome = $('Trata os dados').first().json.solicitante_nome;\nconst telefone = $('Trata os dados').first().json.telefone;\nconst tipo = $('Trata os dados').first().json.tipo;\nconst id = $('Trata os dados').first().json.id;\nconst mediaId = $('Upload media').first().json.id;\n\nconst filename = (tipo === 'multa' ? 'MULTA' : 'NOTIFICACAO') + '_' + id.slice(0, 8) + '.pdf';\n\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: telefone,\n  type: \"template\",\n  template: {\n    name: \"monteiro_condominial_documento\",\n    language: { code: \"pt_BR\" },\n    components: [\n      {\n        type: \"header\",\n        parameters: [\n          {\n            type: \"document\",\n            document: {\n              id: mediaId,\n              filename: filename\n            }\n          }\n        ]\n      },\n      {\n        type: \"body\",\n        parameters: [\n          { type: \"text\", text: nome }\n        ]\n      }\n    ]\n  }\n};\n\nreturn [{ json: { resultado: body } }];"
+      },
+      "id": "f7c7098e-68c9-453f-9819-d32ca95a9c87",
+      "name": "Monta Body do Template",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/1150042498190368/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.resultado }}",
+        "options": {}
+      },
+      "id": "f092c9d4-9ce1-458c-9cd2-769d18f7e6c1",
+      "name": "Envia Template",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        560
+      ],
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Trata os dados').first().json.telefone }}"
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "=Documento enviado ao solicitante após aprovação."
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Trata os dados').first().json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Trata os dados').first().json.solicitante_nome }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "=text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "=MONTEIRO-CONDOMINIAL"
+            }
+          ]
+        }
+      },
+      "id": "a38831d7-122f-45f6-bc62-e3f9a454415d",
+      "name": "Registra no Histórico",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        368
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "FcbZyD53kbkf6Vxp",
+          "name": "Monteiro - Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Trata os dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trata os dados": {
+      "main": [
+        [
+          {
+            "node": "Baixa o PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Informa Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca Última Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Está dentro de 24h?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Está dentro de 24h?": {
+      "main": [
+        [
+          {
+            "node": "Envia Documento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Monta Body do Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixa o PDF": {
+      "main": [
+        [
+          {
+            "node": "Upload media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia Documento": {
+      "main": [
+        [
+          {
+            "node": "Registra no Histórico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta Body do Template": {
+      "main": [
+        [
+          {
+            "node": "Envia Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia Template": {
+      "main": [
+        [
+          {
+            "node": "Registra no Histórico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload media": {
+      "main": [
+        [
+          {
+            "node": "Busca Última Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "d9916329-6848-4f36-9f3e-2e968ca55fda",
+  "activeVersionId": "d9916329-6848-4f36-9f3e-2e968ca55fda",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "HpgTIxdmR50Fxnl1",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-18T15:53:25.193Z",
+      "updatedAt": "2026-09-18T15:53:25.193Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "d9916329-6848-4f36-9f3e-2e968ca55fda",
+    "workflowId": "HpgTIxdmR50Fxnl1",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "monteiro-ramalho-disparo-solicitante",
+          "options": {}
+        },
+        "id": "b145e42b-e397-4a8b-b532-02fa1310bc15",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -800,
+          400
+        ],
+        "webhookId": "5e80a28c-de17-4afd-817b-98dc50d04fd9"
+      },
+      {
+        "parameters": {
+          "jsCode": "return items.map(item => {\n  let data = item.json.body || item.json;\n\n  const camposObrigatorios = ['tipo', 'id', 'pdf_url', 'solicitante_nome', 'solicitante_telefone'];\n\n  for (const campo of camposObrigatorios) {\n    if (data[campo] === undefined || data[campo] === null || String(data[campo]).trim() === '') {\n      throw new Error(`Campo obrigatório \"${campo}\" não informado.`);\n    }\n  }\n\n  if (data.tipo !== 'multa' && data.tipo !== 'notificacao') {\n    throw new Error('tipo deve ser \"multa\" ou \"notificacao\".');\n  }\n\n  const telefone = (raw => {\n    let t = (raw || \"\").toString().replace(/\\s+/g, \"\").replace(/\\D/g, \"\");\n    t = t.replace(/^0+/, \"\");\n    if (t.length === 8) {\n      t = \"11\" + \"9\" + t;\n    } else if (t.length === 9) {\n      t = \"11\" + t;\n    } else if (t.length === 10) {\n      t = t.replace(/^(\\d{2})(\\d{8})$/, \"$19$2\");\n    } else if (t.length === 11) {\n      t = \"55\" + t;\n    } else if (t.length === 12) {\n      t = t.slice(0, 4) + \"9\" + t.slice(4);\n    } else if (t.length > 13) {\n      t = t.slice(-13);\n    }\n    return t;\n  })(data.solicitante_telefone);\n\n  return {\n    json: {\n      tipo: data.tipo,\n      id: String(data.id),\n      pdf_url: data.pdf_url,\n      solicitante_nome: data.solicitante_nome,\n      telefone: telefone\n    }\n  };\n});"
+        },
+        "id": "cd11146c-7a70-4d03-bdeb-4926ab1905df",
+        "name": "Trata os dados",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -560,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "e1b0e1a1-0001-4a1a-8a1a-000000000001",
+                "name": "erro",
+                "type": "string",
+                "value": "={{ $json.error }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "fae92885-1637-4c31-bb50-fedaa7cb2e36",
+        "name": "Informa Erro",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -336,
+          704
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT (\n  SELECT created_at FROM historico_mensagens\n  WHERE telefone = $1 AND nome_app = 'MONTEIRO-CONDOMINIAL'\n  ORDER BY created_at DESC\n  LIMIT 1\n) AS ultima_mensagem_em;",
+          "options": {
+            "queryReplacement": "={{ [ $('Trata os dados').first().json.telefone ] }}"
+          }
+        },
+        "id": "e34d19fb-af73-4d28-8e8e-7b9a0b6e2681",
+        "name": "Busca Última Mensagem",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          160,
+          400
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "b1c2d3e4-0001-4a1a-8a1a-000000000002",
+                "leftValue": "={{ $json.ultima_mensagem_em ? (Date.now() - new Date($json.ultima_mensagem_em).getTime()) < (24*60*60*1000) : false }}",
+                "operator": {
+                  "operation": "true",
+                  "singleValue": true,
+                  "type": "boolean"
+                },
+                "rightValue": "={{ true }}"
+              }
+            ],
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            }
+          },
+          "options": {}
+        },
+        "id": "d80f16c5-77a8-4775-a978-c01134885777",
+        "name": "Está dentro de 24h?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          400,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Trata os dados').first().json.pdf_url }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "id": "b4c68de5-2dbc-4675-9977-4338cb900eae",
+        "name": "Baixa o PDF",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          -320,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "media",
+          "phoneNumberId": "1150042498190368",
+          "additionalFields": {}
+        },
+        "id": "b6a3ed23-8b4d-4747-a8a9-0c5c38ff2d41",
+        "name": "Upload media",
+        "type": "n8n-nodes-base.whatsApp",
+        "typeVersion": 1.1,
+        "position": [
+          -80,
+          400
+        ],
+        "webhookId": "18088382-06bd-4121-8725-98106c4ad331",
+        "credentials": {
+          "whatsAppApi": {
+            "id": "Ksmd12PV3S3XJmoe",
+            "name": "Monteiro - Condominial"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "send",
+          "phoneNumberId": "1150042498190368",
+          "recipientPhoneNumber": "={{ $('Trata os dados').first().json.telefone }}",
+          "messageType": "document",
+          "mediaPath": "useMediaId",
+          "mediaId": "={{ $('Upload media').first().json.id }}",
+          "mediaFilename": "={{ ($('Trata os dados').first().json.tipo === 'multa' ? 'MULTA' : 'NOTIFICACAO') + '_' + $('Trata os dados').first().json.id.slice(0,8) + '.pdf' }}",
+          "additionalFields": {}
+        },
+        "id": "8cd1fafc-2371-4c4e-9a2b-aedb84d45f95",
+        "name": "Envia Documento",
+        "type": "n8n-nodes-base.whatsApp",
+        "typeVersion": 1.1,
+        "position": [
+          640,
+          272
+        ],
+        "webhookId": "98801a11-b628-476e-88b5-57838c7f553d",
+        "credentials": {
+          "whatsAppApi": {
+            "id": "Ksmd12PV3S3XJmoe",
+            "name": "Monteiro - Condominial"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const nome = $('Trata os dados').first().json.solicitante_nome;\nconst telefone = $('Trata os dados').first().json.telefone;\nconst tipo = $('Trata os dados').first().json.tipo;\nconst id = $('Trata os dados').first().json.id;\nconst mediaId = $('Upload media').first().json.id;\n\nconst filename = (tipo === 'multa' ? 'MULTA' : 'NOTIFICACAO') + '_' + id.slice(0, 8) + '.pdf';\n\nconst body = {\n  messaging_product: \"whatsapp\",\n  to: telefone,\n  type: \"template\",\n  template: {\n    name: \"monteiro_condominial_documento\",\n    language: { code: \"pt_BR\" },\n    components: [\n      {\n        type: \"header\",\n        parameters: [\n          {\n            type: \"document\",\n            document: {\n              id: mediaId,\n              filename: filename\n            }\n          }\n        ]\n      },\n      {\n        type: \"body\",\n        parameters: [\n          { type: \"text\", text: nome }\n        ]\n      }\n    ]\n  }\n};\n\nreturn [{ json: { resultado: body } }];"
+        },
+        "id": "f7c7098e-68c9-453f-9819-d32ca95a9c87",
+        "name": "Monta Body do Template",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          640,
+          560
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://graph.facebook.com/v22.0/1150042498190368/messages",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ $json.resultado }}",
+          "options": {}
+        },
+        "id": "f092c9d4-9ce1-458c-9cd2-769d18f7e6c1",
+        "name": "Envia Template",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          880,
+          560
+        ],
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "tableId": "historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $('Trata os dados').first().json.telefone }}"
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "=Documento enviado ao solicitante após aprovação."
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Trata os dados').first().json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $('Trata os dados').first().json.solicitante_nome }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "=text"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "=MONTEIRO-CONDOMINIAL"
+              }
+            ]
+          }
+        },
+        "id": "a38831d7-122f-45f6-bc62-e3f9a454415d",
+        "name": "Registra no Histórico",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1072,
+          368
+        ],
+        "credentials": {
+          "supabaseApi": {
+            "id": "FcbZyD53kbkf6Vxp",
+            "name": "Monteiro - Supabase"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Trata os dados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Trata os dados": {
+        "main": [
+          [
+            {
+              "node": "Baixa o PDF",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Informa Erro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca Última Mensagem": {
+        "main": [
+          [
+            {
+              "node": "Está dentro de 24h?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Está dentro de 24h?": {
+        "main": [
+          [
+            {
+              "node": "Envia Documento",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Monta Body do Template",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Baixa o PDF": {
+        "main": [
+          [
+            {
+              "node": "Upload media",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Envia Documento": {
+        "main": [
+          [
+            {
+              "node": "Registra no Histórico",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta Body do Template": {
+        "main": [
+          [
+            {
+              "node": "Envia Template",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Envia Template": {
+        "main": [
+          [
+            {
+              "node": "Registra no Histórico",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upload media": {
+        "main": [
+          [
+            {
+              "node": "Busca Última Mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version d9916329",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-09-18T16:05:01.375Z",
+    "updatedAt": "2026-09-18T16:26:10.283Z"
+  },
+  "tags": []
+}
