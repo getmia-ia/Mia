@@ -1,0 +1,578 @@
+{
+  "updatedAt": "2026-09-22T02:08:47.248Z",
+  "createdAt": "2026-09-21T22:59:52.537Z",
+  "id": "WeXBC8EBbjNzJhHc",
+  "name": "Monteiro Ramalho - 3.8 - Retomada (lead parou de responder)",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "c0284d4f-c1f8-4885-94bd-7219f5d8408d",
+      "name": "A cada 5 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1376,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Procura conversas que esfriaram no meio da triagem.\n--\n-- ultima_mensagem: qual foi a ultima linha da conversa de cada telefone.\n--   Se foi fala da IA, quer dizer que ela falou e o lead nao respondeu.\n-- ultima_fala_real: a ultima coisa de verdade que a atendente disse,\n--   ignorando as proprias mensagens de retomada. E esse texto que vai\n--   servir de contexto pra escrever a proxima retomada.\n-- ultima_do_lead: quando o lead falou pela ultima vez.\n-- tentativas: quantas retomadas ja foram enviadas desde a ultima fala\n--   dele. Da 0, 1 ou 2 — quando chega em 3 o lead sai da busca sozinho.\n-- historico_completo: todas as mensagens da conversa (usuario + agente),\n--   em ordem cronologica, agregadas em JSON por telefone.\nWITH ultima_mensagem AS (\n  SELECT DISTINCT ON (telefone)\n    telefone,\n    created_at,\n    (mensagem_agente IS NOT NULL) AS ultima_foi_ia\n  FROM historico_mensagens\n  WHERE nome_app = 'SDR-MONTEIRO'\n    AND telefone IS NOT NULL\n    AND btrim(telefone) <> ''\n  ORDER BY telefone, created_at DESC\n),\nultima_fala_real AS (\n  SELECT DISTINCT ON (telefone)\n    telefone,\n    mensagem_agente\n  FROM historico_mensagens\n  WHERE nome_app = 'SDR-MONTEIRO'\n    AND mensagem_agente IS NOT NULL\n    AND btrim(mensagem_agente) <> ''\n    AND COALESCE(message_type, '') <> 'retomada'\n  ORDER BY telefone, created_at DESC\n),\nultima_do_lead AS (\n  SELECT telefone, max(created_at) AS quando\n  FROM historico_mensagens\n  WHERE nome_app = 'SDR-MONTEIRO'\n    AND mensagem_usuario IS NOT NULL\n  GROUP BY telefone\n),\ntentativas AS (\n  SELECT h.telefone, count(*) AS qtd\n  FROM historico_mensagens h\n  LEFT JOIN ultima_do_lead l ON l.telefone = h.telefone\n  WHERE h.nome_app = 'SDR-MONTEIRO'\n    AND h.message_type = 'retomada'\n    AND h.created_at > COALESCE(l.quando, '1970-01-01'::timestamptz)\n  GROUP BY h.telefone\n),\nhistorico_completo AS (\n  SELECT\n    telefone,\n    json_agg(\n      json_build_object(\n        'created_at', created_at,\n        'mensagem_usuario', mensagem_usuario,\n        'mensagem_agente', mensagem_agente,\n        'message_type', message_type\n      ) ORDER BY created_at ASC\n    ) AS historico\n  FROM historico_mensagens\n  WHERE nome_app = 'SDR-MONTEIRO'\n    AND telefone IS NOT NULL\n    AND btrim(telefone) <> ''\n  GROUP BY telefone\n)\nSELECT\n  lc.id,\n  lc.nome,\n  lc.telefone,\n  lc.area_juridica,\n  lc.etapa::text AS etapa,\n  COALESCE(t.qtd, 0) AS tentativas,\n  um.created_at AS ultima_mensagem_em,\n  left(COALESCE(ufr.mensagem_agente, ''), 600) AS ultima_mensagem_ia,\n  hc.historico AS historico_completo\nFROM leads_crm lc\nJOIN ultima_mensagem um ON um.telefone = lc.telefone\nLEFT JOIN ultima_fala_real ufr ON ufr.telefone = lc.telefone\nLEFT JOIN tentativas t ON t.telefone = lc.telefone\nLEFT JOIN historico_completo hc ON hc.telefone = lc.telefone\nWHERE um.ultima_foi_ia = true\n  AND lc.inteligencia = true\n  AND (\n       (lc.area_juridica = 'trabalhista' AND lc.etapa::text IN ('novo', 'potencial', 'calculo', 'acompanhamento'))\n    OR (lc.area_juridica = 'previdenciario' AND lc.etapa::text IN ('novo', 'qualificado', 'sem_laudo'))\n  )\n  AND um.created_at >= now() - interval '12 hours'\n  AND (\n       (COALESCE(t.qtd, 0) = 0 AND um.created_at <= now() - interval '35 minutes')\n    OR (t.qtd = 1 AND um.created_at <= now() - interval '45 minutes')\n    OR (t.qtd = 2 AND um.created_at <= now() - interval '60 minutes')\n  )\nORDER BY um.created_at ASC;",
+        "options": {}
+      },
+      "id": "85fd3ecb-0143-42e1-afd8-1f2ad7f1d057",
+      "name": "Busca quem parou de responder",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1136,
+        224
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "buffer_do_lead",
+        "key": "={{ $json.telefone }}_mem_Monteiro_SDR",
+        "options": {}
+      },
+      "id": "f1596569-ea9a-4eff-8d73-05b0382ca690",
+      "name": "Tem mensagem esperando processar?",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -704,
+        320
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "buffer-vazio",
+              "leftValue": "={{ $json.buffer_do_lead }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d00f9d8c-8d15-40ad-9e15-4cc6134ea312",
+      "name": "Buffer esta vazio?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -480,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $('Um lead por vez').first().json;\n\nconst primeiroNome = String(lead.nome || '').replace(/\\s+/g, ' ').trim().split(' ')[0] || '';\nconst tentativasFeitas = Number(lead.tentativas || 0);\nconst etapa = String(lead.etapa || '');\n\n// Frase de reserva por etapa. So e usada se a IA nao responder ou\n// devolver algo que nao da pra usar.\nconst reservaPorEtapa = {\n  novo: 'as informacoes do seu caso',\n  potencial: 'as informacoes do seu caso',\n  qualificado: 'as informacoes do seu caso',\n  calculo: 'a estimativa do seu caso',\n  acompanhamento: 'a analise do seu caso',\n  sem_laudo: 'o documento que pedi'\n};\nconst reserva = reservaPorEtapa[etapa] || 'as informacoes do seu caso';\n\n// Pega o trecho que a IA escreveu\nlet trecho = '';\ntry {\n  trecho = String($('Escreve o trecho do contexto').first().json.text || '').trim();\n} catch (e) {\n  trecho = '';\n}\n\n// Limpa aspas e pontuacao que a IA possa ter colocado nas pontas\ntrecho = trecho.replace(/^[\"'`\\s]+/, '').replace(/[\"'`.!?\\s]+$/, '').trim();\n\n// Se veio vazio, com quebra de linha, ou longo demais, usa a reserva.\n// Isso garante que uma falha da IA nunca trava nem estraga a mensagem.\nconst quantidadePalavras = trecho ? trecho.split(/\\s+/).length : 0;\nif (!trecho || trecho.indexOf('\\n') !== -1 || quantidadePalavras > 12) {\n  trecho = reserva;\n}\n\nconst chamaPeloNome = primeiroNome ? ', ' + primeiroNome : '';\n\n// As tres frases sao fixas — so o trecho entre colchetes muda\nlet texto = '';\n\nif (tentativasFeitas === 0) {\n  texto = 'Oi' + chamaPeloNome + '! Esta por ai ainda? So pra confirmar se posso seguir com ' + trecho + '.';\n} else if (tentativasFeitas === 1) {\n  texto = 'Oi, aqui e da equipe Monteiro Ramalho. Fique a vontade pra responder quando estiver num lugar mais tranquilo — so fica pendente ' + trecho + ' pra eu continuar seu atendimento.';\n} else {\n  texto = 'Voce esta online? Preciso so confirmar ' + trecho + ' pra continuar seu atendimento.';\n}\n\nconst memoriaAgente = JSON.stringify({\n  type: 'ai',\n  data: {\n    content: texto,\n    tool_calls: [],\n    invalid_tool_calls: [],\n    additional_kwargs: {},\n    response_metadata: {}\n  }\n});\n\nconst corpo = {\n  messaging_product: 'whatsapp',\n  to: String(lead.telefone),\n  type: 'text',\n  text: { body: texto }\n};\n\nreturn [{\n  json: {\n    lead_id: lead.id,\n    telefone: String(lead.telefone),\n    nome: primeiroNome,\n    etapa: etapa,\n    numero_da_tentativa: tentativasFeitas + 1,\n    trecho_usado: trecho,\n    veio_da_ia: trecho !== reserva,\n    mensagem_completa: texto,\n    memoria_agente: memoriaAgente,\n    corpo: corpo\n  }\n}];"
+      },
+      "id": "cc845f7e-8d7e-46ff-8c87-f10d1d5fa1e0",
+      "name": "Escolhe a mensagem certa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/1037049099499145/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.corpo }}",
+        "options": {}
+      },
+      "id": "32860ca9-ed65-4f17-b5c2-da4f702cc23b",
+      "name": "Envia a retomada no WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        192,
+        304
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "envio-aceito",
+              "leftValue": "={{ $json.messages[0].message_status }}",
+              "rightValue": "accepted",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4b77393b-8b68-4872-b212-412096853fc6",
+      "name": "Deu certo o envio?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        384,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "tableId": "historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Escolhe a mensagem certa').first().json.mensagem_completa }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Escolhe a mensagem certa').first().json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Escolhe a mensagem certa').first().json.nome }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "retomada"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-MONTEIRO"
+            }
+          ]
+        }
+      },
+      "id": "c8ee2a0d-2b3a-4894-bb43-d9d7a9d8d629",
+      "name": "Grava a retomada no historico",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        624,
+        368
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "FcbZyD53kbkf6Vxp",
+          "name": "Monteiro - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $('Escolhe a mensagem certa').first().json.telefone }}_mem_agent_Monteiro_SDR",
+        "messageData": "={{ $('Escolhe a mensagem certa').first().json.memoria_agente }}",
+        "tail": true
+      },
+      "id": "0a962cff-0bc3-4fa8-8a19-6a03d23a3af2",
+      "name": "Guarda na memoria do agente",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        816,
+        368
+      ],
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "cdb29faf-43bc-45a7-82a0-dc82e8815dca",
+      "name": "Um lead por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -896,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "5511992486507",
+        "messageText": "=Erro ao enviar a retomada para {{ $('Escolhe a mensagem certa').first().json.nome }} ({{ $('Escolhe a mensagem certa').first().json.telefone }})",
+        "options_message": {}
+      },
+      "id": "a12b143e-62e2-4d87-bd29-9e4acc2271fc",
+      "name": "Avisa a equipe se falhar",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        656,
+        608
+      ],
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Retomada de quem parou de responder\n\nRoda de 5 em 5 minutos procurando conversa que esfriou no meio da triagem.\n\nA regra e simples: se a ultima mensagem da conversa foi da IA (ou seja, a pessoa nao respondeu) e ja passou tempo suficiente, manda uma mensagem curta chamando de volta.\n\nSao no maximo 3 tentativas: a primeira depois de 35 minutos, a segunda 45 minutos depois dela, e a terceira 60 minutos depois da segunda. Passou disso, para de vez.\n\nNao precisa de nenhuma regra dizendo \"pare\" — a propria busca deixa de encontrar o lead quando ele ja recebeu as 3.",
+        "color": 4
+      },
+      "id": "e32715d4-ac05-4ea1-8fb0-eb4a6aff1ae5",
+      "name": "Sticky Note a33650cb",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1040,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Por que so vale pras ultimas 12 horas\n\nA busca ignora quem parou de responder ha mais de 12 horas. Sem esse limite, no primeiro dia o fluxo mandaria mensagem pra mais de 150 pessoas de uma vez, inclusive gente que sumiu ha semanas — o que assustaria o cliente e poderia derrubar o numero do WhatsApp.\n\nConversa velha nao e caso de retomada rapida: precisa de outra abordagem, com mensagem diferente.",
+        "height": 240,
+        "width": 352,
+        "color": 3
+      },
+      "id": "f2a83752-3c97-4c78-afeb-d64a751bda12",
+      "name": "Sticky Note 72b3b150",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## A checagem que evita mensagem atravessada\n\nO fluxo principal espera 300 segundos antes de responder, pra juntar varias mensagens seguidas do lead. Durante essa espera, a mensagem dele fica guardada no Redis e ainda nao aparece no banco.\n\nEntao antes de mandar qualquer retomada, o fluxo olha se tem algo esperando ali. Se tiver, pula esse lead e tenta de novo daqui 5 minutos — assim a gente nao pergunta \"esta por ai?\" bem na hora em que a pessoa acabou de responder.",
+        "height": 304,
+        "width": 496,
+        "color": 6
+      },
+      "id": "8e2b0f65-0125-4b57-a127-0f4d8f67df60",
+      "name": "Sticky Note 64c269a0",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o-mini",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "8e5061a0-800a-414c-a4c8-62acadb12323",
+      "name": "Modelo do trecho",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -272,
+        608
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "vmIaRNjxLKMYkFt4",
+          "name": "OpenRouter - Monteiro"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Voce escreve UM trecho curto que vai ser encaixado dentro de uma frase ja pronta.\n\nHistórico de conversa com esse cliente:\n\"{{ $('Busca quem parou de responder').item.json.historico_completo.map(m => {\n  const hora = new Date(m.created_at).toLocaleString('pt-BR');\n  const quem = m.mensagem_usuario ? 'Cliente' : 'Atendente';\n  const texto = m.mensagem_usuario || m.mensagem_agente || '';\n  return `[${hora}] ${quem}: ${texto}`;\n}).join('\\n') }}\"\n\nEtapa do atendimento: {{ $('Busca quem parou de responder').item.json.etapa }}\nArea: {{ $('Busca quem parou de responder').item.json.area_juridica }}\n\nEscreva, em portugues do Brasil, um trecho de 3 a 8 palavras que nomeie o que ficou pendente nessa conversa. O trecho precisa encaixar nestas tres frases, sem quebrar a gramatica:\n- \"...se posso seguir com [SEU TRECHO].\"\n- \"...so fica pendente [SEU TRECHO] pra eu continuar seu atendimento.\"\n- \"...preciso so confirmar [SEU TRECHO] pra continuar seu atendimento.\"\n\nRegras:\n- Comece com artigo (o, a, os, as). Exemplos bons: \"o laudo medico\", \"a estimativa do seu caso\", \"os dados da sua demissao\", \"a analise do seu caso\"\n- Nao use ponto final, aspas, nem letra maiuscula no comeco\n- Nao invente informacao que nao esta na mensagem acima\n- Nao cite valores em dinheiro, prazos, datas nem termos juridicos\n- Nao mencione o nome do cliente\n- Se a mensagem acima nao deixar claro o que ficou pendente, responda exatamente: as informacoes do seu caso\n\nResponda SOMENTE com o trecho, nada mais.",
+        "batching": {}
+      },
+      "id": "18831860-a8f5-4f9a-89e4-b6c6f4ba65da",
+      "name": "Escreve o trecho do contexto",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -288,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Como a mensagem fica personalizada\n\nAs tres frases da retomada sao fixas, do jeito que foram aprovadas. O que muda e so um trecho dentro delas.\n\nA busca traz a ultima coisa que a atendente disse ao cliente (ignorando retomadas anteriores). A IA le esse texto e escreve um trecho curto nomeando o que ficou pendente — por exemplo \"o laudo medico\" ou \"a estimativa do seu caso\".\n\nSe a IA falhar, demorar ou devolver algo estranho, o proprio no seguinte usa uma frase de reserva conforme a etapa do lead. Ou seja: a mensagem sai de qualquer jeito, nunca trava.\n\nO campo veio_da_ia mostra, na execucao, se o trecho foi escrito pela IA ou se caiu na reserva.",
+        "height": 384,
+        "width": 448,
+        "color": 5
+      },
+      "id": "d1c8930a-0ed9-482f-8b7b-a5bd934f3fcd",
+      "name": "Nota sobre o trecho dinamico",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -288,
+        -208
+      ]
+    }
+  ],
+  "connections": {
+    "A cada 5 minutos": {
+      "main": [
+        [
+          {
+            "node": "Busca quem parou de responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca quem parou de responder": {
+      "main": [
+        [
+          {
+            "node": "Um lead por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem mensagem esperando processar?": {
+      "main": [
+        [
+          {
+            "node": "Buffer esta vazio?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buffer esta vazio?": {
+      "main": [
+        [
+          {
+            "node": "Escreve o trecho do contexto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Um lead por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escolhe a mensagem certa": {
+      "main": [
+        [
+          {
+            "node": "Envia a retomada no WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia a retomada no WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Deu certo o envio?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deu certo o envio?": {
+      "main": [
+        [
+          {
+            "node": "Grava a retomada no historico",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avisa a equipe se falhar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Grava a retomada no historico": {
+      "main": [
+        [
+          {
+            "node": "Guarda na memoria do agente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guarda na memoria do agente": {
+      "main": [
+        [
+          {
+            "node": "Um lead por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Um lead por vez": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Tem mensagem esperando processar?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisa a equipe se falhar": {
+      "main": [
+        [
+          {
+            "node": "Um lead por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo do trecho": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Escreve o trecho do contexto",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escreve o trecho do contexto": {
+      "main": [
+        [
+          {
+            "node": "Escolhe a mensagem certa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "a08a7482-7cc6-42e0-9c8e-76fe3fe4f4a8",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "WeXBC8EBbjNzJhHc",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-21T22:59:52.537Z",
+      "updatedAt": "2026-09-21T22:59:52.537Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
