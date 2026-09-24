@@ -1,0 +1,925 @@
+{
+  "updatedAt": "2026-09-23T11:08:25.731Z",
+  "createdAt": "2026-09-23T10:46:29.892Z",
+  "id": "YBrK3mIdbmQRjYEY",
+  "name": "Monteiro Ramalho - 2.9 - Verifica Infração Similar",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "monteiro-ramalho-verifica-infracao-similar",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a60bb7bb-59d2-4f46-9376-e30cff627c33",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -800,
+        400
+      ],
+      "webhookId": "0f231060-9aa4-4c15-b17a-1c3fb55c791d"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  let data = item.json.body || item.json;\n\n  const obrigatorios = ['condomino_id', 'infracao'];\n  for (const campo of obrigatorios) {\n    if (data[campo] === undefined || data[campo] === null || String(data[campo]).trim() === '') {\n      throw new Error(`Campo obrigatório \"${campo}\" não informado.`);\n    }\n  }\n\n  return {\n    json: {\n      condomino_id: data.condomino_id,\n      infracao: data.infracao\n    }\n  };\n});"
+      },
+      "id": "acd07493-b032-4d53-8683-df9a1912a725",
+      "name": "Trata os dados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1b0e1a1-0001-4a1a-8a1a-000000000001",
+              "name": "erro",
+              "type": "string",
+              "value": "={{ $json.error }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0c9b33a3-cd6a-4039-a237-7a97b1ae346b",
+      "name": "Informa Erro",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -592,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": $json.erro } }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "4c7be56a-e557-4302-b5d2-23e595a9722f",
+      "name": "Responde Erro",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -416,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(\n  json_agg(json_build_object('id', id, 'data_infracao', data_infracao, 'infracao', infracao) ORDER BY data_infracao DESC),\n  '[]'::json\n) AS infracoes_anteriores\nFROM (\n  SELECT id, data_infracao, infracao FROM notificacoes\n  WHERE condomino_id = $1\n  ORDER BY data_infracao DESC\n  LIMIT 20\n) sub;",
+        "options": {
+          "queryReplacement": "={{ [ $json.condomino_id ] }}"
+        }
+      },
+      "id": "0cc03f5e-c805-41ae-9dbc-697c8ade180c",
+      "name": "Busca Infrações Anteriores",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -320,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b1c2d3e4-0002-4a1a-8a1a-000000000003",
+              "leftValue": "={{ $json.infracoes_anteriores.length }}",
+              "operator": {
+                "operation": "gt",
+                "type": "number"
+              },
+              "rightValue": 0
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      },
+      "id": "3dcc1a7e-4125-4767-945e-81be0cc6607f",
+      "name": "Tem Infrações Anteriores?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -80,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d2e3f4-0003-4a1a-8a1a-000000000004",
+              "name": "similares",
+              "type": "array",
+              "value": "={{ [] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0c69ea25-a447-424a-87b3-a2da30e4f67f",
+      "name": "Sem Similares",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        176,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webhook.miabuilder.com/webhook/open-router-verificacao",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "anthropic/claude-sonnet-4.5"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1b9af390-f3cd-44c1-a8b0-1b07a85684af",
+      "name": "Verifica modelo da openRouter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        176,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Nova infração:\n{{ $('Trata os dados').first().json.infracao }}\n\nInfrações anteriores deste mesmo condômino (compare a nova com cada uma):\n{{ JSON.stringify($('Busca Infrações Anteriores').first().json.infracoes_anteriores) }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=Você é um especialista em direito condominial. Sua tarefa é comparar uma NOVA infração com uma lista de infrações ANTERIORES do mesmo condômino, identificando quais das anteriores tratam da MESMA NATUREZA de conduta que a nova — mesmo que a redação seja completamente diferente.\n\n\"Mesma natureza\" significa a mesma categoria de comportamento infrator (ex.: perturbação do sossego/barulho, animal solto ou sem contenção em área comum, estacionamento indevido ou uso indevido de vaga, alteração de fachada ou instalação irregular, uso indevido de área comum, descarte irregular de lixo, obra ou reforma sem autorização, inadimplência, entre outras) — não a redação literal do texto.\n\nNão considere como mesma natureza infrações que, apesar de envolverem o mesmo objeto (ex.: veículo, animal), tratam de condutas distintas entre si (ex.: estacionar em vaga de outro morador e obstruir saída de emergência são naturezas diferentes, mesmo ambas envolvendo veículo).\n\nAnalise cada item da lista de infrações anteriores e retorne apenas os que realmente são da mesma natureza da nova infração, com uma justificativa curta (uma frase) do motivo. Se nenhuma for da mesma natureza, retorne uma lista vazia.\n\nResponda somente com um JSON válido, sem comentários, sem markdown, sem texto antes ou depois, no formato:\n{\n  \"similares\": [\n    { \"id\": \"<id exato da infração anterior, copiado literalmente da lista recebida>\", \"motivo\": \"<justificativa curta>\" }\n  ]\n}"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "db8567ee-c91e-4f93-9a0c-cdf70f6539ac",
+      "name": "Compara Infrações",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        384,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "model": "={{ $json.resolvedModel }}",
+        "options": {
+          "maxTokens": "***REMOVIDO***"
+        }
+      },
+      "id": "593b6abe-d703-4886-8052-56c20c28367f",
+      "name": "OpenRouter Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        320,
+        432
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "vmIaRNjxLKMYkFt4",
+          "name": "OpenRouter - Monteiro"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"similares\": [\n    { \"id\": \"uuid-exemplo\", \"motivo\": \"Ambas tratam de perturbação do sossego em horário noturno.\" }\n  ]\n}",
+        "autoFix": true
+      },
+      "id": "e767de56-77d1-4dad-a0c8-59a7d57b3c9d",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        448,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1e2f3a4-0005-4a1a-8a1a-000000000005",
+              "name": "similares",
+              "type": "array",
+              "value": "={{ $json.output.similares }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f2bdf1d6-79bb-4f81-9dfb-7b563ccdbf6f",
+      "name": "Normaliza Saída LLM",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        704,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const anteriores = $('Busca Infrações Anteriores').first().json.infracoes_anteriores || [];\nconst similaresIds = ($json.similares || []).map(s => ({ id: s.id, motivo: s.motivo }));\n\nconst similares = similaresIds\n  .map(s => {\n    const original = anteriores.find(a => a.id === s.id);\n    if (!original) return null;\n    return {\n      id: original.id,\n      data_infracao: original.data_infracao,\n      infracao: original.infracao,\n      motivo: s.motivo\n    };\n  })\n  .filter(Boolean);\n\nreturn [{\n  json: {\n    tem_similar: similares.length > 0,\n    similares\n  }\n}];"
+      },
+      "id": "6831653a-f7da-4838-821a-0fc84555045b",
+      "name": "Monta Resposta Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "d0d757ee-8545-49b7-9e52-52e06ecbd34a",
+      "name": "Responde",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1088,
+        560
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Trata os dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trata os dados": {
+      "main": [
+        [
+          {
+            "node": "Busca Infrações Anteriores",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Informa Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Informa Erro": {
+      "main": [
+        [
+          {
+            "node": "Responde Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca Infrações Anteriores": {
+      "main": [
+        [
+          {
+            "node": "Tem Infrações Anteriores?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem Infrações Anteriores?": {
+      "main": [
+        [
+          {
+            "node": "Verifica modelo da openRouter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sem Similares",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica modelo da openRouter": {
+      "main": [
+        [
+          {
+            "node": "Compara Infrações",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compara Infrações": {
+      "main": [
+        [
+          {
+            "node": "Normaliza Saída LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Compara Infrações",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Structured Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Compara Infrações",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliza Saída LLM": {
+      "main": [
+        [
+          {
+            "node": "Monta Resposta Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sem Similares": {
+      "main": [
+        [
+          {
+            "node": "Monta Resposta Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta Resposta Final": {
+      "main": [
+        [
+          {
+            "node": "Responde",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "ab838c99-54ce-401a-a52f-8648f0a74967",
+  "activeVersionId": "ab838c99-54ce-401a-a52f-8648f0a74967",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "YBrK3mIdbmQRjYEY",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-23T10:46:29.892Z",
+      "updatedAt": "2026-09-23T10:46:29.892Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "ab838c99-54ce-401a-a52f-8648f0a74967",
+    "workflowId": "YBrK3mIdbmQRjYEY",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "monteiro-ramalho-verifica-infracao-similar",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "id": "a60bb7bb-59d2-4f46-9376-e30cff627c33",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -800,
+          400
+        ],
+        "webhookId": "0f231060-9aa4-4c15-b17a-1c3fb55c791d"
+      },
+      {
+        "parameters": {
+          "jsCode": "return items.map(item => {\n  let data = item.json.body || item.json;\n\n  const obrigatorios = ['condomino_id', 'infracao'];\n  for (const campo of obrigatorios) {\n    if (data[campo] === undefined || data[campo] === null || String(data[campo]).trim() === '') {\n      throw new Error(`Campo obrigatório \"${campo}\" não informado.`);\n    }\n  }\n\n  return {\n    json: {\n      condomino_id: data.condomino_id,\n      infracao: data.infracao\n    }\n  };\n});"
+        },
+        "id": "acd07493-b032-4d53-8683-df9a1912a725",
+        "name": "Trata os dados",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -560,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "e1b0e1a1-0001-4a1a-8a1a-000000000001",
+                "name": "erro",
+                "type": "string",
+                "value": "={{ $json.error }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "0c9b33a3-cd6a-4039-a237-7a97b1ae346b",
+        "name": "Informa Erro",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -592,
+          672
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ { \"error\": $json.erro } }}",
+          "options": {
+            "responseCode": 400
+          }
+        },
+        "id": "4c7be56a-e557-4302-b5d2-23e595a9722f",
+        "name": "Responde Erro",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.4,
+        "position": [
+          -416,
+          672
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT COALESCE(\n  json_agg(json_build_object('id', id, 'data_infracao', data_infracao, 'infracao', infracao) ORDER BY data_infracao DESC),\n  '[]'::json\n) AS infracoes_anteriores\nFROM (\n  SELECT id, data_infracao, infracao FROM notificacoes\n  WHERE condomino_id = $1\n  ORDER BY data_infracao DESC\n  LIMIT 20\n) sub;",
+          "options": {
+            "queryReplacement": "={{ [ $json.condomino_id ] }}"
+          }
+        },
+        "id": "0cc03f5e-c805-41ae-9dbc-697c8ade180c",
+        "name": "Busca Infrações Anteriores",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -320,
+          400
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "b1c2d3e4-0002-4a1a-8a1a-000000000003",
+                "leftValue": "={{ $json.infracoes_anteriores.length }}",
+                "operator": {
+                  "operation": "gt",
+                  "type": "number"
+                },
+                "rightValue": 0
+              }
+            ],
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            }
+          },
+          "options": {}
+        },
+        "id": "3dcc1a7e-4125-4767-945e-81be0cc6607f",
+        "name": "Tem Infrações Anteriores?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -80,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "c1d2e3f4-0003-4a1a-8a1a-000000000004",
+                "name": "similares",
+                "type": "array",
+                "value": "={{ [] }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "0c69ea25-a447-424a-87b3-a2da30e4f67f",
+        "name": "Sem Similares",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          176,
+          704
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://webhook.miabuilder.com/webhook/open-router-verificacao",
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "anthropic/claude-sonnet-4.5"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "1b9af390-f3cd-44c1-a8b0-1b07a85684af",
+        "name": "Verifica modelo da openRouter",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          176,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=Nova infração:\n{{ $('Trata os dados').first().json.infracao }}\n\nInfrações anteriores deste mesmo condômino (compare a nova com cada uma):\n{{ JSON.stringify($('Busca Infrações Anteriores').first().json.infracoes_anteriores) }}",
+          "hasOutputParser": true,
+          "messages": {
+            "messageValues": [
+              {
+                "message": "=Você é um especialista em direito condominial. Sua tarefa é comparar uma NOVA infração com uma lista de infrações ANTERIORES do mesmo condômino, identificando quais das anteriores tratam da MESMA NATUREZA de conduta que a nova — mesmo que a redação seja completamente diferente.\n\n\"Mesma natureza\" significa a mesma categoria de comportamento infrator (ex.: perturbação do sossego/barulho, animal solto ou sem contenção em área comum, estacionamento indevido ou uso indevido de vaga, alteração de fachada ou instalação irregular, uso indevido de área comum, descarte irregular de lixo, obra ou reforma sem autorização, inadimplência, entre outras) — não a redação literal do texto.\n\nNão considere como mesma natureza infrações que, apesar de envolverem o mesmo objeto (ex.: veículo, animal), tratam de condutas distintas entre si (ex.: estacionar em vaga de outro morador e obstruir saída de emergência são naturezas diferentes, mesmo ambas envolvendo veículo).\n\nAnalise cada item da lista de infrações anteriores e retorne apenas os que realmente são da mesma natureza da nova infração, com uma justificativa curta (uma frase) do motivo. Se nenhuma for da mesma natureza, retorne uma lista vazia.\n\nResponda somente com um JSON válido, sem comentários, sem markdown, sem texto antes ou depois, no formato:\n{\n  \"similares\": [\n    { \"id\": \"<id exato da infração anterior, copiado literalmente da lista recebida>\", \"motivo\": \"<justificativa curta>\" }\n  ]\n}"
+              }
+            ]
+          },
+          "batching": {}
+        },
+        "id": "db8567ee-c91e-4f93-9a0c-cdf70f6539ac",
+        "name": "Compara Infrações",
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.7,
+        "position": [
+          384,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "model": "={{ $json.resolvedModel }}",
+          "options": {
+            "maxTokens": "***REMOVIDO***"
+          }
+        },
+        "id": "593b6abe-d703-4886-8052-56c20c28367f",
+        "name": "OpenRouter Chat Model",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          320,
+          432
+        ],
+        "credentials": {
+          "openRouterApi": {
+            "id": "vmIaRNjxLKMYkFt4",
+            "name": "OpenRouter - Monteiro"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsonSchemaExample": "{\n  \"similares\": [\n    { \"id\": \"uuid-exemplo\", \"motivo\": \"Ambas tratam de perturbação do sossego em horário noturno.\" }\n  ]\n}",
+          "autoFix": true
+        },
+        "id": "e767de56-77d1-4dad-a0c8-59a7d57b3c9d",
+        "name": "Structured Output Parser",
+        "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+        "typeVersion": 1.3,
+        "position": [
+          448,
+          336
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "d1e2f3a4-0005-4a1a-8a1a-000000000005",
+                "name": "similares",
+                "type": "array",
+                "value": "={{ $json.output.similares }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "f2bdf1d6-79bb-4f81-9dfb-7b563ccdbf6f",
+        "name": "Normaliza Saída LLM",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          704,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const anteriores = $('Busca Infrações Anteriores').first().json.infracoes_anteriores || [];\nconst similaresIds = ($json.similares || []).map(s => ({ id: s.id, motivo: s.motivo }));\n\nconst similares = similaresIds\n  .map(s => {\n    const original = anteriores.find(a => a.id === s.id);\n    if (!original) return null;\n    return {\n      id: original.id,\n      data_infracao: original.data_infracao,\n      infracao: original.infracao,\n      motivo: s.motivo\n    };\n  })\n  .filter(Boolean);\n\nreturn [{\n  json: {\n    tem_similar: similares.length > 0,\n    similares\n  }\n}];"
+        },
+        "id": "6831653a-f7da-4838-821a-0fc84555045b",
+        "name": "Monta Resposta Final",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          896,
+          560
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ $json }}",
+          "options": {}
+        },
+        "id": "d0d757ee-8545-49b7-9e52-52e06ecbd34a",
+        "name": "Responde",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.4,
+        "position": [
+          1088,
+          560
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Trata os dados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Trata os dados": {
+        "main": [
+          [
+            {
+              "node": "Busca Infrações Anteriores",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Informa Erro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Informa Erro": {
+        "main": [
+          [
+            {
+              "node": "Responde Erro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca Infrações Anteriores": {
+        "main": [
+          [
+            {
+              "node": "Tem Infrações Anteriores?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tem Infrações Anteriores?": {
+        "main": [
+          [
+            {
+              "node": "Verifica modelo da openRouter",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Sem Similares",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica modelo da openRouter": {
+        "main": [
+          [
+            {
+              "node": "Compara Infrações",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Compara Infrações": {
+        "main": [
+          [
+            {
+              "node": "Normaliza Saída LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenRouter Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Compara Infrações",
+              "type": "ai_languageModel",
+              "index": 0
+            },
+            {
+              "node": "Structured Output Parser",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Structured Output Parser": {
+        "ai_outputParser": [
+          [
+            {
+              "node": "Compara Infrações",
+              "type": "ai_outputParser",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normaliza Saída LLM": {
+        "main": [
+          [
+            {
+              "node": "Monta Resposta Final",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sem Similares": {
+        "main": [
+          [
+            {
+              "node": "Monta Resposta Final",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta Resposta Final": {
+        "main": [
+          [
+            {
+              "node": "Responde",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version ab838c99",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-09-23T10:51:49.371Z",
+    "updatedAt": "2026-09-23T11:05:56.933Z"
+  },
+  "tags": []
+}
