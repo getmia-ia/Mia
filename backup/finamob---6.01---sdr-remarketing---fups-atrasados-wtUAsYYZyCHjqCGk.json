@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-03T22:29:22.202Z",
+  "updatedAt": "2026-09-23T23:06:44.321Z",
   "createdAt": "2026-06-09T03:20:25.080Z",
   "id": "wtUAsYYZyCHjqCGk",
   "name": "Finamob - 6.01 - SDR Remarketing - FUPs Atrasados",
@@ -2800,6 +2800,179 @@
       ],
       "id": "1ca45fb6-a009-43aa-afa4-cc6038976e51",
       "name": "Doc telefone"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  mailing_enriched.id,\n  mailing_enriched.clientes                 AS contato,\n  mailing_enriched.empresa,\n  mailing_enriched.tipo,\n  mailing_enriched.plano_de_acao            AS plano_texto_livre,\n  mailing_enriched.status_plano_acao        AS status_que_o_n8n_le,\n  mailing_enriched.retorno_automatico,\n  mailing_enriched.dt_retorno_automatico,\n  mailing_enriched.fup,\n  DATEDIFF(CURDATE(), DATE(mailing_enriched.fup)) AS dias_atraso,\n  mailing_enriched.lixeira,\n  mailing_enriched.tem_operacao,\n  mailing_enriched.whatsapp                 AS whatsapp_bruto,\n  mailing_enriched.whatsapp_digits_local,\n  mailing_enriched.whatsapp_canonical,\n  CASE\n    WHEN mailing_enriched.lixeira <> 0\n      THEN '01 - esta na lixeira'\n    WHEN mailing_enriched.tem_operacao = 'Sim'\n      THEN '02 - tem_operacao = Sim (algum dos 5 caminhos de vinculo bateu)'\n    WHEN NOT (\n           mailing_enriched.tipo IS NULL\n           OR TRIM(mailing_enriched.tipo) = ''\n           OR TRIM(mailing_enriched.tipo) IN ('Cliente', 'Cliente/Parceiro', 'Outros')\n         )\n      THEN CONCAT('03 - tipo fora da whitelist: ', COALESCE(mailing_enriched.tipo, 'NULL'))\n    WHEN NOT (\n           mailing_enriched.fup IS NULL\n           OR mailing_enriched.fup = ''\n           OR DATE(mailing_enriched.fup) < CURDATE()\n         )\n      THEN '04 - fup nao venceu no banco (ou nao e data valida - ver QUERY 7)'\n    WHEN mailing_enriched.whatsapp IS NULL OR mailing_enriched.whatsapp = ''\n      THEN '05 - sem whatsapp cadastrado'\n    WHEN NOT (\n           (LENGTH(mailing_enriched.whatsapp_digits_local) = 11\n             AND SUBSTRING(mailing_enriched.whatsapp_digits_local, 3, 1) = '9')\n           OR (LENGTH(mailing_enriched.whatsapp_digits_local) = 10\n             AND SUBSTRING(mailing_enriched.whatsapp_digits_local, 3, 1) BETWEEN '2' AND '9')\n         )\n      THEN CONCAT('06 - whatsapp com tamanho/faixa invalida (',\n                  LENGTH(mailing_enriched.whatsapp_digits_local), ' digitos)')\n    WHEN mailing_enriched.whatsapp_digits_local = REPEAT(\n           LEFT(mailing_enriched.whatsapp_digits_local, 1),\n           LENGTH(mailing_enriched.whatsapp_digits_local))\n      THEN '07 - whatsapp placeholder (todos os digitos iguais)'\n    WHEN NOT (CAST(LEFT(mailing_enriched.whatsapp_digits_local, 2) AS UNSIGNED) BETWEEN 11 AND 99)\n      THEN '08 - DDD invalido'\n    WHEN mailing_enriched.status_plano_acao IN (\n           'ptentativaderreativaçãor',\n           'stentativadereativaçãor',\n           'ttentativadereativaçãor',\n           'encaminhar advisor',\n           'naoeoICP')\n      THEN CONCAT('09 - status_plano_acao na lista de excluidos: ',\n                  mailing_enriched.status_plano_acao)\n    WHEN EXISTS (\n           SELECT 1\n           FROM (\n             SELECT\n               m2r.id, m2r.lixeira,\n               CONCAT(\n                 LEFT(CASE WHEN LENGTH(m2r.whatsapp_digits_raw) IN (12, 13)\n                                AND LEFT(m2r.whatsapp_digits_raw, 2) = '55'\n                           THEN SUBSTRING(m2r.whatsapp_digits_raw, 3)\n                           ELSE m2r.whatsapp_digits_raw END, 2),\n                 RIGHT(CASE WHEN LENGTH(m2r.whatsapp_digits_raw) IN (12, 13)\n                                 AND LEFT(m2r.whatsapp_digits_raw, 2) = '55'\n                            THEN SUBSTRING(m2r.whatsapp_digits_raw, 3)\n                            ELSE m2r.whatsapp_digits_raw END, 8)\n               ) AS whatsapp_canonical\n             FROM (\n               SELECT m2.id, m2.lixeira,\n                 REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n                   m2.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''), '+', ''\n                 ) AS whatsapp_digits_raw\n               FROM mailing m2\n             ) AS m2r\n           ) AS m2c\n           WHERE m2c.lixeira = 0\n             AND m2c.id <> mailing_enriched.id\n             AND m2c.whatsapp_canonical = mailing_enriched.whatsapp_canonical\n         )\n      THEN '10 - telefone duplicado com outro mailing ativo (dedupe mata os 2 lados)'\n    ELSE '00 - PASSA em todos os filtros (deveria estar entrando na fila)'\n  END AS motivo_bloqueio\nFROM (\n  SELECT\n    e.*,\n    CONCAT(LEFT(e.whatsapp_digits_local, 2), RIGHT(e.whatsapp_digits_local, 8)) AS whatsapp_canonical\n  FROM (\n    SELECT\n      r.*,\n      CASE\n        WHEN EXISTS (SELECT 1 FROM operacao o WHERE o.mailing_id = r.id)\n        OR EXISTS (\n          SELECT 1 FROM incorporadoras i\n          JOIN operacao o2 ON o2.cnpj_digits = i.cnpj_digits\n          WHERE i.id = r.idincorporadora AND i.cnpj_digits IS NOT NULL\n        )\n        OR EXISTS (\n          SELECT 1 FROM operacao o3\n          WHERE o3.cnpj_digits = r.cnpj_empresa\n            AND r.cnpj_empresa IS NOT NULL AND r.cnpj_empresa <> ''\n        )\n        OR EXISTS (\n          SELECT 1 FROM operacao o4\n          WHERE o4.idclientes = r.idcliente AND r.idcliente IS NOT NULL\n        )\n        OR EXISTS (\n          SELECT 1 FROM clientes c\n          JOIN operacao o5 ON o5.idclientes = c.id\n          WHERE c.mailing_id = r.id\n        )\n        THEN 'Sim' ELSE 'Não'\n      END AS tem_operacao,\n      CASE\n        WHEN LENGTH(r.whatsapp_digits_raw) IN (12, 13)\n             AND LEFT(r.whatsapp_digits_raw, 2) = '55'\n          THEN SUBSTRING(r.whatsapp_digits_raw, 3)\n        ELSE r.whatsapp_digits_raw\n      END AS whatsapp_digits_local\n    FROM (\n      SELECT\n        m.*,\n        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n          m.whatsapp, '(', ''), ')', ''), ' ', ''), '-', ''), '.', ''), '+', ''\n        ) AS whatsapp_digits_raw\n      FROM mailing m\n      WHERE m.id IN (\n    428, 227, 1098, 1481, 215, 1524, 1248, 2716, 2649, 4072, 500, 1638, 5405, 5954, 6569, 6903, 7206, 2487, 7535, 398,\n    7741, 7929, 503, 8399, 8427, 7967, 8573, 748, 106, 583, 6147, 7310, 5263, 5506, 865, 2272, 7275, 7059, 1323, 4990,\n    6968, 2909, 1111, 2454, 5534, 2995, 3352, 946, 1951, 3897, 6092, 7377, 7329, 476, 7304, 2264, 8490, 2720, 1988, 2386,\n    7493, 5005, 7140, 7276, 7415, 877, 6874, 7475, 6568, 2095, 7374, 1427, 6332, 250, 220, 471, 2547, 2024, 7273, 7664,\n    7322, 7477, 6721, 2981, 3893, 1057, 7793, 6686, 5726, 921, 2686, 2467, 1469, 1364, 7594, 5268, 2205, 2790, 7460, 7185,\n    3627, 4907, 7728, 4790, 633, 4025, 2949, 7149, 7131, 4759, 7564, 497, 5018, 1399, 1102, 3088, 4680, 5843, 3554, 634,\n    4285, 3311, 7524, 1598, 7530, 1201, 6939, 7425, 6329, 7428, 5554, 6628, 8487, 3063, 7239, 7487, 1474, 7245, 1345, 5462,\n    6818, 7360, 7066, 6834, 6788, 4276, 3152, 1490, 6299, 4415, 7814, 7124, 1523, 6885, 7192, 7540, 1332, 1129, 4526, 5072,\n    2748, 7237, 5810, 6774, 3061, 108, 845, 6505, 7615, 5844, 7766, 593, 30, 4506, 911, 627, 747, 11, 735, 574,\n    928, 717, 839, 1352, 7169, 725, 868, 723, 675, 7084, 635, 732, 258, 438, 433, 726, 701, 263, 1405, 864,\n    754, 183, 184, 720, 951, 939, 950, 944, 405, 2087, 1016, 788, 418, 994, 925, 424, 778, 945, 6280, 924,\n    537, 916, 1052, 1078, 1037, 1064, 1034, 7914, 1063, 1103, 1033, 1113, 1041, 1049, 1046, 538, 1116, 1177, 1155, 1157,\n    7987, 7890, 1151, 1204, 1192, 1218, 1150, 1138, 1222, 1179, 1158, 1156, 1183, 1340, 1252, 1226, 2040, 1282, 1314, 1329,\n    1324, 1342, 1253, 1273, 1990, 1452, 1453, 1415, 6640, 2004, 1396, 733, 2184, 495, 1293, 1449, 1378, 1356, 2331, 480,\n    1370, 7129, 1457, 1522, 1601, 1575, 1480, 2982, 1539, 1493, 577, 493, 1541, 912, 1555, 1576, 1484, 7021, 1696, 5722,\n    1607, 1670, 540, 1666, 1705, 2734, 83, 7982, 1712, 285, 7210, 1928, 6913, 1996, 1999, 1972, 902, 1933, 1717, 2011,\n    2065, 7997, 2002, 7162, 2012, 7146, 2486, 7050, 7030, 6926, 2001, 6943, 2003, 2405, 2103, 2138, 2173, 2174, 2217, 2196,\n    2154, 2219, 2279, 2238, 2270, 2254, 2260, 2341, 2229, 2295, 2232, 2815, 2369, 2404, 2430, 2493, 7292, 7151, 2469, 2438,\n    3212, 2445, 1636, 1090, 2660, 2646, 5221, 2597, 6131, 2600, 2510, 2534, 2592, 7174, 2786, 2609, 7390, 2736, 7009, 7027,\n    2844, 2853, 2766, 2831, 2812, 2836, 2876, 863, 2999, 2895, 2986, 965, 3197, 7512, 2912, 2881, 2289, 2987, 2962, 2366,\n    2945, 2976, 2934, 2192, 3050, 3191, 3034, 3196, 6981, 3186, 3101, 3444, 3527, 3334, 3294, 8675, 663, 1940, 3768, 7187,\n    3787, 6642, 6797, 3757, 4112, 4087, 4160, 4127, 4380, 4339, 2950, 4604, 4590, 7303, 4660, 6604, 4395, 4537, 4588, 4476,\n    8736, 8737, 8742, 4618, 8725, 4724, 8032, 4705, 1587, 3513, 4757, 5807, 4030, 4813, 6236, 4945, 4878, 4847, 4901, 8155,\n    5009, 5241, 4828, 8714, 2169, 543, 5283, 6302, 5255, 7470, 8076, 5386, 7684, 5399, 5313, 5341, 8754, 5476, 6104, 5427,\n    6996, 1071, 4432, 5513, 7501, 5202, 5517, 479, 5426, 5551, 8153, 8772, 5578, 2530, 8021, 7211, 2435, 5692, 7566, 1139,\n    5769, 4512, 5731, 5045, 6261, 5819, 5660, 5935, 5898, 5929, 5508, 8711, 7430, 5943, 8946, 6012, 8216, 6087, 5966, 5962,\n    5993, 6249, 6188, 6291, 6309, 8967, 6303, 3895, 6286, 7543, 6412, 6325, 672, 6350, 8697, 6417, 4575, 8353, 3111, 6510,\n    6430, 119, 6428, 8001, 6586, 6609, 7899, 7786, 6790, 7699, 7934, 7433, 6621, 6647, 6368, 6186, 6738, 6756, 1499, 2817,\n    6733, 9052, 8716, 6829, 8172, 4561, 6871, 6959, 954, 6975, 7961, 6931, 7018, 7045, 8995, 8106, 5231, 7852, 1561, 7137,\n    5364, 7254, 8226, 7990, 8350, 2998, 8212, 1232, 9077, 9079, 9076, 2740, 1637, 64, 7231, 7302, 1412, 2907, 6864, 5991,\n    2521, 8247, 8144, 7927, 2540, 7930, 7386, 7897, 6139, 8354, 8434, 8178, 8023, 8028, 8505, 6664, 9192, 179, 407, 1067,\n    328, 652, 1975, 2417, 1479, 9260, 9252, 3717, 4692, 46, 9299, 9307, 9343, 7976, 507, 8202, 7042, 8276, 3215, 9371,\n    9389, 8300, 3024, 3461, 7554, 8476, 3530, 5972, 6634, 7771, 7357, 7049, 7473, 7451, 9490, 539, 600, 8456, 7102, 8156,\n    9573, 8131, 499, 6649, 8610, 7240, 8603, 3459, 8502, 100, 8608, 2214, 340, 9189, 8590, 293\n      )\n    ) AS r\n  ) AS e\n) AS mailing_enriched\nORDER BY motivo_bloqueio, mailing_enriched.id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        480,
+        -176
+      ],
+      "id": "7af35db9-4bd4-4533-aa5f-620284181021",
+      "name": "Execute a SQL query4",
+      "notesInFlow": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "notes": "FILA DE ENTRADA - lead que nunca entrou em tentativa de reativacao (ou tem fup vencido/nulo). LIMIT 100. Em 26/08 passou a usar a WHITELIST de tipo, igual as 3 filas de follow-up - antes usava blacklist e deixava entrar lead que nenhuma fila de follow-up conseguia pescar depois."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  m.id,\n  m.clientes AS contato,\n  m.empresa,\n  m.idcliente,\n  m.idincorporadora,\n  m.cnpj_empresa,\n  (SELECT COUNT(*) FROM operacao o  WHERE o.mailing_id = m.id)                         AS via1_mailing_id,\n  (SELECT COUNT(*) FROM incorporadoras i JOIN operacao o2 ON o2.cnpj_digits = i.cnpj_digits\n     WHERE i.id = m.idincorporadora AND i.cnpj_digits IS NOT NULL)                     AS via2_incorporadora,\n  (SELECT COUNT(*) FROM operacao o3 WHERE o3.cnpj_digits = m.cnpj_empresa\n     AND m.cnpj_empresa IS NOT NULL AND m.cnpj_empresa <> '')                          AS via3_cnpj_mailing,\n  (SELECT COUNT(*) FROM operacao o4 WHERE o4.idclientes = m.idcliente\n     AND m.idcliente IS NOT NULL)                                                      AS via4_idcliente,\n  (SELECT COUNT(*) FROM clientes c JOIN operacao o5 ON o5.idclientes = c.id\n     WHERE c.mailing_id = m.id)                                                        AS via5_clientes_mailing\nFROM mailing m\nWHERE m.id IN (\n    428, 227, 1098, 1481, 215, 1524, 1248, 2716, 2649, 4072, 500, 1638, 5405, 5954, 6569, 6903, 7206, 2487, 7535, 398,\n    7741, 7929, 503, 8399, 8427, 7967, 8573, 748, 106, 583, 6147, 7310, 5263, 5506, 865, 2272, 7275, 7059, 1323, 4990,\n    6968, 2909, 1111, 2454, 5534, 2995, 3352, 946, 1951, 3897, 6092, 7377, 7329, 476, 7304, 2264, 8490, 2720, 1988, 2386,\n    7493, 5005, 7140, 7276, 7415, 877, 6874, 7475, 6568, 2095, 7374, 1427, 6332, 250, 220, 471, 2547, 2024, 7273, 7664,\n    7322, 7477, 6721, 2981, 3893, 1057, 7793, 6686, 5726, 921, 2686, 2467, 1469, 1364, 7594, 5268, 2205, 2790, 7460, 7185,\n    3627, 4907, 7728, 4790, 633, 4025, 2949, 7149, 7131, 4759, 7564, 497, 5018, 1399, 1102, 3088, 4680, 5843, 3554, 634,\n    4285, 3311, 7524, 1598, 7530, 1201, 6939, 7425, 6329, 7428, 5554, 6628, 8487, 3063, 7239, 7487, 1474, 7245, 1345, 5462,\n    6818, 7360, 7066, 6834, 6788, 4276, 3152, 1490, 6299, 4415, 7814, 7124, 1523, 6885, 7192, 7540, 1332, 1129, 4526, 5072,\n    2748, 7237, 5810, 6774, 3061, 108, 845, 6505, 7615, 5844, 7766, 593, 30, 4506, 911, 627, 747, 11, 735, 574,\n    928, 717, 839, 1352, 7169, 725, 868, 723, 675, 7084, 635, 732, 258, 438, 433, 726, 701, 263, 1405, 864,\n    754, 183, 184, 720, 951, 939, 950, 944, 405, 2087, 1016, 788, 418, 994, 925, 424, 778, 945, 6280, 924,\n    537, 916, 1052, 1078, 1037, 1064, 1034, 7914, 1063, 1103, 1033, 1113, 1041, 1049, 1046, 538, 1116, 1177, 1155, 1157,\n    7987, 7890, 1151, 1204, 1192, 1218, 1150, 1138, 1222, 1179, 1158, 1156, 1183, 1340, 1252, 1226, 2040, 1282, 1314, 1329,\n    1324, 1342, 1253, 1273, 1990, 1452, 1453, 1415, 6640, 2004, 1396, 733, 2184, 495, 1293, 1449, 1378, 1356, 2331, 480,\n    1370, 7129, 1457, 1522, 1601, 1575, 1480, 2982, 1539, 1493, 577, 493, 1541, 912, 1555, 1576, 1484, 7021, 1696, 5722,\n    1607, 1670, 540, 1666, 1705, 2734, 83, 7982, 1712, 285, 7210, 1928, 6913, 1996, 1999, 1972, 902, 1933, 1717, 2011,\n    2065, 7997, 2002, 7162, 2012, 7146, 2486, 7050, 7030, 6926, 2001, 6943, 2003, 2405, 2103, 2138, 2173, 2174, 2217, 2196,\n    2154, 2219, 2279, 2238, 2270, 2254, 2260, 2341, 2229, 2295, 2232, 2815, 2369, 2404, 2430, 2493, 7292, 7151, 2469, 2438,\n    3212, 2445, 1636, 1090, 2660, 2646, 5221, 2597, 6131, 2600, 2510, 2534, 2592, 7174, 2786, 2609, 7390, 2736, 7009, 7027,\n    2844, 2853, 2766, 2831, 2812, 2836, 2876, 863, 2999, 2895, 2986, 965, 3197, 7512, 2912, 2881, 2289, 2987, 2962, 2366,\n    2945, 2976, 2934, 2192, 3050, 3191, 3034, 3196, 6981, 3186, 3101, 3444, 3527, 3334, 3294, 8675, 663, 1940, 3768, 7187,\n    3787, 6642, 6797, 3757, 4112, 4087, 4160, 4127, 4380, 4339, 2950, 4604, 4590, 7303, 4660, 6604, 4395, 4537, 4588, 4476,\n    8736, 8737, 8742, 4618, 8725, 4724, 8032, 4705, 1587, 3513, 4757, 5807, 4030, 4813, 6236, 4945, 4878, 4847, 4901, 8155,\n    5009, 5241, 4828, 8714, 2169, 543, 5283, 6302, 5255, 7470, 8076, 5386, 7684, 5399, 5313, 5341, 8754, 5476, 6104, 5427,\n    6996, 1071, 4432, 5513, 7501, 5202, 5517, 479, 5426, 5551, 8153, 8772, 5578, 2530, 8021, 7211, 2435, 5692, 7566, 1139,\n    5769, 4512, 5731, 5045, 6261, 5819, 5660, 5935, 5898, 5929, 5508, 8711, 7430, 5943, 8946, 6012, 8216, 6087, 5966, 5962,\n    5993, 6249, 6188, 6291, 6309, 8967, 6303, 3895, 6286, 7543, 6412, 6325, 672, 6350, 8697, 6417, 4575, 8353, 3111, 6510,\n    6430, 119, 6428, 8001, 6586, 6609, 7899, 7786, 6790, 7699, 7934, 7433, 6621, 6647, 6368, 6186, 6738, 6756, 1499, 2817,\n    6733, 9052, 8716, 6829, 8172, 4561, 6871, 6959, 954, 6975, 7961, 6931, 7018, 7045, 8995, 8106, 5231, 7852, 1561, 7137,\n    5364, 7254, 8226, 7990, 8350, 2998, 8212, 1232, 9077, 9079, 9076, 2740, 1637, 64, 7231, 7302, 1412, 2907, 6864, 5991,\n    2521, 8247, 8144, 7927, 2540, 7930, 7386, 7897, 6139, 8354, 8434, 8178, 8023, 8028, 8505, 6664, 9192, 179, 407, 1067,\n    328, 652, 1975, 2417, 1479, 9260, 9252, 3717, 4692, 46, 9299, 9307, 9343, 7976, 507, 8202, 7042, 8276, 3215, 9371,\n    9389, 8300, 3024, 3461, 7554, 8476, 3530, 5972, 6634, 7771, 7357, 7049, 7473, 7451, 9490, 539, 600, 8456, 7102, 8156,\n    9573, 8131, 499, 6649, 8610, 7240, 8603, 3459, 8502, 100, 8608, 2214, 340, 9189, 8590, 293\n)\nHAVING via1_mailing_id + via2_incorporadora + via3_cnpj_mailing\n     + via4_idcliente + via5_clientes_mailing > 0\nORDER BY m.id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        752,
+        -160
+      ],
+      "id": "beb2c86b-897b-4dcd-9369-ae0c45d3ed90",
+      "name": "Execute a SQL query5",
+      "notesInFlow": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "notes": "FILA DE ENTRADA - lead que nunca entrou em tentativa de reativacao (ou tem fup vencido/nulo). LIMIT 100. Em 26/08 passou a usar a WHITELIST de tipo, igual as 3 filas de follow-up - antes usava blacklist e deixava entrar lead que nenhuma fila de follow-up conseguia pescar depois."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  SUM(via1 > 0)                                              AS bate_via1_mailing_id,\n  SUM(via2 > 0)                                              AS bate_via2_incorporadora,\n  SUM(via3 > 0)                                              AS bate_via3_cnpj_mailing,\n  SUM(via4 > 0)                                              AS bate_via4_idcliente,\n  SUM(via5 > 0)                                              AS bate_via5_clientes_mailing,\n  '---'                                                      AS separador,\n  SUM(via1 > 0 AND via2+via3+via4+via5 = 0)                  AS so_via1,\n  SUM(via2 > 0 AND via1+via3+via4+via5 = 0)                  AS so_via2,\n  SUM(via3 > 0 AND via1+via2+via4+via5 = 0)                  AS so_via3,\n  SUM(via4 > 0 AND via1+via2+via3+via5 = 0)                  AS so_via4,\n  SUM(via5 > 0 AND via1+via2+via3+via4 = 0)                  AS so_via5,\n  COUNT(*)                                                   AS total_com_algum_vinculo\nFROM (\n  SELECT\n    m.id,\n    (SELECT COUNT(*) FROM operacao o  WHERE o.mailing_id = m.id)                     AS via1,\n    (SELECT COUNT(*) FROM incorporadoras i JOIN operacao o2 ON o2.cnpj_digits = i.cnpj_digits\n       WHERE i.id = m.idincorporadora AND i.cnpj_digits IS NOT NULL)                 AS via2,\n    (SELECT COUNT(*) FROM operacao o3 WHERE o3.cnpj_digits = m.cnpj_empresa\n       AND m.cnpj_empresa IS NOT NULL AND m.cnpj_empresa <> '')                      AS via3,\n    (SELECT COUNT(*) FROM operacao o4 WHERE o4.idclientes = m.idcliente\n       AND m.idcliente IS NOT NULL)                                                  AS via4,\n    (SELECT COUNT(*) FROM clientes c JOIN operacao o5 ON o5.idclientes = c.id\n       WHERE c.mailing_id = m.id)                                                    AS via5\n  FROM mailing m\n  WHERE m.lixeira = 0\n) AS x\nWHERE via1 + via2 + via3 + via4 + via5 > 0;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        992,
+        -160
+      ],
+      "id": "4cfbd8b1-e01c-4bcd-80ae-936a092cccaf",
+      "name": "Execute a SQL query6",
+      "notesInFlow": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "notes": "FILA DE ENTRADA - lead que nunca entrou em tentativa de reativacao (ou tem fup vencido/nulo). LIMIT 100. Em 26/08 passou a usar a WHITELIST de tipo, igual as 3 filas de follow-up - antes usava blacklist e deixava entrar lead que nenhuma fila de follow-up conseguia pescar depois."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 'via4 - operacao.idclientes = 0'     AS furo,\n       (SELECT COUNT(*) FROM operacao WHERE idclientes = 0)                     AS operacoes_com_lixo,\n       (SELECT COUNT(*) FROM mailing  WHERE idcliente  = 0 AND lixeira = 0)     AS mailings_com_lixo\nUNION ALL\nSELECT 'via2 - cnpj_digits vazio',\n       (SELECT COUNT(*) FROM operacao      WHERE cnpj_digits IN ('', '0')),\n       (SELECT COUNT(*) FROM incorporadoras WHERE cnpj_digits IN ('', '0'))\nUNION ALL\nSELECT 'via3 - operacao.cnpj_digits = 0 (mailing.cnpj_empresa = 0)',\n       (SELECT COUNT(*) FROM operacao WHERE cnpj_digits = '0'),\n       (SELECT COUNT(*) FROM mailing  WHERE cnpj_empresa = '0' AND lixeira = 0)\nUNION ALL\nSELECT 'via5 - clientes.mailing_id = 0',\n       (SELECT COUNT(*) FROM clientes c JOIN operacao o ON o.idclientes = c.id WHERE c.mailing_id = 0),\n       0;\n \n-- Se a via4 for a culpada, esta query lista as operacoes \"curinga\" que estao\n-- casando com o mundo inteiro. Provavelmente sao poucas (as vezes UMA).\nSELECT o.id AS operacao_id, o.idclientes, o.nomeincorporadora, o.projeto,\n       o.status, o.datacriacao,\n       (SELECT COUNT(*) FROM mailing m WHERE m.idcliente = o.idclientes\n          AND m.lixeira = 0)                                    AS mailings_que_ela_bloqueia\nFROM operacao o\nWHERE o.idclientes IS NOT NULL\nGROUP BY o.id\nHAVING mailings_que_ela_bloqueia > 20\nORDER BY mailings_que_ela_bloqueia DESC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1248,
+        -160
+      ],
+      "id": "dd56c3e7-7310-4913-98c0-2ac774dcefb7",
+      "name": "Execute a SQL query7",
+      "notesInFlow": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "notes": "FILA DE ENTRADA - lead que nunca entrou em tentativa de reativacao (ou tem fup vencido/nulo). LIMIT 100. Em 26/08 passou a usar a WHITELIST de tipo, igual as 3 filas de follow-up - antes usava blacklist e deixava entrar lead que nenhuma fila de follow-up conseguia pescar depois."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 'via4 - operacao.idclientes = 0'     AS furo,\n       (SELECT COUNT(*) FROM operacao WHERE idclientes = 0)                     AS operacoes_com_lixo,\n       (SELECT COUNT(*) FROM mailing  WHERE idcliente  = 0 AND lixeira = 0)     AS mailings_com_lixo\nUNION ALL\nSELECT 'via2 - cnpj_digits vazio',\n       (SELECT COUNT(*) FROM operacao      WHERE cnpj_digits IN ('', '0')),\n       (SELECT COUNT(*) FROM incorporadoras WHERE cnpj_digits IN ('', '0'))\nUNION ALL\nSELECT 'via3 - operacao.cnpj_digits = 0 (mailing.cnpj_empresa = 0)',\n       (SELECT COUNT(*) FROM operacao WHERE cnpj_digits = '0'),\n       (SELECT COUNT(*) FROM mailing  WHERE cnpj_empresa = '0' AND lixeira = 0)\nUNION ALL\nSELECT 'via5 - clientes.mailing_id = 0',\n       (SELECT COUNT(*) FROM clientes c JOIN operacao o ON o.idclientes = c.id WHERE c.mailing_id = 0),\n       0;\n \n-- Se a via4 for a culpada, esta query lista as operacoes \"curinga\" que estao\n-- casando com o mundo inteiro. Provavelmente sao poucas (as vezes UMA).\nSELECT o.id AS operacao_id, o.idclientes, o.nomeincorporadora, o.projeto,\n       o.status, o.datacriacao,\n       (SELECT COUNT(*) FROM mailing m WHERE m.idcliente = o.idclientes\n          AND m.lixeira = 0)                                    AS mailings_que_ela_bloqueia\nFROM operacao o\nWHERE o.idclientes IS NOT NULL\nGROUP BY o.id\nHAVING mailings_que_ela_bloqueia > 20\nORDER BY mailings_que_ela_bloqueia DESC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1536,
+        -160
+      ],
+      "id": "3089670a-c577-40fb-a7a9-183f26f1dbc9",
+      "name": "Execute a SQL query8",
+      "notesInFlow": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "notes": "FILA DE ENTRADA - lead que nunca entrou em tentativa de reativacao (ou tem fup vencido/nulo). LIMIT 100. Em 26/08 passou a usar a WHITELIST de tipo, igual as 3 filas de follow-up - antes usava blacklist e deixava entrar lead que nenhuma fila de follow-up conseguia pescar depois."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://finamob.com.br/api/update_mailing_api.php",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "***REMOVIDO***"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"phone\": \"(34) 9333-2620\",\n    \"ultimo_contato\": \"2025-11-04\"\n  } ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1232,
+        -368
+      ],
+      "id": "6fea9ab0-edef-4611-a3ef-08a1ebcb24b1",
+      "name": "API Finamob4",
+      "retryOnFail": true,
+      "notesInFlow": true,
+      "onError": "continueErrorOutput",
+      "notes": "Atualiza o CRM ANTES do envio (status 1ª tentativa, ultimo_contato=hoje, fup=hoje+2, midia=15, dono_do_lead=29). Ordem intencional: garante idempotencia - reprocessar a execucao nao redispara, porque o lead sai da fila pelo status. Efeito colateral: se o envio falhar depois, o lead foi 'queimado' e vai receber a mensagem 2 sem ter recebido a 1 - por isso a falha de envio agora é registrada (ver Registra Evento - Falha no Envio 1).  DECIDIDO 26/08: a funcao de telefone DESTE node fica como esta. Ele usa o phone como CHAVE DE BUSCA no CRM (update_mailing_api.php), nao como numero discavel - por isso nao insere o 9. Os nodes Enviar Template usam outra funcao, com a regra de fixo x celular antigo. Consequencia conhecida e aceita: para celular antigo, historico_mensagens.telefone (que vem do Meta, com o 9) nao bate com o phone usado aqui - cruzamento entre as duas bases exige normalizar antes."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*) AS `Leads que voltariam para a fila`\nFROM mailing m\nJOIN (\n    SELECT id,\n           CASE WHEN LEFT(so_digits,2) = '55' AND LENGTH(so_digits) > 11\n                THEN SUBSTRING(so_digits,3) ELSE so_digits END AS local_limpo\n      FROM (\n        SELECT id,\n               REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(\n                 COALESCE(whatsapp,''),\n                 '(',''),')',''),'-',''),' ',''),'.','') AS so_digits\n          FROM mailing\n      ) a1\n) a2 ON a2.id = m.id\nWHERE m.lixeira = 0\n  AND LOWER(TRIM(COALESCE(m.tipo,''))) IN ('cliente','cliente/parceiro','outros')\n  AND m.fup IS NOT NULL AND m.fup <> '' AND DATE(m.fup) < CURDATE()\n  AND (\n        (LENGTH(a2.local_limpo) = 11 AND LEFT(a2.local_limpo,1) = '9')\n     OR (LENGTH(a2.local_limpo) = 10 AND LEFT(a2.local_limpo,1) BETWEEN '2' AND '9')\n      )\n  AND (m.status_plano_acao IS NULL OR TRIM(m.status_plano_acao) = '')\n  /* tem operacao, mas TODAS declinadas */\n  AND (SELECT COUNT(*) FROM operacao o WHERE o.mailing_id = m.id) > 0\n  AND (SELECT SUM(CASE WHEN LOWER(COALESCE(so.status,'')) = 'declinado' THEN 0 ELSE 1 END)\n         FROM operacao o\n         LEFT JOIN statusoperacao so ON so.id = o.status\n        WHERE o.mailing_id = m.id) = 0;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1536,
+        -384
+      ],
+      "id": "c5fa0522-d2bc-469e-bc70-2395f2021b12",
+      "name": "Execute a SQL query9",
+      "notesInFlow": true,
+      "credentials": {
+        "mySql": {
+          "id": "8ItpiHe2joMjz6qf",
+          "name": "Finamob database"
+        }
+      },
+      "notes": "FILA DE ENTRADA - lead que nunca entrou em tentativa de reativacao (ou tem fup vencido/nulo). LIMIT 100. Em 26/08 passou a usar a WHITELIST de tipo, igual as 3 filas de follow-up - antes usava blacklist e deixava entrar lead que nenhuma fila de follow-up conseguia pescar depois."
     }
   ],
   "connections": {
@@ -3316,7 +3489,7 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "15e46c12-790d-4502-98c7-e50ec4b59fa4",
+  "versionId": "ff1080c6-aad7-48b5-94fc-ad913889c604",
   "activeVersionId": "15e46c12-790d-4502-98c7-e50ec4b59fa4",
   "triggerCount": 1,
   "shared": [
