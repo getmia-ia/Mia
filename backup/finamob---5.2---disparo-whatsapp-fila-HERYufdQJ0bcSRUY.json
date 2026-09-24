@@ -1,0 +1,621 @@
+{
+  "updatedAt": "2026-09-23T21:58:58.665Z",
+  "createdAt": "2026-09-23T21:47:14.235Z",
+  "id": "HERYufdQJ0bcSRUY",
+  "name": "Finamob - 5.2 - Disparo Whatsapp (fila)",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "disparo-finamob",
+        "options": {}
+      },
+      "id": "98d3d9f9-473a-4429-8999-44d58632c600",
+      "name": "Webhook (disparo)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2464,
+        272
+      ],
+      "webhookId": "disparo-finamob"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body?.disparo?.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "db2cbf95-197e-40f2-8b1c-9ba3eb3d425c",
+      "name": "Chamada do app?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2256,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "disparos",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.body.disparo.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "Em andamento"
+            }
+          ]
+        }
+      },
+      "id": "18d90311-d77b-44f7-9dea-0c690c54c332",
+      "name": "Marcar Em andamento",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -2032,
+        144
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ihkbgkytcyyahowcbakt.supabase.co/rest/v1/rpc/fila_whatsapp_claim",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"p_limite\": 50\n}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "e244d5ee-9241-4c4e-83be-72d502ca34b5",
+      "name": "Reivindicar lote (RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1792,
+        288
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// A RPC pode voltar como array em 1 item OU ja dividido. Normaliza.\nconst out=[];\nfor(const it of $input.all()){\n  const j=it.json;\n  if(Array.isArray(j)){ for(const r of j) out.push({json:r}); }\n  else if(j && Array.isArray(j.data)){ for(const r of j.data) out.push({json:r}); }\n  else if(j && j.lead_id) out.push({json:j});\n}\nreturn out;\n"
+      },
+      "id": "382cf3aa-f964-494e-87dc-e919d6001df3",
+      "name": "Normalizar lote",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1568,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Roteia origem -> phone_number_id do Meta e monta o corpo do template.\nconst MAP = {\n  'SDR-ADVISOR':     '1195821910283433',\n  'SDR-MARKETING':   '1279082001960816',\n  'SDR-REMARKETING': '1202871396233612',\n  'SDR-INBOUND':     '1292568043938721',\n};\nfunction normTel(raw){\n  let d=String(raw||'').replace(/\\D/g,'').replace(/^0+/,'');\n  if(!d) return '';\n  if(d.startsWith('55')) d=d.slice(2);\n  if(d.length===10){ const p=d.slice(2)[0]; if(['6','7','8','9'].includes(p)) d=d.slice(0,2)+'9'+d.slice(2); }\n  return '55'+d;\n}\nconst clean = v => (v==null?'':String(v)).trim();\nreturn items.map(it=>{\n  const j=it.json;\n  const pnid=MAP[j.origem_disparo];\n  const tel=normTel(j.telefone);\n  const params=[j.param_1,j.param_2,j.param_3,j.param_4,j.param_5]\n    .map(clean).filter(x=>x!=='').map(t=>({type:'text',text:t}));\n  const comps=[];\n  const temImagem=(clean(j.tipo_midia).toLowerCase()==='imagem') && !!clean(j.imagem_url);\n  if(temImagem) comps.push({type:'header',parameters:[{type:'image',image:{link:clean(j.imagem_url)}}]});\n  if(params.length) comps.push({type:'body',parameters:params});\n  const body={ messaging_product:'whatsapp', to:tel, type:'template',\n    template:{ name:j.template_name, language:{code:'pt_BR'}, ...(comps.length?{components:comps}:{}) } };\n  return { json: {\n    lead_id:j.lead_id, telefone:tel, nome:j.nome, origem_disparo:j.origem_disparo,\n    mensagem_completa:j.mensagem_completa,\n    graph_url: pnid ? ('https://graph.facebook.com/v22.0/'+pnid+'/messages') : '',\n    valido: !!pnid && !!tel && !!j.template_name,\n    motivo_invalido: !pnid ? 'origem sem phone_number_id' : (!tel ? 'telefone invalido' : (!j.template_name ? 'sem template_name' : '')),\n    body }};\n});\n"
+      },
+      "id": "cbdecb54-aa89-45e3-86c9-d769fd42bb2e",
+      "name": "Preparar envio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1344,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.valido }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "24482f45-5b6e-49d8-8de4-2a2264bb3946",
+      "name": "Valido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1136,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.graph_url }}",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "262c6aa0-4611-45df-a7fa-e0e00f83a601",
+      "name": "Enviar WhatsApp (Meta)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -912,
+        0
+      ],
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "leads",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Preparar envio').item.json.lead_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status_envio",
+              "fieldValue": "enviado"
+            },
+            {
+              "fieldId": "enviado_em",
+              "fieldValue": "={{ $now.toISO() }}"
+            }
+          ]
+        }
+      },
+      "id": "cb854241-8ec9-4ff3-b1a2-051fca7a809f",
+      "name": "Marcar enviado",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -688,
+        -112
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "finamob-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Preparar envio').item.json.mensagem_completa }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Preparar envio').item.json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Preparar envio').item.json.nome }}"
+            },
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Preparar envio').item.json.telefone }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "={{ $('Preparar envio').item.json.origem_disparo }}"
+            }
+          ]
+        }
+      },
+      "id": "8e484c40-6f28-4a73-8b4e-a3409a600448",
+      "name": "Gravar historico",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -464,
+        -112
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "leads",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Preparar envio').item.json.lead_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status_envio",
+              "fieldValue": "falha"
+            },
+            {
+              "fieldId": "erro_msg",
+              "fieldValue": "={{ ($json.error && ($json.error.message||JSON.stringify($json.error))) || 'erro no envio Meta' }}"
+            }
+          ]
+        }
+      },
+      "id": "980e3fd4-d9d6-43c9-bb80-44e966512a21",
+      "name": "Marcar falha",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -688,
+        112
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "leads",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.lead_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status_envio",
+              "fieldValue": "falha"
+            },
+            {
+              "fieldId": "erro_msg",
+              "fieldValue": "={{ $json.motivo_invalido }}"
+            }
+          ]
+        }
+      },
+      "id": "8119df03-2510-495d-9353-c749921f396c",
+      "name": "Marcar invalido",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -912,
+        272
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "J2ITvTeT2ru3SEdo",
+          "name": "EMI - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Se o lote veio cheio, provavelmente ainda ha fila -> re-dispara.\nconst n = $input.all().length;\nreturn n >= 50 ? [{json:{restantes:true, lote:n}}] : [];\n"
+      },
+      "id": "094894d3-1dfc-48c0-9d30-160c7e339f47",
+      "name": "Ainda tem fila?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1328,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 15
+      },
+      "id": "7352dce8-93c0-4b71-9bcb-17fa7f61c54e",
+      "name": "Aguardar ritmo",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1120,
+        512
+      ],
+      "webhookId": "aguardar-ritmo-fila"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webhook.miabuilder.com/webhook/disparo-finamob",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "42aba9d1-f8a1-4dbe-976f-f24076448c64",
+      "name": "Re-disparar worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -896,
+        512
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (disparo)": {
+      "main": [
+        [
+          {
+            "node": "Chamada do app?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chamada do app?": {
+      "main": [
+        [
+          {
+            "node": "Marcar Em andamento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reivindicar lote (RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar Em andamento": {
+      "main": [
+        [
+          {
+            "node": "Reivindicar lote (RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reivindicar lote (RPC)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar lote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar lote": {
+      "main": [
+        [
+          {
+            "node": "Preparar envio",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ainda tem fila?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar envio": {
+      "main": [
+        [
+          {
+            "node": "Valido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valido?": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp (Meta)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar invalido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WhatsApp (Meta)": {
+      "main": [
+        [
+          {
+            "node": "Marcar enviado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar falha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar enviado": {
+      "main": [
+        [
+          {
+            "node": "Gravar historico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ainda tem fila?": {
+      "main": [
+        [
+          {
+            "node": "Aguardar ritmo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar ritmo": {
+      "main": [
+        [
+          {
+            "node": "Re-disparar worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "afaf1e95-d9ca-4a90-b654-e326fe99dcd9",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "HERYufdQJ0bcSRUY",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-23T21:47:14.235Z",
+      "updatedAt": "2026-09-23T21:47:14.235Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
