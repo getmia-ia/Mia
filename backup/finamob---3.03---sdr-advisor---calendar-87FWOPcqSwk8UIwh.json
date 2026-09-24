@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-22T19:40:22.665Z",
+  "updatedAt": "2026-09-23T17:30:40.048Z",
   "createdAt": "2025-11-25T18:20:24.028Z",
   "id": "87FWOPcqSwk8UIwh",
   "name": "Finamob - 3.03 - SDR Advisor - Calendar",
@@ -205,7 +205,7 @@
                   {
                     "id": "c547c9e1-f130-4390-9088-65fd9282edfc",
                     "leftValue": "={{ $('trigger').first().json.type }}",
-                    "rightValue": "encontrarReuniao",
+                    "rightValue": "buscarReuniao",
                     "operator": {
                       "type": "string",
                       "operation": "equals",
@@ -216,7 +216,7 @@
                 "combinator": "and"
               },
               "renameOutput": true,
-              "outputKey": "encontrarReuniao"
+              "outputKey": "buscarReuniao"
             },
             {
               "conditions": {
@@ -503,8 +503,8 @@
           "cachedResultName": "contato@monteferrario.com.br"
         },
         "returnAll": true,
-        "timeMin": "={{ $now.minus({week:1}) }}",
-        "timeMax": "={{ $now.plus({ week: 2 }) }}",
+        "timeMin": "={{ $now.minus({ week: 2 }).toISO() }}",
+        "timeMax": "={{ $now.plus({ week: 2 }).toISO() }}",
         "options": {}
       },
       "type": "n8n-nodes-base.googleCalendar",
@@ -522,7 +522,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const TIMEZONE = \"America/Sao_Paulo\";\n\nconst leadEmailRaw = $('trigger').first().json.email; \n\nif (!leadEmailRaw) {\n    return [{ json: { error: \"Dados incompletos\", found: false } }];\n}\n\nconst leadEmail = leadEmailRaw.trim().toLowerCase();\n\n// Use UTC mesmo (mais seguro)\nconst now = new Date();\n\n// Função pra pegar dateTime com fallback (caso seja all-day)\nfunction getEventDate(item) {\n  const start = item.json.start;\n  if (!start) return null;\n\n  // Eventos com hora\n  if (start.dateTime) return new Date(start.dateTime);\n\n  // Eventos all-day (date)\n  if (start.date) return new Date(start.date + \"T00:00:00\");\n\n  return null;\n}\n\n// Filtra eventos do lead\nconst matches = items.filter(item => {\n  const event = item.json;\n\n  return event.attendees?.some(attendee =>\n    attendee.email?.trim().toLowerCase() === leadEmail\n  );\n});\n\n// Separa eventos futuros e passados\nconst futureMeetings = matches\n  .map(item => ({ item, date: getEventDate(item) }))\n  .filter(e => e.date && e.date >= now)\n  .sort((a, b) => a.date - b.date);\n\nconst pastMeetings = matches\n  .map(item => ({ item, date: getEventDate(item) }))\n  .filter(e => e.date && e.date < now)\n  .sort((a, b) => b.date - a.date);\n\n// Pega os candidatos\nconst nextMeeting = futureMeetings[0] || null;\nconst lastMeeting = pastMeetings[0] || null;\n\n// Formatação correta com timezone\nfunction formatDateTime(date) {\n  return {\n    date: date.toLocaleDateString(\"pt-BR\", {\n      timeZone: TIMEZONE\n    }),\n    time: date.toLocaleTimeString(\"pt-BR\", {\n      timeZone: TIMEZONE,\n      hour: '2-digit',\n      minute: '2-digit'\n    })\n  };\n}\n\nreturn [{\n  json: {\n    found: !!(nextMeeting || lastMeeting),\n\n    nextMeeting: nextMeeting ? {\n      eventId: nextMeeting.item.json.id,\n      summary: nextMeeting.item.json.summary,\n      ...formatDateTime(nextMeeting.date)\n    } : null,\n\n    lastMeeting: lastMeeting ? {\n      eventId: lastMeeting.item.json.id,\n      summary: lastMeeting.item.json.summary,\n      ...formatDateTime(lastMeeting.date)\n    } : null\n  }\n}];"
+        "jsCode": "const TIMEZONE = \"America/Sao_Paulo\";\n\nconst leadEmailRaw = $('trigger').first().json.email;\n\nif (!leadEmailRaw) {\n  return [{\n    json: {\n      found: false,\n      message: \"Não foi possível buscar a reunião: e-mail do lead não informado.\"\n    }\n  }];\n}\n\nconst leadEmail = leadEmailRaw.trim().toLowerCase();\nconst now = new Date();\n\nfunction parseDate(obj) {\n  if (!obj) return null;\n  if (obj.dateTime) return new Date(obj.dateTime);\n  if (obj.date) return new Date(obj.date + \"T00:00:00-03:00\");\n  return null;\n}\n\nfunction getMeetingLink(ev) {\n  const video = ev.conferenceData?.entryPoints?.find(e => e.entryPointType === \"video\");\n  if (video?.uri) return video.uri;\n  if (ev.hangoutLink) return ev.hangoutLink;\n  if (ev.location && /^https?:\\/\\//i.test(ev.location.trim())) return ev.location.trim();\n  return null;\n}\n\nfunction format(date) {\n  return {\n    date: date.toLocaleDateString(\"pt-BR\", { timeZone: TIMEZONE }),\n    weekday: date.toLocaleDateString(\"pt-BR\", { timeZone: TIMEZONE, weekday: \"long\" }),\n    time: date.toLocaleTimeString(\"pt-BR\", { timeZone: TIMEZONE, hour: \"2-digit\", minute: \"2-digit\" })\n  };\n}\n\nfunction build(ev, start, status) {\n  return {\n    eventId: ev.id,\n    summary: ev.summary || \"Reunião\",\n    status, // \"em_andamento\" | \"agendada\" | \"realizada\"\n    ...format(start),\n    meetingLink: getMeetingLink(ev)\n  };\n}\n\n// Eventos do lead, não cancelados\nconst events = $input.all()\n  .map(i => i.json)\n  .filter(ev => ev?.id && ev.status !== \"cancelled\")\n  .filter(ev => ev.attendees?.some(a => a.email?.trim().toLowerCase() === leadEmail))\n  .map(ev => ({ ev, start: parseDate(ev.start), end: parseDate(ev.end) || parseDate(ev.start) }))\n  .filter(e => e.start);\n\n// Próxima = ainda não terminou (inclui a que está acontecendo agora)\nconst upcoming = events.filter(e => e.end > now).sort((a, b) => a.start - b.start);\nconst past = events.filter(e => e.end <= now).sort((a, b) => b.start - a.start);\n\nconst next = upcoming[0]\n  ? build(upcoming[0].ev, upcoming[0].start, upcoming[0].start <= now ? \"em_andamento\" : \"agendada\")\n  : null;\nconst last = past[0] ? build(past[0].ev, past[0].start, \"realizada\") : null;\n\n// Mensagem pronta para o agente\nlet message;\nif (next) {\n  message = next.status === \"em_andamento\"\n    ? `A reunião está acontecendo agora (começou às ${next.time}).`\n    : `A próxima reunião é ${next.weekday}, ${next.date}, às ${next.time}.`;\n  message += next.meetingLink\n    ? ` Link: ${next.meetingLink}`\n    : \" Não há link de videochamada cadastrado nesse evento.\";\n} else if (last) {\n  message = `Não há reunião futura agendada. A última reunião foi em ${last.date} às ${last.time}.`;\n} else {\n  message = \"Não encontrei nenhuma reunião agendada para este e-mail.\";\n}\n\nreturn [{\n  json: {\n    found: !!next,\n    nextMeeting: next,\n    lastMeeting: last,\n    message\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1834,8 +1834,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "dd80eec9-a21a-444c-87bb-89e67c0e7793",
-  "activeVersionId": "dd80eec9-a21a-444c-87bb-89e67c0e7793",
+  "versionId": "184c4c63-627e-40b7-bc78-0fdee3db1be2",
+  "activeVersionId": "184c4c63-627e-40b7-bc78-0fdee3db1be2",
   "triggerCount": 0,
   "shared": [
     {
@@ -1847,7 +1847,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "dd80eec9-a21a-444c-87bb-89e67c0e7793",
+    "versionId": "184c4c63-627e-40b7-bc78-0fdee3db1be2",
     "workflowId": "87FWOPcqSwk8UIwh",
     "nodes": [
       {
@@ -2049,7 +2049,7 @@
                     {
                       "id": "c547c9e1-f130-4390-9088-65fd9282edfc",
                       "leftValue": "={{ $('trigger').first().json.type }}",
-                      "rightValue": "encontrarReuniao",
+                      "rightValue": "buscarReuniao",
                       "operator": {
                         "type": "string",
                         "operation": "equals",
@@ -2060,7 +2060,7 @@
                   "combinator": "and"
                 },
                 "renameOutput": true,
-                "outputKey": "encontrarReuniao"
+                "outputKey": "buscarReuniao"
               },
               {
                 "conditions": {
@@ -2347,8 +2347,8 @@
             "cachedResultName": "contato@monteferrario.com.br"
           },
           "returnAll": true,
-          "timeMin": "={{ $now.minus({week:1}) }}",
-          "timeMax": "={{ $now.plus({ week: 2 }) }}",
+          "timeMin": "={{ $now.minus({ week: 2 }).toISO() }}",
+          "timeMax": "={{ $now.plus({ week: 2 }).toISO() }}",
           "options": {}
         },
         "type": "n8n-nodes-base.googleCalendar",
@@ -2366,7 +2366,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const TIMEZONE = \"America/Sao_Paulo\";\n\nconst leadEmailRaw = $('trigger').first().json.email; \n\nif (!leadEmailRaw) {\n    return [{ json: { error: \"Dados incompletos\", found: false } }];\n}\n\nconst leadEmail = leadEmailRaw.trim().toLowerCase();\n\n// Use UTC mesmo (mais seguro)\nconst now = new Date();\n\n// Função pra pegar dateTime com fallback (caso seja all-day)\nfunction getEventDate(item) {\n  const start = item.json.start;\n  if (!start) return null;\n\n  // Eventos com hora\n  if (start.dateTime) return new Date(start.dateTime);\n\n  // Eventos all-day (date)\n  if (start.date) return new Date(start.date + \"T00:00:00\");\n\n  return null;\n}\n\n// Filtra eventos do lead\nconst matches = items.filter(item => {\n  const event = item.json;\n\n  return event.attendees?.some(attendee =>\n    attendee.email?.trim().toLowerCase() === leadEmail\n  );\n});\n\n// Separa eventos futuros e passados\nconst futureMeetings = matches\n  .map(item => ({ item, date: getEventDate(item) }))\n  .filter(e => e.date && e.date >= now)\n  .sort((a, b) => a.date - b.date);\n\nconst pastMeetings = matches\n  .map(item => ({ item, date: getEventDate(item) }))\n  .filter(e => e.date && e.date < now)\n  .sort((a, b) => b.date - a.date);\n\n// Pega os candidatos\nconst nextMeeting = futureMeetings[0] || null;\nconst lastMeeting = pastMeetings[0] || null;\n\n// Formatação correta com timezone\nfunction formatDateTime(date) {\n  return {\n    date: date.toLocaleDateString(\"pt-BR\", {\n      timeZone: TIMEZONE\n    }),\n    time: date.toLocaleTimeString(\"pt-BR\", {\n      timeZone: TIMEZONE,\n      hour: '2-digit',\n      minute: '2-digit'\n    })\n  };\n}\n\nreturn [{\n  json: {\n    found: !!(nextMeeting || lastMeeting),\n\n    nextMeeting: nextMeeting ? {\n      eventId: nextMeeting.item.json.id,\n      summary: nextMeeting.item.json.summary,\n      ...formatDateTime(nextMeeting.date)\n    } : null,\n\n    lastMeeting: lastMeeting ? {\n      eventId: lastMeeting.item.json.id,\n      summary: lastMeeting.item.json.summary,\n      ...formatDateTime(lastMeeting.date)\n    } : null\n  }\n}];"
+          "jsCode": "const TIMEZONE = \"America/Sao_Paulo\";\n\nconst leadEmailRaw = $('trigger').first().json.email;\n\nif (!leadEmailRaw) {\n  return [{\n    json: {\n      found: false,\n      message: \"Não foi possível buscar a reunião: e-mail do lead não informado.\"\n    }\n  }];\n}\n\nconst leadEmail = leadEmailRaw.trim().toLowerCase();\nconst now = new Date();\n\nfunction parseDate(obj) {\n  if (!obj) return null;\n  if (obj.dateTime) return new Date(obj.dateTime);\n  if (obj.date) return new Date(obj.date + \"T00:00:00-03:00\");\n  return null;\n}\n\nfunction getMeetingLink(ev) {\n  const video = ev.conferenceData?.entryPoints?.find(e => e.entryPointType === \"video\");\n  if (video?.uri) return video.uri;\n  if (ev.hangoutLink) return ev.hangoutLink;\n  if (ev.location && /^https?:\\/\\//i.test(ev.location.trim())) return ev.location.trim();\n  return null;\n}\n\nfunction format(date) {\n  return {\n    date: date.toLocaleDateString(\"pt-BR\", { timeZone: TIMEZONE }),\n    weekday: date.toLocaleDateString(\"pt-BR\", { timeZone: TIMEZONE, weekday: \"long\" }),\n    time: date.toLocaleTimeString(\"pt-BR\", { timeZone: TIMEZONE, hour: \"2-digit\", minute: \"2-digit\" })\n  };\n}\n\nfunction build(ev, start, status) {\n  return {\n    eventId: ev.id,\n    summary: ev.summary || \"Reunião\",\n    status, // \"em_andamento\" | \"agendada\" | \"realizada\"\n    ...format(start),\n    meetingLink: getMeetingLink(ev)\n  };\n}\n\n// Eventos do lead, não cancelados\nconst events = $input.all()\n  .map(i => i.json)\n  .filter(ev => ev?.id && ev.status !== \"cancelled\")\n  .filter(ev => ev.attendees?.some(a => a.email?.trim().toLowerCase() === leadEmail))\n  .map(ev => ({ ev, start: parseDate(ev.start), end: parseDate(ev.end) || parseDate(ev.start) }))\n  .filter(e => e.start);\n\n// Próxima = ainda não terminou (inclui a que está acontecendo agora)\nconst upcoming = events.filter(e => e.end > now).sort((a, b) => a.start - b.start);\nconst past = events.filter(e => e.end <= now).sort((a, b) => b.start - a.start);\n\nconst next = upcoming[0]\n  ? build(upcoming[0].ev, upcoming[0].start, upcoming[0].start <= now ? \"em_andamento\" : \"agendada\")\n  : null;\nconst last = past[0] ? build(past[0].ev, past[0].start, \"realizada\") : null;\n\n// Mensagem pronta para o agente\nlet message;\nif (next) {\n  message = next.status === \"em_andamento\"\n    ? `A reunião está acontecendo agora (começou às ${next.time}).`\n    : `A próxima reunião é ${next.weekday}, ${next.date}, às ${next.time}.`;\n  message += next.meetingLink\n    ? ` Link: ${next.meetingLink}`\n    : \" Não há link de videochamada cadastrado nesse evento.\";\n} else if (last) {\n  message = `Não há reunião futura agendada. A última reunião foi em ${last.date} às ${last.time}.`;\n} else {\n  message = \"Não encontrei nenhuma reunião agendada para este e-mail.\";\n}\n\nreturn [{\n  json: {\n    found: !!next,\n    nextMeeting: next,\n    lastMeeting: last,\n    message\n  }\n}];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -3665,11 +3665,11 @@
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Version dd80eec9",
+    "name": "Version 184c4c63",
     "description": "",
-    "autosaved": false,
-    "createdAt": "2026-09-22T19:40:22.668Z",
-    "updatedAt": "2026-09-22T19:40:54.008Z"
+    "autosaved": true,
+    "createdAt": "2026-09-23T17:30:40.051Z",
+    "updatedAt": "2026-09-23T17:30:49.993Z"
   },
   "tags": []
 }
