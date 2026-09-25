@@ -1,0 +1,613 @@
+{
+  "updatedAt": "2026-09-24T21:58:33.475Z",
+  "createdAt": "2026-09-24T21:54:10.063Z",
+  "id": "JJ5lPJxwPkQBB55F",
+  "name": "Lab Brain · mapa de temas",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "5de66bb9-0652-42a8-8056-c0ca7fe68823",
+      "name": "Rodar agora",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "945ccde2-6802-40cb-b577-b00dba35af9f",
+      "name": "Parâmetros",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "p1",
+              "name": "arquivos_por_rodada",
+              "value": 3,
+              "type": "number"
+            },
+            {
+              "id": "p2",
+              "name": "pasta_contem",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "p3",
+              "name": "max_caracteres",
+              "value": 180000,
+              "type": "number"
+            },
+            {
+              "id": "p4",
+              "name": "somente_ids",
+              "value": "1nEnmEvU_HE14LVS3eaaaPZPoAPgXMprU,1Hqlh_YapeES9Zp1xNFM9DUE5GSFxSACf,1uZdrFDEh09qW7Jh1lK2deLiUZpOdKU_j",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "3e5ba81e-bb85-4b96-a4fd-840ff1ddfd38",
+      "name": "Arquivos ainda não lidos",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "lab_temas_pendentes",
+        "returnAll": false,
+        "limit": "={{ $json.arquivos_por_rodada }}",
+        "filterType": "string",
+        "filterString": "={{ $json.somente_ids ? 'file_id=in.(' + $json.somente_ids + ')' : 'folder_path=ilike.*' + $json.pasta_contem + '*' }}"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "ba5193e9-7bb8-451e-8990-acc8131c3733",
+      "name": "Trechos do arquivo",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        880,
+        300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "lab_temas_trechos",
+        "returnAll": true,
+        "filterType": "string",
+        "filterString": "=file_id=eq.{{ $json.file_id }}"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "99c930cd-2e9f-4306-bf5e-e2e6359e5dfc",
+      "name": "Montar texto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const arq = $('Um arquivo por vez').first().json;\nconst max = $('Parâmetros').first().json.max_caracteres;\nconst linhas = $input.all().map(i => i.json).filter(t => t.id != null).sort((a, b) => a.linha - b.linha || a.id - b.id);\n// Cada trecho vai marcado com o id, para o modelo apontar de onde tirou cada tema.\nlet blocos = linhas.map(t => '[#' + t.id + '] ' + String(t.content || '').trim());\nlet total = blocos.reduce((s, b) => s + b.length, 0);\n// Arquivo grande demais: amostra espalhada, para cobrir o arquivo inteiro em vez de só o começo.\nif (total > max) {\n  const passo = total / max;\n  blocos = blocos.filter((_, i) => Math.floor(i % passo) === 0);\n}\nreturn [{ json: { file_id: arq.file_id, file_name: arq.file_name, folder_path: arq.folder_path || '', trechos: linhas.length, ids: linhas.map(t => t.id), texto: blocos.join('\\n\\n') } }];"
+      }
+    },
+    {
+      "id": "75788ad6-35fb-4fef-9323-0601c52e70fa",
+      "name": "Extrair temas",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "promptType": "define",
+        "hasOutputParser": true,
+        "text": "=Arquivo: {{ $json.file_name }} (pasta: {{ $json.folder_path }})\n\nConteúdo, em trechos marcados com [#id]:\n\n{{ $json.texto }}",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "Você indexa o acervo da Loyalty Academy Brasil (podcasts LoyaltyCast, cursos, PDFs, materiais de loyalty/CRM/CX) para virar pauta de conteúdo.\n\nLeia o arquivo e liste os TEMAS que ele realmente discute — de 5 a 15 em arquivos longos, menos em arquivos curtos. Um tema é uma ideia que renderia um artigo ou post por si só: um problema, uma tese, um método, um caso, um dado. Prefira menos temas fortes a muitos fracos.\n\nNÃO são temas:\n- assuntos genéricos (\"fidelização\", \"importância do CRM\")\n- a estrutura do próprio material (\"o que o módulo vai abordar\", \"apresentação do curso\", \"agenda do episódio\", apresentação de convidados)\n- chamadas para ação, avisos, patrocínio\nSe um arquivo curto for só introdução ou índice, devolva 0 ou 1 tema.\n\nPara cada tema:\n- titulo: específico, como uma pauta (até 90 caracteres)\n- resumo: 2 ou 3 frases com o que foi dito, incluindo números, empresas e nomes quando aparecerem\n- palavras_chave: 3 a 6 termos\n- trechos: de 1 a 4 trechos que sustentam o tema, pelo id [#id] que aparece antes de cada um, com uma citação curta copiada literalmente dele\n\ntipo_fonte: podcast, curso, pdf, apresentacao, documento ou outro.\n\nNunca invente trecho, id, número ou fala. Use só ids que aparecem no texto. Responda em português, mesmo que o arquivo esteja em inglês."
+            }
+          ]
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "0730a713-5577-4ac0-b896-4f8d61b1fcfb",
+      "name": "Modelo de extração",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        520
+      ],
+      "parameters": {
+        "model": "google/gemini-3.5-flash",
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": "***REMOVIDO***"
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "id": "56c6b9da-5444-4031-a187-e304a53664b9",
+      "name": "Formato dos temas",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1460,
+        520
+      ],
+      "parameters": {
+        "schemaType": "fromJson",
+        "jsonSchemaExample": "{ \"tipo_fonte\": \"podcast\", \"temas\": [ { \"titulo\": \"Breakage como indicador de saúde do programa\", \"resumo\": \"Duas frases sobre o que foi discutido e qual a tese.\", \"palavras_chave\": [\"breakage\", \"resgate\"], \"trechos\": [ { \"chunk_id\": 123, \"citacao\": \"frase curta copiada do trecho\" } ] } ] }"
+      }
+    },
+    {
+      "id": "6a7414a6-6bdf-4475-b77c-0f6840fb13e5",
+      "name": "Marcar arquivo com erro",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        420
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "lab_temas_arquivos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "file_id",
+              "fieldValue": "={{ $('Montar texto').first().json.file_id }}"
+            },
+            {
+              "fieldId": "file_name",
+              "fieldValue": "={{ $('Montar texto').first().json.file_name }}"
+            },
+            {
+              "fieldId": "folder_path",
+              "fieldValue": "={{ $('Montar texto').first().json.folder_path }}"
+            },
+            {
+              "fieldId": "trechos",
+              "fieldValue": "={{ $('Montar texto').first().json.trechos }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "erro"
+            },
+            {
+              "fieldId": "erro",
+              "fieldValue": "={{ $json.error?.message || $json.error || 'falha na extração' }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "fa856570-0492-4962-907f-cc908e39797f",
+      "name": "Um arquivo por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "5e6a29ab-f7b4-4674-9726-f4fc7367f8f4",
+      "name": "Preparar temas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        200
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const arq = $('Montar texto').first().json;\nconst validos = new Set(arq.ids);\nconst out = $input.first().json.output || {};\nconst pg = (arr) => '{' + (arr || []).map(k => '\"' + String(k).replace(/[\"\\\\{}]/g, '').trim() + '\"').join(',') + '}';\n// Descarta trecho com id que não existe no arquivo: o modelo não pode inventar fonte.\nconst temas = (out.temas || []).map(t => ({\n  file_id: arq.file_id, file_name: arq.file_name, folder_path: arq.folder_path,\n  titulo: String(t.titulo || '').slice(0, 200), resumo: String(t.resumo || ''),\n  palavras_pg: pg(t.palavras_chave),\n  trechos_json: JSON.stringify((t.trechos || []).filter(x => validos.has(Number(x.chunk_id))).map(x => ({ chunk_id: Number(x.chunk_id), citacao: String(x.citacao || '') }))),\n})).filter(t => t.titulo);\nreturn [{ json: { file_id: arq.file_id, file_name: arq.file_name, folder_path: arq.folder_path, trechos: arq.trechos, tipo_fonte: out.tipo_fonte || '', total: temas.length, temas } }];"
+      }
+    },
+    {
+      "id": "e638ab3b-8de1-4454-9a7b-7f44d0f9358a",
+      "name": "Marcar arquivo lido",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "lab_temas_arquivos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "file_id",
+              "fieldValue": "={{ $json.file_id }}"
+            },
+            {
+              "fieldId": "file_name",
+              "fieldValue": "={{ $json.file_name }}"
+            },
+            {
+              "fieldId": "folder_path",
+              "fieldValue": "={{ $json.folder_path }}"
+            },
+            {
+              "fieldId": "trechos",
+              "fieldValue": "={{ $json.trechos }}"
+            },
+            {
+              "fieldId": "temas",
+              "fieldValue": "={{ $json.total }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "ok"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "48ac7250-940c-455a-a431-c3378dff985c",
+      "name": "Separar temas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        60
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Preparar temas').first().json.temas.map(t => ({ json: t }));"
+      }
+    },
+    {
+      "id": "02f090ee-b530-4d5e-a336-cb656b313391",
+      "name": "Gravar temas",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        60
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "lab_temas",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "file_id",
+              "fieldValue": "={{ $json.file_id }}"
+            },
+            {
+              "fieldId": "file_name",
+              "fieldValue": "={{ $json.file_name }}"
+            },
+            {
+              "fieldId": "folder_path",
+              "fieldValue": "={{ $json.folder_path }}"
+            },
+            {
+              "fieldId": "titulo",
+              "fieldValue": "={{ $json.titulo }}"
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ $json.resumo }}"
+            },
+            {
+              "fieldId": "palavras_chave",
+              "fieldValue": "={{ $json.palavras_pg }}"
+            },
+            {
+              "fieldId": "trechos",
+              "fieldValue": "={{ $json.trechos_json }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "01f2198a-fcf5-4f5c-920a-ae70133d8a85",
+      "name": "Toda madrugada",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 3,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7e7f206f-681d-4076-be86-0a4c62929d9f",
+      "name": "Sticky Note 531e80d7",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -120
+      ],
+      "parameters": {
+        "content": "## Lab Brain · mapa de temas\nLê cada arquivo do índice do Lab Brain (tabela documents) UMA vez e grava em lab_temas os temas discutidos, com os trechos que sustentam cada um.\nA automação de blog e a Galera consultam lab_temas em vez de fazer busca vetorial.\nAjuste quantos arquivos por rodada e o filtro de pasta no nó Parâmetros. Para reler um arquivo, apague a linha dele em lab_temas_arquivos (e os temas em lab_temas).",
+        "color": 4,
+        "width": 760,
+        "height": 200
+      }
+    }
+  ],
+  "connections": {
+    "Rodar agora": {
+      "main": [
+        [
+          {
+            "node": "Parâmetros",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parâmetros": {
+      "main": [
+        [
+          {
+            "node": "Arquivos ainda não lidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Arquivos ainda não lidos": {
+      "main": [
+        [
+          {
+            "node": "Um arquivo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trechos do arquivo": {
+      "main": [
+        [
+          {
+            "node": "Montar texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar texto": {
+      "main": [
+        [
+          {
+            "node": "Extrair temas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair temas": {
+      "main": [
+        [
+          {
+            "node": "Preparar temas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar arquivo com erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo de extração": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Extrair temas",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formato dos temas": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Extrair temas",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar arquivo com erro": {
+      "main": [
+        [
+          {
+            "node": "Um arquivo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Um arquivo por vez": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Trechos do arquivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar temas": {
+      "main": [
+        [
+          {
+            "node": "Marcar arquivo lido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar arquivo lido": {
+      "main": [
+        [
+          {
+            "node": "Separar temas",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Um arquivo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar temas": {
+      "main": [
+        [
+          {
+            "node": "Gravar temas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Toda madrugada": {
+      "main": [
+        [
+          {
+            "node": "Parâmetros",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "1696bf99-6ba0-41c2-a4ce-f8ddd34fa22f",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "JJ5lPJxwPkQBB55F",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-24T21:54:10.063Z",
+      "updatedAt": "2026-09-24T21:54:10.063Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
