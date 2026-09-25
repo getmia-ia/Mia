@@ -1,0 +1,4451 @@
+{
+  "updatedAt": "2026-09-24T19:20:05.988Z",
+  "createdAt": "2026-09-24T17:35:53.204Z",
+  "id": "sFYpoZ3g1CSut2kw",
+  "name": "Galera · Esteira de conteúdo",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "galera/peca",
+        "options": {
+          "responseData": "{\"status\":\"aceito\"}"
+        }
+      },
+      "id": "6a7a7e80-9d91-4701-b160-f9629372ba88",
+      "name": "Nova peça (site)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        304
+      ],
+      "webhookId": "319deee2-a2be-42ea-bcbc-45dc582e634c"
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body ?? $input.first().json;\nif (!b.peca_id) throw new Error('Pedido sem peca_id');\nreturn [{ json: { peca_id: b.peca_id } }];"
+      },
+      "id": "d00ce840-da1a-49ec-ac61-879f3f3652cd",
+      "name": "Normalizar pedido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const peca = $('Buscar peça').first().json;\nif (!peca || !peca.id) throw new Error('Peça não encontrada');\nif (peca.status !== 'na_fila') throw new Error('Peça ' + peca.id + ' já saiu da fila (status ' + peca.status + ')');\n\n// Tudo aqui é editável na aba Configuração da Galera (galera_config e\n// galera_documentos). Os valores padrão só valem se a linha não existir.\nconst config = {};\nfor (const { json: c } of $('Buscar configuração').all()) if (c.chave) config[c.chave] = c.valor;\nconst notaMinima = Number(config.nota_minima ?? 7);\nconst maxRodadas = Number(config.max_rodadas ?? 3);\nconst ambiente = config.regras_ambiente ?? 'Você roda numa automação, sem acesso a arquivos nem ferramentas. Entregue direto o resultado final, em português.';\n\nconst documentos = $('Buscar documentos').all().map(i => i.json)\n  .filter(d => d.id && d.ativo !== false)\n  .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));\nconst docsDo = (slug) => {\n  const meus = documentos.filter(d => (d.agentes || []).includes(slug));\n  if (!meus.length) return '';\n  return '\\n\\n# DOCUMENTOS DE CONTEXTO DO LAB\\n\\n' + meus.map(d => '## ' + d.titulo + '\\n\\n' + d.conteudo).join('\\n\\n---\\n\\n');\n};\n\nconst prompts = {}, modelos = {}, temperaturas = {}, ativos = {}, nomes = {};\nfor (const { json: a } of $('Buscar agentes').all()) {\n  if (!a.slug) continue;\n  prompts[a.slug] = ambiente + '\\n\\n' + a.prompt + (a.observacoes ? '\\n\\n## Observações\\n' + a.observacoes : '') + docsDo(a.slug);\n  modelos[a.slug] = a.modelo || 'anthropic/claude-sonnet-5';\n  temperaturas[a.slug] = Number(a.temperatura ?? 0.7);\n  ativos[a.slug] = a.ativo;\n  nomes[a.slug] = a.nome;\n}\nfor (const s of ['conteudo-redator','conteudo-revisor-editorial','conteudo-publicador']) {\n  if (!prompts[s]) throw new Error('Agente ' + s + ' não está em galera_agentes');\n}\nconst briefing = [\n  'Cliente: LAB', 'Pauta: ' + peca.pauta, 'Canal: ' + peca.canal, 'Formato: ' + peca.formato,\n  'Objetivo: ' + peca.objetivo, 'ICP: ' + peca.icp, 'Dor/origem: ' + peca.dor, 'CTA: ' + peca.cta,\n  'Funil: ' + peca.funil, 'Publicação pretendida: ' + peca.data_publicacao, 'ID da peça: ' + peca.id,\n  'Regra da nota: avança com nota maior ou igual a ' + notaMinima + '; após ' + maxRodadas + ' rodadas abaixo disso, a esteira para.',\n].join('\\n');\nreturn [{ json: { peca_id: peca.id, formato: peca.formato, canal: peca.canal, data_publicacao: peca.data_publicacao, briefing, prompts, modelos, temperaturas, ativos, nomes, nota_minima: notaMinima, max_rodadas: maxRodadas } }];"
+      },
+      "id": "cd543dab-ca52-4104-84fb-1c8093367078",
+      "name": "Montar contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Briefing da peça:\n{{ $('Montar contexto').first().json.briefing }}\n\n{{ $('Revisor Editorial').isExecuted ? 'AJUSTES PEDIDOS PELA REVISÃO (rodada anterior):\\n' + JSON.stringify($('Revisor Editorial').last().json.output) : '' }}\n{{ $('Portão 1 · Texto').isExecuted && $('Portão 1 · Texto').last().json.body?.decisao === 'reprovado' ? 'A HEVELYN REPROVOU NO PORTÃO 1. Comentário: ' + $('Portão 1 · Texto').last().json.body?.comentario : '' }}\n\nEntregue a peça completa (com frontmatter e 2-3 variações de hook).",
+        "options": {
+          "systemMessage": "={{ $('Montar contexto').first().json.prompts['conteudo-redator'] }}",
+          "maxIterations": 5
+        }
+      },
+      "id": "39ac967e-42e8-4fc0-8400-fe02be57d781",
+      "name": "Redator",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        880,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Briefing:\n{{ $('Montar contexto').first().json.briefing }}\n\nPeça para avaliar:\n{{ $json.output }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "={{ $('Montar contexto').first().json.prompts['conteudo-revisor-editorial'] }}"
+        }
+      },
+      "id": "b091a6a3-ab13-4e7a-a5b9-34f07613f6ee",
+      "name": "Revisor Editorial",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1104,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{ \"nota\": 7.5, \"justificativa\": \"frase\", \"erros_reprovatorios\": [\"trecho: motivo\"], \"ajustes\": [\"trecho: problema\"], \"o_que_esta_bom\": \"curto\" }"
+      },
+      "id": "9afaf785-605c-4771-899f-72e3e5c2f97c",
+      "name": "Formato da nota",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1200,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json.output;\nconst ctx = $('Montar contexto').first().json;\nconst rodada = $runIndex + 1;\nconst passou = r.nota >= ctx.nota_minima && (r.erros_reprovatorios ?? []).length === 0;\nreturn [{ json: { ...r, rodada, passou, esgotou: !passou && rodada >= ctx.max_rodadas, peca: $('Redator').last().json.output } }];"
+      },
+      "id": "26724ab3-f27a-4967-98fd-bae80b01f85a",
+      "name": "Aplicar regra das notas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.passou }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "95441044-727d-422c-ba09-a6632be77775",
+      "name": "Nota ≥ 7?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1552,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "limitWaitTime": false,
+        "resumeAmount": 7,
+        "resumeUnit": "days",
+        "options": {
+          "webhookSuffix": "portao-1"
+        }
+      },
+      "id": "bb3959f3-31bb-46af-8d71-cd917de67c98",
+      "name": "Portão 1 · Texto",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1984,
+        208
+      ],
+      "webhookId": "a18448ef-8c7f-4b7f-8fb7-b91d2e5184c0"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body?.decisao }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "aprovado"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b5627738-541c-487f-88b2-48add9060b20",
+      "name": "Texto aprovado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2208,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ ['Carrossel','Vídeo','Imagem','Reels'].includes($('Montar contexto').first().json.formato) && $('Montar contexto').first().json.ativos['conteudo-briefing-visual'] !== false }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8670c33f-d631-4e1f-b2a3-8295bf6224c2",
+      "name": "Peça tem visual?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2432,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Briefing:\n{{ $('Montar contexto').first().json.briefing }}\n\nTexto aprovado no portão 1:\n{{ $('Aplicar regra das notas').last().json.peca }}\n\n{{ $('Portão 2 · Design').isExecuted && $('Portão 2 · Design').last().json.body?.decisao !== 'aprovado' ? 'A HEVELYN REPROVOU O DESIGN: ' + $('Portão 2 · Design').last().json.body?.comentario : '' }}",
+        "options": {
+          "systemMessage": "={{ $('Montar contexto').first().json.prompts['conteudo-briefing-visual'] }}",
+          "maxIterations": 5
+        }
+      },
+      "id": "1bcd9914-93fe-4602-b2e5-cf9a658eff20",
+      "name": "Briefing Visual",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Avalie este briefing visual:\n{{ $json.output }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "={{ $('Montar contexto').first().json.prompts['conteudo-revisor-visual'] }}"
+        }
+      },
+      "id": "b5912326-88df-43b9-95f5-79f7f925ba03",
+      "name": "Revisor Visual",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2864,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{ \"nota\": 7.5, \"justificativa\": \"frase\", \"erros_reprovatorios\": [\"trecho: motivo\"], \"ajustes\": [\"trecho: problema\"], \"o_que_esta_bom\": \"curto\" }"
+      },
+      "id": "b65de00a-ab71-4026-aa0a-8fccea9223ad",
+      "name": "Formato da nota visual",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2960,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "limitWaitTime": false,
+        "resumeAmount": 7,
+        "resumeUnit": "days",
+        "options": {
+          "webhookSuffix": "portao-2"
+        }
+      },
+      "id": "13b6a45e-724e-4cb3-8e0f-22d7a07ce84a",
+      "name": "Portão 2 · Design",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3312,
+        0
+      ],
+      "webhookId": "05494154-4c93-48fc-aaeb-80318167fb58"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body?.decisao }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "aprovado"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8adbba56-d1d4-4d10-b3e4-a658be485557",
+      "name": "Design aprovado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Peça aprovada (id {{ $('Montar contexto').first().json.peca_id }}), canal {{ $('Montar contexto').first().json.canal }}, publicação pretendida {{ $('Montar contexto').first().json.data_publicacao }}.\n\nCopy aprovada:\n{{ $('Aplicar regra das notas').last().json.peca }}\n\n{{ $('Briefing Visual').isExecuted ? 'Briefing visual aprovado:\\n' + $('Briefing Visual').last().json.output : '' }}\n\nMonte o pacote de publicação (legenda final, horário sugerido, checklist do canal) e a linha do publicacao-log. NÃO publique: a Hevelyn aprova e agenda no portão 3.",
+        "options": {
+          "systemMessage": "={{ $('Montar contexto').first().json.prompts['conteudo-publicador'] }}",
+          "maxIterations": 5
+        }
+      },
+      "id": "4b82d8f9-1df9-4fde-81e3-ea2cadcf6c6a",
+      "name": "Publicador",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        3744,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.esgotou }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b7319e86-4ccc-46b8-83a2-9bf774697e7c",
+      "name": "3 rodadas esgotadas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "limitWaitTime": false,
+        "resumeAmount": 14,
+        "resumeUnit": "days",
+        "options": {
+          "webhookSuffix": "portao-3"
+        }
+      },
+      "id": "b2b56cbb-aef4-414f-8d2c-3257c119787c",
+      "name": "Portão 3 · Publicação",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4192,
+        208
+      ],
+      "webhookId": "9d288678-8299-4d86-9d40-13e86ebe075d"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body?.decisao }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "aprovado"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1f107aa4-7c93-40ba-b7bd-a253711ac5fe",
+      "name": "Publicação aprovada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4400,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "={{ $json.body?.agendar_para || $('Montar contexto').first().json.data_publicacao }}"
+      },
+      "id": "58b4b7e0-9f7e-4e33-b605-cef4d8f4d294",
+      "name": "Esperar horário agendado",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4624,
+        112
+      ],
+      "webhookId": "188c5263-0732-451e-b189-780d04479bd9"
+    },
+    {
+      "parameters": {
+        "content": "## Galera · esteira de conteúdo\nDados no Supabase da LAB (credencial \"LAB\"). O site fala com o workflow \"Galera · API do site\", que cria a peça e chama este webhook com { peca_id }.\nPrompts, modelo e temperatura vêm de galera_agentes.\nCada passo é um insert em galera_eventos; um trigger no banco atualiza a peça.\nPortões: o site faz POST no resume_url com {decisao, comentario, agendar_para}. Nada publica sozinho.",
+        "height": 180,
+        "width": 700,
+        "color": 4
+      },
+      "id": "7b1570a6-a4de-464f-9cd0-46067356f138",
+      "name": "Sticky Note e6f26ad4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "model": "={{ $('Montar contexto').first().json.modelos['conteudo-redator'] }}",
+        "options": {
+          "temperature": "={{ $('Montar contexto').first().json.temperaturas['conteudo-redator'] }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        928,
+        576
+      ],
+      "id": "863c21b7-df0d-4bf9-b2b9-d875b4e7e893",
+      "name": "Modelo Redator",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "={{ $('Montar contexto').first().json.modelos['conteudo-briefing-visual'] }}",
+        "options": {
+          "temperature": "={{ $('Montar contexto').first().json.temperaturas['conteudo-briefing-visual'] }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        2688,
+        272
+      ],
+      "id": "dec44d29-c157-4c59-8678-2061a8571da4",
+      "name": "Modelo Briefing Visual",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "={{ $('Montar contexto').first().json.modelos['conteudo-publicador'] }}",
+        "options": {
+          "temperature": "={{ $('Montar contexto').first().json.temperaturas['conteudo-publicador'] }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        3744,
+        400
+      ],
+      "id": "0d6ebb2e-583e-4185-b983-7402074eac3d",
+      "name": "Modelo Publicador",
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "id": "06e0311e-9f11-450a-8b76-ae4afe74a171",
+      "name": "Modelo Revisor Editorial",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        576
+      ],
+      "parameters": {
+        "model": "={{ $('Montar contexto').first().json.modelos['conteudo-revisor-editorial'] }}",
+        "options": {
+          "temperature": "={{ $('Montar contexto').first().json.temperaturas['conteudo-revisor-editorial'] }}"
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "id": "a36d32ef-4829-474e-b6e6-a0e87cf7f331",
+      "name": "Modelo Revisor Visual",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        2864,
+        272
+      ],
+      "parameters": {
+        "model": "={{ $('Montar contexto').first().json.modelos['conteudo-revisor-visual'] }}",
+        "options": {
+          "temperature": "={{ $('Montar contexto').first().json.temperaturas['conteudo-revisor-visual'] }}"
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "id": "f4ae2327-9f15-4000-88e6-47ada2ab8b3e",
+      "name": "Registrar início",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        880,
+        112
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "inicio"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ 'Esteira iniciada' }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({}) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": "produzindo"
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": "={{ $execution.id }}"
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "fc9e00e2-4af2-41ea-a637-b532507ad846",
+      "name": "Registrar Redator",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        112
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "agente_concluido"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": "conteudo-redator"
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ 'Rascunho da rodada ' + ($runIndex + 1) }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ saida: $json.output, rodada: $runIndex + 1 }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "0fb5c849-66b6-4c0f-92d2-f38150f17c61",
+      "name": "Registrar Revisor Editorial",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        112
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "agente_concluido"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": "conteudo-revisor-editorial"
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ 'Nota ' + $json.nota + ' — ' + ($json.justificativa || '') }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ nota: $json.nota, rodada: $json.rodada, saida: { erros_reprovatorios: $json.erros_reprovatorios, ajustes: $json.ajustes, o_que_esta_bom: $json.o_que_esta_bom } }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "61a0b15e-4fca-4898-9c00-0bb193fe2457",
+      "name": "Registrar Briefing Visual",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2750,
+        -200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "agente_concluido"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": "conteudo-briefing-visual"
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ 'Briefing visual pronto' }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ saida: $json.output }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "83b07f20-cc18-4889-a918-90ff45ad4fea",
+      "name": "Registrar Revisor Visual",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2980,
+        -200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "agente_concluido"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": "conteudo-revisor-visual"
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ 'Nota ' + $json.output.nota + ' — ' + ($json.output.justificativa || '') }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ nota: $json.output.nota, saida: $json.output }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "1e0e711b-5369-4043-a75b-5c154e03131b",
+      "name": "Registrar Publicador",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3968,
+        40
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "agente_concluido"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": "conteudo-publicador"
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ 'Pacote de publicação pronto' }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ saida: $json.output }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "c80e2d5d-5b34-46de-bb2d-1b87873c5dd5",
+      "name": "Abrir portão 1",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        208
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "portao_aberto"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ 'Aprovar o TEXTO (nota ' + $json.nota + ', rodada ' + $json.rodada + ')' }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ portao: 'portao-1', nota: $json.nota }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": "aguardando_portao"
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": "portao-1"
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": "={{ $execution.resumeUrl.includes('?') ? $execution.resumeUrl.replace('?', '/portao-1?') : $execution.resumeUrl + '/portao-1' }}"
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "051db6d7-dcf9-4305-9f65-80da89a2a888",
+      "name": "Abrir portão 2",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3088,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "portao_aberto"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ 'Aprovar o DESIGN (nota do revisor visual ' + $json.output.nota + ')' }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ portao: 'portao-2', nota: $json.output.nota }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": "aguardando_portao"
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": "portao-2"
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": "={{ $execution.resumeUrl.includes('?') ? $execution.resumeUrl.replace('?', '/portao-2?') : $execution.resumeUrl + '/portao-2' }}"
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "3732cc86-d26e-4abb-b8fe-b43ac1cf37ee",
+      "name": "Abrir portão 3",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3968,
+        208
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "portao_aberto"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ 'Aprovar a PUBLICAÇÃO e escolher o horário' }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ portao: 'portao-3' }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": "aguardando_portao"
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": "portao-3"
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": "={{ $execution.resumeUrl.includes('?') ? $execution.resumeUrl.replace('?', '/portao-3?') : $execution.resumeUrl + '/portao-3' }}"
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "b10e0f50-b4fc-42c4-9863-9c1c7131ed1a",
+      "name": "Registrar escalonada",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        608
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "escalonada"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ $('Montar contexto').first().json.max_rodadas + ' rodadas abaixo de ' + $('Montar contexto').first().json.nota_minima + ' — decida o que fazer com as tentativas' }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ tentativas: $('Aplicar regra das notas').all().map(i => i.json) }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": "escalonada"
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "0cf834cb-ef21-4134-a6dd-7d3add31e19b",
+      "name": "Registrar hora de publicar",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4848,
+        112
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "hora_de_publicar"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ 'Chegou o horário: publique no canal.' }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ pacote: $('Publicador').last().json.output }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": "hora_de_publicar"
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "2d457022-a725-4372-be5a-86bf2acdd1e5",
+      "name": "Registrar reprovada",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4624,
+        320
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "reprovada"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ $json.body?.comentario || 'Publicação reprovada' }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({}) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": "reprovada"
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d50975e1-d6fb-46dc-8272-7f78fe657dda",
+      "name": "Registrar decisão 1",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2208,
+        40
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "decisao"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ portao: 'portao-1', decisao: $json.body?.decisao, comentario: $json.body?.comentario || '' }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": "produzindo"
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "cbd48e1c-3225-470d-a3b6-c962610c40f1",
+      "name": "Registrar decisão 2",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3520,
+        -200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "decisao"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ portao: 'portao-2', decisao: $json.body?.decisao, comentario: $json.body?.comentario || '' }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": "produzindo"
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "e35adc4f-8f77-4a57-85f5-a9b1dbe8f699",
+      "name": "Registrar decisão 3",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4400,
+        40
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "decisao"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ portao: 'portao-3', decisao: $json.body?.decisao, comentario: $json.body?.comentario || '', agendar_para: $json.body?.agendar_para }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": ""
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "de2e15a5-eef1-4527-83d2-b0bb4e58f8db",
+      "name": "Registrar agendada",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4624,
+        -80
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_eventos",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "agendada"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ agendado_para: $json.body?.agendar_para || $('Montar contexto').first().json.data_publicacao }) }}"
+            },
+            {
+              "fieldId": "novo_status",
+              "fieldValue": "agendada"
+            },
+            {
+              "fieldId": "novo_portao",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "resume_url",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "execution_id",
+              "fieldValue": ""
+            },
+            {
+              "fieldId": "agendado_para",
+              "fieldValue": "={{ $json.body?.agendar_para || $('Montar contexto').first().json.data_publicacao }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "b190e51c-3f23-48fc-a263-75f520fcf2db",
+      "name": "Buscar peça",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        448,
+        304
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "galera_pecas",
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.peca_id }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "57e8f2bb-8fa6-4c1b-a902-15729edde274",
+      "name": "Buscar agentes",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        560,
+        304
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "galera_agentes",
+        "returnAll": true,
+        "filterType": "none"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "94482075-a181-489b-9bed-963806b12af0",
+      "name": "Buscar configuração",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        560,
+        480
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "galera_config",
+        "returnAll": true,
+        "filterType": "none"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "8e4f6d2f-88bc-4879-9332-f8c7eac96213",
+      "name": "Buscar documentos",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        620,
+        640
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "galera_documentos",
+        "returnAll": true,
+        "filterType": "none"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    }
+  ],
+  "connections": {
+    "Nova peça (site)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar pedido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar contexto": {
+      "main": [
+        [
+          {
+            "node": "Redator",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registrar início",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redator": {
+      "main": [
+        [
+          {
+            "node": "Revisor Editorial",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registrar Redator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revisor Editorial": {
+      "main": [
+        [
+          {
+            "node": "Aplicar regra das notas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formato da nota": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Revisor Editorial",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplicar regra das notas": {
+      "main": [
+        [
+          {
+            "node": "Nota ≥ 7?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registrar Revisor Editorial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nota ≥ 7?": {
+      "main": [
+        [
+          {
+            "node": "Abrir portão 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "3 rodadas esgotadas?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Portão 1 · Texto": {
+      "main": [
+        [
+          {
+            "node": "Texto aprovado?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registrar decisão 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Texto aprovado?": {
+      "main": [
+        [
+          {
+            "node": "Peça tem visual?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Peça tem visual?": {
+      "main": [
+        [
+          {
+            "node": "Briefing Visual",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Publicador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Briefing Visual": {
+      "main": [
+        [
+          {
+            "node": "Revisor Visual",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registrar Briefing Visual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revisor Visual": {
+      "main": [
+        [
+          {
+            "node": "Registrar Revisor Visual",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Abrir portão 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formato da nota visual": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Revisor Visual",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Portão 2 · Design": {
+      "main": [
+        [
+          {
+            "node": "Design aprovado?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registrar decisão 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Design aprovado?": {
+      "main": [
+        [
+          {
+            "node": "Publicador",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Briefing Visual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publicador": {
+      "main": [
+        [
+          {
+            "node": "Registrar Publicador",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Abrir portão 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3 rodadas esgotadas?": {
+      "main": [
+        [
+          {
+            "node": "Registrar escalonada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Portão 3 · Publicação": {
+      "main": [
+        [
+          {
+            "node": "Publicação aprovada?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registrar decisão 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publicação aprovada?": {
+      "main": [
+        [
+          {
+            "node": "Esperar horário agendado",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registrar agendada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar reprovada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo Redator": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Redator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo Briefing Visual": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Briefing Visual",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo Publicador": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Publicador",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo Revisor Editorial": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Revisor Editorial",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo Revisor Visual": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Revisor Visual",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abrir portão 1": {
+      "main": [
+        [
+          {
+            "node": "Portão 1 · Texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abrir portão 2": {
+      "main": [
+        [
+          {
+            "node": "Portão 2 · Design",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abrir portão 3": {
+      "main": [
+        [
+          {
+            "node": "Portão 3 · Publicação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar horário agendado": {
+      "main": [
+        [
+          {
+            "node": "Registrar hora de publicar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar pedido": {
+      "main": [
+        [
+          {
+            "node": "Buscar peça",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar peça": {
+      "main": [
+        [
+          {
+            "node": "Buscar agentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar agentes": {
+      "main": [
+        [
+          {
+            "node": "Buscar configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar configuração": {
+      "main": [
+        [
+          {
+            "node": "Buscar documentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar documentos": {
+      "main": [
+        [
+          {
+            "node": "Montar contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp",
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "bfae8ec2-ec1c-4e58-928f-156f353cb1e3",
+  "activeVersionId": "bfae8ec2-ec1c-4e58-928f-156f353cb1e3",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "sFYpoZ3g1CSut2kw",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-24T17:35:53.204Z",
+      "updatedAt": "2026-09-24T17:35:53.204Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "bfae8ec2-ec1c-4e58-928f-156f353cb1e3",
+    "workflowId": "sFYpoZ3g1CSut2kw",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "galera/peca",
+          "options": {
+            "responseData": "{\"status\":\"aceito\"}"
+          }
+        },
+        "id": "6a7a7e80-9d91-4701-b160-f9629372ba88",
+        "name": "Nova peça (site)",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          304
+        ],
+        "webhookId": "319deee2-a2be-42ea-bcbc-45dc582e634c"
+      },
+      {
+        "parameters": {
+          "jsCode": "const b = $input.first().json.body ?? $input.first().json;\nif (!b.peca_id) throw new Error('Pedido sem peca_id');\nreturn [{ json: { peca_id: b.peca_id } }];"
+        },
+        "id": "d00ce840-da1a-49ec-ac61-879f3f3652cd",
+        "name": "Normalizar pedido",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          224,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const peca = $('Buscar peça').first().json;\nif (!peca || !peca.id) throw new Error('Peça não encontrada');\nif (peca.status !== 'na_fila') throw new Error('Peça ' + peca.id + ' já saiu da fila (status ' + peca.status + ')');\n\n// Tudo aqui é editável na aba Configuração da Galera (galera_config e\n// galera_documentos). Os valores padrão só valem se a linha não existir.\nconst config = {};\nfor (const { json: c } of $('Buscar configuração').all()) if (c.chave) config[c.chave] = c.valor;\nconst notaMinima = Number(config.nota_minima ?? 7);\nconst maxRodadas = Number(config.max_rodadas ?? 3);\nconst ambiente = config.regras_ambiente ?? 'Você roda numa automação, sem acesso a arquivos nem ferramentas. Entregue direto o resultado final, em português.';\n\nconst documentos = $('Buscar documentos').all().map(i => i.json)\n  .filter(d => d.id && d.ativo !== false)\n  .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));\nconst docsDo = (slug) => {\n  const meus = documentos.filter(d => (d.agentes || []).includes(slug));\n  if (!meus.length) return '';\n  return '\\n\\n# DOCUMENTOS DE CONTEXTO DO LAB\\n\\n' + meus.map(d => '## ' + d.titulo + '\\n\\n' + d.conteudo).join('\\n\\n---\\n\\n');\n};\n\nconst prompts = {}, modelos = {}, temperaturas = {}, ativos = {}, nomes = {};\nfor (const { json: a } of $('Buscar agentes').all()) {\n  if (!a.slug) continue;\n  prompts[a.slug] = ambiente + '\\n\\n' + a.prompt + (a.observacoes ? '\\n\\n## Observações\\n' + a.observacoes : '') + docsDo(a.slug);\n  modelos[a.slug] = a.modelo || 'anthropic/claude-sonnet-5';\n  temperaturas[a.slug] = Number(a.temperatura ?? 0.7);\n  ativos[a.slug] = a.ativo;\n  nomes[a.slug] = a.nome;\n}\nfor (const s of ['conteudo-redator','conteudo-revisor-editorial','conteudo-publicador']) {\n  if (!prompts[s]) throw new Error('Agente ' + s + ' não está em galera_agentes');\n}\nconst briefing = [\n  'Cliente: LAB', 'Pauta: ' + peca.pauta, 'Canal: ' + peca.canal, 'Formato: ' + peca.formato,\n  'Objetivo: ' + peca.objetivo, 'ICP: ' + peca.icp, 'Dor/origem: ' + peca.dor, 'CTA: ' + peca.cta,\n  'Funil: ' + peca.funil, 'Publicação pretendida: ' + peca.data_publicacao, 'ID da peça: ' + peca.id,\n  'Regra da nota: avança com nota maior ou igual a ' + notaMinima + '; após ' + maxRodadas + ' rodadas abaixo disso, a esteira para.',\n].join('\\n');\nreturn [{ json: { peca_id: peca.id, formato: peca.formato, canal: peca.canal, data_publicacao: peca.data_publicacao, briefing, prompts, modelos, temperaturas, ativos, nomes, nota_minima: notaMinima, max_rodadas: maxRodadas } }];"
+        },
+        "id": "cd543dab-ca52-4104-84fb-1c8093367078",
+        "name": "Montar contexto",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          672,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=Briefing da peça:\n{{ $('Montar contexto').first().json.briefing }}\n\n{{ $('Revisor Editorial').isExecuted ? 'AJUSTES PEDIDOS PELA REVISÃO (rodada anterior):\\n' + JSON.stringify($('Revisor Editorial').last().json.output) : '' }}\n{{ $('Portão 1 · Texto').isExecuted && $('Portão 1 · Texto').last().json.body?.decisao === 'reprovado' ? 'A HEVELYN REPROVOU NO PORTÃO 1. Comentário: ' + $('Portão 1 · Texto').last().json.body?.comentario : '' }}\n\nEntregue a peça completa (com frontmatter e 2-3 variações de hook).",
+          "options": {
+            "systemMessage": "={{ $('Montar contexto').first().json.prompts['conteudo-redator'] }}",
+            "maxIterations": 5
+          }
+        },
+        "id": "39ac967e-42e8-4fc0-8400-fe02be57d781",
+        "name": "Redator",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 3.1,
+        "position": [
+          880,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=Briefing:\n{{ $('Montar contexto').first().json.briefing }}\n\nPeça para avaliar:\n{{ $json.output }}",
+          "hasOutputParser": true,
+          "options": {
+            "systemMessage": "={{ $('Montar contexto').first().json.prompts['conteudo-revisor-editorial'] }}"
+          }
+        },
+        "id": "b091a6a3-ab13-4e7a-a5b9-34f07613f6ee",
+        "name": "Revisor Editorial",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 3.1,
+        "position": [
+          1104,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "jsonSchemaExample": "{ \"nota\": 7.5, \"justificativa\": \"frase\", \"erros_reprovatorios\": [\"trecho: motivo\"], \"ajustes\": [\"trecho: problema\"], \"o_que_esta_bom\": \"curto\" }"
+        },
+        "id": "9afaf785-605c-4771-899f-72e3e5c2f97c",
+        "name": "Formato da nota",
+        "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+        "typeVersion": 1.3,
+        "position": [
+          1200,
+          528
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const r = $input.first().json.output;\nconst ctx = $('Montar contexto').first().json;\nconst rodada = $runIndex + 1;\nconst passou = r.nota >= ctx.nota_minima && (r.erros_reprovatorios ?? []).length === 0;\nreturn [{ json: { ...r, rodada, passou, esgotou: !passou && rodada >= ctx.max_rodadas, peca: $('Redator').last().json.output } }];"
+        },
+        "id": "26724ab3-f27a-4967-98fd-bae80b01f85a",
+        "name": "Aplicar regra das notas",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1328,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.passou }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "95441044-727d-422c-ba09-a6632be77775",
+        "name": "Nota ≥ 7?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1552,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "resume": "webhook",
+          "httpMethod": "POST",
+          "limitWaitTime": false,
+          "resumeAmount": 7,
+          "resumeUnit": "days",
+          "options": {
+            "webhookSuffix": "portao-1"
+          }
+        },
+        "id": "bb3959f3-31bb-46af-8d71-cd917de67c98",
+        "name": "Portão 1 · Texto",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          1984,
+          208
+        ],
+        "webhookId": "a18448ef-8c7f-4b7f-8fb7-b91d2e5184c0"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.body?.decisao }}",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                },
+                "rightValue": "aprovado"
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "b5627738-541c-487f-88b2-48add9060b20",
+        "name": "Texto aprovado?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2208,
+          208
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ ['Carrossel','Vídeo','Imagem','Reels'].includes($('Montar contexto').first().json.formato) && $('Montar contexto').first().json.ativos['conteudo-briefing-visual'] !== false }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "8670c33f-d631-4e1f-b2a3-8295bf6224c2",
+        "name": "Peça tem visual?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2432,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=Briefing:\n{{ $('Montar contexto').first().json.briefing }}\n\nTexto aprovado no portão 1:\n{{ $('Aplicar regra das notas').last().json.peca }}\n\n{{ $('Portão 2 · Design').isExecuted && $('Portão 2 · Design').last().json.body?.decisao !== 'aprovado' ? 'A HEVELYN REPROVOU O DESIGN: ' + $('Portão 2 · Design').last().json.body?.comentario : '' }}",
+          "options": {
+            "systemMessage": "={{ $('Montar contexto').first().json.prompts['conteudo-briefing-visual'] }}",
+            "maxIterations": 5
+          }
+        },
+        "id": "1bcd9914-93fe-4602-b2e5-cf9a658eff20",
+        "name": "Briefing Visual",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 3.1,
+        "position": [
+          2640,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=Avalie este briefing visual:\n{{ $json.output }}",
+          "hasOutputParser": true,
+          "options": {
+            "systemMessage": "={{ $('Montar contexto').first().json.prompts['conteudo-revisor-visual'] }}"
+          }
+        },
+        "id": "b5912326-88df-43b9-95f5-79f7f925ba03",
+        "name": "Revisor Visual",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 3.1,
+        "position": [
+          2864,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "jsonSchemaExample": "{ \"nota\": 7.5, \"justificativa\": \"frase\", \"erros_reprovatorios\": [\"trecho: motivo\"], \"ajustes\": [\"trecho: problema\"], \"o_que_esta_bom\": \"curto\" }"
+        },
+        "id": "b65de00a-ab71-4026-aa0a-8fccea9223ad",
+        "name": "Formato da nota visual",
+        "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+        "typeVersion": 1.3,
+        "position": [
+          2960,
+          224
+        ]
+      },
+      {
+        "parameters": {
+          "resume": "webhook",
+          "httpMethod": "POST",
+          "limitWaitTime": false,
+          "resumeAmount": 7,
+          "resumeUnit": "days",
+          "options": {
+            "webhookSuffix": "portao-2"
+          }
+        },
+        "id": "13b6a45e-724e-4cb3-8e0f-22d7a07ce84a",
+        "name": "Portão 2 · Design",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          3312,
+          0
+        ],
+        "webhookId": "05494154-4c93-48fc-aaeb-80318167fb58"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.body?.decisao }}",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                },
+                "rightValue": "aprovado"
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "8adbba56-d1d4-4d10-b3e4-a658be485557",
+        "name": "Design aprovado?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          3520,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=Peça aprovada (id {{ $('Montar contexto').first().json.peca_id }}), canal {{ $('Montar contexto').first().json.canal }}, publicação pretendida {{ $('Montar contexto').first().json.data_publicacao }}.\n\nCopy aprovada:\n{{ $('Aplicar regra das notas').last().json.peca }}\n\n{{ $('Briefing Visual').isExecuted ? 'Briefing visual aprovado:\\n' + $('Briefing Visual').last().json.output : '' }}\n\nMonte o pacote de publicação (legenda final, horário sugerido, checklist do canal) e a linha do publicacao-log. NÃO publique: a Hevelyn aprova e agenda no portão 3.",
+          "options": {
+            "systemMessage": "={{ $('Montar contexto').first().json.prompts['conteudo-publicador'] }}",
+            "maxIterations": 5
+          }
+        },
+        "id": "4b82d8f9-1df9-4fde-81e3-ea2cadcf6c6a",
+        "name": "Publicador",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 3.1,
+        "position": [
+          3744,
+          208
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.esgotou }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "b7319e86-4ccc-46b8-83a2-9bf774697e7c",
+        "name": "3 rodadas esgotadas?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1760,
+          512
+        ]
+      },
+      {
+        "parameters": {
+          "resume": "webhook",
+          "httpMethod": "POST",
+          "limitWaitTime": false,
+          "resumeAmount": 14,
+          "resumeUnit": "days",
+          "options": {
+            "webhookSuffix": "portao-3"
+          }
+        },
+        "id": "b2b56cbb-aef4-414f-8d2c-3257c119787c",
+        "name": "Portão 3 · Publicação",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          4192,
+          208
+        ],
+        "webhookId": "9d288678-8299-4d86-9d40-13e86ebe075d"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.body?.decisao }}",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                },
+                "rightValue": "aprovado"
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "1f107aa4-7c93-40ba-b7bd-a253711ac5fe",
+        "name": "Publicação aprovada?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          4400,
+          208
+        ]
+      },
+      {
+        "parameters": {
+          "resume": "specificTime",
+          "dateTime": "={{ $json.body?.agendar_para || $('Montar contexto').first().json.data_publicacao }}"
+        },
+        "id": "58b4b7e0-9f7e-4e33-b605-cef4d8f4d294",
+        "name": "Esperar horário agendado",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          4624,
+          112
+        ],
+        "webhookId": "188c5263-0732-451e-b189-780d04479bd9"
+      },
+      {
+        "parameters": {
+          "content": "## Galera · esteira de conteúdo\nDados no Supabase da LAB (credencial \"LAB\"). O site fala com o workflow \"Galera · API do site\", que cria a peça e chama este webhook com { peca_id }.\nPrompts, modelo e temperatura vêm de galera_agentes.\nCada passo é um insert em galera_eventos; um trigger no banco atualiza a peça.\nPortões: o site faz POST no resume_url com {decisao, comentario, agendar_para}. Nada publica sozinho.",
+          "height": 180,
+          "width": 700,
+          "color": 4
+        },
+        "id": "7b1570a6-a4de-464f-9cd0-46067356f138",
+        "name": "Sticky Note e6f26ad4",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          0,
+          -64
+        ]
+      },
+      {
+        "parameters": {
+          "model": "={{ $('Montar contexto').first().json.modelos['conteudo-redator'] }}",
+          "options": {
+            "temperature": "={{ $('Montar contexto').first().json.temperaturas['conteudo-redator'] }}"
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          928,
+          576
+        ],
+        "id": "863c21b7-df0d-4bf9-b2b9-d875b4e7e893",
+        "name": "Modelo Redator",
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "model": "={{ $('Montar contexto').first().json.modelos['conteudo-briefing-visual'] }}",
+          "options": {
+            "temperature": "={{ $('Montar contexto').first().json.temperaturas['conteudo-briefing-visual'] }}"
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          2688,
+          272
+        ],
+        "id": "dec44d29-c157-4c59-8678-2061a8571da4",
+        "name": "Modelo Briefing Visual",
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "model": "={{ $('Montar contexto').first().json.modelos['conteudo-publicador'] }}",
+          "options": {
+            "temperature": "={{ $('Montar contexto').first().json.temperaturas['conteudo-publicador'] }}"
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          3744,
+          400
+        ],
+        "id": "0d6ebb2e-583e-4185-b983-7402074eac3d",
+        "name": "Modelo Publicador",
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "id": "06e0311e-9f11-450a-8b76-ae4afe74a171",
+        "name": "Modelo Revisor Editorial",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          1104,
+          576
+        ],
+        "parameters": {
+          "model": "={{ $('Montar contexto').first().json.modelos['conteudo-revisor-editorial'] }}",
+          "options": {
+            "temperature": "={{ $('Montar contexto').first().json.temperaturas['conteudo-revisor-editorial'] }}"
+          }
+        },
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "id": "a36d32ef-4829-474e-b6e6-a0e87cf7f331",
+        "name": "Modelo Revisor Visual",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          2864,
+          272
+        ],
+        "parameters": {
+          "model": "={{ $('Montar contexto').first().json.modelos['conteudo-revisor-visual'] }}",
+          "options": {
+            "temperature": "={{ $('Montar contexto').first().json.temperaturas['conteudo-revisor-visual'] }}"
+          }
+        },
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "id": "f4ae2327-9f15-4000-88e6-47ada2ab8b3e",
+        "name": "Registrar início",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          880,
+          112
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "inicio"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ 'Esteira iniciada' }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({}) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": "produzindo"
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": "={{ $execution.id }}"
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "fc9e00e2-4af2-41ea-a637-b532507ad846",
+        "name": "Registrar Redator",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1000,
+          112
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "agente_concluido"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": "conteudo-redator"
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ 'Rascunho da rodada ' + ($runIndex + 1) }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ saida: $json.output, rodada: $runIndex + 1 }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "0fb5c849-66b6-4c0f-92d2-f38150f17c61",
+        "name": "Registrar Revisor Editorial",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1440,
+          112
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "agente_concluido"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": "conteudo-revisor-editorial"
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ 'Nota ' + $json.nota + ' — ' + ($json.justificativa || '') }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ nota: $json.nota, rodada: $json.rodada, saida: { erros_reprovatorios: $json.erros_reprovatorios, ajustes: $json.ajustes, o_que_esta_bom: $json.o_que_esta_bom } }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "61a0b15e-4fca-4898-9c00-0bb193fe2457",
+        "name": "Registrar Briefing Visual",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2750,
+          -200
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "agente_concluido"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": "conteudo-briefing-visual"
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ 'Briefing visual pronto' }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ saida: $json.output }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "83b07f20-cc18-4889-a918-90ff45ad4fea",
+        "name": "Registrar Revisor Visual",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2980,
+          -200
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "agente_concluido"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": "conteudo-revisor-visual"
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ 'Nota ' + $json.output.nota + ' — ' + ($json.output.justificativa || '') }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ nota: $json.output.nota, saida: $json.output }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "1e0e711b-5369-4043-a75b-5c154e03131b",
+        "name": "Registrar Publicador",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          3968,
+          40
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "agente_concluido"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": "conteudo-publicador"
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ 'Pacote de publicação pronto' }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ saida: $json.output }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "c80e2d5d-5b34-46de-bb2d-1b87873c5dd5",
+        "name": "Abrir portão 1",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1760,
+          208
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "portao_aberto"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ 'Aprovar o TEXTO (nota ' + $json.nota + ', rodada ' + $json.rodada + ')' }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ portao: 'portao-1', nota: $json.nota }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": "aguardando_portao"
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": "portao-1"
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": "={{ $execution.resumeUrl.includes('?') ? $execution.resumeUrl.replace('?', '/portao-1?') : $execution.resumeUrl + '/portao-1' }}"
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        }
+      },
+      {
+        "id": "051db6d7-dcf9-4305-9f65-80da89a2a888",
+        "name": "Abrir portão 2",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          3088,
+          0
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "portao_aberto"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ 'Aprovar o DESIGN (nota do revisor visual ' + $json.output.nota + ')' }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ portao: 'portao-2', nota: $json.output.nota }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": "aguardando_portao"
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": "portao-2"
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": "={{ $execution.resumeUrl.includes('?') ? $execution.resumeUrl.replace('?', '/portao-2?') : $execution.resumeUrl + '/portao-2' }}"
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        }
+      },
+      {
+        "id": "3732cc86-d26e-4abb-b8fe-b43ac1cf37ee",
+        "name": "Abrir portão 3",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          3968,
+          208
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "portao_aberto"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ 'Aprovar a PUBLICAÇÃO e escolher o horário' }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ portao: 'portao-3' }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": "aguardando_portao"
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": "portao-3"
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": "={{ $execution.resumeUrl.includes('?') ? $execution.resumeUrl.replace('?', '/portao-3?') : $execution.resumeUrl + '/portao-3' }}"
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        }
+      },
+      {
+        "id": "b10e0f50-b4fc-42c4-9863-9c1c7131ed1a",
+        "name": "Registrar escalonada",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1984,
+          608
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "escalonada"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ $('Montar contexto').first().json.max_rodadas + ' rodadas abaixo de ' + $('Montar contexto').first().json.nota_minima + ' — decida o que fazer com as tentativas' }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ tentativas: $('Aplicar regra das notas').all().map(i => i.json) }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": "escalonada"
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "0cf834cb-ef21-4134-a6dd-7d3add31e19b",
+        "name": "Registrar hora de publicar",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          4848,
+          112
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "hora_de_publicar"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ 'Chegou o horário: publique no canal.' }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ pacote: $('Publicador').last().json.output }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": "hora_de_publicar"
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "2d457022-a725-4372-be5a-86bf2acdd1e5",
+        "name": "Registrar reprovada",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          4624,
+          320
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "reprovada"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ $json.body?.comentario || 'Publicação reprovada' }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({}) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": "reprovada"
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "d50975e1-d6fb-46dc-8272-7f78fe657dda",
+        "name": "Registrar decisão 1",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2208,
+          40
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "decisao"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ portao: 'portao-1', decisao: $json.body?.decisao, comentario: $json.body?.comentario || '' }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": "produzindo"
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "cbd48e1c-3225-470d-a3b6-c962610c40f1",
+        "name": "Registrar decisão 2",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          3520,
+          -200
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "decisao"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ portao: 'portao-2', decisao: $json.body?.decisao, comentario: $json.body?.comentario || '' }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": "produzindo"
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "e35adc4f-8f77-4a57-85f5-a9b1dbe8f699",
+        "name": "Registrar decisão 3",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          4400,
+          40
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "decisao"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ portao: 'portao-3', decisao: $json.body?.decisao, comentario: $json.body?.comentario || '', agendar_para: $json.body?.agendar_para }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": ""
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "de2e15a5-eef1-4527-83d2-b0bb4e58f8db",
+        "name": "Registrar agendada",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          4624,
+          -80
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_eventos",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "agendada"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ agendado_para: $json.body?.agendar_para || $('Montar contexto').first().json.data_publicacao }) }}"
+              },
+              {
+                "fieldId": "novo_status",
+                "fieldValue": "agendada"
+              },
+              {
+                "fieldId": "novo_portao",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "resume_url",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "execution_id",
+                "fieldValue": ""
+              },
+              {
+                "fieldId": "agendado_para",
+                "fieldValue": "={{ $json.body?.agendar_para || $('Montar contexto').first().json.data_publicacao }}"
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "b190e51c-3f23-48fc-a263-75f520fcf2db",
+        "name": "Buscar peça",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          448,
+          304
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "getAll",
+          "tableId": "galera_pecas",
+          "returnAll": true,
+          "filterType": "manual",
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $json.peca_id }}"
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        }
+      },
+      {
+        "id": "57e8f2bb-8fa6-4c1b-a902-15729edde274",
+        "name": "Buscar agentes",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          560,
+          304
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "getAll",
+          "tableId": "galera_agentes",
+          "returnAll": true,
+          "filterType": "none"
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "executeOnce": true
+      },
+      {
+        "id": "94482075-a181-489b-9bed-963806b12af0",
+        "name": "Buscar configuração",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          560,
+          480
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "getAll",
+          "tableId": "galera_config",
+          "returnAll": true,
+          "filterType": "none"
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "alwaysOutputData": true,
+        "executeOnce": true
+      },
+      {
+        "id": "8e4f6d2f-88bc-4879-9332-f8c7eac96213",
+        "name": "Buscar documentos",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          620,
+          640
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "getAll",
+          "tableId": "galera_documentos",
+          "returnAll": true,
+          "filterType": "none"
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "alwaysOutputData": true,
+        "executeOnce": true
+      }
+    ],
+    "connections": {
+      "Nova peça (site)": {
+        "main": [
+          [
+            {
+              "node": "Normalizar pedido",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar contexto": {
+        "main": [
+          [
+            {
+              "node": "Redator",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Registrar início",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Redator": {
+        "main": [
+          [
+            {
+              "node": "Revisor Editorial",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Registrar Redator",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Revisor Editorial": {
+        "main": [
+          [
+            {
+              "node": "Aplicar regra das notas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Formato da nota": {
+        "ai_outputParser": [
+          [
+            {
+              "node": "Revisor Editorial",
+              "type": "ai_outputParser",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Aplicar regra das notas": {
+        "main": [
+          [
+            {
+              "node": "Nota ≥ 7?",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Registrar Revisor Editorial",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Nota ≥ 7?": {
+        "main": [
+          [
+            {
+              "node": "Abrir portão 1",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "3 rodadas esgotadas?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Portão 1 · Texto": {
+        "main": [
+          [
+            {
+              "node": "Texto aprovado?",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Registrar decisão 1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Texto aprovado?": {
+        "main": [
+          [
+            {
+              "node": "Peça tem visual?",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Redator",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Peça tem visual?": {
+        "main": [
+          [
+            {
+              "node": "Briefing Visual",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Publicador",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Briefing Visual": {
+        "main": [
+          [
+            {
+              "node": "Revisor Visual",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Registrar Briefing Visual",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Revisor Visual": {
+        "main": [
+          [
+            {
+              "node": "Registrar Revisor Visual",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Abrir portão 2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Formato da nota visual": {
+        "ai_outputParser": [
+          [
+            {
+              "node": "Revisor Visual",
+              "type": "ai_outputParser",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Portão 2 · Design": {
+        "main": [
+          [
+            {
+              "node": "Design aprovado?",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Registrar decisão 2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Design aprovado?": {
+        "main": [
+          [
+            {
+              "node": "Publicador",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Briefing Visual",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Publicador": {
+        "main": [
+          [
+            {
+              "node": "Registrar Publicador",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Abrir portão 3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "3 rodadas esgotadas?": {
+        "main": [
+          [
+            {
+              "node": "Registrar escalonada",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Redator",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Portão 3 · Publicação": {
+        "main": [
+          [
+            {
+              "node": "Publicação aprovada?",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Registrar decisão 3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Publicação aprovada?": {
+        "main": [
+          [
+            {
+              "node": "Esperar horário agendado",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Registrar agendada",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Registrar reprovada",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Modelo Redator": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Redator",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Modelo Briefing Visual": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Briefing Visual",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Modelo Publicador": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Publicador",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Modelo Revisor Editorial": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Revisor Editorial",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Modelo Revisor Visual": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Revisor Visual",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Abrir portão 1": {
+        "main": [
+          [
+            {
+              "node": "Portão 1 · Texto",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Abrir portão 2": {
+        "main": [
+          [
+            {
+              "node": "Portão 2 · Design",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Abrir portão 3": {
+        "main": [
+          [
+            {
+              "node": "Portão 3 · Publicação",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Esperar horário agendado": {
+        "main": [
+          [
+            {
+              "node": "Registrar hora de publicar",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalizar pedido": {
+        "main": [
+          [
+            {
+              "node": "Buscar peça",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar peça": {
+        "main": [
+          [
+            {
+              "node": "Buscar agentes",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar agentes": {
+        "main": [
+          [
+            {
+              "node": "Buscar configuração",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar configuração": {
+        "main": [
+          [
+            {
+              "node": "Buscar documentos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar documentos": {
+        "main": [
+          [
+            {
+              "node": "Montar contexto",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Registros antes dos portões (ordem de execução)",
+    "description": "No execution order v1 o n8n executa ramos de cima para baixo. Registros de decisão e do Publicador ficavam abaixo do caminho principal e só rodavam depois do próximo Wait. Subidos no canvas para rodarem primeiro.",
+    "autosaved": false,
+    "createdAt": "2026-09-24T19:20:05.991Z",
+    "updatedAt": "2026-09-24T19:20:05.991Z"
+  },
+  "tags": []
+}
