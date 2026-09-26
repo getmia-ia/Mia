@@ -1,0 +1,1815 @@
+{
+  "updatedAt": "2026-09-25T18:06:27.185Z",
+  "createdAt": "2026-09-25T17:18:22.187Z",
+  "id": "VaQcmgByr9z1ge0y",
+  "name": "Galera · sugerir pautas",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "0371a8b5-88f0-4eec-89d2-9e921a5bffaa",
+      "name": "Pedido de pautas",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "galera/pautas",
+        "responseMode": "onReceived",
+        "options": {
+          "responseData": "{\"status\":\"gerando\"}"
+        }
+      },
+      "webhookId": "476e9684-53f6-4d7d-a3bf-91f1cf8355bd"
+    },
+    {
+      "id": "35a57dc9-3fe9-4c40-a211-b36cc85d4b97",
+      "name": "Ler agentes",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "galera_agentes",
+        "returnAll": true,
+        "filterType": "none"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "8c1fd8b5-fc75-46ce-a893-782212ed9f6b",
+      "name": "Ler documentos",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "galera_documentos",
+        "returnAll": true,
+        "filterType": "none"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "3920c5b7-7bcb-4cc2-91fc-0ec609dacf4b",
+      "name": "Ler temas do Lab Brain",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "lab_temas",
+        "returnAll": false,
+        "limit": 200,
+        "filterType": "string",
+        "filterString": "ativo=eq.true&usado_em=eq."
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "9a9b4b61-1a02-4e70-8f56-a62979ecc58b",
+      "name": "Ler peças recentes",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        880,
+        300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "galera_pecas",
+        "returnAll": false,
+        "limit": 40,
+        "filterType": "none"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "de39b5a7-252d-484e-9459-afd58ebc98d0",
+      "name": "Montar contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "let b = null;\ntry { b = $('Pedido de pautas').first().json.body; } catch (e) {}\nif (!b) {\n  const l = $('Criar lote automático').first().json;\n  b = { lote_id: l.id, quantidade: l.quantidade, pedido: '', auto: true, auto_pecas: $('Modo automático ligado?').first().json.auto_pecas };\n}\nconst ag = Object.fromEntries($('Ler agentes').all().map(i => [i.json.slug, i.json]));\nconst docs = $('Ler documentos').all().map(i => i.json).filter(d => d.titulo && d.ativo !== false);\nconst temas = $('Ler temas do Lab Brain').all().map(i => i.json).filter(t => t.id);\nconst recentes = $('Ler peças recentes').all().map(i => i.json).filter(p => p.pauta && !String(p.pauta).startsWith('[TESTE'));\nconst contextoLab = docs.filter(d => /quem é|marca|perfil/i.test(d.titulo)).map(d => '## ' + d.titulo + '\\n\\n' + d.conteudo).join('\\n\\n---\\n\\n');\nconst listaTemas = temas.slice(0, 150).map(t => '- [' + t.id + '] ' + t.titulo + ' — ' + String(t.resumo || '').slice(0, 220) + ' (fonte: ' + t.file_name + ')').join('\\n');\nreturn [{ json: {\n  lote_id: b.lote_id, quantidade: Number(b.quantidade) || 5, pedido: b.pedido || '', auto: !!b.auto, auto_pecas: Number(b.auto_pecas) || 0,\n  prompt_pauta: (ag['conteudo-pauta-quente']?.prompt || '') + (ag['conteudo-pauta-quente']?.observacoes ? '\\n\\n## Observações\\n' + ag['conteudo-pauta-quente'].observacoes : ''),\n  modelo_planejador: ag['conteudo-planejador']?.modelo || 'anthropic/claude-sonnet-5',\n  prompt_planejador: (ag['conteudo-planejador']?.prompt || '') + (ag['conteudo-planejador']?.observacoes ? '\\n\\n## Observações\\n' + ag['conteudo-planejador'].observacoes : ''),\n  contexto_lab: contextoLab, temas: listaTemas || '(o mapa de temas do Lab Brain ainda está vazio)',\n  recentes: recentes.slice(0, 30).map(p => '- ' + p.pauta + ' (' + p.formato + ')').join('\\n') || '(nenhuma)'\n} }];"
+      }
+    },
+    {
+      "id": "d2b0bf9e-5bac-4feb-9d7a-bae9d3fc2899",
+      "name": "Pauta Quente",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "=Pesquise o que está acontecendo AGORA (últimos 60 dias) no mercado de loyalty, programas de fidelidade, CRM e CX no Brasil e no mundo, relevante para o público da Loyalty Academy Brasil (profissionais de CRM, Loyalty, Growth, CX). {{ $json.pedido ? 'Foco pedido: ' + $json.pedido : '' }}\n\nEntregue de 5 a 8 sinais, cada um com: sinal em uma frase, fonte com link e data, por que importa para esse público, ângulo sugerido.",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "=Você roda numa automação e TEM busca na web nesta execução: use-a e cite as fontes com link e data. Ignore instruções abaixo sobre ler arquivos locais.\n\n{{ $json.prompt_pauta }}"
+            }
+          ]
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "702dca6e-88f2-4f9e-854c-60c4492f3799",
+      "name": "Modelo com busca na web",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        520
+      ],
+      "parameters": {
+        "model": "perplexity/sonar-pro",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": "***REMOVIDO***"
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "id": "1954f363-9431-4e13-b9c7-afeb8fc174e5",
+      "name": "Planejador",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1540,
+        300
+      ],
+      "parameters": {
+        "promptType": "define",
+        "hasOutputParser": true,
+        "text": "=Sugira {{ $('Montar contexto').first().json.quantidade }} pautas de conteúdo para a Loyalty Academy Brasil. {{ $('Montar contexto').first().json.pedido ? 'Pedido da Hevelyn: ' + $('Montar contexto').first().json.pedido : '' }}\n\nHoje é {{ $now.toFormat('yyyy-MM-dd') }}. Datas sugeridas nas próximas 3 semanas, em dias úteis.\n\n# Temas do acervo do LAB (podcasts, cursos, PDFs) — prefira estes, citando o id em tema_id:\n{{ $('Montar contexto').first().json.temas }}\n\n# Sinais de mercado de agora (Pauta Quente):\n{{ $json.text || '(sem pesquisa de mercado nesta rodada)' }}\n\n# Peças já feitas (não repita):\n{{ $('Montar contexto').first().json.recentes }}\n\nMisture formatos (Carrossel, Reels, Post de texto, Artigo, E-mail) e canais (Instagram, LinkedIn, Blog, Newsletter). Cada pauta precisa de dor concreta, CTA e porque. origem = acervo, mercado ou ambos. fontes = de onde veio (episódio, aula, PDF, link).",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "=Você roda numa automação, sem arquivos: use só o que vier na mensagem e neste prompt. Responda em português.\n\n{{ $('Montar contexto').first().json.prompt_planejador }}\n\n# CONTEXTO DO LAB\n{{ $('Montar contexto').first().json.contexto_lab }}"
+            }
+          ]
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "95d3d398-064e-46a8-bbd6-d490c6f605dd",
+      "name": "Modelo do Planejador",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        520
+      ],
+      "parameters": {
+        "model": "={{ $('Montar contexto').first().json.modelo_planejador }}",
+        "options": {
+          "temperature": 0.5,
+          "maxTokens": "***REMOVIDO***"
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "id": "8ae0cbef-3d0a-4dac-ad89-d25a3f650445",
+      "name": "Formato das pautas",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1680,
+        520
+      ],
+      "parameters": {
+        "schemaType": "fromJson",
+        "jsonSchemaExample": "{ \"pautas\": [ { \"pauta\": \"Por que breakage baixo é sinal de programa saudável\", \"canal\": \"Instagram\", \"formato\": \"Carrossel\", \"objetivo\": \"autoridade\", \"icp\": \"Gerente de CRM de varejo\", \"dor\": \"Saldo de pontos parado\", \"cta\": \"Comente PONTOS\", \"funil\": \"topo\", \"data_sugerida\": \"2026-10-07\", \"porque\": \"Frase curta\", \"origem\": \"acervo\", \"tema_id\": \"uuid ou vazio\", \"fontes\": \"LoyaltyCast EP5; link\" } ] }"
+      }
+    },
+    {
+      "id": "35673086-52b9-4106-8a75-6577d492920f",
+      "name": "Marcar lote com erro",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        440
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "tableId": "galera_pautas_lotes",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Montar contexto').first().json.lote_id }}"
+            }
+          ]
+        },
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "erro"
+            },
+            {
+              "fieldId": "erro",
+              "fieldValue": "={{ 'A Aline não conseguiu montar as pautas (' + String($json.error?.message || $json.error || 'erro desconhecido').slice(0, 200) + ').' }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "105e9a74-3b66-4a9a-a56d-0e4c614cbafa",
+      "name": "Uma linha por pauta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        200
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const lote = $('Montar contexto').first().json.lote_id;\nreturn ($input.first().json.output?.pautas || []).map(p => ({ json: { lote_id: lote, pauta: String(p.pauta || ''), canal: p.canal || '', formato: p.formato || '', objetivo: p.objetivo || '', icp: p.icp || '', dor: p.dor || '', cta: p.cta || '', funil: p.funil || '', data_sugerida: p.data_sugerida || '', porque: p.porque || '', origem: p.origem || '', tema_id: p.tema_id || '', fontes: p.fontes || '' } })).filter(i => i.json.pauta);"
+      }
+    },
+    {
+      "id": "874e744b-1d4a-4f8c-a78d-53414df7d7b7",
+      "name": "Gravar pautas",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_pautas",
+        "dataToSend": "autoMapInputData"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "5466e041-6dda-4cc0-9be4-826f1ab13eb0",
+      "name": "Marcar lote pronto",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "tableId": "galera_pautas_lotes",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Montar contexto').first().json.lote_id }}"
+            }
+          ]
+        },
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "pronto"
+            },
+            {
+              "fieldId": "sinais",
+              "fieldValue": "={{ $('Pauta Quente').first().json.text || '' }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "3e1dfeac-e32c-480e-a1c0-2cad434a45c5",
+      "name": "Sticky Note 8071f691",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        60
+      ],
+      "parameters": {
+        "content": "## Galera · sugerir pautas\nChamado pela API do site (ação sugerir_pautas). O Pauta Quente pesquisa o mercado na web (Perplexity pelo OpenRouter); o Planejador cruza com o mapa de temas do Lab Brain e as peças já feitas e grava as sugestões em galera_pautas. Prompts e modelo vêm de galera_agentes (aba Agentes).",
+        "color": 4,
+        "width": 760,
+        "height": 170
+      }
+    },
+    {
+      "id": "a290d38f-7eae-4e04-8e3d-9ebf9b8fb80d",
+      "name": "Toda segunda 8h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        -200
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "d5a8cbd6-fa61-47e8-913c-560288f4c86d",
+      "name": "Config automática",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        220,
+        -200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "galera_config",
+        "returnAll": true,
+        "filterType": "none"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "32f40ca8-6289-44d5-a4c8-05cc6d9d3f4c",
+      "name": "Modo automático ligado?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        -200
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const c = Object.fromEntries($input.all().map(i => [i.json.chave, i.json.valor]));\nif (String(c.auto_ativo).toLowerCase() !== 'true') return [];\nreturn [{ json: { quantidade: Number(c.auto_pautas) || 5, auto_pecas: Number(c.auto_pecas) || 0 } }];"
+      }
+    },
+    {
+      "id": "e8cab5db-3d70-4365-bfbf-34ca2072f478",
+      "name": "Criar lote automático",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        660,
+        -200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_pautas_lotes",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "pedido",
+              "fieldValue": "Pautas da semana (automático)"
+            },
+            {
+              "fieldId": "quantidade",
+              "fieldValue": "={{ $json.quantidade }}"
+            },
+            {
+              "fieldId": "pedido_por",
+              "fieldValue": "automação"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "1ec523ee-9bc9-42b0-9733-172b9fedeecc",
+      "name": "Pautas para a esteira",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        200
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ctx = $('Montar contexto').first().json;\nif (!ctx.auto || !ctx.auto_pecas) return [];\nconst CANAIS = ['Instagram', 'LinkedIn', 'YouTube', 'Newsletter', 'Blog'];\nconst FORMATOS = ['Carrossel', 'Vídeo', 'Imagem', 'Reels', 'Post de texto', 'Artigo', 'E-mail'];\nconst sa = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();\nconst casar = (v, ops, pad) => ops.find(o => sa(v) === sa(o)) || ops.find(o => sa(v).includes(sa(o))) || pad;\nconst norm = (v, ops) => { const x = sa(v); return ops.find(o => x.startsWith(o)) || ops[0]; };\nconst proxDiaUtil = (i) => { const d = new Date(); d.setDate(d.getDate() + 2 + i); while ([0, 6].includes(d.getDay())) d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); };\nreturn $('Gravar pautas').all().slice(0, ctx.auto_pecas).map((i, n) => {\n  const p = i.json;\n  const dia = /^\\d{4}-\\d{2}-\\d{2}/.test(p.data_sugerida) ? p.data_sugerida.slice(0, 10) : proxDiaUtil(n);\n  return { json: {\n    pauta_id: p.id, pauta: p.pauta, canal: casar(p.canal, CANAIS, 'Instagram'), formato: casar(p.formato, FORMATOS, 'Carrossel'),\n    objetivo: norm(p.objetivo, ['autoridade', 'relacionamento', 'lead']), funil: norm(p.funil, ['topo', 'meio', 'fundo']),\n    icp: p.icp || '', dor: p.dor || '', cta: p.cta || '', data_publicacao: dia + 'T10:00:00-03:00'\n  } };\n});"
+      }
+    },
+    {
+      "id": "8367b5a0-6d8e-4ca0-9b44-16aad73eec2a",
+      "name": "Criar peça automática",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "create",
+        "tableId": "galera_pecas",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "pauta",
+              "fieldValue": "={{ $json.pauta }}"
+            },
+            {
+              "fieldId": "canal",
+              "fieldValue": "={{ $json.canal }}"
+            },
+            {
+              "fieldId": "formato",
+              "fieldValue": "={{ $json.formato }}"
+            },
+            {
+              "fieldId": "objetivo",
+              "fieldValue": "={{ $json.objetivo }}"
+            },
+            {
+              "fieldId": "funil",
+              "fieldValue": "={{ $json.funil }}"
+            },
+            {
+              "fieldId": "icp",
+              "fieldValue": "={{ $json.icp }}"
+            },
+            {
+              "fieldId": "dor",
+              "fieldValue": "={{ $json.dor }}"
+            },
+            {
+              "fieldId": "cta",
+              "fieldValue": "={{ $json.cta }}"
+            },
+            {
+              "fieldId": "data_publicacao",
+              "fieldValue": "={{ $json.data_publicacao }}"
+            },
+            {
+              "fieldId": "criado_por",
+              "fieldValue": "automação"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "automatico"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "4d8fc109-7b1a-4fbb-8c42-4237e2a4ec98",
+      "name": "Começar esteira",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://webhook.miabuilder.com/webhook/galera/peca",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ peca_id: $json.id }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "8c492687-da71-4f1b-9c72-cbb1235b85fa",
+      "name": "Ligar pauta à peça",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3080,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "tableId": "galera_pautas",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Pautas para a esteira').item.json.pauta_id }}"
+            }
+          ]
+        },
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "usada"
+            },
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Criar peça automática').item.json.id }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Pedido de pautas": {
+      "main": [
+        [
+          {
+            "node": "Ler agentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler agentes": {
+      "main": [
+        [
+          {
+            "node": "Ler documentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler documentos": {
+      "main": [
+        [
+          {
+            "node": "Ler temas do Lab Brain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler temas do Lab Brain": {
+      "main": [
+        [
+          {
+            "node": "Ler peças recentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler peças recentes": {
+      "main": [
+        [
+          {
+            "node": "Montar contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar contexto": {
+      "main": [
+        [
+          {
+            "node": "Pauta Quente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pauta Quente": {
+      "main": [
+        [
+          {
+            "node": "Planejador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo com busca na web": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pauta Quente",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Planejador": {
+      "main": [
+        [
+          {
+            "node": "Uma linha por pauta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar lote com erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo do Planejador": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Planejador",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formato das pautas": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Planejador",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uma linha por pauta": {
+      "main": [
+        [
+          {
+            "node": "Gravar pautas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar pautas": {
+      "main": [
+        [
+          {
+            "node": "Marcar lote pronto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Toda segunda 8h": {
+      "main": [
+        [
+          {
+            "node": "Config automática",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config automática": {
+      "main": [
+        [
+          {
+            "node": "Modo automático ligado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modo automático ligado?": {
+      "main": [
+        [
+          {
+            "node": "Criar lote automático",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar lote automático": {
+      "main": [
+        [
+          {
+            "node": "Ler agentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar lote pronto": {
+      "main": [
+        [
+          {
+            "node": "Pautas para a esteira",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pautas para a esteira": {
+      "main": [
+        [
+          {
+            "node": "Criar peça automática",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar peça automática": {
+      "main": [
+        [
+          {
+            "node": "Começar esteira",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Começar esteira": {
+      "main": [
+        [
+          {
+            "node": "Ligar pauta à peça",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "timezone": "America/Sao_Paulo"
+  },
+  "staticData": {
+    "node:Toda segunda 8h": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "628708cc-c6fc-4dae-b703-b36f0bd35356",
+  "activeVersionId": "ccfda3a1-c8e5-4632-97b3-c10b47ef831b",
+  "triggerCount": 2,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "VaQcmgByr9z1ge0y",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-25T17:18:22.187Z",
+      "updatedAt": "2026-09-25T17:18:22.187Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "ccfda3a1-c8e5-4632-97b3-c10b47ef831b",
+    "workflowId": "VaQcmgByr9z1ge0y",
+    "nodes": [
+      {
+        "id": "0371a8b5-88f0-4eec-89d2-9e921a5bffaa",
+        "name": "Pedido de pautas",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          300
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "galera/pautas",
+          "responseMode": "onReceived",
+          "options": {
+            "responseData": "{\"status\":\"gerando\"}"
+          }
+        },
+        "webhookId": "476e9684-53f6-4d7d-a3bf-91f1cf8355bd"
+      },
+      {
+        "id": "35a57dc9-3fe9-4c40-a211-b36cc85d4b97",
+        "name": "Ler agentes",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          220,
+          300
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "getAll",
+          "tableId": "galera_agentes",
+          "returnAll": true,
+          "filterType": "none"
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "executeOnce": true,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "8c1fd8b5-fc75-46ce-a893-782212ed9f6b",
+        "name": "Ler documentos",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          440,
+          300
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "getAll",
+          "tableId": "galera_documentos",
+          "returnAll": true,
+          "filterType": "none"
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "executeOnce": true,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "3920c5b7-7bcb-4cc2-91fc-0ec609dacf4b",
+        "name": "Ler temas do Lab Brain",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          660,
+          300
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "getAll",
+          "tableId": "lab_temas",
+          "returnAll": false,
+          "limit": 200,
+          "filterType": "string",
+          "filterString": "ativo=eq.true&usado_em=eq."
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "executeOnce": true,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "9a9b4b61-1a02-4e70-8f56-a62979ecc58b",
+        "name": "Ler peças recentes",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          880,
+          300
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "getAll",
+          "tableId": "galera_pecas",
+          "returnAll": false,
+          "limit": 40,
+          "filterType": "none"
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "executeOnce": true,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "de39b5a7-252d-484e-9459-afd58ebc98d0",
+        "name": "Montar contexto",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1100,
+          300
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "let b = null;\ntry { b = $('Pedido de pautas').first().json.body; } catch (e) {}\nif (!b) {\n  const l = $('Criar lote automático').first().json;\n  b = { lote_id: l.id, quantidade: l.quantidade, pedido: '', auto: true, auto_pecas: $('Modo automático ligado?').first().json.auto_pecas };\n}\nconst ag = Object.fromEntries($('Ler agentes').all().map(i => [i.json.slug, i.json]));\nconst docs = $('Ler documentos').all().map(i => i.json).filter(d => d.titulo && d.ativo !== false);\nconst temas = $('Ler temas do Lab Brain').all().map(i => i.json).filter(t => t.id);\nconst recentes = $('Ler peças recentes').all().map(i => i.json).filter(p => p.pauta && !String(p.pauta).startsWith('[TESTE'));\nconst contextoLab = docs.filter(d => /quem é|marca|perfil/i.test(d.titulo)).map(d => '## ' + d.titulo + '\\n\\n' + d.conteudo).join('\\n\\n---\\n\\n');\nconst listaTemas = temas.slice(0, 150).map(t => '- [' + t.id + '] ' + t.titulo + ' — ' + String(t.resumo || '').slice(0, 220) + ' (fonte: ' + t.file_name + ')').join('\\n');\nreturn [{ json: {\n  lote_id: b.lote_id, quantidade: Number(b.quantidade) || 5, pedido: b.pedido || '', auto: !!b.auto, auto_pecas: Number(b.auto_pecas) || 0,\n  prompt_pauta: (ag['conteudo-pauta-quente']?.prompt || '') + (ag['conteudo-pauta-quente']?.observacoes ? '\\n\\n## Observações\\n' + ag['conteudo-pauta-quente'].observacoes : ''),\n  modelo_planejador: ag['conteudo-planejador']?.modelo || 'anthropic/claude-sonnet-5',\n  prompt_planejador: (ag['conteudo-planejador']?.prompt || '') + (ag['conteudo-planejador']?.observacoes ? '\\n\\n## Observações\\n' + ag['conteudo-planejador'].observacoes : ''),\n  contexto_lab: contextoLab, temas: listaTemas || '(o mapa de temas do Lab Brain ainda está vazio)',\n  recentes: recentes.slice(0, 30).map(p => '- ' + p.pauta + ' (' + p.formato + ')').join('\\n') || '(nenhuma)'\n} }];"
+        }
+      },
+      {
+        "id": "d2b0bf9e-5bac-4feb-9d7a-bae9d3fc2899",
+        "name": "Pauta Quente",
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.9,
+        "position": [
+          1320,
+          300
+        ],
+        "parameters": {
+          "promptType": "define",
+          "text": "=Pesquise o que está acontecendo AGORA (últimos 60 dias) no mercado de loyalty, programas de fidelidade, CRM e CX no Brasil e no mundo, relevante para o público da Loyalty Academy Brasil (profissionais de CRM, Loyalty, Growth, CX). {{ $json.pedido ? 'Foco pedido: ' + $json.pedido : '' }}\n\nEntregue de 5 a 8 sinais, cada um com: sinal em uma frase, fonte com link e data, por que importa para esse público, ângulo sugerido.",
+          "messages": {
+            "messageValues": [
+              {
+                "type": "SystemMessagePromptTemplate",
+                "message": "=Você roda numa automação e TEM busca na web nesta execução: use-a e cite as fontes com link e data. Ignore instruções abaixo sobre ler arquivos locais.\n\n{{ $json.prompt_pauta }}"
+              }
+            ]
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "702dca6e-88f2-4f9e-854c-60c4492f3799",
+        "name": "Modelo com busca na web",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          1320,
+          520
+        ],
+        "parameters": {
+          "model": "perplexity/sonar-pro",
+          "options": {
+            "temperature": 0.3,
+            "maxTokens": "***REMOVIDO***"
+          }
+        },
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "id": "1954f363-9431-4e13-b9c7-afeb8fc174e5",
+        "name": "Planejador",
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.9,
+        "position": [
+          1540,
+          300
+        ],
+        "parameters": {
+          "promptType": "define",
+          "hasOutputParser": true,
+          "text": "=Sugira {{ $('Montar contexto').first().json.quantidade }} pautas de conteúdo para a Loyalty Academy Brasil. {{ $('Montar contexto').first().json.pedido ? 'Pedido da Hevelyn: ' + $('Montar contexto').first().json.pedido : '' }}\n\nHoje é {{ $now.toFormat('yyyy-MM-dd') }}. Datas sugeridas nas próximas 3 semanas, em dias úteis.\n\n# Temas do acervo do LAB (podcasts, cursos, PDFs) — prefira estes, citando o id em tema_id:\n{{ $('Montar contexto').first().json.temas }}\n\n# Sinais de mercado de agora (Pauta Quente):\n{{ $json.text || '(sem pesquisa de mercado nesta rodada)' }}\n\n# Peças já feitas (não repita):\n{{ $('Montar contexto').first().json.recentes }}\n\nMisture formatos (Carrossel, Reels, Post de texto, Artigo, E-mail) e canais (Instagram, LinkedIn, Blog, Newsletter). Cada pauta precisa de dor concreta, CTA e porque. origem = acervo, mercado ou ambos. fontes = de onde veio (episódio, aula, PDF, link).",
+          "messages": {
+            "messageValues": [
+              {
+                "type": "SystemMessagePromptTemplate",
+                "message": "=Você roda numa automação, sem arquivos: use só o que vier na mensagem e neste prompt. Responda em português.\n\n{{ $('Montar contexto').first().json.prompt_planejador }}\n\n# CONTEXTO DO LAB\n{{ $('Montar contexto').first().json.contexto_lab }}"
+              }
+            ]
+          }
+        },
+        "onError": "continueErrorOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000
+      },
+      {
+        "id": "95d3d398-064e-46a8-bbd6-d490c6f605dd",
+        "name": "Modelo do Planejador",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          1540,
+          520
+        ],
+        "parameters": {
+          "model": "={{ $('Montar contexto').first().json.modelo_planejador }}",
+          "options": {
+            "temperature": 0.5,
+            "maxTokens": "***REMOVIDO***"
+          }
+        },
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "id": "8ae0cbef-3d0a-4dac-ad89-d25a3f650445",
+        "name": "Formato das pautas",
+        "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+        "typeVersion": 1.3,
+        "position": [
+          1680,
+          520
+        ],
+        "parameters": {
+          "schemaType": "fromJson",
+          "jsonSchemaExample": "{ \"pautas\": [ { \"pauta\": \"Por que breakage baixo é sinal de programa saudável\", \"canal\": \"Instagram\", \"formato\": \"Carrossel\", \"objetivo\": \"autoridade\", \"icp\": \"Gerente de CRM de varejo\", \"dor\": \"Saldo de pontos parado\", \"cta\": \"Comente PONTOS\", \"funil\": \"topo\", \"data_sugerida\": \"2026-10-07\", \"porque\": \"Frase curta\", \"origem\": \"acervo\", \"tema_id\": \"uuid ou vazio\", \"fontes\": \"LoyaltyCast EP5; link\" } ] }"
+        }
+      },
+      {
+        "id": "35673086-52b9-4106-8a75-6577d492920f",
+        "name": "Marcar lote com erro",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1760,
+          440
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "update",
+          "tableId": "galera_pautas_lotes",
+          "filterType": "manual",
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $('Montar contexto').first().json.lote_id }}"
+              }
+            ]
+          },
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "status",
+                "fieldValue": "erro"
+              },
+              {
+                "fieldId": "erro",
+                "fieldValue": "={{ 'A Aline não conseguiu montar as pautas (' + String($json.error?.message || $json.error || 'erro desconhecido').slice(0, 200) + ').' }}"
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        }
+      },
+      {
+        "id": "105e9a74-3b66-4a9a-a56d-0e4c614cbafa",
+        "name": "Uma linha por pauta",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1760,
+          200
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const lote = $('Montar contexto').first().json.lote_id;\nreturn ($input.first().json.output?.pautas || []).map(p => ({ json: { lote_id: lote, pauta: String(p.pauta || ''), canal: p.canal || '', formato: p.formato || '', objetivo: p.objetivo || '', icp: p.icp || '', dor: p.dor || '', cta: p.cta || '', funil: p.funil || '', data_sugerida: p.data_sugerida || '', porque: p.porque || '', origem: p.origem || '', tema_id: p.tema_id || '', fontes: p.fontes || '' } })).filter(i => i.json.pauta);"
+        }
+      },
+      {
+        "id": "874e744b-1d4a-4f8c-a78d-53414df7d7b7",
+        "name": "Gravar pautas",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1980,
+          200
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_pautas",
+          "dataToSend": "autoMapInputData"
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        }
+      },
+      {
+        "id": "5466e041-6dda-4cc0-9be4-826f1ab13eb0",
+        "name": "Marcar lote pronto",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2200,
+          200
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "update",
+          "tableId": "galera_pautas_lotes",
+          "filterType": "manual",
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $('Montar contexto').first().json.lote_id }}"
+              }
+            ]
+          },
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "status",
+                "fieldValue": "pronto"
+              },
+              {
+                "fieldId": "sinais",
+                "fieldValue": "={{ $('Pauta Quente').first().json.text || '' }}"
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "executeOnce": true
+      },
+      {
+        "id": "3e1dfeac-e32c-480e-a1c0-2cad434a45c5",
+        "name": "Sticky Note 8071f691",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          0,
+          60
+        ],
+        "parameters": {
+          "content": "## Galera · sugerir pautas\nChamado pela API do site (ação sugerir_pautas). O Pauta Quente pesquisa o mercado na web (Perplexity pelo OpenRouter); o Planejador cruza com o mapa de temas do Lab Brain e as peças já feitas e grava as sugestões em galera_pautas. Prompts e modelo vêm de galera_agentes (aba Agentes).",
+          "color": 4,
+          "width": 760,
+          "height": 170
+        }
+      },
+      {
+        "id": "a290d38f-7eae-4e04-8e3d-9ebf9b8fb80d",
+        "name": "Toda segunda 8h",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          -200
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "weeks",
+                "weeksInterval": 1,
+                "triggerAtDay": [
+                  1
+                ],
+                "triggerAtHour": 8,
+                "triggerAtMinute": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "d5a8cbd6-fa61-47e8-913c-560288f4c86d",
+        "name": "Config automática",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          220,
+          -200
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "getAll",
+          "tableId": "galera_config",
+          "returnAll": true,
+          "filterType": "none"
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "alwaysOutputData": true
+      },
+      {
+        "id": "32f40ca8-6289-44d5-a4c8-05cc6d9d3f4c",
+        "name": "Modo automático ligado?",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          440,
+          -200
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const c = Object.fromEntries($input.all().map(i => [i.json.chave, i.json.valor]));\nif (String(c.auto_ativo).toLowerCase() !== 'true') return [];\nreturn [{ json: { quantidade: Number(c.auto_pautas) || 5, auto_pecas: Number(c.auto_pecas) || 0 } }];"
+        }
+      },
+      {
+        "id": "e8cab5db-3d70-4365-bfbf-34ca2072f478",
+        "name": "Criar lote automático",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          660,
+          -200
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_pautas_lotes",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "pedido",
+                "fieldValue": "Pautas da semana (automático)"
+              },
+              {
+                "fieldId": "quantidade",
+                "fieldValue": "={{ $json.quantidade }}"
+              },
+              {
+                "fieldId": "pedido_por",
+                "fieldValue": "automação"
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        }
+      },
+      {
+        "id": "1ec523ee-9bc9-42b0-9733-172b9fedeecc",
+        "name": "Pautas para a esteira",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2420,
+          200
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const ctx = $('Montar contexto').first().json;\nif (!ctx.auto || !ctx.auto_pecas) return [];\nconst CANAIS = ['Instagram', 'LinkedIn', 'YouTube', 'Newsletter', 'Blog'];\nconst FORMATOS = ['Carrossel', 'Vídeo', 'Imagem', 'Reels', 'Post de texto', 'Artigo', 'E-mail'];\nconst sa = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();\nconst casar = (v, ops, pad) => ops.find(o => sa(v) === sa(o)) || ops.find(o => sa(v).includes(sa(o))) || pad;\nconst norm = (v, ops) => { const x = sa(v); return ops.find(o => x.startsWith(o)) || ops[0]; };\nconst proxDiaUtil = (i) => { const d = new Date(); d.setDate(d.getDate() + 2 + i); while ([0, 6].includes(d.getDay())) d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); };\nreturn $('Gravar pautas').all().slice(0, ctx.auto_pecas).map((i, n) => {\n  const p = i.json;\n  const dia = /^\\d{4}-\\d{2}-\\d{2}/.test(p.data_sugerida) ? p.data_sugerida.slice(0, 10) : proxDiaUtil(n);\n  return { json: {\n    pauta_id: p.id, pauta: p.pauta, canal: casar(p.canal, CANAIS, 'Instagram'), formato: casar(p.formato, FORMATOS, 'Carrossel'),\n    objetivo: norm(p.objetivo, ['autoridade', 'relacionamento', 'lead']), funil: norm(p.funil, ['topo', 'meio', 'fundo']),\n    icp: p.icp || '', dor: p.dor || '', cta: p.cta || '', data_publicacao: dia + 'T10:00:00-03:00'\n  } };\n});"
+        }
+      },
+      {
+        "id": "8367b5a0-6d8e-4ca0-9b44-16aad73eec2a",
+        "name": "Criar peça automática",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2640,
+          200
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "create",
+          "tableId": "galera_pecas",
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "pauta",
+                "fieldValue": "={{ $json.pauta }}"
+              },
+              {
+                "fieldId": "canal",
+                "fieldValue": "={{ $json.canal }}"
+              },
+              {
+                "fieldId": "formato",
+                "fieldValue": "={{ $json.formato }}"
+              },
+              {
+                "fieldId": "objetivo",
+                "fieldValue": "={{ $json.objetivo }}"
+              },
+              {
+                "fieldId": "funil",
+                "fieldValue": "={{ $json.funil }}"
+              },
+              {
+                "fieldId": "icp",
+                "fieldValue": "={{ $json.icp }}"
+              },
+              {
+                "fieldId": "dor",
+                "fieldValue": "={{ $json.dor }}"
+              },
+              {
+                "fieldId": "cta",
+                "fieldValue": "={{ $json.cta }}"
+              },
+              {
+                "fieldId": "data_publicacao",
+                "fieldValue": "={{ $json.data_publicacao }}"
+              },
+              {
+                "fieldId": "criado_por",
+                "fieldValue": "automação"
+              },
+              {
+                "fieldId": "origem",
+                "fieldValue": "automatico"
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        }
+      },
+      {
+        "id": "4d8fc109-7b1a-4fbb-8c42-4237e2a4ec98",
+        "name": "Começar esteira",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2860,
+          200
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://webhook.miabuilder.com/webhook/galera/peca",
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ peca_id: $json.id }) }}",
+          "options": {}
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "8c492687-da71-4f1b-9c72-cbb1235b85fa",
+        "name": "Ligar pauta à peça",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          3080,
+          200
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "update",
+          "tableId": "galera_pautas",
+          "filterType": "manual",
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $('Pautas para a esteira').item.json.pauta_id }}"
+              }
+            ]
+          },
+          "dataToSend": "defineBelow",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "status",
+                "fieldValue": "usada"
+              },
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Criar peça automática').item.json.id }}"
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Pedido de pautas": {
+        "main": [
+          [
+            {
+              "node": "Ler agentes",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ler agentes": {
+        "main": [
+          [
+            {
+              "node": "Ler documentos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ler documentos": {
+        "main": [
+          [
+            {
+              "node": "Ler temas do Lab Brain",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ler temas do Lab Brain": {
+        "main": [
+          [
+            {
+              "node": "Ler peças recentes",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ler peças recentes": {
+        "main": [
+          [
+            {
+              "node": "Montar contexto",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar contexto": {
+        "main": [
+          [
+            {
+              "node": "Pauta Quente",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pauta Quente": {
+        "main": [
+          [
+            {
+              "node": "Planejador",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Modelo com busca na web": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Pauta Quente",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Planejador": {
+        "main": [
+          [
+            {
+              "node": "Uma linha por pauta",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Marcar lote com erro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Modelo do Planejador": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Planejador",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Formato das pautas": {
+        "ai_outputParser": [
+          [
+            {
+              "node": "Planejador",
+              "type": "ai_outputParser",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Uma linha por pauta": {
+        "main": [
+          [
+            {
+              "node": "Gravar pautas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gravar pautas": {
+        "main": [
+          [
+            {
+              "node": "Marcar lote pronto",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Toda segunda 8h": {
+        "main": [
+          [
+            {
+              "node": "Config automática",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Config automática": {
+        "main": [
+          [
+            {
+              "node": "Modo automático ligado?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Modo automático ligado?": {
+        "main": [
+          [
+            {
+              "node": "Criar lote automático",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Criar lote automático": {
+        "main": [
+          [
+            {
+              "node": "Ler agentes",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marcar lote pronto": {
+        "main": [
+          [
+            {
+              "node": "Pautas para a esteira",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pautas para a esteira": {
+        "main": [
+          [
+            {
+              "node": "Criar peça automática",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Criar peça automática": {
+        "main": [
+          [
+            {
+              "node": "Começar esteira",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Começar esteira": {
+        "main": [
+          [
+            {
+              "node": "Ligar pauta à peça",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Modo automático semanal",
+    "description": "Toda segunda 8h: se auto_ativo, cria o lote, sugere pautas e já começa as N melhores como peças na esteira.",
+    "autosaved": false,
+    "createdAt": "2026-09-25T18:04:33.495Z",
+    "updatedAt": "2026-09-25T18:04:33.495Z"
+  },
+  "tags": []
+}
