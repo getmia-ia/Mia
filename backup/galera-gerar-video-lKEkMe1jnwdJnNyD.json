@@ -1,0 +1,2656 @@
+{
+  "updatedAt": "2026-09-27T02:47:32.794Z",
+  "createdAt": "2026-09-27T02:22:56.101Z",
+  "id": "lKEkMe1jnwdJnNyD",
+  "name": "Galera · gerar vídeo",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "92e440b3-e655-4092-be4a-049934fc5237",
+      "name": "Pedido de vídeo",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "galera/video",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "61ea16d8-cc81-4499-a38f-578384911e09"
+    },
+    {
+      "id": "05bfda83-d009-43d8-9b11-32453e91f555",
+      "name": "Montar contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const b = $input.first().json.body || {};\nreturn [{ json: { peca_id: b.peca_id, rodada: Number(b.rodada) || 0, formato: b.formato || 'Reels', canal: b.canal || '', resume_url: b.resume_url || '', cenas: b.cenas || [] } }];"
+      }
+    },
+    {
+      "id": "6fea7da5-1369-45d0-b0d6-f1b7d76e5b15",
+      "name": "Buscar configuração",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "galera_config",
+        "returnAll": true,
+        "filterType": "none"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "d0e464a3-43cf-4163-8442-6694edcdf2bb",
+      "name": "Cenas para vídeo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{ json: { output: { cenas: $('Montar contexto').first().json.cenas } } }];"
+      }
+    },
+    {
+      "id": "20b4d4e4-5c9a-403e-82b5-b04be4ed747f",
+      "name": "Uma cena por item",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ctx = $('Montar contexto').first().json;\nconst hz = ctx.formato === 'Vídeo' && /youtube/i.test(ctx.canal || '');\nconst cfg = Object.fromEntries($('Buscar configuração').all().map(i => [i.json.chave, i.json.valor]));\nlet refs = [];\ntry { refs = JSON.parse(cfg.img_referencias || '[]'); } catch (e) {}\nrefs = refs.slice(0, 4).map(x => String(x).replace(/^data:[^,]+,/, ''));\nconst modelo = refs.length ? 'flux-2-pro' : 'flux-pro-v1-1';\nconst cenas = $input.first().json.output?.cenas || [];\nif (!cenas.length) throw new Error('A Clara não conseguiu preparar as cenas do roteiro (o modelo não devolveu o formato esperado)');\nreturn cenas.map((c, i) => {\n  const body = refs.length\n    ? Object.assign({ prompt: c.prompt_imagem, width: hz ? 1440 : 810, height: hz ? 810 : 1440 }, ...refs.map((x, j) => ({ [j ? 'input_image_' + (j + 1) : 'input_image']: x })))\n    : { prompt: c.prompt_imagem, aspect_ratio: hz ? 'widescreen_16_9' : 'social_story_9_16', output_format: 'jpeg' };\n  const palavras = String(c.locucao || '').split(/\\s+/).filter(Boolean).length;\n  return { json: { numero: Number(c.numero) || i + 1, rodada: ctx.rodada, prompt_imagem: c.prompt_imagem, prompt_movimento: c.prompt_movimento || '', locucao: c.locucao || '', duracao: palavras > 11 ? '10' : '5', modelo_img: modelo, img_body: JSON.stringify(body), hz } };\n});"
+      }
+    },
+    {
+      "id": "fb5fe9f4-e2ba-4cea-8519-38d820b492bb",
+      "name": "Pedir imagem (cena)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.magnific.com/v1/ai/text-to-image/' + $json.modelo_img }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-magnific-api-key",
+              "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.img_body }}",
+        "options": {
+          "timeout": 30000,
+          "batching": {
+            "batch": {
+              "batchSize": 4,
+              "batchInterval": 300
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "c14f231e-cf12-4bb5-9cf1-732c40ca90ba",
+      "name": "Guardar tarefa da imagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const base = $('Uma cena por item').all();\nconst resp = $input.all();\nreturn base.map((b, i) => {\n  const { img_body, ...j } = b.json;\n  const task = resp[i]?.json?.data?.task_id || '';\n  return { json: { ...j, img_task: task, imagem_falhou: !task, tent: 0 } };\n});"
+      }
+    },
+    {
+      "id": "edc7ef36-de1f-4a2e-807c-d08c917f7873",
+      "name": "Esperar imagens das cenas",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "amount": 15
+      },
+      "webhookId": "6aa1ca91-44ee-4454-856a-1bbda47c6a15"
+    },
+    {
+      "id": "301a29ab-4b07-4e44-8527-ff10f8b7e8cf",
+      "name": "Base imagens",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "f3aa96be-0c91-4d07-9c86-063d31661d24",
+      "name": "Consultar imagem (cena)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.magnific.com/v1/ai/text-to-image/' + $json.modelo_img + '/' + ($json.img_task || 'sem-tarefa') }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-magnific-api-key",
+              "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "443cc22f-60d2-4bd3-aebd-321c3d20184e",
+      "name": "Checar imagens das cenas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const base = $('Base imagens').all();\nconst resp = $input.all();\nconst itens = base.map((b, i) => {\n  const j = { ...b.json, tent: (b.json.tent || 0) + 1 };\n  const d = resp[i]?.json?.data;\n  if (!j.imagem_url && d?.status === 'COMPLETED') j.imagem_url = d.generated?.[0];\n  if (d?.status === 'FAILED') j.imagem_falhou = true;\n  return j;\n});\nconst prontas = itens.every(j => j.imagem_url || j.imagem_falhou) || (itens[0]?.tent || 0) >= 10;\nreturn itens.map(j => ({ json: { ...j, todas_prontas: prontas } }));"
+      }
+    },
+    {
+      "id": "ad8ee4bc-e95d-4080-b799-0fff987b3b3a",
+      "name": "Progresso imagens",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2420,
+        -200
+      ],
+      "parameters": {
+        "tableId": "galera_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "video_progresso"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": "conteudo-cenas-video"
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "Gerando as imagens das cenas"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ fase: 'imagens', cenas: $input.all().map(i => ({ numero: i.json.numero, imagem: !!i.json.imagem_url, video: false, audio: false, tem_audio: !!i.json.locucao, falhou: !!i.json.imagem_falhou })) }) }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "id": "e1d0eae3-35d4-4250-abc1-fa99b0ee06cd",
+      "name": "Imagens das cenas prontas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2420,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.todas_prontas }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6b696ce6-2f19-4cac-b944-8c10aa681b9d",
+      "name": "Esperar mais imagens",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2420,
+        220
+      ],
+      "parameters": {
+        "amount": 10
+      },
+      "webhookId": "5d65c5af-9fd5-481f-85e7-a5b384bec929"
+    },
+    {
+      "id": "a4de5e30-0ae8-4630-ac71-03324d2740b7",
+      "name": "Base animar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ok = $input.all().filter(i => i.json.imagem_url).map(i => ({ json: { ...i.json, tent: 0 } }));\nif (!ok.length) throw new Error('Nenhuma imagem de cena ficou pronta no Magnific');\nreturn ok;"
+      }
+    },
+    {
+      "id": "4e747cc0-6171-4849-94a7-5006d19ece42",
+      "name": "Pedir vídeo (cena)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.magnific.com/v1/ai/image-to-video/kling-v2-6-pro",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-magnific-api-key",
+              "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ image: $json.imagem_url, prompt: $json.prompt_movimento || 'subtle cinematic motion', duration: $json.duracao, aspect_ratio: $json.hz ? 'widescreen_16_9' : 'social_story_9_16', cfg_scale: 0.5, generate_audio: false }) }}",
+        "options": {
+          "timeout": 30000,
+          "batching": {
+            "batch": {
+              "batchSize": 4,
+              "batchInterval": 300
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "d74c8195-ef19-4a12-b783-fd0f7f2712ff",
+      "name": "Pedir voz (cena)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.magnific.com/v1/ai/voiceover/elevenlabs-turbo-v2-5",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-magnific-api-key",
+              "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $('Base animar').item.json.locucao || '.', voice_id: ($('Buscar configuração').all().map(i => i.json).find(c => c.chave === 'video_voz') || {}).valor || '21m00Tcm4TlvDq8ikWAM', speed: 1.0, stability: 0.5, similarity_boost: 0.5, use_speaker_boost: true }) }}",
+        "options": {
+          "timeout": 30000,
+          "batching": {
+            "batch": {
+              "batchSize": 4,
+              "batchInterval": 300
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "23d1097d-1842-49e2-89c5-26b37af1d956",
+      "name": "Animar e narrar cenas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const base = $('Base animar').all();\nconst v = $('Pedir vídeo (cena)').all();\nconst a = $input.all();\nreturn base.map((b, i) => {\n  const video_task = v[i]?.json?.data?.task_id || '';\n  const audio_task = b.json.locucao ? (a[i]?.json?.data?.task_id || '') : '';\n  return { json: { ...b.json, video_task, audio_task, video_falhou: !video_task, tent: 0 } };\n});"
+      }
+    },
+    {
+      "id": "1549a674-a669-4f25-8f59-f3d9be110799",
+      "name": "Esperar vídeos",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3520,
+        0
+      ],
+      "parameters": {
+        "amount": 50
+      },
+      "webhookId": "218b08c3-3ce4-4810-9383-cac33d49af9e"
+    },
+    {
+      "id": "a9388195-e056-4634-aff6-9db622cc83c8",
+      "name": "Base vídeos",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3740,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "d04aa90a-a732-4175-b305-25b581504639",
+      "name": "Consultar vídeo (cena)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3960,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.magnific.com/v1/ai/image-to-video/kling-v2-6/' + ($json.video_task || 'sem-tarefa') }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-magnific-api-key",
+              "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "0715aa46-0ede-40e4-8d05-0193ab9b7e15",
+      "name": "Consultar voz (cena)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4180,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.magnific.com/v1/ai/voiceover/elevenlabs-turbo-v2-5/' + ($('Base vídeos').item.json.audio_task || 'sem-tarefa') }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-magnific-api-key",
+              "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "a5f986f1-9e0f-4ccb-b7cd-8b30854b5e5c",
+      "name": "Checar vídeos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const base = $('Base vídeos').all();\nconst v = $('Consultar vídeo (cena)').all();\nconst a = $input.all();\nconst itens = base.map((b, i) => {\n  const j = { ...b.json, tent: (b.json.tent || 0) + 1 };\n  const dv = v[i]?.json?.data, da = a[i]?.json?.data;\n  if (!j.video_url && dv?.status === 'COMPLETED') j.video_url = dv.generated?.[0];\n  if (dv?.status === 'FAILED') j.video_falhou = true;\n  if (j.audio_task && !j.audio_url && da?.status === 'COMPLETED') j.audio_url = da.generated?.[0];\n  if (j.audio_task && da?.status === 'FAILED') j.audio_falhou = true;\n  return j;\n});\nconst pronto = (j) => (j.video_url || j.video_falhou) && (!j.audio_task || j.audio_url || j.audio_falhou);\nconst todos = itens.every(pronto) || (itens[0]?.tent || 0) >= 20;\nreturn itens.map(j => ({ json: { ...j, todos_prontos: todos } }));"
+      }
+    },
+    {
+      "id": "cd10077c-d994-4a9d-a1eb-76b33a81d726",
+      "name": "Progresso vídeos",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4620,
+        -200
+      ],
+      "parameters": {
+        "tableId": "galera_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "video_progresso"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": "conteudo-cenas-video"
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "Animando e narrando as cenas"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ fase: 'videos', cenas: $input.all().map(i => i.json).filter(j => !j.sem_cenas).map(j => ({ numero: j.numero, imagem: true, video: !!j.video_url, audio: !!j.audio_url, tem_audio: !!j.audio_task, falhou: !!j.video_falhou })) }) }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "id": "670a9d8f-709e-485f-a315-071200c488ee",
+      "name": "Vídeos prontos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4620,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.todos_prontos }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "88cf1220-5bca-428f-b81b-20c141c7cda1",
+      "name": "Esperar mais vídeos",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4620,
+        220
+      ],
+      "parameters": {
+        "amount": 20
+      },
+      "webhookId": "d1354405-8af6-4807-9b74-33811488a715"
+    },
+    {
+      "id": "0d043985-be14-4a8e-b43e-9724ef9feb8f",
+      "name": "Progresso montagem",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4840,
+        -200
+      ],
+      "parameters": {
+        "tableId": "galera_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "video_progresso"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": "conteudo-cenas-video"
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "Montando o vídeo final"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ fase: 'montando', cenas: $json.cenas.map(c => ({ numero: c.numero, imagem: true, video: true, audio: true, tem_audio: true, falhou: false })) }) }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "id": "d403a1b2-82ee-4c93-9cd1-3964b61edcae",
+      "name": "Comando de montagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const itens = $input.all().map(i => i.json).filter(j => j.video_url).sort((a, b) => a.numero - b.numero);\nif (!itens.length) throw new Error('Nenhuma cena de vídeo ficou pronta no Magnific');\nconst peca = $('Montar contexto').first().json.peca_id;\nconst rodada = itens[0]?.rodada ?? 0;\nconst prefixo = peca + '/r' + rodada + '-' + Date.now();\nconst dir = '/home/node/.n8n-files/galera/' + prefixo.replace(/\\//g, '_');\nconst q = (s) => \"'\" + String(s).replace(/'/g, \"'\\\\''\") + \"'\";\nconst linhas = [\n  'set -e',\n  'F=/tmp/ffmpeg; [ -x $F ] || (wget -q -O /tmp/ffmpeg.gz https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-x64.gz && gunzip -f /tmp/ffmpeg.gz && chmod +x $F)',\n  'rm -rf ' + q(dir) + ' && mkdir -p ' + q(dir) + ' && cd ' + q(dir),\n];\nconst lista = [];\nconst T = itens[0]?.hz ? '1280:720' : '720:1280';\nconst vf = '[0:v]scale=' + T + ':force_original_aspect_ratio=increase,crop=' + T + ',setsar=1,fps=30[v]';\nfor (const j of itens) {\n  const n = String(j.numero).padStart(2, '0');\n  linhas.push('wget -q -O v' + n + '.mp4 ' + q(j.video_url));\n  if (j.audio_url) {\n    linhas.push('wget -q -O a' + n + '.mp3 ' + q(j.audio_url));\n    linhas.push('$F -y -loglevel error -i v' + n + '.mp4 -i a' + n + '.mp3 -filter_complex \"' + vf + ';[1:a]apad[a]\" -map \"[v]\" -map \"[a]\" -shortest -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 cena-' + n + '.mp4');\n  } else {\n    linhas.push('$F -y -loglevel error -i v' + n + '.mp4 -f lavfi -i anullsrc=r=44100:cl=stereo -filter_complex \"' + vf + '\" -map \"[v]\" -map 1:a -shortest -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 cena-' + n + '.mp4');\n  }\n  lista.push(\"file 'cena-\" + n + \".mp4'\");\n}\nlinhas.push(\"printf '%s\\\\n' \" + lista.map(l => q(l)).join(' ') + ' > lista.txt');\nlinhas.push('$F -y -loglevel error -f concat -safe 0 -i lista.txt -c copy video-final.mp4');\nlinhas.push('rm -f v*.mp4 a*.mp3 lista.txt && ls -la');\nreturn [{ json: { cmd: linhas.join('\\n'), dir, prefixo, rodada, cenas: itens.map(j => ({ numero: j.numero, locucao: j.locucao, prompt: j.prompt_imagem, duracao: Number(j.duracao) })) } }];"
+      }
+    },
+    {
+      "id": "7ed898a4-5b41-43e0-8a1e-1847e805944c",
+      "name": "Montar vídeo (ffmpeg)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        5060,
+        0
+      ],
+      "parameters": {
+        "command": "={{ $json.cmd }}"
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "33ad4822-28e3-4b3d-847b-a50ff2bc7d99",
+      "name": "Ler arquivos do vídeo",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        5280,
+        0
+      ],
+      "parameters": {
+        "fileSelector": "={{ $('Comando de montagem').first().json.dir + '/*.mp4' }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "71ce72f6-fe23-41e4-9785-558ed7ae2213",
+      "name": "Subir para o Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5500,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/galera/' + $('Comando de montagem').first().json.prefixo + '/' + $binary.data.fileName }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-upsert",
+              "value": "true"
+            },
+            {
+              "name": "Content-Type",
+              "value": "video/mp4"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "575e181a-bf49-4883-9173-4865cbde98e8",
+      "name": "Linhas dos vídeos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const m = $('Comando de montagem').first().json;\nconst base = 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/public/galera/' + m.prefixo + '/';\nconst peca = $('Montar contexto').first().json.peca_id;\nconst nomes = $('Ler arquivos do vídeo').all().map(i => i.binary?.data?.fileName).filter(Boolean);\nconst linhas = [];\nif (nomes.includes('video-final.mp4')) linhas.push({ peca_id: peca, numero: 0, rodada: m.rodada, video_url: base + 'video-final.mp4', locucao: m.cenas.map(c => c.locucao).join(' '), prompt: '', duracao: m.cenas.reduce((s, c) => s + c.duracao, 0) });\nfor (const c of m.cenas) {\n  const n = 'cena-' + String(c.numero).padStart(2, '0') + '.mp4';\n  if (nomes.includes(n)) linhas.push({ peca_id: peca, numero: c.numero, rodada: m.rodada, video_url: base + n, locucao: c.locucao || '', prompt: c.prompt || '', duracao: c.duracao });\n}\nreturn linhas.length ? linhas.map(json => ({ json })) : [{ json: { vazio: true } }];"
+      }
+    },
+    {
+      "id": "4be5fda7-8a63-4fd7-a306-b5b4014caa24",
+      "name": "Gravar vídeos",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        5940,
+        0
+      ],
+      "parameters": {
+        "tableId": "galera_videos",
+        "dataToSend": "autoMapInputData"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "39db8857-1e84-45eb-aaa4-fbb335511f74",
+      "name": "Registrar vídeo pronto",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        6160,
+        0
+      ],
+      "parameters": {
+        "tableId": "galera_eventos",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "peca_id",
+              "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+            },
+            {
+              "fieldId": "evento",
+              "fieldValue": "video_pronto"
+            },
+            {
+              "fieldId": "agente_slug",
+              "fieldValue": "conteudo-cenas-video"
+            },
+            {
+              "fieldId": "resumo",
+              "fieldValue": "={{ 'Gerei e montei o vídeo: ' + $('Comando de montagem').first().json.cenas.length + ' cenas com locução.' }}"
+            },
+            {
+              "fieldId": "payload",
+              "fieldValue": "={{ JSON.stringify({ total: $('Comando de montagem').first().json.cenas.length, rodada: $('Comando de montagem').first().json.rodada }) }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "303c781f-1fd0-4b47-af53-c3ec7ffe381b",
+      "name": "Avisar esteira",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6380,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Montar contexto').first().json.resume_url }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ok: true, total: $('Comando de montagem').first().json.cenas.length }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "executeOnce": true
+    },
+    {
+      "id": "a8c24b46-47c0-48b9-af47-a7ca4ac34d44",
+      "name": "Deu erro",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        600
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "53f5e713-5e3d-4c51-bf14-c7321b812bef",
+      "name": "Execução com erro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        600
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://n8n.miabuilder.com/api/v1/executions/' + $json.execution.id + '?includeData=true' }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "n8nApi",
+        "options": {}
+      },
+      "credentials": {
+        "n8nApi": {
+          "id": "0CiPHsGiiUoYqMqm",
+          "name": "n8n account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "52f3925a-933b-4dcb-8ad2-337372919666",
+      "name": "Dados do pedido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        600
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const erro = $('Deu erro').first().json.execution || {};\nconst run = $input.first().json.data?.resultData?.runData || {};\nconst b = run['Pedido de vídeo']?.[0]?.data?.main?.[0]?.[0]?.json?.body || {};\nif (!b.resume_url) return [];\nreturn [{ json: { resume_url: b.resume_url, erro: 'O vídeo parou em \"' + (erro.lastNodeExecuted || 'uma etapa') + '\": ' + String(erro.error?.message || 'erro').slice(0, 180) } }];"
+      }
+    },
+    {
+      "id": "57c56441-33bd-48d8-b84f-395c283db9fc",
+      "name": "Avisar esteira do erro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        600
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.resume_url }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ok: false, erro: $json.erro }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Pedido de vídeo": {
+      "main": [
+        [
+          {
+            "node": "Montar contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar contexto": {
+      "main": [
+        [
+          {
+            "node": "Buscar configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar configuração": {
+      "main": [
+        [
+          {
+            "node": "Cenas para vídeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cenas para vídeo": {
+      "main": [
+        [
+          {
+            "node": "Uma cena por item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uma cena por item": {
+      "main": [
+        [
+          {
+            "node": "Pedir imagem (cena)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedir imagem (cena)": {
+      "main": [
+        [
+          {
+            "node": "Guardar tarefa da imagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar tarefa da imagem": {
+      "main": [
+        [
+          {
+            "node": "Esperar imagens das cenas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar imagens das cenas": {
+      "main": [
+        [
+          {
+            "node": "Base imagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar mais imagens": {
+      "main": [
+        [
+          {
+            "node": "Base imagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Base imagens": {
+      "main": [
+        [
+          {
+            "node": "Consultar imagem (cena)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar imagem (cena)": {
+      "main": [
+        [
+          {
+            "node": "Checar imagens das cenas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checar imagens das cenas": {
+      "main": [
+        [
+          {
+            "node": "Progresso imagens",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Imagens das cenas prontas?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Base animar": {
+      "main": [
+        [
+          {
+            "node": "Pedir vídeo (cena)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedir vídeo (cena)": {
+      "main": [
+        [
+          {
+            "node": "Pedir voz (cena)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedir voz (cena)": {
+      "main": [
+        [
+          {
+            "node": "Animar e narrar cenas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Animar e narrar cenas": {
+      "main": [
+        [
+          {
+            "node": "Esperar vídeos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar vídeos": {
+      "main": [
+        [
+          {
+            "node": "Base vídeos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar mais vídeos": {
+      "main": [
+        [
+          {
+            "node": "Base vídeos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Base vídeos": {
+      "main": [
+        [
+          {
+            "node": "Consultar vídeo (cena)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar vídeo (cena)": {
+      "main": [
+        [
+          {
+            "node": "Consultar voz (cena)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar voz (cena)": {
+      "main": [
+        [
+          {
+            "node": "Checar vídeos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checar vídeos": {
+      "main": [
+        [
+          {
+            "node": "Progresso vídeos",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Vídeos prontos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comando de montagem": {
+      "main": [
+        [
+          {
+            "node": "Progresso montagem",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Montar vídeo (ffmpeg)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar vídeo (ffmpeg)": {
+      "main": [
+        [
+          {
+            "node": "Ler arquivos do vídeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler arquivos do vídeo": {
+      "main": [
+        [
+          {
+            "node": "Subir para o Storage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subir para o Storage": {
+      "main": [
+        [
+          {
+            "node": "Linhas dos vídeos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Linhas dos vídeos": {
+      "main": [
+        [
+          {
+            "node": "Gravar vídeos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar vídeos": {
+      "main": [
+        [
+          {
+            "node": "Registrar vídeo pronto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar vídeo pronto": {
+      "main": [
+        [
+          {
+            "node": "Avisar esteira",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deu erro": {
+      "main": [
+        [
+          {
+            "node": "Execução com erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execução com erro": {
+      "main": [
+        [
+          {
+            "node": "Dados do pedido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dados do pedido": {
+      "main": [
+        [
+          {
+            "node": "Avisar esteira do erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Imagens das cenas prontas?": {
+      "main": [
+        [
+          {
+            "node": "Base animar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Esperar mais imagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vídeos prontos?": {
+      "main": [
+        [
+          {
+            "node": "Comando de montagem",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Esperar mais vídeos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "lKEkMe1jnwdJnNyD"
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "60370c39-f058-42d1-8129-17e7cbdd3b28",
+  "activeVersionId": "60370c39-f058-42d1-8129-17e7cbdd3b28",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "lKEkMe1jnwdJnNyD",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-27T02:22:56.101Z",
+      "updatedAt": "2026-09-27T02:22:56.101Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "60370c39-f058-42d1-8129-17e7cbdd3b28",
+    "workflowId": "lKEkMe1jnwdJnNyD",
+    "nodes": [
+      {
+        "id": "92e440b3-e655-4092-be4a-049934fc5237",
+        "name": "Pedido de vídeo",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "galera/video",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "webhookId": "61ea16d8-cc81-4499-a38f-578384911e09"
+      },
+      {
+        "id": "05bfda83-d009-43d8-9b11-32453e91f555",
+        "name": "Montar contexto",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          224,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const b = $input.first().json.body || {};\nreturn [{ json: { peca_id: b.peca_id, rodada: Number(b.rodada) || 0, formato: b.formato || 'Reels', canal: b.canal || '', resume_url: b.resume_url || '', cenas: b.cenas || [] } }];"
+        }
+      },
+      {
+        "id": "6fea7da5-1369-45d0-b0d6-f1b7d76e5b15",
+        "name": "Buscar configuração",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          440,
+          0
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "getAll",
+          "tableId": "galera_config",
+          "returnAll": true,
+          "filterType": "none"
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "alwaysOutputData": true,
+        "executeOnce": true
+      },
+      {
+        "id": "d0e464a3-43cf-4163-8442-6694edcdf2bb",
+        "name": "Cenas para vídeo",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          660,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "return [{ json: { output: { cenas: $('Montar contexto').first().json.cenas } } }];"
+        }
+      },
+      {
+        "id": "20b4d4e4-5c9a-403e-82b5-b04be4ed747f",
+        "name": "Uma cena por item",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          880,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const ctx = $('Montar contexto').first().json;\nconst hz = ctx.formato === 'Vídeo' && /youtube/i.test(ctx.canal || '');\nconst cfg = Object.fromEntries($('Buscar configuração').all().map(i => [i.json.chave, i.json.valor]));\nlet refs = [];\ntry { refs = JSON.parse(cfg.img_referencias || '[]'); } catch (e) {}\nrefs = refs.slice(0, 4).map(x => String(x).replace(/^data:[^,]+,/, ''));\nconst modelo = refs.length ? 'flux-2-pro' : 'flux-pro-v1-1';\nconst cenas = $input.first().json.output?.cenas || [];\nif (!cenas.length) throw new Error('A Clara não conseguiu preparar as cenas do roteiro (o modelo não devolveu o formato esperado)');\nreturn cenas.map((c, i) => {\n  const body = refs.length\n    ? Object.assign({ prompt: c.prompt_imagem, width: hz ? 1440 : 810, height: hz ? 810 : 1440 }, ...refs.map((x, j) => ({ [j ? 'input_image_' + (j + 1) : 'input_image']: x })))\n    : { prompt: c.prompt_imagem, aspect_ratio: hz ? 'widescreen_16_9' : 'social_story_9_16', output_format: 'jpeg' };\n  const palavras = String(c.locucao || '').split(/\\s+/).filter(Boolean).length;\n  return { json: { numero: Number(c.numero) || i + 1, rodada: ctx.rodada, prompt_imagem: c.prompt_imagem, prompt_movimento: c.prompt_movimento || '', locucao: c.locucao || '', duracao: palavras > 11 ? '10' : '5', modelo_img: modelo, img_body: JSON.stringify(body), hz } };\n});"
+        }
+      },
+      {
+        "id": "fb5fe9f4-e2ba-4cea-8519-38d820b492bb",
+        "name": "Pedir imagem (cena)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1100,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://api.magnific.com/v1/ai/text-to-image/' + $json.modelo_img }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "x-magnific-api-key",
+                "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ $json.img_body }}",
+          "options": {
+            "timeout": 30000,
+            "batching": {
+              "batch": {
+                "batchSize": 4,
+                "batchInterval": 300
+              }
+            }
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "c14f231e-cf12-4bb5-9cf1-732c40ca90ba",
+        "name": "Guardar tarefa da imagem",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1320,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const base = $('Uma cena por item').all();\nconst resp = $input.all();\nreturn base.map((b, i) => {\n  const { img_body, ...j } = b.json;\n  const task = resp[i]?.json?.data?.task_id || '';\n  return { json: { ...j, img_task: task, imagem_falhou: !task, tent: 0 } };\n});"
+        }
+      },
+      {
+        "id": "edc7ef36-de1f-4a2e-807c-d08c917f7873",
+        "name": "Esperar imagens das cenas",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          1540,
+          0
+        ],
+        "parameters": {
+          "amount": 15
+        },
+        "webhookId": "6aa1ca91-44ee-4454-856a-1bbda47c6a15"
+      },
+      {
+        "id": "301a29ab-4b07-4e44-8527-ff10f8b7e8cf",
+        "name": "Base imagens",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          1760,
+          0
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "f3aa96be-0c91-4d07-9c86-063d31661d24",
+        "name": "Consultar imagem (cena)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1980,
+          0
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "={{ 'https://api.magnific.com/v1/ai/text-to-image/' + $json.modelo_img + '/' + ($json.img_task || 'sem-tarefa') }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "x-magnific-api-key",
+                "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true
+      },
+      {
+        "id": "443cc22f-60d2-4bd3-aebd-321c3d20184e",
+        "name": "Checar imagens das cenas",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2200,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const base = $('Base imagens').all();\nconst resp = $input.all();\nconst itens = base.map((b, i) => {\n  const j = { ...b.json, tent: (b.json.tent || 0) + 1 };\n  const d = resp[i]?.json?.data;\n  if (!j.imagem_url && d?.status === 'COMPLETED') j.imagem_url = d.generated?.[0];\n  if (d?.status === 'FAILED') j.imagem_falhou = true;\n  return j;\n});\nconst prontas = itens.every(j => j.imagem_url || j.imagem_falhou) || (itens[0]?.tent || 0) >= 10;\nreturn itens.map(j => ({ json: { ...j, todas_prontas: prontas } }));"
+        }
+      },
+      {
+        "id": "ad8ee4bc-e95d-4080-b799-0fff987b3b3a",
+        "name": "Progresso imagens",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2420,
+          -200
+        ],
+        "parameters": {
+          "tableId": "galera_eventos",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "video_progresso"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": "conteudo-cenas-video"
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "Gerando as imagens das cenas"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ fase: 'imagens', cenas: $input.all().map(i => ({ numero: i.json.numero, imagem: !!i.json.imagem_url, video: false, audio: false, tem_audio: !!i.json.locucao, falhou: !!i.json.imagem_falhou })) }) }}"
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "executeOnce": true
+      },
+      {
+        "id": "e1d0eae3-35d4-4250-abc1-fa99b0ee06cd",
+        "name": "Imagens das cenas prontas?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2420,
+          0
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.todas_prontas }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "6b696ce6-2f19-4cac-b944-8c10aa681b9d",
+        "name": "Esperar mais imagens",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          2420,
+          220
+        ],
+        "parameters": {
+          "amount": 10
+        },
+        "webhookId": "5d65c5af-9fd5-481f-85e7-a5b384bec929"
+      },
+      {
+        "id": "a4de5e30-0ae8-4630-ac71-03324d2740b7",
+        "name": "Base animar",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2640,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const ok = $input.all().filter(i => i.json.imagem_url).map(i => ({ json: { ...i.json, tent: 0 } }));\nif (!ok.length) throw new Error('Nenhuma imagem de cena ficou pronta no Magnific');\nreturn ok;"
+        }
+      },
+      {
+        "id": "4e747cc0-6171-4849-94a7-5006d19ece42",
+        "name": "Pedir vídeo (cena)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2860,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.magnific.com/v1/ai/image-to-video/kling-v2-6-pro",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "x-magnific-api-key",
+                "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ image: $json.imagem_url, prompt: $json.prompt_movimento || 'subtle cinematic motion', duration: $json.duracao, aspect_ratio: $json.hz ? 'widescreen_16_9' : 'social_story_9_16', cfg_scale: 0.5, generate_audio: false }) }}",
+          "options": {
+            "timeout": 30000,
+            "batching": {
+              "batch": {
+                "batchSize": 4,
+                "batchInterval": 300
+              }
+            }
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "d74c8195-ef19-4a12-b783-fd0f7f2712ff",
+        "name": "Pedir voz (cena)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3080,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.magnific.com/v1/ai/voiceover/elevenlabs-turbo-v2-5",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "x-magnific-api-key",
+                "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ text: $('Base animar').item.json.locucao || '.', voice_id: ($('Buscar configuração').all().map(i => i.json).find(c => c.chave === 'video_voz') || {}).valor || '21m00Tcm4TlvDq8ikWAM', speed: 1.0, stability: 0.5, similarity_boost: 0.5, use_speaker_boost: true }) }}",
+          "options": {
+            "timeout": 30000,
+            "batching": {
+              "batch": {
+                "batchSize": 4,
+                "batchInterval": 300
+              }
+            }
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 2000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "23d1097d-1842-49e2-89c5-26b37af1d956",
+        "name": "Animar e narrar cenas",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3300,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const base = $('Base animar').all();\nconst v = $('Pedir vídeo (cena)').all();\nconst a = $input.all();\nreturn base.map((b, i) => {\n  const video_task = v[i]?.json?.data?.task_id || '';\n  const audio_task = b.json.locucao ? (a[i]?.json?.data?.task_id || '') : '';\n  return { json: { ...b.json, video_task, audio_task, video_falhou: !video_task, tent: 0 } };\n});"
+        }
+      },
+      {
+        "id": "1549a674-a669-4f25-8f59-f3d9be110799",
+        "name": "Esperar vídeos",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          3520,
+          0
+        ],
+        "parameters": {
+          "amount": 50
+        },
+        "webhookId": "218b08c3-3ce4-4810-9383-cac33d49af9e"
+      },
+      {
+        "id": "a9388195-e056-4634-aff6-9db622cc83c8",
+        "name": "Base vídeos",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          3740,
+          0
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "d04aa90a-a732-4175-b305-25b581504639",
+        "name": "Consultar vídeo (cena)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3960,
+          0
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "={{ 'https://api.magnific.com/v1/ai/image-to-video/kling-v2-6/' + ($json.video_task || 'sem-tarefa') }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "x-magnific-api-key",
+                "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true
+      },
+      {
+        "id": "0715aa46-0ede-40e4-8d05-0193ab9b7e15",
+        "name": "Consultar voz (cena)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          4180,
+          0
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "={{ 'https://api.magnific.com/v1/ai/voiceover/elevenlabs-turbo-v2-5/' + ($('Base vídeos').item.json.audio_task || 'sem-tarefa') }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "x-magnific-api-key",
+                "value": "MSa5f0036a21e0445589b0d96fdb4079ba"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true
+      },
+      {
+        "id": "a5f986f1-9e0f-4ccb-b7cd-8b30854b5e5c",
+        "name": "Checar vídeos",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4400,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const base = $('Base vídeos').all();\nconst v = $('Consultar vídeo (cena)').all();\nconst a = $input.all();\nconst itens = base.map((b, i) => {\n  const j = { ...b.json, tent: (b.json.tent || 0) + 1 };\n  const dv = v[i]?.json?.data, da = a[i]?.json?.data;\n  if (!j.video_url && dv?.status === 'COMPLETED') j.video_url = dv.generated?.[0];\n  if (dv?.status === 'FAILED') j.video_falhou = true;\n  if (j.audio_task && !j.audio_url && da?.status === 'COMPLETED') j.audio_url = da.generated?.[0];\n  if (j.audio_task && da?.status === 'FAILED') j.audio_falhou = true;\n  return j;\n});\nconst pronto = (j) => (j.video_url || j.video_falhou) && (!j.audio_task || j.audio_url || j.audio_falhou);\nconst todos = itens.every(pronto) || (itens[0]?.tent || 0) >= 20;\nreturn itens.map(j => ({ json: { ...j, todos_prontos: todos } }));"
+        }
+      },
+      {
+        "id": "cd10077c-d994-4a9d-a1eb-76b33a81d726",
+        "name": "Progresso vídeos",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          4620,
+          -200
+        ],
+        "parameters": {
+          "tableId": "galera_eventos",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "video_progresso"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": "conteudo-cenas-video"
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "Animando e narrando as cenas"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ fase: 'videos', cenas: $input.all().map(i => i.json).filter(j => !j.sem_cenas).map(j => ({ numero: j.numero, imagem: true, video: !!j.video_url, audio: !!j.audio_url, tem_audio: !!j.audio_task, falhou: !!j.video_falhou })) }) }}"
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "executeOnce": true
+      },
+      {
+        "id": "670a9d8f-709e-485f-a315-071200c488ee",
+        "name": "Vídeos prontos?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          4620,
+          0
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.todos_prontos }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "88cf1220-5bca-428f-b81b-20c141c7cda1",
+        "name": "Esperar mais vídeos",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          4620,
+          220
+        ],
+        "parameters": {
+          "amount": 20
+        },
+        "webhookId": "d1354405-8af6-4807-9b74-33811488a715"
+      },
+      {
+        "id": "0d043985-be14-4a8e-b43e-9724ef9feb8f",
+        "name": "Progresso montagem",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          4840,
+          -200
+        ],
+        "parameters": {
+          "tableId": "galera_eventos",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "video_progresso"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": "conteudo-cenas-video"
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "Montando o vídeo final"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ fase: 'montando', cenas: $json.cenas.map(c => ({ numero: c.numero, imagem: true, video: true, audio: true, tem_audio: true, falhou: false })) }) }}"
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "executeOnce": true
+      },
+      {
+        "id": "d403a1b2-82ee-4c93-9cd1-3964b61edcae",
+        "name": "Comando de montagem",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4840,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const itens = $input.all().map(i => i.json).filter(j => j.video_url).sort((a, b) => a.numero - b.numero);\nif (!itens.length) throw new Error('Nenhuma cena de vídeo ficou pronta no Magnific');\nconst peca = $('Montar contexto').first().json.peca_id;\nconst rodada = itens[0]?.rodada ?? 0;\nconst prefixo = peca + '/r' + rodada + '-' + Date.now();\nconst dir = '/home/node/.n8n-files/galera/' + prefixo.replace(/\\//g, '_');\nconst q = (s) => \"'\" + String(s).replace(/'/g, \"'\\\\''\") + \"'\";\nconst linhas = [\n  'set -e',\n  'F=/tmp/ffmpeg; [ -x $F ] || (wget -q -O /tmp/ffmpeg.gz https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-x64.gz && gunzip -f /tmp/ffmpeg.gz && chmod +x $F)',\n  'rm -rf ' + q(dir) + ' && mkdir -p ' + q(dir) + ' && cd ' + q(dir),\n];\nconst lista = [];\nconst T = itens[0]?.hz ? '1280:720' : '720:1280';\nconst vf = '[0:v]scale=' + T + ':force_original_aspect_ratio=increase,crop=' + T + ',setsar=1,fps=30[v]';\nfor (const j of itens) {\n  const n = String(j.numero).padStart(2, '0');\n  linhas.push('wget -q -O v' + n + '.mp4 ' + q(j.video_url));\n  if (j.audio_url) {\n    linhas.push('wget -q -O a' + n + '.mp3 ' + q(j.audio_url));\n    linhas.push('$F -y -loglevel error -i v' + n + '.mp4 -i a' + n + '.mp3 -filter_complex \"' + vf + ';[1:a]apad[a]\" -map \"[v]\" -map \"[a]\" -shortest -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 cena-' + n + '.mp4');\n  } else {\n    linhas.push('$F -y -loglevel error -i v' + n + '.mp4 -f lavfi -i anullsrc=r=44100:cl=stereo -filter_complex \"' + vf + '\" -map \"[v]\" -map 1:a -shortest -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 cena-' + n + '.mp4');\n  }\n  lista.push(\"file 'cena-\" + n + \".mp4'\");\n}\nlinhas.push(\"printf '%s\\\\n' \" + lista.map(l => q(l)).join(' ') + ' > lista.txt');\nlinhas.push('$F -y -loglevel error -f concat -safe 0 -i lista.txt -c copy video-final.mp4');\nlinhas.push('rm -f v*.mp4 a*.mp3 lista.txt && ls -la');\nreturn [{ json: { cmd: linhas.join('\\n'), dir, prefixo, rodada, cenas: itens.map(j => ({ numero: j.numero, locucao: j.locucao, prompt: j.prompt_imagem, duracao: Number(j.duracao) })) } }];"
+        }
+      },
+      {
+        "id": "7ed898a4-5b41-43e0-8a1e-1847e805944c",
+        "name": "Montar vídeo (ffmpeg)",
+        "type": "n8n-nodes-base.executeCommand",
+        "typeVersion": 1,
+        "position": [
+          5060,
+          0
+        ],
+        "parameters": {
+          "command": "={{ $json.cmd }}"
+        },
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true
+      },
+      {
+        "id": "33ad4822-28e3-4b3d-847b-a50ff2bc7d99",
+        "name": "Ler arquivos do vídeo",
+        "type": "n8n-nodes-base.readWriteFile",
+        "typeVersion": 1,
+        "position": [
+          5280,
+          0
+        ],
+        "parameters": {
+          "fileSelector": "={{ $('Comando de montagem').first().json.dir + '/*.mp4' }}",
+          "options": {}
+        },
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true
+      },
+      {
+        "id": "71ce72f6-fe23-41e4-9785-558ed7ae2213",
+        "name": "Subir para o Storage",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5500,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/galera/' + $('Comando de montagem').first().json.prefixo + '/' + $binary.data.fileName }}",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "x-upsert",
+                "value": "true"
+              },
+              {
+                "name": "Content-Type",
+                "value": "video/mp4"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "binaryData",
+          "inputDataFieldName": "data",
+          "options": {}
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "575e181a-bf49-4883-9173-4865cbde98e8",
+        "name": "Linhas dos vídeos",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5720,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const m = $('Comando de montagem').first().json;\nconst base = 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/public/galera/' + m.prefixo + '/';\nconst peca = $('Montar contexto').first().json.peca_id;\nconst nomes = $('Ler arquivos do vídeo').all().map(i => i.binary?.data?.fileName).filter(Boolean);\nconst linhas = [];\nif (nomes.includes('video-final.mp4')) linhas.push({ peca_id: peca, numero: 0, rodada: m.rodada, video_url: base + 'video-final.mp4', locucao: m.cenas.map(c => c.locucao).join(' '), prompt: '', duracao: m.cenas.reduce((s, c) => s + c.duracao, 0) });\nfor (const c of m.cenas) {\n  const n = 'cena-' + String(c.numero).padStart(2, '0') + '.mp4';\n  if (nomes.includes(n)) linhas.push({ peca_id: peca, numero: c.numero, rodada: m.rodada, video_url: base + n, locucao: c.locucao || '', prompt: c.prompt || '', duracao: c.duracao });\n}\nreturn linhas.length ? linhas.map(json => ({ json })) : [{ json: { vazio: true } }];"
+        }
+      },
+      {
+        "id": "4be5fda7-8a63-4fd7-a306-b5b4014caa24",
+        "name": "Gravar vídeos",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          5940,
+          0
+        ],
+        "parameters": {
+          "tableId": "galera_videos",
+          "dataToSend": "autoMapInputData"
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true
+      },
+      {
+        "id": "39db8857-1e84-45eb-aaa4-fbb335511f74",
+        "name": "Registrar vídeo pronto",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          6160,
+          0
+        ],
+        "parameters": {
+          "tableId": "galera_eventos",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "peca_id",
+                "fieldValue": "={{ $('Montar contexto').first().json.peca_id }}"
+              },
+              {
+                "fieldId": "evento",
+                "fieldValue": "video_pronto"
+              },
+              {
+                "fieldId": "agente_slug",
+                "fieldValue": "conteudo-cenas-video"
+              },
+              {
+                "fieldId": "resumo",
+                "fieldValue": "={{ 'Gerei e montei o vídeo: ' + $('Comando de montagem').first().json.cenas.length + ' cenas com locução.' }}"
+              },
+              {
+                "fieldId": "payload",
+                "fieldValue": "={{ JSON.stringify({ total: $('Comando de montagem').first().json.cenas.length, rodada: $('Comando de montagem').first().json.rodada }) }}"
+              }
+            ]
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true,
+        "executeOnce": true
+      },
+      {
+        "id": "303c781f-1fd0-4b47-af53-c3ec7ffe381b",
+        "name": "Avisar esteira",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          6380,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $('Montar contexto').first().json.resume_url }}",
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ ok: true, total: $('Comando de montagem').first().json.cenas.length }) }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 3000,
+        "executeOnce": true
+      },
+      {
+        "id": "a8c24b46-47c0-48b9-af47-a7ca4ac34d44",
+        "name": "Deu erro",
+        "type": "n8n-nodes-base.errorTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          600
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "53f5e713-5e3d-4c51-bf14-c7321b812bef",
+        "name": "Execução com erro",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          220,
+          600
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "={{ 'https://n8n.miabuilder.com/api/v1/executions/' + $json.execution.id + '?includeData=true' }}",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "n8nApi",
+          "options": {}
+        },
+        "credentials": {
+          "n8nApi": {
+            "id": "0CiPHsGiiUoYqMqm",
+            "name": "n8n account"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "52f3925a-933b-4dcb-8ad2-337372919666",
+        "name": "Dados do pedido",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          440,
+          600
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const erro = $('Deu erro').first().json.execution || {};\nconst run = $input.first().json.data?.resultData?.runData || {};\nconst b = run['Pedido de vídeo']?.[0]?.data?.main?.[0]?.[0]?.json?.body || {};\nif (!b.resume_url) return [];\nreturn [{ json: { resume_url: b.resume_url, erro: 'O vídeo parou em \"' + (erro.lastNodeExecuted || 'uma etapa') + '\": ' + String(erro.error?.message || 'erro').slice(0, 180) } }];"
+        }
+      },
+      {
+        "id": "57c56441-33bd-48d8-b84f-395c283db9fc",
+        "name": "Avisar esteira do erro",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          660,
+          600
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $json.resume_url }}",
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ ok: false, erro: $json.erro }) }}",
+          "options": {}
+        },
+        "onError": "continueRegularOutput"
+      }
+    ],
+    "connections": {
+      "Pedido de vídeo": {
+        "main": [
+          [
+            {
+              "node": "Montar contexto",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar contexto": {
+        "main": [
+          [
+            {
+              "node": "Buscar configuração",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar configuração": {
+        "main": [
+          [
+            {
+              "node": "Cenas para vídeo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cenas para vídeo": {
+        "main": [
+          [
+            {
+              "node": "Uma cena por item",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Uma cena por item": {
+        "main": [
+          [
+            {
+              "node": "Pedir imagem (cena)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pedir imagem (cena)": {
+        "main": [
+          [
+            {
+              "node": "Guardar tarefa da imagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Guardar tarefa da imagem": {
+        "main": [
+          [
+            {
+              "node": "Esperar imagens das cenas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Esperar imagens das cenas": {
+        "main": [
+          [
+            {
+              "node": "Base imagens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Esperar mais imagens": {
+        "main": [
+          [
+            {
+              "node": "Base imagens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Base imagens": {
+        "main": [
+          [
+            {
+              "node": "Consultar imagem (cena)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Consultar imagem (cena)": {
+        "main": [
+          [
+            {
+              "node": "Checar imagens das cenas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Checar imagens das cenas": {
+        "main": [
+          [
+            {
+              "node": "Progresso imagens",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Imagens das cenas prontas?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Base animar": {
+        "main": [
+          [
+            {
+              "node": "Pedir vídeo (cena)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pedir vídeo (cena)": {
+        "main": [
+          [
+            {
+              "node": "Pedir voz (cena)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pedir voz (cena)": {
+        "main": [
+          [
+            {
+              "node": "Animar e narrar cenas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Animar e narrar cenas": {
+        "main": [
+          [
+            {
+              "node": "Esperar vídeos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Esperar vídeos": {
+        "main": [
+          [
+            {
+              "node": "Base vídeos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Esperar mais vídeos": {
+        "main": [
+          [
+            {
+              "node": "Base vídeos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Base vídeos": {
+        "main": [
+          [
+            {
+              "node": "Consultar vídeo (cena)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Consultar vídeo (cena)": {
+        "main": [
+          [
+            {
+              "node": "Consultar voz (cena)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Consultar voz (cena)": {
+        "main": [
+          [
+            {
+              "node": "Checar vídeos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Checar vídeos": {
+        "main": [
+          [
+            {
+              "node": "Progresso vídeos",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Vídeos prontos?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Comando de montagem": {
+        "main": [
+          [
+            {
+              "node": "Progresso montagem",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Montar vídeo (ffmpeg)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar vídeo (ffmpeg)": {
+        "main": [
+          [
+            {
+              "node": "Ler arquivos do vídeo",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ler arquivos do vídeo": {
+        "main": [
+          [
+            {
+              "node": "Subir para o Storage",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Subir para o Storage": {
+        "main": [
+          [
+            {
+              "node": "Linhas dos vídeos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Linhas dos vídeos": {
+        "main": [
+          [
+            {
+              "node": "Gravar vídeos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gravar vídeos": {
+        "main": [
+          [
+            {
+              "node": "Registrar vídeo pronto",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Registrar vídeo pronto": {
+        "main": [
+          [
+            {
+              "node": "Avisar esteira",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Deu erro": {
+        "main": [
+          [
+            {
+              "node": "Execução com erro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Execução com erro": {
+        "main": [
+          [
+            {
+              "node": "Dados do pedido",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Dados do pedido": {
+        "main": [
+          [
+            {
+              "node": "Avisar esteira do erro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Imagens das cenas prontas?": {
+        "main": [
+          [
+            {
+              "node": "Base animar",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Esperar mais imagens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Vídeos prontos?": {
+        "main": [
+          [
+            {
+              "node": "Comando de montagem",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Esperar mais vídeos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Cadeia de vídeo completa (Magnific + ffmpeg + Storage)",
+    "description": "Added nodes: Buscar configuração, Cenas para vídeo, Uma cena por item, Pedir imagem (cena), Guardar tarefa da imagem and 32 more\nConnections: 38 added, 0 removed",
+    "autosaved": false,
+    "createdAt": "2026-09-27T02:28:03.489Z",
+    "updatedAt": "2026-09-27T02:28:03.489Z"
+  },
+  "tags": []
+}
