@@ -1,0 +1,341 @@
+{
+  "updatedAt": "2026-09-28T13:07:36.894Z",
+  "createdAt": "2026-09-28T12:50:38.739Z",
+  "id": "TDgtm2m5guFpFU8F",
+  "name": "01 - Automação Sites",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "6f5dbac5-6fbf-4560-9849-c2c487d60113",
+      "name": "Receber Pedido de Site",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "criar-site-medico",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "11af4087-eb6b-42bd-b31f-6ca546fabde6"
+    },
+    {
+      "id": "f06e8e20-5e83-4655-9e1c-76949ca632ec",
+      "name": "Normalizar Dados",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "wp",
+              "name": "wp_url",
+              "value": "https://doctorone.com.br",
+              "type": "string"
+            },
+            {
+              "id": "tpl",
+              "name": "template_id",
+              "value": "={{ $json.body?.template_id ?? $json.template_id }}",
+              "type": "number"
+            },
+            {
+              "id": "st",
+              "name": "status",
+              "value": "={{ $json.body?.status ?? $json.status ?? \"draft\" }}",
+              "type": "string"
+            },
+            {
+              "id": "es",
+              "name": "estilo",
+              "value": "={{ $json.body?.estilo ?? $json.estilo ?? \"manter as cores do modelo\" }}",
+              "type": "string"
+            },
+            {
+              "id": "dd",
+              "name": "dados",
+              "value": "={{ (() => { const d = $json.body?.dados ?? $json.dados ?? \"\"; return typeof d === \"string\" ? d : JSON.stringify(d, null, 2); })() }}",
+              "type": "string"
+            },
+            {
+              "id": "wa",
+              "name": "whatsapp",
+              "value": "={{ String($json.body?.dados?.whatsapp ?? $json.body?.whatsapp ?? \"\").replace(/\\D/g, \"\") }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d51de166-bb37-4122-bbff-f462e5c30fd2",
+      "name": "Buscar Modelo Elementor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.wp_url }}/wp-json/doctorone/v1/template/{{ $json.template_id }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "wordpressApi",
+        "options": {}
+      }
+    },
+    {
+      "id": "37e8ed4b-7833-4230-9434-ce571b00fa77",
+      "name": "Extrair Textos e Cores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const TEXT_KEYS = new Set(['title','editor','description_text','title_text','text','button_text','testimonial_content','testimonial_name','testimonial_job','tab_title','tab_content','heading','sub_heading','before_text','highlighted_text','rotating_text','after_text','caption','prefix','suffix','inner_text','alert_title','alert_description','link_text','field_label','placeholder','item_title','item_description','ending_number_suffix']);\nconst tpl = $input.first().json;\nconst textos = {};\nconst cores = new Set();\n\nfunction scan(obj, path) {\n  for (const [k, v] of Object.entries(obj || {})) {\n    if (typeof v === 'string') {\n      if (TEXT_KEYS.has(k) && v.replace(/<[^>]*>/g, '').trim()) textos[path + '.' + k] = v;\n      if (/^#[0-9a-f]{3,8}$/i.test(v.trim())) cores.add(v.trim().toLowerCase());\n    } else if (Array.isArray(v)) {\n      v.forEach((it, i) => { if (it && typeof it === 'object') scan(it, path + '.' + k + '.' + i); });\n    }\n  }\n}\nfunction walk(els) {\n  for (const el of els || []) {\n    if (el.settings) scan(el.settings, el.id);\n    walk(el.elements);\n  }\n}\nwalk(tpl.elementor_data);\n\nreturn [{ json: { textos, cores: [...cores], total_textos: Object.keys(textos).length } }];"
+      }
+    },
+    {
+      "id": "58db1c10-24a8-4ccb-b350-c00ea9c883b2",
+      "name": "OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        880,
+        520
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "gpt-4.1"
+        },
+        "responsesApiEnabled": false,
+        "options": {
+          "responseFormat": "json_object",
+          "temperature": 0.6,
+          "maxTokens": "***REMOVIDO***"
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "GNYM1RjawrdA7XKF",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "id": "bfdb1b86-b6f1-4f99-93fd-8f843ee30be3",
+      "name": "Gerar Copy do Médico",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        880,
+        300
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "=DADOS DO MÉDICO:\n{{ $('Normalizar Dados').item.json.dados }}\n\nESTILO VISUAL PEDIDO:\n{{ $('Normalizar Dados').item.json.estilo }}\n\nCORES ATUAIS DO MODELO:\n{{ JSON.stringify($json.cores) }}\n\nTEXTOS DO MODELO (chave -> texto atual):\n{{ JSON.stringify($json.textos, null, 1) }}",
+        "options": {
+          "systemMessage": "Você cria a copy de landing pages de alta conversão para médicos, reescrevendo um modelo pronto do Elementor.\n\nREGRAS GERAIS\n- Português do Brasil, linguagem simples, clara e objetiva. Sem jargões, sem exageros, sem repetições.\n- Nunca mencione que é uma IA.\n\nREGRAS DO CFM (Manual de Publicidade Médica)\n- Nunca explore sofrimento, dor ou medo do paciente.\n- Nunca use \"cura\", \"resultados garantidos\", \"antes e depois\", \"milagre\" ou promessas irreais.\n- Não invente depoimentos de pacientes nem dados sensacionalistas.\n- Comunicação ética e educativa, valorizando prevenção e cuidado.\n\nESTRUTURA DA PÁGINA\n- Primeira dobra: endereço e telefone, NOME EM CAIXA ALTA, CRM e RQE, headline \"[Especialidade] em [Cidade]\", subheadline com anos de experiência e número de cirurgias/consultas, botão Agendar Consulta.\n- Procedimentos: título de 1 palavra, subtítulo, cards de 2-3 palavras com bullets curtos focados no benefício e em palavras-chave boas para Google Ads. Se não houver lista, use os procedimentos mais comuns da especialidade.\n- Depoimentos: título de 1 a 3 palavras e subtítulo (sem inventar depoimentos).\n- Sobre o médico: \"Médico(a) [especialidade] especialista em [área]\", \"Dr./Dra. [nome]\", \"CRM | RQE\", 3 parágrafos (especialidade; formação; onde atua, associações e prêmios).\n- Clínica: título, descrição da estrutura, endereço e telefone.\n- CTA: palavra curta (CUIDE-SE, COMECE AGORA), título chamando para contato, descrição.\n- FAQ: dúvidas reais de pacientes da especialidade.\n- Rodapé: endereço, telefone, e-mail, associações.\n\nCOMO RESPONDER\nVocê recebe TEXTOS DO MODELO: um objeto em que cada chave é um campo do Elementor e o valor é o texto atual (de outro médico).\n- Reescreva CADA texto para o novo médico, mantendo a mesma função na página e tamanho parecido.\n- Preserve as tags HTML existentes (<p>, <strong>, <br>, etc.).\n- Mantenha exatamente as mesmas chaves. Não crie nem remova chaves.\n- Textos que não dependem do médico (ex.: \"Agendar Consulta\", \"Mapa do Site\") podem ficar iguais.\n- Dados ausentes: não invente CRM, RQE, endereço, telefone ou números. Use o texto genérico mais seguro.\n- Cores: se o ESTILO VISUAL pedir mudança, mapeie cada cor atual para uma nova cor harmônica (hex). Se não, retorne \"cores\": {}.\n\nResponda SOMENTE com JSON válido neste formato:\n{\"titulo_pagina\":\"\",\"slug\":\"\",\"seo_titulo\":\"até 60 caracteres\",\"seo_descricao\":\"até 155 caracteres\",\"textos\":{\"chave\":\"novo texto\"},\"cores\":{\"#corantiga\":\"#corNova\"}}"
+        }
+      }
+    },
+    {
+      "id": "87a52de5-bff7-4035-8f55-8e944ec4f380",
+      "name": "Montar JSON do Elementor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const raw = String($input.first().json.output || '');\nconst ia = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));\nconst cfg = $('Normalizar Dados').first().json;\nconst tpl = $('Buscar Modelo Elementor').first().json;\nconst data = JSON.parse(JSON.stringify(tpl.elementor_data));\nconst textos = ia.textos || {};\nconst cores = Object.fromEntries(Object.entries(ia.cores || {}).map(([a, b]) => [a.toLowerCase(), b]));\nconst wa = cfg.whatsapp;\nlet aplicados = 0;\n\nfunction trocaLinks(s) {\n  if (!wa) return s;\n  return s.replace(/(wa\\.me\\/)\\d+/g, '$1' + wa)\n          .replace(/(api\\.whatsapp\\.com\\/send\\?phone=)\\d+/g, '$1' + wa)\n          .replace(/(tel:\\+?)\\d+/g, '$1' + wa);\n}\nfunction aplicar(obj, path) {\n  for (const [k, v] of Object.entries(obj || {})) {\n    const chave = path + '.' + k;\n    if (typeof v === 'string') {\n      if (Object.prototype.hasOwnProperty.call(textos, chave)) { obj[k] = textos[chave]; aplicados++; }\n      const c = cores[obj[k].trim().toLowerCase()];\n      if (c) obj[k] = c;\n      obj[k] = trocaLinks(obj[k]);\n    } else if (Array.isArray(v)) {\n      v.forEach((it, i) => { if (it && typeof it === 'object') aplicar(it, chave + '.' + i); });\n    } else if (v && typeof v === 'object') {\n      aplicar(v, chave);\n    }\n  }\n}\nfunction walk(els) {\n  for (const el of els || []) {\n    if (el.settings) aplicar(el.settings, el.id);\n    walk(el.elements);\n  }\n}\nwalk(data);\n\nconst pageSettings = JSON.parse(JSON.stringify(tpl.page_settings || {}));\naplicar(pageSettings, 'page');\n\nreturn [{ json: {\n  aplicados,\n  esperados: $('Extrair Textos e Cores').first().json.total_textos,\n  payload: {\n    titulo: ia.titulo_pagina,\n    slug: ia.slug,\n    status: cfg.status,\n    seo_titulo: ia.seo_titulo,\n    seo_descricao: ia.seo_descricao,\n    elementor_data: data,\n    page_settings: pageSettings\n  }\n} }];"
+      }
+    },
+    {
+      "id": "3372a242-4c82-468a-a048-b64598b20a9b",
+      "name": "Criar Página no WordPress",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Normalizar Dados').item.json.wp_url }}/wp-json/doctorone/v1/pages",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "wordpressApi",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "dc8bb037-84b3-41b8-a46f-978abbcb7745",
+      "name": "Responder com Link",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1540,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, pagina_id: $json.id, link: $json.link, editar_no_elementor: $json.editar, status: $json.status, textos_aplicados: $('Montar JSON do Elementor').item.json.aplicados, textos_no_modelo: $('Montar JSON do Elementor').item.json.esperados }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "1972f138-7f0f-454f-9591-75c0c0671b64",
+      "name": "Como usar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        20
+      ],
+      "parameters": {
+        "color": 4,
+        "width": 700,
+        "height": 240,
+        "content": "## Como usar\n1. Instale o plugin **doctorone-n8n.php** no WordPress.\n2. Crie uma Senha de Aplicativo (Usuários > Perfil) e configure a credencial WordPress nos 2 nós HTTP.\n3. POST em /webhook/criar-site-medico com:\n`{ \"template_id\": 123, \"status\": \"draft\", \"estilo\": \"sóbrio, azul\", \"dados\": { ...infos do médico... } }`\n4. A resposta traz o link da página e o link para editar no Elementor."
+      }
+    }
+  ],
+  "connections": {
+    "Receber Pedido de Site": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Dados": {
+      "main": [
+        [
+          {
+            "node": "Buscar Modelo Elementor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Modelo Elementor": {
+      "main": [
+        [
+          {
+            "node": "Extrair Textos e Cores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair Textos e Cores": {
+      "main": [
+        [
+          {
+            "node": "Gerar Copy do Médico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Gerar Copy do Médico",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar Copy do Médico": {
+      "main": [
+        [
+          {
+            "node": "Montar JSON do Elementor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar JSON do Elementor": {
+      "main": [
+        [
+          {
+            "node": "Criar Página no WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Página no WordPress": {
+      "main": [
+        [
+          {
+            "node": "Responder com Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "399cd8b8-8d80-4c14-b4b3-cd40eb95f53b",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "TDgtm2m5guFpFU8F",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-09-28T12:50:38.739Z",
+      "updatedAt": "2026-09-28T12:50:38.739Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
