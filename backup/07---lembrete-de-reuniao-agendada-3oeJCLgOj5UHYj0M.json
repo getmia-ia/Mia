@@ -1,0 +1,502 @@
+{
+  "updatedAt": "2026-10-02T17:40:26.052Z",
+  "createdAt": "2026-10-02T15:09:36.749Z",
+  "id": "3oeJCLgOj5UHYj0M",
+  "name": "07 - Lembrete de Reunião Agendada",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 11 * * *"
+            }
+          ]
+        }
+      },
+      "id": "1d916f3c-81f2-4c70-a902-28caeadc99c5",
+      "name": "Disparo Diário 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -336,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  l.name as lead_nome,\n  l.meeting_scheduled_at,\n  pl.full_name as planner_nome,\n  pl.phone as planner_telefone\nfrom leads l\njoin profiles pl on pl.id = l.planner_id\nwhere l.meeting_scheduled_at::date = (current_date + interval '1 day')::date\n  and pl.phone is not null;",
+        "options": {}
+      },
+      "id": "ecc2baac-9822-4759-b501-a14860467646",
+      "name": "Buscar Reuniões de Amanhã",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -112,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "769u9DNAemYPOCzL",
+          "name": "ELEVA - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function normalizarTelefone(raw) {\n  if (!raw) return null;\n  let digits = String(raw).replace(/\\D/g, '');\n\n  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {\n    digits = digits.slice(2);\n  }\n\n  const ddd = digits.slice(0, 2);\n  let numero = digits.slice(2);\n\n  if (numero.length === 8) {\n    numero = '9' + numero;\n  }\n\n  return `55${ddd}${numero}`;\n}\n\nconst item = $json;\nconst dataFormatada = new Date(item.meeting_scheduled_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' });\n\nreturn {\n  json: {\n    telefone: normalizarTelefone(item.planner_telefone),\n    nome: item.planner_nome,\n    template_name: \"aviso_reuniao_lead\",\n    param_0: item.planner_nome,\n    param_1: item.lead_nome,\n    param_2: dataFormatada,\n    mensagem_completa: `Olá ${item.planner_nome}! Lembrete: você tem uma reunião agendada amanhã com ${item.lead_nome}, às ${dataFormatada}.`\n  }\n};",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "fcf18b8b-a64e-43ad-8ed3-bb374e60b219",
+      "name": "Montar Mensagem de Lembrete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/928381500368600/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $json.telefone }}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"{{ $json.template_name }}\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": {{ \n          JSON.stringify(\n            [\n              { \"type\": \"text\", \"text\": $json.param_0},\n              { \"type\": \"text\", \"text\": $json.param_1},\n              { \"type\": \"text\", \"text\": $json.param_2}\n            ].filter(p => p.text && p.text.trim() !== \"\")\n          )\n        }}\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "id": "f718833b-0edd-48e2-a080-0a7392039b81",
+      "name": "Enviar Mensagem via Meta API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        592,
+        16
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "tableId": "historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Montar Mensagem de Lembrete').item.json.mensagem_completa }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Montar Mensagem de Lembrete').item.json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Montar Mensagem de Lembrete').item.json.nome }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "=text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "=ELEVA-IA"
+            }
+          ]
+        }
+      },
+      "id": "1d9cae04-318a-457d-bc07-ed93822dcea7",
+      "name": "Cria Mensagem no Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        864,
+        16
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "kajlEDhCYmeLcxgQ",
+          "name": "ELEVA - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "b11598d3-7250-4f15-8e44-3ed545e4057e",
+      "name": "Loop - Enviar Mensagens",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        336,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Disparo Diário 08:00": {
+      "main": [
+        [
+          {
+            "node": "Buscar Reuniões de Amanhã",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Reuniões de Amanhã": {
+      "main": [
+        [
+          {
+            "node": "Montar Mensagem de Lembrete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Mensagem de Lembrete": {
+      "main": [
+        [
+          {
+            "node": "Loop - Enviar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Mensagem via Meta API": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase": {
+      "main": [
+        [
+          {
+            "node": "Loop - Enviar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop - Enviar Mensagens": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Enviar Mensagem via Meta API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": {
+    "node:Disparo Diário 08:00": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "43e7ec7c-f396-4863-859f-50e811339a66",
+  "activeVersionId": "43e7ec7c-f396-4863-859f-50e811339a66",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "3oeJCLgOj5UHYj0M",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-02T15:09:36.749Z",
+      "updatedAt": "2026-10-02T15:09:36.749Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "43e7ec7c-f396-4863-859f-50e811339a66",
+    "workflowId": "3oeJCLgOj5UHYj0M",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 11 * * *"
+              }
+            ]
+          }
+        },
+        "id": "1d916f3c-81f2-4c70-a902-28caeadc99c5",
+        "name": "Disparo Diário 08:00",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          -336,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "select\n  l.name as lead_nome,\n  l.meeting_scheduled_at,\n  pl.full_name as planner_nome,\n  pl.phone as planner_telefone\nfrom leads l\njoin profiles pl on pl.id = l.planner_id\nwhere l.meeting_scheduled_at::date = (current_date + interval '1 day')::date\n  and pl.phone is not null;",
+          "options": {}
+        },
+        "id": "ecc2baac-9822-4759-b501-a14860467646",
+        "name": "Buscar Reuniões de Amanhã",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          -112,
+          0
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "769u9DNAemYPOCzL",
+            "name": "ELEVA - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "function normalizarTelefone(raw) {\n  if (!raw) return null;\n  let digits = String(raw).replace(/\\D/g, '');\n\n  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {\n    digits = digits.slice(2);\n  }\n\n  const ddd = digits.slice(0, 2);\n  let numero = digits.slice(2);\n\n  if (numero.length === 8) {\n    numero = '9' + numero;\n  }\n\n  return `55${ddd}${numero}`;\n}\n\nconst item = $json;\nconst dataFormatada = new Date(item.meeting_scheduled_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' });\n\nreturn {\n  json: {\n    telefone: normalizarTelefone(item.planner_telefone),\n    nome: item.planner_nome,\n    template_name: \"aviso_reuniao_lead\",\n    param_0: item.planner_nome,\n    param_1: item.lead_nome,\n    param_2: dataFormatada,\n    mensagem_completa: `Olá ${item.planner_nome}! Lembrete: você tem uma reunião agendada amanhã com ${item.lead_nome}, às ${dataFormatada}.`\n  }\n};",
+          "mode": "runOnceForEachItem"
+        },
+        "id": "fcf18b8b-a64e-43ad-8ed3-bb374e60b219",
+        "name": "Montar Mensagem de Lembrete",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          112,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://graph.facebook.com/v22.0/928381500368600/messages",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $json.telefone }}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"{{ $json.template_name }}\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": {{ \n          JSON.stringify(\n            [\n              { \"type\": \"text\", \"text\": $json.param_0},\n              { \"type\": \"text\", \"text\": $json.param_1},\n              { \"type\": \"text\", \"text\": $json.param_2}\n            ].filter(p => p.text && p.text.trim() !== \"\")\n          )\n        }}\n      }\n    ]\n  }\n}",
+          "options": {}
+        },
+        "id": "f718833b-0edd-48e2-a080-0a7392039b81",
+        "name": "Enviar Mensagem via Meta API",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          592,
+          16
+        ],
+        "retryOnFail": true,
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "tableId": "historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "={{ $('Montar Mensagem de Lembrete').item.json.mensagem_completa }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Montar Mensagem de Lembrete').item.json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $('Montar Mensagem de Lembrete').item.json.nome }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "=text"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "=ELEVA-IA"
+              }
+            ]
+          }
+        },
+        "id": "1d9cae04-318a-457d-bc07-ed93822dcea7",
+        "name": "Cria Mensagem no Supabase",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          864,
+          16
+        ],
+        "executeOnce": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "kajlEDhCYmeLcxgQ",
+            "name": "ELEVA - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "id": "b11598d3-7250-4f15-8e44-3ed545e4057e",
+        "name": "Loop - Enviar Mensagens",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          336,
+          0
+        ]
+      }
+    ],
+    "connections": {
+      "Disparo Diário 08:00": {
+        "main": [
+          [
+            {
+              "node": "Buscar Reuniões de Amanhã",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar Reuniões de Amanhã": {
+        "main": [
+          [
+            {
+              "node": "Montar Mensagem de Lembrete",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar Mensagem de Lembrete": {
+        "main": [
+          [
+            {
+              "node": "Loop - Enviar Mensagens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar Mensagem via Meta API": {
+        "main": [
+          [
+            {
+              "node": "Cria Mensagem no Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cria Mensagem no Supabase": {
+        "main": [
+          [
+            {
+              "node": "Loop - Enviar Mensagens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop - Enviar Mensagens": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Enviar Mensagem via Meta API",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Corrigir fuso horário (fix real)",
+    "description": "Corrige de verdade o parâmetro jsCode (a tentativa anterior criou uma estrutura aninhada incorreta que não tinha efeito real)",
+    "autosaved": false,
+    "createdAt": "2026-10-02T17:40:26.054Z",
+    "updatedAt": "2026-10-02T17:40:26.054Z"
+  },
+  "tags": []
+}
