@@ -1,0 +1,502 @@
+{
+  "updatedAt": "2026-10-02T15:44:33.712Z",
+  "createdAt": "2026-10-02T15:06:28.068Z",
+  "id": "81txq6ppeVabc83V",
+  "name": "08 - Aviso de Aniversário de Clientes",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 11 * * *"
+            }
+          ]
+        }
+      },
+      "id": "e03420bb-6a7e-4f83-8e8f-a6cd3bd0a572",
+      "name": "Disparo Diário 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -336,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  cli.full_name as cliente_nome,\n  cli.birth_date,\n  pl.full_name as planner_nome,\n  pl.phone as planner_telefone\nfrom profiles cli\njoin profiles pl on pl.id = cli.planner_id\nwhere extract(month from cli.birth_date) = extract(month from current_date)\n  and extract(day from cli.birth_date) = extract(day from current_date)\n  and pl.phone is not null;",
+        "options": {}
+      },
+      "id": "2f15b330-e383-44be-959d-46e464ea0775",
+      "name": "Buscar Aniversariantes de Hoje",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -112,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "769u9DNAemYPOCzL",
+          "name": "ELEVA - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function normalizarTelefone(raw) {\n  if (!raw) return null;\n  let digits = String(raw).replace(/\\D/g, '');\n\n  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {\n    digits = digits.slice(2);\n  }\n\n  const ddd = digits.slice(0, 2);\n  let numero = digits.slice(2);\n\n  if (numero.length === 8) {\n    numero = '9' + numero;\n  }\n\n  return `55${ddd}${numero}`;\n}\n\nconst item = $json;\n\nreturn {\n  json: {\n    telefone: normalizarTelefone(item.planner_telefone),\n    nome: item.planner_nome,\n    template_name: \"aviso_aniversario_cliente\",\n    param_0: item.planner_nome,\n    param_1: item.cliente_nome,\n    mensagem_completa: `Olá ${item.planner_nome}! Hoje é aniversário do seu cliente ${item.cliente_nome}. Que tal mandar uma mensagem de parabéns?`\n  }\n};"
+      },
+      "id": "ce74f336-4f95-4437-bb4c-39e7c2f0da45",
+      "name": "Montar Mensagem de Aniversário",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/928381500368600/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $json.telefone }}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"{{ $json.template_name }}\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": {{ \n          JSON.stringify(\n            [\n              { \"type\": \"text\", \"text\": $json.param_0},\n              { \"type\": \"text\", \"text\": $json.param_1}\n            ].filter(p => p.text && p.text.trim() !== \"\")\n          )\n        }}\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "id": "ad841c8c-8c6f-44d1-a655-9fe7de9796d8",
+      "name": "Enviar Mensagem via Meta API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        16
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "tableId": "historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Montar Mensagem de Aniversário').item.json.mensagem_completa }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Montar Mensagem de Aniversário').item.json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Montar Mensagem de Aniversário').item.json.nome }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "=text"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "=ELEVA-IA"
+            }
+          ]
+        }
+      },
+      "id": "bc1c713f-5fd7-493e-b8fa-43cb6e043e26",
+      "name": "Cria Mensagem no Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        864,
+        32
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "kajlEDhCYmeLcxgQ",
+          "name": "ELEVA - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "e80f59bc-d1af-426d-b1fc-9bbe172cb986",
+      "name": "Loop - Enviar Mensagens",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        336,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Disparo Diário 08:00": {
+      "main": [
+        [
+          {
+            "node": "Buscar Aniversariantes de Hoje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Aniversariantes de Hoje": {
+      "main": [
+        [
+          {
+            "node": "Montar Mensagem de Aniversário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Mensagem de Aniversário": {
+      "main": [
+        [
+          {
+            "node": "Loop - Enviar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Mensagem via Meta API": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cria Mensagem no Supabase": {
+      "main": [
+        [
+          {
+            "node": "Loop - Enviar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop - Enviar Mensagens": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Enviar Mensagem via Meta API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": {
+    "node:Disparo Diário 08:00": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "f4e5a6af-24e6-4004-959e-b48c90c1b138",
+  "activeVersionId": "f4e5a6af-24e6-4004-959e-b48c90c1b138",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "81txq6ppeVabc83V",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-02T15:06:28.068Z",
+      "updatedAt": "2026-10-02T15:06:28.068Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "f4e5a6af-24e6-4004-959e-b48c90c1b138",
+    "workflowId": "81txq6ppeVabc83V",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 11 * * *"
+              }
+            ]
+          }
+        },
+        "id": "e03420bb-6a7e-4f83-8e8f-a6cd3bd0a572",
+        "name": "Disparo Diário 08:00",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          -336,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "select\n  cli.full_name as cliente_nome,\n  cli.birth_date,\n  pl.full_name as planner_nome,\n  pl.phone as planner_telefone\nfrom profiles cli\njoin profiles pl on pl.id = cli.planner_id\nwhere extract(month from cli.birth_date) = extract(month from current_date)\n  and extract(day from cli.birth_date) = extract(day from current_date)\n  and pl.phone is not null;",
+          "options": {}
+        },
+        "id": "2f15b330-e383-44be-959d-46e464ea0775",
+        "name": "Buscar Aniversariantes de Hoje",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          -112,
+          0
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "769u9DNAemYPOCzL",
+            "name": "ELEVA - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "function normalizarTelefone(raw) {\n  if (!raw) return null;\n  let digits = String(raw).replace(/\\D/g, '');\n\n  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {\n    digits = digits.slice(2);\n  }\n\n  const ddd = digits.slice(0, 2);\n  let numero = digits.slice(2);\n\n  if (numero.length === 8) {\n    numero = '9' + numero;\n  }\n\n  return `55${ddd}${numero}`;\n}\n\nconst item = $json;\n\nreturn {\n  json: {\n    telefone: normalizarTelefone(item.planner_telefone),\n    nome: item.planner_nome,\n    template_name: \"aviso_aniversario_cliente\",\n    param_0: item.planner_nome,\n    param_1: item.cliente_nome,\n    mensagem_completa: `Olá ${item.planner_nome}! Hoje é aniversário do seu cliente ${item.cliente_nome}. Que tal mandar uma mensagem de parabéns?`\n  }\n};"
+        },
+        "id": "ce74f336-4f95-4437-bb4c-39e7c2f0da45",
+        "name": "Montar Mensagem de Aniversário",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          112,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://graph.facebook.com/v22.0/928381500368600/messages",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $json.telefone }}\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"{{ $json.template_name }}\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": {{ \n          JSON.stringify(\n            [\n              { \"type\": \"text\", \"text\": $json.param_0},\n              { \"type\": \"text\", \"text\": $json.param_1}\n            ].filter(p => p.text && p.text.trim() !== \"\")\n          )\n        }}\n      }\n    ]\n  }\n}",
+          "options": {}
+        },
+        "id": "ad841c8c-8c6f-44d1-a655-9fe7de9796d8",
+        "name": "Enviar Mensagem via Meta API",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          560,
+          16
+        ],
+        "retryOnFail": true,
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "tableId": "historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "={{ $('Montar Mensagem de Aniversário').item.json.mensagem_completa }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Montar Mensagem de Aniversário').item.json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $('Montar Mensagem de Aniversário').item.json.nome }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "=text"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "=ELEVA-IA"
+              }
+            ]
+          }
+        },
+        "id": "bc1c713f-5fd7-493e-b8fa-43cb6e043e26",
+        "name": "Cria Mensagem no Supabase",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          864,
+          32
+        ],
+        "executeOnce": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "kajlEDhCYmeLcxgQ",
+            "name": "ELEVA - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "id": "e80f59bc-d1af-426d-b1fc-9bbe172cb986",
+        "name": "Loop - Enviar Mensagens",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          336,
+          0
+        ]
+      }
+    ],
+    "connections": {
+      "Disparo Diário 08:00": {
+        "main": [
+          [
+            {
+              "node": "Buscar Aniversariantes de Hoje",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar Aniversariantes de Hoje": {
+        "main": [
+          [
+            {
+              "node": "Montar Mensagem de Aniversário",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar Mensagem de Aniversário": {
+        "main": [
+          [
+            {
+              "node": "Loop - Enviar Mensagens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar Mensagem via Meta API": {
+        "main": [
+          [
+            {
+              "node": "Cria Mensagem no Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cria Mensagem no Supabase": {
+        "main": [
+          [
+            {
+              "node": "Loop - Enviar Mensagens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop - Enviar Mensagens": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Enviar Mensagem via Meta API",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version f4e5a6af",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-10-02T15:44:33.717Z",
+    "updatedAt": "2026-10-02T15:45:52.970Z"
+  },
+  "tags": []
+}
