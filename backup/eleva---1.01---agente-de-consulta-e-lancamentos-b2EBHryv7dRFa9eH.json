@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-16T16:59:11.826Z",
+  "updatedAt": "2026-10-05T14:43:32.854Z",
   "createdAt": "2026-03-06T15:47:28.821Z",
   "id": "b2EBHryv7dRFa9eH",
   "name": "Eleva - 1.01 - Agente de Consulta e Lancamentos",
@@ -3742,6 +3742,20 @@
       "id": "e359bd14-df06-4f39-9f16-7153ceb369b4",
       "name": "Webhook",
       "webhookId": "2a01594e-946d-42ea-8d19-564ae0f19b34"
+    },
+    {
+      "id": "19fd7221-10c0-4123-b025-c6ec23c733ea",
+      "name": "Trava - Confirma Lançamento Real",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        -2704
+      ],
+      "parameters": {
+        "jsCode": "// TRAVA: impede que a IA diga \"lancei\" quando a ferramenta não rodou de verdade.\n// Fica entre o agente e o envio da mensagem. Se a IA afirmou algo que a ferramenta\n// não fez, troca o texto por um aviso honesto e marca o item pra auditoria.\n\nconst AVISO = 'Não consegui registrar esse lançamento agora, então ele ainda NÃO foi salvo. Pode me mandar de novo, por favor? (valor, categoria e forma de pagamento)';\n\nfunction comoTexto(valor) {\n  return valor === undefined || valor === null ? '' : String(valor);\n}\n\n// Tira do texto as frases que NÃO afirmam um lançamento novo:\n// negações (\"não lancei\") e referências ao passado (\"já lancei\", \"lancei antes\").\nfunction semFrasesQueNaoAfirmam(texto) {\n  const verbos = '(?:lancei|registrei|anotei|adicionei|inseri|criei|alterei|atualizei|corrigi|editei)';\n  return texto\n    .replace(new RegExp('\\\\bn[ãa]o\\\\s+(?:\\\\S+\\\\s+){0,2}?' + verbos + '\\\\b', 'gi'), ' ')\n    .replace(new RegExp('\\\\bj[áa]\\\\s+(?:\\\\S+\\\\s+){0,2}?' + verbos + '\\\\b', 'gi'), ' ')\n    .replace(new RegExp('\\\\b' + verbos + '\\\\s+(?:\\\\S+\\\\s+){0,2}?(?:antes|anteriormente|ontem)\\\\b', 'gi'), ' ');\n}\n\nconst resultado = $input.all().map(item => {\n  const saida = item.json;\n  const texto = comoTexto(saida.output);\n  const passos = Array.isArray(saida.intermediateSteps) ? saida.intermediateSteps : [];\n\n  const nomeDaFerramenta = (p) => comoTexto(p && p.action && p.action.tool);\n  const retornoDaFerramenta = (p) => comoTexto(p && p.observation);\n\n  // Só vale como \"lançou de verdade\" se a ferramenta devolveu o id do lançamento.\n  const lancouDeVerdade = passos.some(p =>\n    nomeDaFerramenta(p) === 'lancamento_whatsapp' &&\n    /lancamento_id\\W{1,4}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(retornoDaFerramenta(p)));\n\n  // Só vale como \"editou de verdade\" se a ferramenta devolveu editado: true.\n  const editouDeVerdade = passos.some(p =>\n    nomeDaFerramenta(p) === 'editar_lancamento' &&\n    /editado\\W{1,4}true/i.test(retornoDaFerramenta(p)));\n\n  const t = semFrasesQueNaoAfirmam(texto);\n  const temValor = /R\\$\\s*\\d/.test(t);\n\n  const afirmaQueLancou = temValor && /\\b(lancei|registrei|anotei|adicionei|inseri|criei)\\b/i.test(t);\n  const afirmaQueEditou = temValor && (/\\b(alterei|atualizei|corrigi|editei)\\b/i.test(t) || /pronto[!,.]?\\s*ficou/i.test(t));\n\n  const mentiu = (afirmaQueLancou && !lancouDeVerdade && !editouDeVerdade)\n              || (afirmaQueEditou && !editouDeVerdade && !lancouDeVerdade);\n\n  if (!mentiu) {\n    return { json: { ...saida, lancamento_nao_confirmado: false } };\n  }\n  return { json: { ...saida, output: AVISO, output_original_bloqueado: texto, lancamento_nao_confirmado: true } };\n});\n\nreturn resultado;\n"
+      },
+      "notes": "Impede a IA de dizer 'lancei/alterei' quando a ferramenta não rodou de verdade (checa intermediateSteps). Se mentiu, troca a mensagem por um aviso honesto e marca lancamento_nao_confirmado=true."
     }
   ],
   "connections": {
@@ -4612,7 +4626,7 @@
       "main": [
         [
           {
-            "node": "Saida do Agente",
+            "node": "Trava - Confirma Lançamento Real",
             "type": "main",
             "index": 0
           }
@@ -4702,6 +4716,17 @@
           }
         ]
       ]
+    },
+    "Trava - Confirma Lançamento Real": {
+      "main": [
+        [
+          {
+            "node": "Saida do Agente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -4712,17 +4737,19 @@
     "saveExecutionProgress": false,
     "saveManualExecutions": true,
     "callerPolicy": "workflowsFromSameOwner",
-    "availableInMCP": false,
+    "availableInMCP": true,
     "errorWorkflow": "xfondpEOYdGLoDo4",
     "executionTimeout": 900,
     "binaryMode": "separate"
   },
   "staticData": null,
   "meta": {
-    "templateCredsSetupCompleted": true
+    "templateCredsSetupCompleted": true,
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
   },
-  "versionId": "2759ef57-1ba8-4abd-89ce-c72257d30abb",
-  "activeVersionId": "2759ef57-1ba8-4abd-89ce-c72257d30abb",
+  "versionId": "63cc1591-5de3-4518-8f84-8e4ac9e04f8b",
+  "activeVersionId": "63cc1591-5de3-4518-8f84-8e4ac9e04f8b",
   "triggerCount": 1,
   "shared": [
     {
@@ -4734,7 +4761,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "2759ef57-1ba8-4abd-89ce-c72257d30abb",
+    "versionId": "63cc1591-5de3-4518-8f84-8e4ac9e04f8b",
     "workflowId": "b2EBHryv7dRFa9eH",
     "nodes": [
       {
@@ -8473,6 +8500,20 @@
         "id": "e359bd14-df06-4f39-9f16-7153ceb369b4",
         "name": "Webhook",
         "webhookId": "2a01594e-946d-42ea-8d19-564ae0f19b34"
+      },
+      {
+        "id": "19fd7221-10c0-4123-b025-c6ec23c733ea",
+        "name": "Trava - Confirma Lançamento Real",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -720,
+          -2704
+        ],
+        "parameters": {
+          "jsCode": "// TRAVA: impede que a IA diga \"lancei\" quando a ferramenta não rodou de verdade.\n// Fica entre o agente e o envio da mensagem. Se a IA afirmou algo que a ferramenta\n// não fez, troca o texto por um aviso honesto e marca o item pra auditoria.\n\nconst AVISO = 'Não consegui registrar esse lançamento agora, então ele ainda NÃO foi salvo. Pode me mandar de novo, por favor? (valor, categoria e forma de pagamento)';\n\nfunction comoTexto(valor) {\n  return valor === undefined || valor === null ? '' : String(valor);\n}\n\n// Tira do texto as frases que NÃO afirmam um lançamento novo:\n// negações (\"não lancei\") e referências ao passado (\"já lancei\", \"lancei antes\").\nfunction semFrasesQueNaoAfirmam(texto) {\n  const verbos = '(?:lancei|registrei|anotei|adicionei|inseri|criei|alterei|atualizei|corrigi|editei)';\n  return texto\n    .replace(new RegExp('\\\\bn[ãa]o\\\\s+(?:\\\\S+\\\\s+){0,2}?' + verbos + '\\\\b', 'gi'), ' ')\n    .replace(new RegExp('\\\\bj[áa]\\\\s+(?:\\\\S+\\\\s+){0,2}?' + verbos + '\\\\b', 'gi'), ' ')\n    .replace(new RegExp('\\\\b' + verbos + '\\\\s+(?:\\\\S+\\\\s+){0,2}?(?:antes|anteriormente|ontem)\\\\b', 'gi'), ' ');\n}\n\nconst resultado = $input.all().map(item => {\n  const saida = item.json;\n  const texto = comoTexto(saida.output);\n  const passos = Array.isArray(saida.intermediateSteps) ? saida.intermediateSteps : [];\n\n  const nomeDaFerramenta = (p) => comoTexto(p && p.action && p.action.tool);\n  const retornoDaFerramenta = (p) => comoTexto(p && p.observation);\n\n  // Só vale como \"lançou de verdade\" se a ferramenta devolveu o id do lançamento.\n  const lancouDeVerdade = passos.some(p =>\n    nomeDaFerramenta(p) === 'lancamento_whatsapp' &&\n    /lancamento_id\\W{1,4}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(retornoDaFerramenta(p)));\n\n  // Só vale como \"editou de verdade\" se a ferramenta devolveu editado: true.\n  const editouDeVerdade = passos.some(p =>\n    nomeDaFerramenta(p) === 'editar_lancamento' &&\n    /editado\\W{1,4}true/i.test(retornoDaFerramenta(p)));\n\n  const t = semFrasesQueNaoAfirmam(texto);\n  const temValor = /R\\$\\s*\\d/.test(t);\n\n  const afirmaQueLancou = temValor && /\\b(lancei|registrei|anotei|adicionei|inseri|criei)\\b/i.test(t);\n  const afirmaQueEditou = temValor && (/\\b(alterei|atualizei|corrigi|editei)\\b/i.test(t) || /pronto[!,.]?\\s*ficou/i.test(t));\n\n  const mentiu = (afirmaQueLancou && !lancouDeVerdade && !editouDeVerdade)\n              || (afirmaQueEditou && !editouDeVerdade && !lancouDeVerdade);\n\n  if (!mentiu) {\n    return { json: { ...saida, lancamento_nao_confirmado: false } };\n  }\n  return { json: { ...saida, output: AVISO, output_original_bloqueado: texto, lancamento_nao_confirmado: true } };\n});\n\nreturn resultado;\n"
+        },
+        "notes": "Impede a IA de dizer 'lancei/alterei' quando a ferramenta não rodou de verdade (checa intermediateSteps). Se mentiu, troca a mensagem por um aviso honesto e marca lancamento_nao_confirmado=true."
       }
     ],
     "connections": {
@@ -9343,7 +9384,7 @@
         "main": [
           [
             {
-              "node": "Saida do Agente",
+              "node": "Trava - Confirma Lançamento Real",
               "type": "main",
               "index": 0
             }
@@ -9433,15 +9474,26 @@
             }
           ]
         ]
+      },
+      "Trava - Confirma Lançamento Real": {
+        "main": [
+          [
+            {
+              "node": "Saida do Agente",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Version 2759ef57",
-    "description": "",
-    "autosaved": true,
-    "createdAt": "2026-09-16T16:59:11.841Z",
-    "updatedAt": "2026-09-16T17:00:07.211Z"
+    "name": "Trava: nunca confirmar lancamento sem a tool rodar",
+    "description": "Trava deterministica: entre o agente e a saida, bloqueia mensagens em que a IA afirma ter lancado/alterado algo sem que lancamento_whatsapp (lancamento_id) ou editar_lancamento (editado:true) tenha rodado de verdade nos intermediateSteps. Motivo: Lavinia 05/10 12:38 - IA confirmou consorcio de R$510 com intermediateSteps vazio.",
+    "autosaved": false,
+    "createdAt": "2026-10-05T14:43:32.876Z",
+    "updatedAt": "2026-10-05T15:20:50.840Z"
   },
   "tags": []
 }
