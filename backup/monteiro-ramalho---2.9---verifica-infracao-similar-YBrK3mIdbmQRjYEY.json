@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-23T11:08:25.731Z",
+  "updatedAt": "2026-10-05T15:01:42.346Z",
   "createdAt": "2026-09-23T10:46:29.892Z",
   "id": "YBrK3mIdbmQRjYEY",
   "name": "Monteiro Ramalho - 2.9 - Verifica Infração Similar",
@@ -25,7 +25,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return items.map(item => {\n  let data = item.json.body || item.json;\n\n  const obrigatorios = ['condomino_id', 'infracao'];\n  for (const campo of obrigatorios) {\n    if (data[campo] === undefined || data[campo] === null || String(data[campo]).trim() === '') {\n      throw new Error(`Campo obrigatório \"${campo}\" não informado.`);\n    }\n  }\n\n  return {\n    json: {\n      condomino_id: data.condomino_id,\n      infracao: data.infracao\n    }\n  };\n});"
+        "jsCode": "return items.map(item => {\n  let data = item.json;\n\n  // Quando vem do sistema (plataforma), os dados chegam dentro de \"body\".\n  // Essa checagem vem primeiro porque o nó de webhook sempre inclui um campo\n  // \"query\" (os parâmetros da URL), normalmente vazio — se olhassemos o \"query\"\n  // antes, toda chamada do sistema cairia no caminho errado.\n  if (data.body !== undefined && data.body !== null) {\n    data = data.body;\n\n  // Quando a IA chama isso como ferramenta, os dados chegam dentro de \"query\",\n  // em formato de texto JSON (ou já como objeto, dependendo da versão).\n  } else if (typeof data.query === 'string' && data.query.trim() !== '') {\n    data = JSON.parse(data.query);\n\n  } else if (data.query && typeof data.query === 'object' && data.query.condomino_id) {\n    data = data.query;\n  }\n\n  const obrigatorios = ['condomino_id', 'infracao'];\n  for (const campo of obrigatorios) {\n    if (data[campo] === undefined || data[campo] === null || String(data[campo]).trim() === '') {\n      throw new Error(`Campo obrigatório \"${campo}\" não informado.`);\n    }\n  }\n\n  // Se não disserem o tipo, assumimos notificação.\n  const tipo = String(data.tipo || 'notificacao').toLowerCase() === 'multa'\n    ? 'multa'\n    : 'notificacao';\n\n  return {\n    json: {\n      condomino_id: data.condomino_id,\n      infracao: data.infracao,\n      tipo: tipo\n    }\n  };\n});"
       },
       "id": "acd07493-b032-4d53-8683-df9a1912a725",
       "name": "Trata os dados",
@@ -72,8 +72,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
       "position": [
-        -416,
-        672
+        -160,
+        992
       ]
     },
     {
@@ -285,8 +285,134 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
       "position": [
-        1088,
+        1328,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "condomino_id"
+            },
+            {
+              "name": "infracao"
+            }
+          ]
+        }
+      },
+      "id": "9775c77c-a0f1-40f1-b310-e217dcde0f37",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -800,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f1a2b3c4-0006-4a1a-8a1a-000000000006",
+              "leftValue": "={{ $('When Executed by Another Workflow').isExecuted }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      },
+      "id": "355ae06a-cc93-4673-8d66-6325542047e2",
+      "name": "Veio do Agente?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1104,
         560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const dados = $('Trata os dados').first().json;\nconst tipo = dados.tipo === 'multa' ? 'multa' : 'notificacao';\n\nconst tipoLabel = tipo === 'multa' ? 'multa' : 'notificação';\nconst tipoOutro = tipo === 'multa' ? 'notificação' : 'multa';\n\nconst similares = $json.similares || [];\n\n// Nenhuma parecida: libera o agente para seguir normalmente.\nif (!similares.length) {\n  return [{\n    json: {\n      tem_similar: false,\n      resposta: `Nenhuma infração anterior de mesma natureza foi encontrada para este condômino. Pode seguir e criar a ${tipoLabel} normalmente, sem precisar avisar o usuário sobre esta verificação.`\n    }\n  }];\n}\n\nfunction formataData(valor) {\n  if (!valor) return 'sem data';\n  const iso = String(valor).split('T')[0];\n  const partes = iso.split('-');\n  if (partes.length !== 3) return iso;\n  return `${partes[2]}/${partes[1]}/${partes[0]}`;\n}\n\nconst lista = similares.map((s, i) => {\n  const texto = String(s.infracao || '').trim();\n  const resumo = texto.length > 300 ? texto.slice(0, 300) + '...' : texto;\n  return `${i + 1}. Em ${formataData(s.data_infracao)}\\n${resumo}\\nMotivo da semelhança: ${s.motivo}`;\n}).join('\\n\\n');\n\nconst quantidade = similares.length === 1\n  ? '1 notificação anterior'\n  : `${similares.length} notificações anteriores`;\n\nconst resposta = `⚠️ Possível reincidência\\n\\nEncontrei ${quantidade} deste condômino com infração de mesma natureza:\\n\\n${lista}\\n\\nComo deseja prosseguir?\\n1. Gerar a ${tipoLabel} mesmo assim\\n2. Gerar uma ${tipoOutro} com os mesmos dados`;\n\nreturn [{\n  json: {\n    tem_similar: true,\n    quantidade: similares.length,\n    resposta: resposta\n  }\n}];"
+      },
+      "id": "6452a64e-ced9-429d-9aa4-9b9675798efb",
+      "name": "Monta Mensagem para o Agente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "a9b8c7d6-0007-4a1a-8a1a-000000000007",
+              "leftValue": "={{ $('When Executed by Another Workflow').isExecuted }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      },
+      "id": "1c64b052-acba-407d-bf9f-6edf2059e267",
+      "name": "Erro - Veio do Agente?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -400,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b8c7d6e5-0008-4a1a-8a1a-000000000008",
+              "name": "resposta",
+              "type": "string",
+              "value": "=Não foi possível verificar infrações anteriores: {{ $json.erro }}. Informe isso ao usuário e pergunte se ele deseja seguir mesmo assim com a criação do documento."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "947bed3a-3ed2-495d-acd7-b075bf1f9798",
+      "name": "Monta Erro para o Agente",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -160,
+        800
       ]
     }
   ],
@@ -314,17 +440,6 @@
         [
           {
             "node": "Informa Erro",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Informa Erro": {
-      "main": [
-        [
-          {
-            "node": "Responde Erro",
             "type": "main",
             "index": 0
           }
@@ -431,11 +546,69 @@
         ]
       ]
     },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Trata os dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Monta Resposta Final": {
       "main": [
         [
           {
+            "node": "Veio do Agente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Veio do Agente?": {
+      "main": [
+        [
+          {
+            "node": "Monta Mensagem para o Agente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Responde",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Informa Erro": {
+      "main": [
+        [
+          {
+            "node": "Erro - Veio do Agente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Erro - Veio do Agente?": {
+      "main": [
+        [
+          {
+            "node": "Monta Erro para o Agente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responde Erro",
             "type": "main",
             "index": 0
           }
@@ -460,8 +633,8 @@
     "aiBuilderAssisted": true,
     "builderVariant": "mcp"
   },
-  "versionId": "ab838c99-54ce-401a-a52f-8648f0a74967",
-  "activeVersionId": "ab838c99-54ce-401a-a52f-8648f0a74967",
+  "versionId": "063a7aec-36a6-4770-8fae-cb9d0ff59a00",
+  "activeVersionId": "063a7aec-36a6-4770-8fae-cb9d0ff59a00",
   "triggerCount": 1,
   "shared": [
     {
@@ -473,7 +646,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "ab838c99-54ce-401a-a52f-8648f0a74967",
+    "versionId": "063a7aec-36a6-4770-8fae-cb9d0ff59a00",
     "workflowId": "YBrK3mIdbmQRjYEY",
     "nodes": [
       {
@@ -495,7 +668,7 @@
       },
       {
         "parameters": {
-          "jsCode": "return items.map(item => {\n  let data = item.json.body || item.json;\n\n  const obrigatorios = ['condomino_id', 'infracao'];\n  for (const campo of obrigatorios) {\n    if (data[campo] === undefined || data[campo] === null || String(data[campo]).trim() === '') {\n      throw new Error(`Campo obrigatório \"${campo}\" não informado.`);\n    }\n  }\n\n  return {\n    json: {\n      condomino_id: data.condomino_id,\n      infracao: data.infracao\n    }\n  };\n});"
+          "jsCode": "return items.map(item => {\n  let data = item.json;\n\n  // Quando vem do sistema (plataforma), os dados chegam dentro de \"body\".\n  // Essa checagem vem primeiro porque o nó de webhook sempre inclui um campo\n  // \"query\" (os parâmetros da URL), normalmente vazio — se olhassemos o \"query\"\n  // antes, toda chamada do sistema cairia no caminho errado.\n  if (data.body !== undefined && data.body !== null) {\n    data = data.body;\n\n  // Quando a IA chama isso como ferramenta, os dados chegam dentro de \"query\",\n  // em formato de texto JSON (ou já como objeto, dependendo da versão).\n  } else if (typeof data.query === 'string' && data.query.trim() !== '') {\n    data = JSON.parse(data.query);\n\n  } else if (data.query && typeof data.query === 'object' && data.query.condomino_id) {\n    data = data.query;\n  }\n\n  const obrigatorios = ['condomino_id', 'infracao'];\n  for (const campo of obrigatorios) {\n    if (data[campo] === undefined || data[campo] === null || String(data[campo]).trim() === '') {\n      throw new Error(`Campo obrigatório \"${campo}\" não informado.`);\n    }\n  }\n\n  // Se não disserem o tipo, assumimos notificação.\n  const tipo = String(data.tipo || 'notificacao').toLowerCase() === 'multa'\n    ? 'multa'\n    : 'notificacao';\n\n  return {\n    json: {\n      condomino_id: data.condomino_id,\n      infracao: data.infracao,\n      tipo: tipo\n    }\n  };\n});"
         },
         "id": "acd07493-b032-4d53-8683-df9a1912a725",
         "name": "Trata os dados",
@@ -542,8 +715,8 @@
         "type": "n8n-nodes-base.respondToWebhook",
         "typeVersion": 1.4,
         "position": [
-          -416,
-          672
+          -160,
+          992
         ]
       },
       {
@@ -755,8 +928,134 @@
         "type": "n8n-nodes-base.respondToWebhook",
         "typeVersion": 1.4,
         "position": [
-          1088,
+          1328,
+          688
+        ]
+      },
+      {
+        "parameters": {
+          "workflowInputs": {
+            "values": [
+              {
+                "name": "condomino_id"
+              },
+              {
+                "name": "infracao"
+              }
+            ]
+          }
+        },
+        "id": "9775c77c-a0f1-40f1-b310-e217dcde0f37",
+        "name": "When Executed by Another Workflow",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -800,
+          640
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "f1a2b3c4-0006-4a1a-8a1a-000000000006",
+                "leftValue": "={{ $('When Executed by Another Workflow').isExecuted }}",
+                "operator": {
+                  "operation": "true",
+                  "singleValue": true,
+                  "type": "boolean"
+                },
+                "rightValue": ""
+              }
+            ],
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            }
+          },
+          "options": {}
+        },
+        "id": "355ae06a-cc93-4673-8d66-6325542047e2",
+        "name": "Veio do Agente?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1104,
           560
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const dados = $('Trata os dados').first().json;\nconst tipo = dados.tipo === 'multa' ? 'multa' : 'notificacao';\n\nconst tipoLabel = tipo === 'multa' ? 'multa' : 'notificação';\nconst tipoOutro = tipo === 'multa' ? 'notificação' : 'multa';\n\nconst similares = $json.similares || [];\n\n// Nenhuma parecida: libera o agente para seguir normalmente.\nif (!similares.length) {\n  return [{\n    json: {\n      tem_similar: false,\n      resposta: `Nenhuma infração anterior de mesma natureza foi encontrada para este condômino. Pode seguir e criar a ${tipoLabel} normalmente, sem precisar avisar o usuário sobre esta verificação.`\n    }\n  }];\n}\n\nfunction formataData(valor) {\n  if (!valor) return 'sem data';\n  const iso = String(valor).split('T')[0];\n  const partes = iso.split('-');\n  if (partes.length !== 3) return iso;\n  return `${partes[2]}/${partes[1]}/${partes[0]}`;\n}\n\nconst lista = similares.map((s, i) => {\n  const texto = String(s.infracao || '').trim();\n  const resumo = texto.length > 300 ? texto.slice(0, 300) + '...' : texto;\n  return `${i + 1}. Em ${formataData(s.data_infracao)}\\n${resumo}\\nMotivo da semelhança: ${s.motivo}`;\n}).join('\\n\\n');\n\nconst quantidade = similares.length === 1\n  ? '1 notificação anterior'\n  : `${similares.length} notificações anteriores`;\n\nconst resposta = `⚠️ Possível reincidência\\n\\nEncontrei ${quantidade} deste condômino com infração de mesma natureza:\\n\\n${lista}\\n\\nComo deseja prosseguir?\\n1. Gerar a ${tipoLabel} mesmo assim\\n2. Gerar uma ${tipoOutro} com os mesmos dados`;\n\nreturn [{\n  json: {\n    tem_similar: true,\n    quantidade: similares.length,\n    resposta: resposta\n  }\n}];"
+        },
+        "id": "6452a64e-ced9-429d-9aa4-9b9675798efb",
+        "name": "Monta Mensagem para o Agente",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1328,
+          432
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "a9b8c7d6-0007-4a1a-8a1a-000000000007",
+                "leftValue": "={{ $('When Executed by Another Workflow').isExecuted }}",
+                "operator": {
+                  "operation": "true",
+                  "singleValue": true,
+                  "type": "boolean"
+                },
+                "rightValue": ""
+              }
+            ],
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            }
+          },
+          "options": {}
+        },
+        "id": "1c64b052-acba-407d-bf9f-6edf2059e267",
+        "name": "Erro - Veio do Agente?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -400,
+          880
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "b8c7d6e5-0008-4a1a-8a1a-000000000008",
+                "name": "resposta",
+                "type": "string",
+                "value": "=Não foi possível verificar infrações anteriores: {{ $json.erro }}. Informe isso ao usuário e pergunte se ele deseja seguir mesmo assim com a criação do documento."
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "947bed3a-3ed2-495d-acd7-b075bf1f9798",
+        "name": "Monta Erro para o Agente",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -160,
+          800
         ]
       }
     ],
@@ -784,17 +1083,6 @@
           [
             {
               "node": "Informa Erro",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Informa Erro": {
-        "main": [
-          [
-            {
-              "node": "Responde Erro",
               "type": "main",
               "index": 0
             }
@@ -901,11 +1189,69 @@
           ]
         ]
       },
+      "When Executed by Another Workflow": {
+        "main": [
+          [
+            {
+              "node": "Trata os dados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
       "Monta Resposta Final": {
         "main": [
           [
             {
+              "node": "Veio do Agente?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Veio do Agente?": {
+        "main": [
+          [
+            {
+              "node": "Monta Mensagem para o Agente",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
               "node": "Responde",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Informa Erro": {
+        "main": [
+          [
+            {
+              "node": "Erro - Veio do Agente?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Erro - Veio do Agente?": {
+        "main": [
+          [
+            {
+              "node": "Monta Erro para o Agente",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Responde Erro",
               "type": "main",
               "index": 0
             }
@@ -915,11 +1261,11 @@
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Version ab838c99",
+    "name": "Version 063a7aec",
     "description": "",
     "autosaved": true,
-    "createdAt": "2026-09-23T10:51:49.371Z",
-    "updatedAt": "2026-09-23T11:05:56.933Z"
+    "createdAt": "2026-10-05T15:01:42.348Z",
+    "updatedAt": "2026-10-05T15:01:46.240Z"
   },
   "tags": []
 }
