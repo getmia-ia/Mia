@@ -1,0 +1,609 @@
+{
+  "updatedAt": "2026-10-06T21:40:14.028Z",
+  "createdAt": "2026-10-06T21:01:38.236Z",
+  "id": "xp9Elf8OUPS3eJxD",
+  "name": "BMS - Contratos Jurídicos - 10.03 - Envio para Assinatura",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "### Envio para assinatura (Assinafy)\nChamado pela edge function `juridico-documento` (ação enviar_assinatura) quando o jurídico confirma quem assina.\n\nRecebe: `{ documentoId, titulo, empresa, nomeArquivo, pdfUrl, signatarios: [{ id, nome, email, lado, papel }] }`\nResponde: `{ assinafyDocumentoId, signatarios: [{ email, signerId, url }] }` ou `{ erro }`.\n\nO sistema espera esta resposta: só com **sucesso** a demanda vai para *Em assinatura*. Qualquer falha (baixar PDF, criar documento, signatários) responde **erro** e a demanda fica em *Aprovados pelo cliente* com a mensagem.\n\nPreencha o nó **Config** (conta e API key do Assinafy).",
+        "height": 560,
+        "width": 1700
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        -112
+      ],
+      "id": "08a56b23-36cd-4c3d-a9d0-e6ae160ec3f7",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bms-juridico-assinatura",
+        "authentication": "***REMOVIDO***",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -672,
+        80
+      ],
+      "id": "ccbf3c3a-15c5-43ef-a5a7-793e421768ce",
+      "name": "Webhook",
+      "webhookId": "728553e8-2302-47b8-95c8-cbf1bbbf794c",
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5d9dfa72-7518-429d-b795-378afe892f16",
+              "name": "accountId",
+              "value": "104abcdf335e4766adcc51a8c97f",
+              "type": "string"
+            },
+            {
+              "id": "b3d962d1-9076-4b0e-b0a3-f8df6196209a",
+              "name": "apiKey",
+              "value": "a86qtfJJQ58hURxiJvufMEiUFGZhSk_rS51wgW-KV7c0gKnWZ891xHfh92BYwjfm",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -464,
+        80
+      ],
+      "id": "a8b5dfc1-4f01-46c4-8dc1-da54c7797b04",
+      "name": "Config"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Webhook').first().json.body.pdfUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -240,
+        80
+      ],
+      "id": "d01ac365-1d9a-426f-a85a-f2c28b98dfae",
+      "name": "Baixa o PDF",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.assinafy.com.br/v1/accounts/{{ $('Config').first().json.accountId }}/documents",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $('Config').first().json.apiKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $('Webhook').first().json.body.nomeArquivo }}"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -16,
+        64
+      ],
+      "id": "77389a5d-1ec9-4be8-970f-dcc9087aa32a",
+      "name": "Criar Documento",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "amount": 8
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        192,
+        48
+      ],
+      "id": "7b29e65b-98b0-46e7-bfd6-412316d2baa4",
+      "name": "Aguarda processamento",
+      "webhookId": "2d4ab847-ca4e-46e8-bbbc-26a6b4af4455"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Para cada signatário: reaproveita o cadastro no Assinafy (mesmo e-mail) ou cria. Depois cria a\n// assinatura virtual com todos (o Assinafy manda o e-mail com o link para cada um).\nconst cfg = $('Config').first().json;\nconst req = $('Webhook').first().json.body;\nconst documentId = $('Criar Documento').first().json.data.id;\nconst headers = { 'X-Api-Key': cfg.apiKey, 'Content-Type': 'application/json' };\nconst base = 'https://api.assinafy.com.br/v1';\n\nconst ids = [];\nfor (const s of req.signatarios) {\n  const email = String(s.email).toLowerCase();\n  const busca = await this.helpers.httpRequest({\n    method: 'GET', url: `${base}/accounts/${cfg.accountId}/signers`, headers,\n    qs: { search: email, 'per-page': 100 }, json: true,\n  });\n  let signer = (busca.data || []).find((x) => String(x.email || '').toLowerCase() === email);\n  if (!signer) {\n    const criado = await this.helpers.httpRequest({\n      method: 'POST', url: `${base}/accounts/${cfg.accountId}/signers`, headers,\n      body: { full_name: s.nome, email }, json: true,\n    });\n    signer = criado.data;\n  }\n  ids.push({ email, signerId: signer.id });\n}\n\nconst assignment = await this.helpers.httpRequest({\n  method: 'POST', url: `${base}/documents/${documentId}/assignments`, headers, json: true,\n  body: {\n    method: 'virtual',\n    signerIds: ids.map((x) => x.signerId),\n    message: `${req.titulo}${req.empresa ? ` — ${req.empresa}` : ''}. Documento enviado pelo jurídico da BMS para assinatura digital.`,\n  },\n});\n\nconst urls = assignment.data?.signing_urls || [];\nreturn [{ json: {\n  assinafyDocumentoId: documentId,\n  signatarios: ids.map((x) => ({\n    ...x,\n    url: urls.find((u) => u.signer_id === x.signerId)?.url\n      || `https://app.assinafy.com.br/sign/${documentId}?email=${encodeURIComponent(x.email)}`,\n  })),\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        48
+      ],
+      "id": "7cfd89b8-0d10-467d-8511-39fa4b88e071",
+      "name": "Signatários e assinatura",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        624,
+        32
+      ],
+      "id": "09e4ffc3-0bb1-4bbe-8515-80abd5338d52",
+      "name": "Responde sucesso (enviado)"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ erro: $json.error?.message || $json.error || $json.message || 'Falha ao enviar ao Assinafy' }) }}",
+        "options": {
+          "responseCode": 422
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -240,
+        272
+      ],
+      "id": "459f2991-3c22-41a1-aa30-70a4ee37b69f",
+      "name": "Responde erro (não enviado)"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Baixa o PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixa o PDF": {
+      "main": [
+        [
+          {
+            "node": "Criar Documento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responde erro (não enviado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Documento": {
+      "main": [
+        [
+          {
+            "node": "Aguarda processamento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responde erro (não enviado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguarda processamento": {
+      "main": [
+        [
+          {
+            "node": "Signatários e assinatura",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signatários e assinatura": {
+      "main": [
+        [
+          {
+            "node": "Responde sucesso (enviado)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responde erro (não enviado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "c9b9467f-9ca5-4c58-aa64-65e37934f743",
+  "activeVersionId": "c9b9467f-9ca5-4c58-aa64-65e37934f743",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "xp9Elf8OUPS3eJxD",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-06T21:01:38.236Z",
+      "updatedAt": "2026-10-06T21:01:38.236Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "c9b9467f-9ca5-4c58-aa64-65e37934f743",
+    "workflowId": "xp9Elf8OUPS3eJxD",
+    "nodes": [
+      {
+        "parameters": {
+          "content": "### Envio para assinatura (Assinafy)\nChamado pela edge function `juridico-documento` (ação enviar_assinatura) quando o jurídico confirma quem assina.\n\nRecebe: `{ documentoId, titulo, empresa, nomeArquivo, pdfUrl, signatarios: [{ id, nome, email, lado, papel }] }`\nResponde: `{ assinafyDocumentoId, signatarios: [{ email, signerId, url }] }` ou `{ erro }`.\n\nO sistema espera esta resposta: só com **sucesso** a demanda vai para *Em assinatura*. Qualquer falha (baixar PDF, criar documento, signatários) responde **erro** e a demanda fica em *Aprovados pelo cliente* com a mensagem.\n\nPreencha o nó **Config** (conta e API key do Assinafy).",
+          "height": 560,
+          "width": 1700
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -752,
+          -112
+        ],
+        "id": "08a56b23-36cd-4c3d-a9d0-e6ae160ec3f7",
+        "name": "Sticky Note"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "bms-juridico-assinatura",
+          "authentication": "***REMOVIDO***",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -672,
+          80
+        ],
+        "id": "ccbf3c3a-15c5-43ef-a5a7-793e421768ce",
+        "name": "Webhook",
+        "webhookId": "728553e8-2302-47b8-95c8-cbf1bbbf794c",
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "5d9dfa72-7518-429d-b795-378afe892f16",
+                "name": "accountId",
+                "value": "104abcdf335e4766adcc51a8c97f",
+                "type": "string"
+              },
+              {
+                "id": "b3d962d1-9076-4b0e-b0a3-f8df6196209a",
+                "name": "apiKey",
+                "value": "a86qtfJJQ58hURxiJvufMEiUFGZhSk_rS51wgW-KV7c0gKnWZ891xHfh92BYwjfm",
+                "type": "string"
+              }
+            ]
+          },
+          "includeOtherFields": true,
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -464,
+          80
+        ],
+        "id": "a8b5dfc1-4f01-46c4-8dc1-da54c7797b04",
+        "name": "Config"
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Webhook').first().json.body.pdfUrl }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          -240,
+          80
+        ],
+        "id": "d01ac365-1d9a-426f-a85a-f2c28b98dfae",
+        "name": "Baixa o PDF",
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://api.assinafy.com.br/v1/accounts/{{ $('Config').first().json.accountId }}/documents",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-Api-Key",
+                "value": "={{ $('Config').first().json.apiKey }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "multipart-form-data",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "name",
+                "value": "={{ $('Webhook').first().json.body.nomeArquivo }}"
+              },
+              {
+                "parameterType": "formBinaryData",
+                "name": "file",
+                "inputDataFieldName": "data"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          -16,
+          64
+        ],
+        "id": "77389a5d-1ec9-4be8-970f-dcc9087aa32a",
+        "name": "Criar Documento",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 3000,
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "amount": 8
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          192,
+          48
+        ],
+        "id": "7b29e65b-98b0-46e7-bfd6-412316d2baa4",
+        "name": "Aguarda processamento",
+        "webhookId": "2d4ab847-ca4e-46e8-bbbc-26a6b4af4455"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Para cada signatário: reaproveita o cadastro no Assinafy (mesmo e-mail) ou cria. Depois cria a\n// assinatura virtual com todos (o Assinafy manda o e-mail com o link para cada um).\nconst cfg = $('Config').first().json;\nconst req = $('Webhook').first().json.body;\nconst documentId = $('Criar Documento').first().json.data.id;\nconst headers = { 'X-Api-Key': cfg.apiKey, 'Content-Type': 'application/json' };\nconst base = 'https://api.assinafy.com.br/v1';\n\nconst ids = [];\nfor (const s of req.signatarios) {\n  const email = String(s.email).toLowerCase();\n  const busca = await this.helpers.httpRequest({\n    method: 'GET', url: `${base}/accounts/${cfg.accountId}/signers`, headers,\n    qs: { search: email, 'per-page': 100 }, json: true,\n  });\n  let signer = (busca.data || []).find((x) => String(x.email || '').toLowerCase() === email);\n  if (!signer) {\n    const criado = await this.helpers.httpRequest({\n      method: 'POST', url: `${base}/accounts/${cfg.accountId}/signers`, headers,\n      body: { full_name: s.nome, email }, json: true,\n    });\n    signer = criado.data;\n  }\n  ids.push({ email, signerId: signer.id });\n}\n\nconst assignment = await this.helpers.httpRequest({\n  method: 'POST', url: `${base}/documents/${documentId}/assignments`, headers, json: true,\n  body: {\n    method: 'virtual',\n    signerIds: ids.map((x) => x.signerId),\n    message: `${req.titulo}${req.empresa ? ` — ${req.empresa}` : ''}. Documento enviado pelo jurídico da BMS para assinatura digital.`,\n  },\n});\n\nconst urls = assignment.data?.signing_urls || [];\nreturn [{ json: {\n  assinafyDocumentoId: documentId,\n  signatarios: ids.map((x) => ({\n    ...x,\n    url: urls.find((u) => u.signer_id === x.signerId)?.url\n      || `https://app.assinafy.com.br/sign/${documentId}?email=${encodeURIComponent(x.email)}`,\n  })),\n} }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          400,
+          48
+        ],
+        "id": "7cfd89b8-0d10-467d-8511-39fa4b88e071",
+        "name": "Signatários e assinatura",
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ JSON.stringify($json) }}",
+          "options": {
+            "responseCode": 200
+          }
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.4,
+        "position": [
+          624,
+          32
+        ],
+        "id": "09e4ffc3-0bb1-4bbe-8515-80abd5338d52",
+        "name": "Responde sucesso (enviado)"
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ JSON.stringify({ erro: $json.error?.message || $json.error || $json.message || 'Falha ao enviar ao Assinafy' }) }}",
+          "options": {
+            "responseCode": 422
+          }
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.4,
+        "position": [
+          -240,
+          272
+        ],
+        "id": "459f2991-3c22-41a1-aa30-70a4ee37b69f",
+        "name": "Responde erro (não enviado)"
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Config",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Config": {
+        "main": [
+          [
+            {
+              "node": "Baixa o PDF",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Baixa o PDF": {
+        "main": [
+          [
+            {
+              "node": "Criar Documento",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Responde erro (não enviado)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Criar Documento": {
+        "main": [
+          [
+            {
+              "node": "Aguarda processamento",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Responde erro (não enviado)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Aguarda processamento": {
+        "main": [
+          [
+            {
+              "node": "Signatários e assinatura",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Signatários e assinatura": {
+        "main": [
+          [
+            {
+              "node": "Responde sucesso (enviado)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Responde erro (não enviado)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version c9b9467f",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-10-06T21:39:55.739Z",
+    "updatedAt": "2026-10-06T21:40:01.212Z"
+  },
+  "tags": []
+}
