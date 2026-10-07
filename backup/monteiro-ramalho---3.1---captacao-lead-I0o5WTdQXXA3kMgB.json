@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-06T02:26:31.481Z",
+  "updatedAt": "2026-10-06T14:10:55.968Z",
   "createdAt": "2026-06-16T17:19:05.152Z",
   "id": "I0o5WTdQXXA3kMgB",
   "name": "Monteiro Ramalho - 3.1 - Captação Lead",
@@ -68,7 +68,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT linkedin_url\nFROM leads_tributario",
+        "query": "SELECT linkedin_url FROM leads_tributario\nUNION\nSELECT linkedin_url FROM leads_tributario_aprovacao",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -176,26 +176,6 @@
     },
     {
       "parameters": {
-        "tableId": "leads_tributario",
-        "dataToSend": "autoMapInputData"
-      },
-      "type": "n8n-nodes-base.supabase",
-      "typeVersion": 1,
-      "position": [
-        1120,
-        -192
-      ],
-      "id": "d175be7c-2ff6-4d1d-8dbf-c87bc5b46cfa",
-      "name": "Insere lead no banco",
-      "credentials": {
-        "supabaseApi": {
-          "id": "FcbZyD53kbkf6Vxp",
-          "name": "Monteiro - Supabase"
-        }
-      }
-    },
-    {
-      "parameters": {
         "content": "## Mudar para puxar só quem tem phone \n\"existingDataPoints\": [\n          \"phone\"\n        ]",
         "height": 384
       },
@@ -288,6 +268,44 @@
       "maxTries": 3,
       "waitBetweenTries": 5000,
       "notes": "Retry 3x/5s: a Lusha recomenda backoff exponencial em 5xx."
+    },
+    {
+      "id": "aa49d131-25ee-407f-bcab-f93c2030c9be",
+      "name": "Monta lista para gravar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -192
+      ],
+      "parameters": {
+        "jsCode": "// Junta os leads novos numa lista só para gravar de uma vez.\n// Se não veio nenhum lead novo, a lista fica vazia e nada é gravado.\nconst leads = items.map((i) => i.json).filter((l) => l && l.nome);\nreturn [{ json: { leads: JSON.stringify(leads) } }];"
+      },
+      "notes": "Junta os leads novos numa lista só, para conferir os clientes e gravar de uma vez."
+    },
+    {
+      "id": "f7803187-90de-4ee1-b2b5-f30c34990624",
+      "name": "Confere clientes e grava na aprovação",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1328,
+        -192
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [$json.leads] }}"
+        },
+        "query": "insert into public.leads_tributario_aprovacao\n  (status, nome, cargo, linkedin_url, empresa_nome, empresa_site, empresa_setor, origem,\n   lusha_contact_id, id_company_lusha, cliente_nome, cliente_categoria, cliente_origem, cliente_tipo_match)\nselect\n  -- cliente com nome exato: barrado aqui, não chega para aprovação\n  case when c.categoria = 'cliente' and c.tipo_match = 'exato' then 'cliente' else 'pendente' end,\n  x.nome, x.cargo, x.linkedin_url, x.empresa_nome, x.empresa_site, x.empresa_setor,\n  coalesce(x.origem, 'lusha_n8n'), x.lusha_contact_id, x.id_company_lusha,\n  c.cliente_nome, c.categoria, c.origem, c.tipo_match\nfrom jsonb_to_recordset($1::jsonb) as x(\n  nome text, cargo text, linkedin_url text, empresa_nome text, empresa_site text,\n  empresa_setor text, origem text, lusha_contact_id text, id_company_lusha text\n)\nleft join lateral public.achar_cliente(x.empresa_nome) c on true\non conflict do nothing\nreturning status;\n"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      },
+      "notes": "Para cada lead novo, confere se a empresa já é cliente. Cliente com nome exato fica barrado (status 'cliente'). Os demais vão para a aba Aprovação, com aviso quando parecer cliente ou estiver em negociação. Nada entra em 'Novo' antes da aprovação."
     }
   ],
   "connections": {
@@ -296,17 +314,6 @@
         [
           {
             "node": "Busca a config ativa do lusha",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Verifica duplicatas": {
-      "main": [
-        [
-          {
-            "node": "Insere lead no banco",
             "type": "main",
             "index": 0
           }
@@ -385,6 +392,28 @@
           }
         ]
       ]
+    },
+    "Verifica duplicatas": {
+      "main": [
+        [
+          {
+            "node": "Monta lista para gravar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta lista para gravar": {
+      "main": [
+        [
+          {
+            "node": "Confere clientes e grava na aprovação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -411,8 +440,8 @@
     "aiBuilderAssisted": true,
     "builderVariant": "mcp"
   },
-  "versionId": "e033791c-06e1-4384-b41d-07839167d68a",
-  "activeVersionId": "e033791c-06e1-4384-b41d-07839167d68a",
+  "versionId": "517e806b-5ea8-4f86-9841-a1557d4cdd63",
+  "activeVersionId": "517e806b-5ea8-4f86-9841-a1557d4cdd63",
   "triggerCount": 1,
   "shared": [
     {
@@ -424,7 +453,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "e033791c-06e1-4384-b41d-07839167d68a",
+    "versionId": "517e806b-5ea8-4f86-9841-a1557d4cdd63",
     "workflowId": "I0o5WTdQXXA3kMgB",
     "nodes": [
       {
@@ -489,7 +518,7 @@
       {
         "parameters": {
           "operation": "executeQuery",
-          "query": "SELECT linkedin_url\nFROM leads_tributario",
+          "query": "SELECT linkedin_url FROM leads_tributario\nUNION\nSELECT linkedin_url FROM leads_tributario_aprovacao",
           "options": {}
         },
         "type": "n8n-nodes-base.postgres",
@@ -597,26 +626,6 @@
       },
       {
         "parameters": {
-          "tableId": "leads_tributario",
-          "dataToSend": "autoMapInputData"
-        },
-        "type": "n8n-nodes-base.supabase",
-        "typeVersion": 1,
-        "position": [
-          1120,
-          -192
-        ],
-        "id": "d175be7c-2ff6-4d1d-8dbf-c87bc5b46cfa",
-        "name": "Insere lead no banco",
-        "credentials": {
-          "supabaseApi": {
-            "id": "FcbZyD53kbkf6Vxp",
-            "name": "Monteiro - Supabase"
-          }
-        }
-      },
-      {
-        "parameters": {
           "content": "## Mudar para puxar só quem tem phone \n\"existingDataPoints\": [\n          \"phone\"\n        ]",
           "height": 384
         },
@@ -709,6 +718,44 @@
         "maxTries": 3,
         "waitBetweenTries": 5000,
         "notes": "Retry 3x/5s: a Lusha recomenda backoff exponencial em 5xx."
+      },
+      {
+        "id": "aa49d131-25ee-407f-bcab-f93c2030c9be",
+        "name": "Monta lista para gravar",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1120,
+          -192
+        ],
+        "parameters": {
+          "jsCode": "// Junta os leads novos numa lista só para gravar de uma vez.\n// Se não veio nenhum lead novo, a lista fica vazia e nada é gravado.\nconst leads = items.map((i) => i.json).filter((l) => l && l.nome);\nreturn [{ json: { leads: JSON.stringify(leads) } }];"
+        },
+        "notes": "Junta os leads novos numa lista só, para conferir os clientes e gravar de uma vez."
+      },
+      {
+        "id": "f7803187-90de-4ee1-b2b5-f30c34990624",
+        "name": "Confere clientes e grava na aprovação",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1328,
+          -192
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "options": {
+            "queryReplacement": "={{ [$json.leads] }}"
+          },
+          "query": "insert into public.leads_tributario_aprovacao\n  (status, nome, cargo, linkedin_url, empresa_nome, empresa_site, empresa_setor, origem,\n   lusha_contact_id, id_company_lusha, cliente_nome, cliente_categoria, cliente_origem, cliente_tipo_match)\nselect\n  -- cliente com nome exato: barrado aqui, não chega para aprovação\n  case when c.categoria = 'cliente' and c.tipo_match = 'exato' then 'cliente' else 'pendente' end,\n  x.nome, x.cargo, x.linkedin_url, x.empresa_nome, x.empresa_site, x.empresa_setor,\n  coalesce(x.origem, 'lusha_n8n'), x.lusha_contact_id, x.id_company_lusha,\n  c.cliente_nome, c.categoria, c.origem, c.tipo_match\nfrom jsonb_to_recordset($1::jsonb) as x(\n  nome text, cargo text, linkedin_url text, empresa_nome text, empresa_site text,\n  empresa_setor text, origem text, lusha_contact_id text, id_company_lusha text\n)\nleft join lateral public.achar_cliente(x.empresa_nome) c on true\non conflict do nothing\nreturning status;\n"
+        },
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        },
+        "notes": "Para cada lead novo, confere se a empresa já é cliente. Cliente com nome exato fica barrado (status 'cliente'). Os demais vão para a aba Aprovação, com aviso quando parecer cliente ou estiver em negociação. Nada entra em 'Novo' antes da aprovação."
       }
     ],
     "connections": {
@@ -717,17 +764,6 @@
           [
             {
               "node": "Busca a config ativa do lusha",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Verifica duplicatas": {
-        "main": [
-          [
-            {
-              "node": "Insere lead no banco",
               "type": "main",
               "index": 0
             }
@@ -806,15 +842,37 @@
             }
           ]
         ]
+      },
+      "Verifica duplicatas": {
+        "main": [
+          [
+            {
+              "node": "Monta lista para gravar",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta lista para gravar": {
+        "main": [
+          [
+            {
+              "node": "Confere clientes e grava na aprovação",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Captação semanal (segunda 6h)",
-    "description": "Agenda muda de \"a cada 2 dias, 6h\" para toda segunda-feira, 6h, para preservar créditos da Lusha. Nenhum outro nó alterado.",
+    "name": "Captação com verificação de clientes e fila de aprovação",
+    "description": "A captação deixa de gravar direto em \"Novo\". Agora confere se a empresa já é cliente (nome exato fica barrado) e grava os leads numa fila de aprovação; só depois de aprovados pelo Monteiro eles entram em \"Novo\". A checagem de duplicados passa a olhar também a fila de aprovação (inclusive rejeitados e barrados), para não recaptar a mesma pessoa.",
     "autosaved": false,
-    "createdAt": "2026-10-06T02:26:31.483Z",
-    "updatedAt": "2026-10-06T02:26:31.483Z"
+    "createdAt": "2026-10-06T14:10:55.970Z",
+    "updatedAt": "2026-10-06T14:10:55.970Z"
   },
   "tags": []
 }
