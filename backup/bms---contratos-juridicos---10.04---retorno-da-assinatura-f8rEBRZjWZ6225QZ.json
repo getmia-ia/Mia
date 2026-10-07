@@ -1,0 +1,685 @@
+{
+  "updatedAt": "2026-10-06T21:40:26.247Z",
+  "createdAt": "2026-10-06T21:02:12.938Z",
+  "id": "f8rEBRZjWZ6225QZ",
+  "name": "BMS - Contratos Jurídicos - 10.04 - Retorno da Assinatura",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "### Retorno da assinatura (webhook do Assinafy)\nCadastre a URL deste webhook na conta do Assinafy (eventos de assinatura do signatário, recusa e documento pronto/certificado).\n\nA cada evento, relê o documento no Assinafy e repassa ao app quem já assinou. Quando o documento fica `certificated` (todos assinaram), baixa o PDF certificado e manda junto — o app conclui a demanda.\n\nDocumentos que não são do BMS são ignorados pelo app.",
+        "height": 620,
+        "width": 1900,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -272,
+        -64
+      ],
+      "id": "7c21360b-3694-458d-b8ec-9d9f0c6578ac",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bms-juridico-assinafy-retorno",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -160,
+        208
+      ],
+      "id": "1a44a264-0478-4b5b-a3a8-b16535190e91",
+      "name": "Webhook Assinafy",
+      "webhookId": "b0340691-c9b4-40f6-a1e5-7705003f8021"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5d9dfa72-7518-429d-b795-378afe892f16",
+              "name": "accountId",
+              "value": "104abcdf335e4766adcc51a8c97f",
+              "type": "string"
+            },
+            {
+              "id": "b3d962d1-9076-4b0e-b0a3-f8df6196209a",
+              "name": "apiKey",
+              "value": "a86qtfJJQ58hURxiJvufMEiUFGZhSk_rS51wgW-KV7c0gKnWZ891xHfh92BYwjfm",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        64,
+        208
+      ],
+      "id": "333c058e-02d2-43fd-bd95-c91fd11d4623",
+      "name": "Config"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.assinafy.com.br/v1/documents/{{ $('Webhook Assinafy').first().json.body.object.id }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $('Config').first().json.apiKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        256,
+        208
+      ],
+      "id": "fcd6448f-228e-425d-82ea-87b3418218f3",
+      "name": "Lê o documento",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "const evento = $('Webhook Assinafy').first().json.body;\nconst d = $input.first().json.data || evento.object || {};\nconst signers = d.assignment?.signers || [];\nreturn [{ json: {\n  assinafyDocumentoId: d.id,\n  evento: evento.event,\n  status: d.status,\n  signatarios: signers.map((s) => ({ email: s.email, signerId: s.id, completed: !!s.completed })),\n  recusadoPor: d.declined_by?.email || d.declined_by?.id || (typeof d.declined_by === 'string' ? d.declined_by : null),\n  motivoRecusa: d.decline_reason || null,\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        208
+      ],
+      "id": "03ee091c-2939-469e-b9a8-eb51f712c463",
+      "name": "Monta retorno"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "83e331d6-e2c2-4333-bd45-343bbcb1f4f7",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "certificated",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        704,
+        208
+      ],
+      "id": "c10b556b-4f56-4516-9c95-6375a63cc9b4",
+      "name": "Todos assinaram?"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.assinafy.com.br/v1/documents/{{ $json.assinafyDocumentoId }}/download/certificated",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $('Config').first().json.apiKey }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        928,
+        112
+      ],
+      "id": "b1e95958-d3d8-4032-9e64-e1556c48a636",
+      "name": "Baixa o doc assinado",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "operation": "binaryToPropery",
+        "destinationKey": "pdfBase64",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        1136,
+        112
+      ],
+      "id": "36033a5b-155c-4603-971b-7104fae62ffa",
+      "name": "PDF em base64"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://xqyxalqwsxqndjetgzry.supabase.co/functions/v1/webhook-n8n-assinatura",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ...$('Monta retorno').first().json, pdfBase64: $json.pdfBase64 }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1360,
+        112
+      ],
+      "id": "6f145607-13d0-4286-b800-8bb2295b3dc8",
+      "name": "Envia ao app (concluído)",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://xqyxalqwsxqndjetgzry.supabase.co/functions/v1/webhook-n8n-assinatura",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        928,
+        320
+      ],
+      "id": "5625ee9d-243a-4d45-9fd9-c61b14162e22",
+      "name": "Envia ao app (andamento)",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Assinafy": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Lê o documento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lê o documento": {
+      "main": [
+        [
+          {
+            "node": "Monta retorno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta retorno": {
+      "main": [
+        [
+          {
+            "node": "Todos assinaram?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Todos assinaram?": {
+      "main": [
+        [
+          {
+            "node": "Baixa o doc assinado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Envia ao app (andamento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixa o doc assinado": {
+      "main": [
+        [
+          {
+            "node": "PDF em base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF em base64": {
+      "main": [
+        [
+          {
+            "node": "Envia ao app (concluído)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "9f841e13-8094-4465-8bf3-ae7eba7ca710",
+  "activeVersionId": "9f841e13-8094-4465-8bf3-ae7eba7ca710",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "f8rEBRZjWZ6225QZ",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-06T21:02:12.938Z",
+      "updatedAt": "2026-10-06T21:02:12.938Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "9f841e13-8094-4465-8bf3-ae7eba7ca710",
+    "workflowId": "f8rEBRZjWZ6225QZ",
+    "nodes": [
+      {
+        "parameters": {
+          "content": "### Retorno da assinatura (webhook do Assinafy)\nCadastre a URL deste webhook na conta do Assinafy (eventos de assinatura do signatário, recusa e documento pronto/certificado).\n\nA cada evento, relê o documento no Assinafy e repassa ao app quem já assinou. Quando o documento fica `certificated` (todos assinaram), baixa o PDF certificado e manda junto — o app conclui a demanda.\n\nDocumentos que não são do BMS são ignorados pelo app.",
+          "height": 620,
+          "width": 1900,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -272,
+          -64
+        ],
+        "id": "7c21360b-3694-458d-b8ec-9d9f0c6578ac",
+        "name": "Sticky Note"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "bms-juridico-assinafy-retorno",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -160,
+          208
+        ],
+        "id": "1a44a264-0478-4b5b-a3a8-b16535190e91",
+        "name": "Webhook Assinafy",
+        "webhookId": "b0340691-c9b4-40f6-a1e5-7705003f8021"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "5d9dfa72-7518-429d-b795-378afe892f16",
+                "name": "accountId",
+                "value": "104abcdf335e4766adcc51a8c97f",
+                "type": "string"
+              },
+              {
+                "id": "b3d962d1-9076-4b0e-b0a3-f8df6196209a",
+                "name": "apiKey",
+                "value": "a86qtfJJQ58hURxiJvufMEiUFGZhSk_rS51wgW-KV7c0gKnWZ891xHfh92BYwjfm",
+                "type": "string"
+              }
+            ]
+          },
+          "includeOtherFields": true,
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          64,
+          208
+        ],
+        "id": "333c058e-02d2-43fd-bd95-c91fd11d4623",
+        "name": "Config"
+      },
+      {
+        "parameters": {
+          "url": "=https://api.assinafy.com.br/v1/documents/{{ $('Webhook Assinafy').first().json.body.object.id }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-Api-Key",
+                "value": "={{ $('Config').first().json.apiKey }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          256,
+          208
+        ],
+        "id": "fcd6448f-228e-425d-82ea-87b3418218f3",
+        "name": "Lê o documento",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 3000
+      },
+      {
+        "parameters": {
+          "jsCode": "const evento = $('Webhook Assinafy').first().json.body;\nconst d = $input.first().json.data || evento.object || {};\nconst signers = d.assignment?.signers || [];\nreturn [{ json: {\n  assinafyDocumentoId: d.id,\n  evento: evento.event,\n  status: d.status,\n  signatarios: signers.map((s) => ({ email: s.email, signerId: s.id, completed: !!s.completed })),\n  recusadoPor: d.declined_by?.email || d.declined_by?.id || (typeof d.declined_by === 'string' ? d.declined_by : null),\n  motivoRecusa: d.decline_reason || null,\n} }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          208
+        ],
+        "id": "03ee091c-2939-469e-b9a8-eb51f712c463",
+        "name": "Monta retorno"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "83e331d6-e2c2-4333-bd45-343bbcb1f4f7",
+                "leftValue": "={{ $json.status }}",
+                "rightValue": "certificated",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          704,
+          208
+        ],
+        "id": "c10b556b-4f56-4516-9c95-6375a63cc9b4",
+        "name": "Todos assinaram?"
+      },
+      {
+        "parameters": {
+          "url": "=https://api.assinafy.com.br/v1/documents/{{ $json.assinafyDocumentoId }}/download/certificated",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-Api-Key",
+                "value": "={{ $('Config').first().json.apiKey }}"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          928,
+          112
+        ],
+        "id": "b1e95958-d3d8-4032-9e64-e1556c48a636",
+        "name": "Baixa o doc assinado",
+        "retryOnFail": true,
+        "maxTries": 5,
+        "waitBetweenTries": 5000
+      },
+      {
+        "parameters": {
+          "operation": "binaryToPropery",
+          "destinationKey": "pdfBase64",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          1136,
+          112
+        ],
+        "id": "36033a5b-155c-4603-971b-7104fae62ffa",
+        "name": "PDF em base64"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://xqyxalqwsxqndjetgzry.supabase.co/functions/v1/webhook-n8n-assinatura",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ ...$('Monta retorno').first().json, pdfBase64: $json.pdfBase64 }) }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1360,
+          112
+        ],
+        "id": "6f145607-13d0-4286-b800-8bb2295b3dc8",
+        "name": "Envia ao app (concluído)",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://xqyxalqwsxqndjetgzry.supabase.co/functions/v1/webhook-n8n-assinatura",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json) }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          928,
+          320
+        ],
+        "id": "5625ee9d-243a-4d45-9fd9-c61b14162e22",
+        "name": "Envia ao app (andamento)",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        }
+      }
+    ],
+    "connections": {
+      "Webhook Assinafy": {
+        "main": [
+          [
+            {
+              "node": "Config",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Config": {
+        "main": [
+          [
+            {
+              "node": "Lê o documento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Lê o documento": {
+        "main": [
+          [
+            {
+              "node": "Monta retorno",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta retorno": {
+        "main": [
+          [
+            {
+              "node": "Todos assinaram?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Todos assinaram?": {
+        "main": [
+          [
+            {
+              "node": "Baixa o doc assinado",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Envia ao app (andamento)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Baixa o doc assinado": {
+        "main": [
+          [
+            {
+              "node": "PDF em base64",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "PDF em base64": {
+        "main": [
+          [
+            {
+              "node": "Envia ao app (concluído)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version 9f841e13",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-10-06T21:37:14.538Z",
+    "updatedAt": "2026-10-06T21:37:19.861Z"
+  },
+  "tags": []
+}
