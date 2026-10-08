@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-06T21:40:14.028Z",
+  "updatedAt": "2026-10-07T18:31:36.063Z",
   "createdAt": "2026-10-06T21:01:38.236Z",
   "id": "xp9Elf8OUPS3eJxD",
   "name": "BMS - Contratos Jurídicos - 10.03 - Envio para Assinatura",
@@ -8,17 +8,17 @@
   "nodes": [
     {
       "parameters": {
-        "content": "### Envio para assinatura (Assinafy)\nChamado pela edge function `juridico-documento` (ação enviar_assinatura) quando o jurídico confirma quem assina.\n\nRecebe: `{ documentoId, titulo, empresa, nomeArquivo, pdfUrl, signatarios: [{ id, nome, email, lado, papel }] }`\nResponde: `{ assinafyDocumentoId, signatarios: [{ email, signerId, url }] }` ou `{ erro }`.\n\nO sistema espera esta resposta: só com **sucesso** a demanda vai para *Em assinatura*. Qualquer falha (baixar PDF, criar documento, signatários) responde **erro** e a demanda fica em *Aprovados pelo cliente* com a mensagem.\n\nPreencha o nó **Config** (conta e API key do Assinafy).",
+        "content": "### Envio para assinatura (Assinafy) — assíncrono\nChamado pelo sistema quando o jurídico confirma quem assina. O Webhook responde **202 na hora** (sem risco de timeout) e o fluxo segue sozinho.\n\nRecebe: `{ documentoId, pedidoId, titulo, empresa, nomeArquivo, pdfUrl, callbackUrl, signatarios: [{ id, nome, email, lado, papel }] }`\n\nAo terminar, chama o `callbackUrl` (webhook-n8n-assinatura) com `{ tipo: \"envio\", documentoId, pedidoId, resultado: \"enviado\", assinafyDocumentoId, signatarios: [{ email, signerId, url }] }` ou `resultado: \"erro\"` com `erro`. Só no **enviado** a demanda vai para *Em assinatura*.\n\nPreencha o nó **Config** (conta e API key do Assinafy). Credencial: **BMS Secret para SAAS Jurídico** no Webhook e nos dois avisos.",
         "height": 560,
-        "width": 1700
+        "width": 1760
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
         -752,
-        -112
+        -128
       ],
-      "id": "08a56b23-36cd-4c3d-a9d0-e6ae160ec3f7",
+      "id": "97069f74-0ba4-466f-8953-5df0ae9dbdbb",
       "name": "Sticky Note"
     },
     {
@@ -26,16 +26,17 @@
         "httpMethod": "POST",
         "path": "bms-juridico-assinatura",
         "authentication": "***REMOVIDO***",
-        "responseMode": "responseNode",
-        "options": {}
+        "options": {
+          "responseData": "{\"ok\":true,\"recebido\":true}"
+        }
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -672,
+        -592,
         80
       ],
-      "id": "ccbf3c3a-15c5-43ef-a5a7-793e421768ce",
+      "id": "95f50e95-025c-4e64-a1f5-a556c7ec73d9",
       "name": "Webhook",
       "webhookId": "728553e8-2302-47b8-95c8-cbf1bbbf794c",
       "credentials": {
@@ -66,10 +67,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -464,
+        -384,
         80
       ],
-      "id": "a8b5dfc1-4f01-46c4-8dc1-da54c7797b04",
+      "id": "4dd1dfd8-90c9-4be0-b47b-54018cfc5daf",
       "name": "Config"
     },
     {
@@ -86,10 +87,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        -240,
+        -176,
         80
       ],
-      "id": "d01ac365-1d9a-426f-a85a-f2c28b98dfae",
+      "id": "636fd3ac-f75d-49ec-8bc3-647a7e5c88db",
       "name": "Baixa o PDF",
       "onError": "continueErrorOutput"
     },
@@ -126,10 +127,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        -16,
+        48,
         64
       ],
-      "id": "77389a5d-1ec9-4be8-970f-dcc9087aa32a",
+      "id": "09aa10bc-f081-4822-b8c6-89537be2f1ce",
       "name": "Criar Documento",
       "retryOnFail": true,
       "maxTries": 3,
@@ -143,10 +144,10 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        192,
+        272,
         48
       ],
-      "id": "7b29e65b-98b0-46e7-bfd6-412316d2baa4",
+      "id": "a2661b3d-5eab-4c60-bb66-6607058b31ef",
       "name": "Aguarda processamento",
       "webhookId": "2d4ab847-ca4e-46e8-bbbc-26a6b4af4455"
     },
@@ -157,46 +158,64 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        400,
+        480,
         48
       ],
-      "id": "7cfd89b8-0d10-467d-8511-39fa4b88e071",
+      "id": "14e94f8f-ba19-482f-8575-d8c3e06813a2",
       "name": "Signatários e assinatura",
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($json) }}",
-        "options": {
-          "responseCode": 200
-        }
+        "method": "POST",
+        "url": "={{ $('Webhook').first().json.body.callbackUrl }}",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tipo: 'envio', documentoId: $('Webhook').first().json.body.documentoId, pedidoId: $('Webhook').first().json.body.pedidoId, resultado: 'enviado', assinafyDocumentoId: $json.assinafyDocumentoId, signatarios: $json.signatarios }) }}",
+        "options": {}
       },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.4,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
       "position": [
-        624,
+        704,
         32
       ],
-      "id": "09e4ffc3-0bb1-4bbe-8515-80abd5338d52",
-      "name": "Responde sucesso (enviado)"
+      "id": "1f1ea08d-34d4-445f-a9ea-d952c9ccd4d6",
+      "name": "Avisa o sistema (enviado)",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ erro: $json.error?.message || $json.error || $json.message || 'Falha ao enviar ao Assinafy' }) }}",
-        "options": {
-          "responseCode": 422
-        }
+        "method": "POST",
+        "url": "={{ $('Webhook').first().json.body.callbackUrl }}",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tipo: 'envio', documentoId: $('Webhook').first().json.body.documentoId, pedidoId: $('Webhook').first().json.body.pedidoId, resultado: 'erro', erro: $json.error?.message || $json.error || $json.message || 'Falha ao enviar ao Assinafy' }) }}",
+        "options": {}
       },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.4,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
       "position": [
-        -240,
-        272
+        -192,
+        288
       ],
-      "id": "459f2991-3c22-41a1-aa30-70a4ee37b69f",
-      "name": "Responde erro (não enviado)"
+      "id": "6707eede-3b58-4505-8719-7bd149d21605",
+      "name": "Avisa o sistema (erro)",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
     }
   ],
   "connections": {
@@ -233,7 +252,7 @@
         ],
         [
           {
-            "node": "Responde erro (não enviado)",
+            "node": "Avisa o sistema (erro)",
             "type": "main",
             "index": 0
           }
@@ -251,7 +270,7 @@
         ],
         [
           {
-            "node": "Responde erro (não enviado)",
+            "node": "Avisa o sistema (erro)",
             "type": "main",
             "index": 0
           }
@@ -273,14 +292,14 @@
       "main": [
         [
           {
-            "node": "Responde sucesso (enviado)",
+            "node": "Avisa o sistema (enviado)",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Responde erro (não enviado)",
+            "node": "Avisa o sistema (erro)",
             "type": "main",
             "index": 0
           }
@@ -299,8 +318,8 @@
   },
   "staticData": null,
   "meta": null,
-  "versionId": "c9b9467f-9ca5-4c58-aa64-65e37934f743",
-  "activeVersionId": "c9b9467f-9ca5-4c58-aa64-65e37934f743",
+  "versionId": "ae6b4ba4-2f2c-4303-8bbd-133db0c9df62",
+  "activeVersionId": "ae6b4ba4-2f2c-4303-8bbd-133db0c9df62",
   "triggerCount": 1,
   "shared": [
     {
@@ -312,22 +331,22 @@
     }
   ],
   "activeVersion": {
-    "versionId": "c9b9467f-9ca5-4c58-aa64-65e37934f743",
+    "versionId": "ae6b4ba4-2f2c-4303-8bbd-133db0c9df62",
     "workflowId": "xp9Elf8OUPS3eJxD",
     "nodes": [
       {
         "parameters": {
-          "content": "### Envio para assinatura (Assinafy)\nChamado pela edge function `juridico-documento` (ação enviar_assinatura) quando o jurídico confirma quem assina.\n\nRecebe: `{ documentoId, titulo, empresa, nomeArquivo, pdfUrl, signatarios: [{ id, nome, email, lado, papel }] }`\nResponde: `{ assinafyDocumentoId, signatarios: [{ email, signerId, url }] }` ou `{ erro }`.\n\nO sistema espera esta resposta: só com **sucesso** a demanda vai para *Em assinatura*. Qualquer falha (baixar PDF, criar documento, signatários) responde **erro** e a demanda fica em *Aprovados pelo cliente* com a mensagem.\n\nPreencha o nó **Config** (conta e API key do Assinafy).",
+          "content": "### Envio para assinatura (Assinafy) — assíncrono\nChamado pelo sistema quando o jurídico confirma quem assina. O Webhook responde **202 na hora** (sem risco de timeout) e o fluxo segue sozinho.\n\nRecebe: `{ documentoId, pedidoId, titulo, empresa, nomeArquivo, pdfUrl, callbackUrl, signatarios: [{ id, nome, email, lado, papel }] }`\n\nAo terminar, chama o `callbackUrl` (webhook-n8n-assinatura) com `{ tipo: \"envio\", documentoId, pedidoId, resultado: \"enviado\", assinafyDocumentoId, signatarios: [{ email, signerId, url }] }` ou `resultado: \"erro\"` com `erro`. Só no **enviado** a demanda vai para *Em assinatura*.\n\nPreencha o nó **Config** (conta e API key do Assinafy). Credencial: **BMS Secret para SAAS Jurídico** no Webhook e nos dois avisos.",
           "height": 560,
-          "width": 1700
+          "width": 1760
         },
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
         "position": [
           -752,
-          -112
+          -128
         ],
-        "id": "08a56b23-36cd-4c3d-a9d0-e6ae160ec3f7",
+        "id": "97069f74-0ba4-466f-8953-5df0ae9dbdbb",
         "name": "Sticky Note"
       },
       {
@@ -335,16 +354,17 @@
           "httpMethod": "POST",
           "path": "bms-juridico-assinatura",
           "authentication": "***REMOVIDO***",
-          "responseMode": "responseNode",
-          "options": {}
+          "options": {
+            "responseData": "{\"ok\":true,\"recebido\":true}"
+          }
         },
         "type": "n8n-nodes-base.webhook",
         "typeVersion": 2.1,
         "position": [
-          -672,
+          -592,
           80
         ],
-        "id": "ccbf3c3a-15c5-43ef-a5a7-793e421768ce",
+        "id": "95f50e95-025c-4e64-a1f5-a556c7ec73d9",
         "name": "Webhook",
         "webhookId": "728553e8-2302-47b8-95c8-cbf1bbbf794c",
         "credentials": {
@@ -375,10 +395,10 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          -464,
+          -384,
           80
         ],
-        "id": "a8b5dfc1-4f01-46c4-8dc1-da54c7797b04",
+        "id": "4dd1dfd8-90c9-4be0-b47b-54018cfc5daf",
         "name": "Config"
       },
       {
@@ -395,10 +415,10 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.3,
         "position": [
-          -240,
+          -176,
           80
         ],
-        "id": "d01ac365-1d9a-426f-a85a-f2c28b98dfae",
+        "id": "636fd3ac-f75d-49ec-8bc3-647a7e5c88db",
         "name": "Baixa o PDF",
         "onError": "continueErrorOutput"
       },
@@ -435,10 +455,10 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.3,
         "position": [
-          -16,
+          48,
           64
         ],
-        "id": "77389a5d-1ec9-4be8-970f-dcc9087aa32a",
+        "id": "09aa10bc-f081-4822-b8c6-89537be2f1ce",
         "name": "Criar Documento",
         "retryOnFail": true,
         "maxTries": 3,
@@ -452,10 +472,10 @@
         "type": "n8n-nodes-base.wait",
         "typeVersion": 1.1,
         "position": [
-          192,
+          272,
           48
         ],
-        "id": "7b29e65b-98b0-46e7-bfd6-412316d2baa4",
+        "id": "a2661b3d-5eab-4c60-bb66-6607058b31ef",
         "name": "Aguarda processamento",
         "webhookId": "2d4ab847-ca4e-46e8-bbbc-26a6b4af4455"
       },
@@ -466,46 +486,64 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          400,
+          480,
           48
         ],
-        "id": "7cfd89b8-0d10-467d-8511-39fa4b88e071",
+        "id": "14e94f8f-ba19-482f-8575-d8c3e06813a2",
         "name": "Signatários e assinatura",
         "onError": "continueErrorOutput"
       },
       {
         "parameters": {
-          "respondWith": "json",
-          "responseBody": "={{ JSON.stringify($json) }}",
-          "options": {
-            "responseCode": 200
-          }
+          "method": "POST",
+          "url": "={{ $('Webhook').first().json.body.callbackUrl }}",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ tipo: 'envio', documentoId: $('Webhook').first().json.body.documentoId, pedidoId: $('Webhook').first().json.body.pedidoId, resultado: 'enviado', assinafyDocumentoId: $json.assinafyDocumentoId, signatarios: $json.signatarios }) }}",
+          "options": {}
         },
-        "type": "n8n-nodes-base.respondToWebhook",
-        "typeVersion": 1.4,
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
         "position": [
-          624,
+          704,
           32
         ],
-        "id": "09e4ffc3-0bb1-4bbe-8515-80abd5338d52",
-        "name": "Responde sucesso (enviado)"
+        "id": "1f1ea08d-34d4-445f-a9ea-d952c9ccd4d6",
+        "name": "Avisa o sistema (enviado)",
+        "retryOnFail": true,
+        "maxTries": 5,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        }
       },
       {
         "parameters": {
-          "respondWith": "json",
-          "responseBody": "={{ JSON.stringify({ erro: $json.error?.message || $json.error || $json.message || 'Falha ao enviar ao Assinafy' }) }}",
-          "options": {
-            "responseCode": 422
-          }
+          "method": "POST",
+          "url": "={{ $('Webhook').first().json.body.callbackUrl }}",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ tipo: 'envio', documentoId: $('Webhook').first().json.body.documentoId, pedidoId: $('Webhook').first().json.body.pedidoId, resultado: 'erro', erro: $json.error?.message || $json.error || $json.message || 'Falha ao enviar ao Assinafy' }) }}",
+          "options": {}
         },
-        "type": "n8n-nodes-base.respondToWebhook",
-        "typeVersion": 1.4,
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
         "position": [
-          -240,
-          272
+          -192,
+          288
         ],
-        "id": "459f2991-3c22-41a1-aa30-70a4ee37b69f",
-        "name": "Responde erro (não enviado)"
+        "id": "6707eede-3b58-4505-8719-7bd149d21605",
+        "name": "Avisa o sistema (erro)",
+        "retryOnFail": true,
+        "maxTries": 5,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        }
       }
     ],
     "connections": {
@@ -542,7 +580,7 @@
           ],
           [
             {
-              "node": "Responde erro (não enviado)",
+              "node": "Avisa o sistema (erro)",
               "type": "main",
               "index": 0
             }
@@ -560,7 +598,7 @@
           ],
           [
             {
-              "node": "Responde erro (não enviado)",
+              "node": "Avisa o sistema (erro)",
               "type": "main",
               "index": 0
             }
@@ -582,14 +620,14 @@
         "main": [
           [
             {
-              "node": "Responde sucesso (enviado)",
+              "node": "Avisa o sistema (enviado)",
               "type": "main",
               "index": 0
             }
           ],
           [
             {
-              "node": "Responde erro (não enviado)",
+              "node": "Avisa o sistema (erro)",
               "type": "main",
               "index": 0
             }
@@ -599,11 +637,11 @@
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Version c9b9467f",
+    "name": "Version ae6b4ba4",
     "description": "",
     "autosaved": true,
-    "createdAt": "2026-10-06T21:39:55.739Z",
-    "updatedAt": "2026-10-06T21:40:01.212Z"
+    "createdAt": "2026-10-07T18:31:36.065Z",
+    "updatedAt": "2026-10-07T18:31:37.645Z"
   },
   "tags": []
 }
