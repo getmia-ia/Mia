@@ -1,0 +1,371 @@
+{
+  "updatedAt": "2026-10-07T20:18:04.582Z",
+  "createdAt": "2026-10-07T19:32:25.575Z",
+  "id": "CMJzuqCkyzu6e5lY",
+  "name": "BMS - Contratos Jurídicos - 10.05 - Follow-up",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "### Follow-up (FUP) de contratos — 10.05\nO **sistema** verifica de hora em hora (dias úteis, 8h–18h) e chama este webhook **uma vez por demanda** a cobrar. O Webhook responde 202 na hora; no fim, o nó **Registra no sistema** confirma em `callbackUrl` (sem isso, o sistema tenta de novo).\n\n- **Aguardando retorno**: cobra o cliente (comercial em cópia) com link novo do portal.\n- **Em assinatura**: um lembrete por signatário que **ainda não assinou**, com o link dele.\n- **Aviso**: ao atingir o nº de cobranças de *Jurídico → Configurações*, avisa o comercial responsável (uma vez por etapa). Se só falta a BMS assinar, avisa o jurídico.\n\nCadência e limite vêm das Configurações do sistema — não há números fixos aqui. Textos dos e-mails: nó **Monta e-mails**.\n",
+        "height": 420,
+        "width": 1300
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -656,
+        -32
+      ],
+      "id": "14606f7b-b050-406e-ab5e-23dd97c77b88",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bms-juridico-followup",
+        "authentication": "***REMOVIDO***",
+        "options": {
+          "responseData": "{\"ok\":true,\"recebido\":true}"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -528,
+        208
+      ],
+      "id": "892134aa-e518-4b91-97dc-55f741543c71",
+      "name": "Webhook",
+      "webhookId": "1520621a-e51c-4653-8f88-24db373250b2",
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Monta os e-mails da demanda recebida: uma saída por e-mail (o nó seguinte envia cada um pelo Resend).\n// Para mudar textos/assuntos, edite só este nó. Etapas: \"retorno\" (cliente não respondeu) e\n// \"assinatura\" (um e-mail por signatário que ainda não assinou). `aviso` = e-mail interno (comercial ou jurídico).\nconst i = $('Webhook').first().json.body;\n\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\nconst fmt = (d) => (d?.nome ? `${d.nome} <${d.email}>` : d?.email);\nconst primeiro = (n) => (n ? String(n).split(' ')[0] : '');\nconst tipo = i.tipoDocumentoLabel || 'Documento';\nconst empresa = i.empresa?.nome || '';\nconst dias = i.diasAguardando == null ? '' : `${i.diasAguardando} dia${i.diasAguardando === 1 ? '' : 's'}`;\nconst from = i.remetente || 'BMS Consultoria Tributária <no-reply@bmsprojetos.com>';\n\nconst botao = (url, texto) => url ? `<tr><td style=\"padding:4px 32px 8px 32px;text-align:center;\">\n  <a href=\"${esc(url)}\" style=\"display:inline-block;background:#E8620E;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:8px;font-size:14px;font-weight:700;\">${esc(texto)}</a></td></tr>` : '';\nconst layout = ({ rotulo, titulo, corpo, cta = '', rodape = 'Este é um e-mail automático.' }) => `<!doctype html>\n<html lang=\"pt-BR\"><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /></head>\n<body style=\"margin:0;padding:0;background:#F3F5F8;font-family:Arial,Helvetica,sans-serif;color:#0F2A47;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:#F3F5F8;padding:32px 12px;\"><tr><td align=\"center\">\n<table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"max-width:600px;width:100%;background:#ffffff;border:1px solid #E3E8EF;border-radius:10px;overflow:hidden;\">\n  <tr><td style=\"background:#0F2A47;padding:24px 32px;\">\n    <div style=\"color:#ffffff;font-size:22px;font-weight:700;letter-spacing:0.06em;\">BMS</div>\n    <div style=\"margin-top:2px;color:#F2A46B;font-size:10px;letter-spacing:0.28em;text-transform:uppercase;\">Consultoria Tributária</div>\n  </td></tr>\n  <tr><td style=\"height:3px;background:#E8620E;\"></td></tr>\n  <tr><td style=\"padding:32px 32px 8px 32px;\">\n    <p style=\"margin:0 0 8px 0;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#6B7A8D;\">${esc(rotulo)}</p>\n    <h1 style=\"margin:0 0 16px 0;font-size:22px;line-height:1.3;color:#0F2A47;\">${esc(titulo)}</h1>\n    ${corpo}\n  </td></tr>\n  ${cta}\n  <tr><td style=\"padding:28px 32px 0 32px;\"><div style=\"border-top:1px solid #E3E8EF;\"></div></td></tr>\n  <tr><td style=\"padding:16px 32px 24px 32px;text-align:center;\">\n    <p style=\"margin:0 0 4px 0;font-size:12px;color:#0F2A47;font-weight:700;\">BMS Consultoria Tributária</p>\n    <p style=\"margin:0;font-size:11px;color:#8A9AAC;\">${esc(rodape)}</p>\n  </td></tr>\n</table></td></tr></table></body></html>`;\nconst p = (t) => `<p style=\"margin:0 0 12px 0;font-size:14px;line-height:1.6;\">${t}</p>`;\nconst contatoComercial = i.comercial?.nome\n  ? p(`<span style=\"font-size:13px;color:#3A4A5E;\">Dúvidas? Fale com <strong>${esc(i.comercial.nome)}</strong> (<a href=\"mailto:${esc(i.comercial.email)}\" style=\"color:#E8620E;\">${esc(i.comercial.email)}</a>).</span>`)\n  : '';\n\nconst emails = [];\n\nif (i.etapa === 'retorno') {\n  const saud = primeiro(i.para?.[0]?.nome) ? `Olá, ${esc(primeiro(i.para[0].nome))},` : 'Olá,';\n  emails.push({\n    tipo: 'cliente',\n    from, to: i.para.map(fmt), cc: (i.cc || []).map(fmt),\n    subject: `Lembrete: ${tipo} — ${empresa} aguarda sua revisão`,\n    html: layout({\n      rotulo: `${tipo} · lembrete`,\n      titulo: empresa,\n      corpo: p(saud)\n        + p(`Há ${esc(dias || 'alguns dias')} enviamos o <strong>${esc(tipo.toLowerCase())}</strong> para sua revisão e ainda não recebemos retorno.`)\n        + p('Pelo portal você pode ler, comentar trechos, enviar sua versão ou aprovar o documento — leva poucos minutos.')\n        + contatoComercial,\n      cta: botao(i.links?.portal, 'Revisar documento no portal'),\n      rodape: 'Este é um lembrete automático. O link do portal é pessoal e expira em alguns dias.',\n    }),\n  });\n} else {\n  for (const s of i.pendentes.length ? i.pendentes : i.para.map((d) => ({ ...d, link: null }))) {\n    const jaAssinaram = (i.assinaram || []).length\n      ? p(`<span style=\"font-size:13px;color:#3A4A5E;\">Já assinaram: ${esc(i.assinaram.join(', '))}.</span>`) : '';\n    emails.push({\n      tipo: 'cliente',\n      from, to: [fmt(s)], cc: [],\n      subject: `Lembrete: assinatura pendente — ${tipo} ${empresa}`,\n      html: layout({\n        rotulo: `${tipo} · assinatura pendente`,\n        titulo: empresa,\n        corpo: p(primeiro(s.nome) ? `Olá, ${esc(primeiro(s.nome))},` : 'Olá,')\n          + p(`O documento <strong>${esc(i.titulo)}</strong> está aguardando a sua assinatura${dias ? ` há ${esc(dias)}` : ''}.`)\n          + (s.link ? p('É só clicar no botão abaixo — a assinatura é digital e leva menos de 2 minutos.')\n                    : p('Procure o e-mail da plataforma de assinatura na sua caixa de entrada (verifique também o spam) para concluir.'))\n          + jaAssinaram + (s.lado === 'bms' ? '' : contatoComercial),\n        cta: botao(s.link, 'Assinar documento'),\n        rodape: 'Este é um lembrete automático. Se você já assinou, desconsidere esta mensagem.',\n      }),\n    });\n  }\n}\n\nif (i.aviso && i.aviso.para?.length) {\n  const paraJuridico = i.aviso.destino === 'juridico';\n  const cobrados = i.etapa === 'retorno' ? i.para : (i.pendentes.length ? i.pendentes : i.para);\n  const lista = cobrados.map((d) => `<li>${esc(d.nome || d.email)}${d.nome ? ` — ${esc(d.email)}` : ''}${d.lado ? ` (${d.lado === 'bms' ? 'BMS' : 'cliente'}${d.papel === 'testemunha' ? ', testemunha' : ''})` : ''}</li>`).join('');\n  emails.push({\n    tipo: 'aviso',\n    from, to: i.aviso.para.map(fmt), cc: (i.aviso.cc || []).map(fmt),\n    subject: `[Ação necessária] ${empresa} — ${i.etapa === 'retorno' ? `${tipo} sem retorno do cliente` : `assinatura pendente (${tipo})`}`,\n    html: layout({\n      rotulo: paraJuridico ? 'Aviso ao jurídico' : 'Aviso ao comercial',\n      titulo: `${empresa}${i.oportunidade ? ` · ${i.oportunidade}` : ''}`,\n      corpo: p(primeiro(i.aviso.para[0]?.nome) ? `Olá, ${esc(primeiro(i.aviso.para[0].nome))},` : 'Olá,')\n        + p(esc(i.aviso.motivo))\n        + p(`<strong>${i.etapa === 'retorno' ? 'Contatos cobrados' : 'Ainda não assinaram'}:</strong>`)\n        + `<ul style=\"margin:0 0 12px 0;padding-left:20px;font-size:14px;line-height:1.6;\">${lista}</ul>`\n        + p(paraJuridico\n          ? 'Falta só a assinatura do lado da BMS. Peça para o(s) assinante(s) concluírem pelo link que receberam do Assinafy.'\n          : i.etapa === 'retorno'\n            ? 'As cobranças por e-mail não tiveram resposta. Sugerimos um contato direto (telefone ou WhatsApp) para entender se há dúvidas ou ajustes no documento. Os lembretes automáticos continuam.'\n            : 'Os lembretes por e-mail não foram suficientes. Sugerimos um contato direto com o cliente para concluir a assinatura. Os lembretes automáticos continuam.'),\n      cta: botao(i.links?.juridico, 'Abrir a demanda no sistema'),\n      rodape: 'Aviso automático do follow-up de contratos. Enviado uma vez por etapa.',\n    }),\n  });\n}\n\nreturn emails.map((e) => ({ json: e }));\n\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        208
+      ],
+      "id": "089abe8e-ddfe-4abb-92b9-e36838dad47d",
+      "name": "Monta e-mails"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ from: $json.from, to: $json.to, ...($json.cc.length ? { cc: $json.cc } : {}), subject: $json.subject, html: $json.html }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -96,
+        208
+      ],
+      "id": "76c63dae-877e-412c-a7bb-f6c89e8fc611",
+      "name": "Envia pelo Resend",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Junta o resultado dos envios (um item por e-mail, na mesma ordem do \"Monta e-mails\") e prepara o retorno ao sistema.\n// Falha no e-mail ao cliente → resultado \"erro\" (o sistema tenta de novo em 1h). Falha só no aviso interno →\n// a cobrança conta, mas o aviso fica para a próxima rodada.\nconst i = $('Webhook').first().json.body;\nconst emails = $('Monta e-mails').all().map((x) => x.json);\nconst respostas = $input.all().map((x) => x.json);\n\nconst resendIds = [];\nconst erros = [];\nlet comercialAvisado = false;\nemails.forEach((e, n) => {\n  const r = respostas[n] || {};\n  const ok = !r.error && r.id;\n  if (e.tipo === 'aviso') comercialAvisado = !!ok;\n  else if (ok) resendIds.push(r.id);\n  else erros.push(`${e.to.join(', ')}: ${r.error?.message || r.error || 'sem resposta do Resend'}`);\n});\n\nreturn [{ json: {\n  acao: 'registrar',\n  documentoId: i.documentoId,\n  etapa: i.etapa,\n  numero: i.numero,\n  resultado: resendIds.length ? 'enviado' : 'erro',\n  erro: erros.join('; ') || null,\n  para: emails.filter((e) => e.tipo !== 'aviso').flatMap((e) => e.to),\n  resendIds,\n  comercialAvisado,\n  avisoDestino: i.aviso?.destino ?? null,\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        208
+      ],
+      "id": "3c2b25e8-ec4e-4376-b6e1-6717125b2451",
+      "name": "Resume o envio"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Webhook').first().json.body.callbackUrl }}",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        352,
+        208
+      ],
+      "id": "21ed7cd2-1964-4b53-a616-1a36184b0535",
+      "name": "Registra no sistema",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Monta e-mails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta e-mails": {
+      "main": [
+        [
+          {
+            "node": "Envia pelo Resend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia pelo Resend": {
+      "main": [
+        [
+          {
+            "node": "Resume o envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume o envio": {
+      "main": [
+        [
+          {
+            "node": "Registra no sistema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "c5a71686-f56b-4206-8fb1-c50a8bbb98ac",
+  "activeVersionId": "c5a71686-f56b-4206-8fb1-c50a8bbb98ac",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "CMJzuqCkyzu6e5lY",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-07T19:32:25.575Z",
+      "updatedAt": "2026-10-07T19:32:25.575Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "c5a71686-f56b-4206-8fb1-c50a8bbb98ac",
+    "workflowId": "CMJzuqCkyzu6e5lY",
+    "nodes": [
+      {
+        "parameters": {
+          "content": "### Follow-up (FUP) de contratos — 10.05\nO **sistema** verifica de hora em hora (dias úteis, 8h–18h) e chama este webhook **uma vez por demanda** a cobrar. O Webhook responde 202 na hora; no fim, o nó **Registra no sistema** confirma em `callbackUrl` (sem isso, o sistema tenta de novo).\n\n- **Aguardando retorno**: cobra o cliente (comercial em cópia) com link novo do portal.\n- **Em assinatura**: um lembrete por signatário que **ainda não assinou**, com o link dele.\n- **Aviso**: ao atingir o nº de cobranças de *Jurídico → Configurações*, avisa o comercial responsável (uma vez por etapa). Se só falta a BMS assinar, avisa o jurídico.\n\nCadência e limite vêm das Configurações do sistema — não há números fixos aqui. Textos dos e-mails: nó **Monta e-mails**.\n",
+          "height": 420,
+          "width": 1300
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -656,
+          -32
+        ],
+        "id": "14606f7b-b050-406e-ab5e-23dd97c77b88",
+        "name": "Sticky Note"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "bms-juridico-followup",
+          "authentication": "***REMOVIDO***",
+          "options": {
+            "responseData": "{\"ok\":true,\"recebido\":true}"
+          }
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -528,
+          208
+        ],
+        "id": "892134aa-e518-4b91-97dc-55f741543c71",
+        "name": "Webhook",
+        "webhookId": "1520621a-e51c-4653-8f88-24db373250b2",
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Monta os e-mails da demanda recebida: uma saída por e-mail (o nó seguinte envia cada um pelo Resend).\n// Para mudar textos/assuntos, edite só este nó. Etapas: \"retorno\" (cliente não respondeu) e\n// \"assinatura\" (um e-mail por signatário que ainda não assinou). `aviso` = e-mail interno (comercial ou jurídico).\nconst i = $('Webhook').first().json.body;\n\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\nconst fmt = (d) => (d?.nome ? `${d.nome} <${d.email}>` : d?.email);\nconst primeiro = (n) => (n ? String(n).split(' ')[0] : '');\nconst tipo = i.tipoDocumentoLabel || 'Documento';\nconst empresa = i.empresa?.nome || '';\nconst dias = i.diasAguardando == null ? '' : `${i.diasAguardando} dia${i.diasAguardando === 1 ? '' : 's'}`;\nconst from = i.remetente || 'BMS Consultoria Tributária <no-reply@bmsprojetos.com>';\n\nconst botao = (url, texto) => url ? `<tr><td style=\"padding:4px 32px 8px 32px;text-align:center;\">\n  <a href=\"${esc(url)}\" style=\"display:inline-block;background:#E8620E;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:8px;font-size:14px;font-weight:700;\">${esc(texto)}</a></td></tr>` : '';\nconst layout = ({ rotulo, titulo, corpo, cta = '', rodape = 'Este é um e-mail automático.' }) => `<!doctype html>\n<html lang=\"pt-BR\"><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /></head>\n<body style=\"margin:0;padding:0;background:#F3F5F8;font-family:Arial,Helvetica,sans-serif;color:#0F2A47;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:#F3F5F8;padding:32px 12px;\"><tr><td align=\"center\">\n<table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"max-width:600px;width:100%;background:#ffffff;border:1px solid #E3E8EF;border-radius:10px;overflow:hidden;\">\n  <tr><td style=\"background:#0F2A47;padding:24px 32px;\">\n    <div style=\"color:#ffffff;font-size:22px;font-weight:700;letter-spacing:0.06em;\">BMS</div>\n    <div style=\"margin-top:2px;color:#F2A46B;font-size:10px;letter-spacing:0.28em;text-transform:uppercase;\">Consultoria Tributária</div>\n  </td></tr>\n  <tr><td style=\"height:3px;background:#E8620E;\"></td></tr>\n  <tr><td style=\"padding:32px 32px 8px 32px;\">\n    <p style=\"margin:0 0 8px 0;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#6B7A8D;\">${esc(rotulo)}</p>\n    <h1 style=\"margin:0 0 16px 0;font-size:22px;line-height:1.3;color:#0F2A47;\">${esc(titulo)}</h1>\n    ${corpo}\n  </td></tr>\n  ${cta}\n  <tr><td style=\"padding:28px 32px 0 32px;\"><div style=\"border-top:1px solid #E3E8EF;\"></div></td></tr>\n  <tr><td style=\"padding:16px 32px 24px 32px;text-align:center;\">\n    <p style=\"margin:0 0 4px 0;font-size:12px;color:#0F2A47;font-weight:700;\">BMS Consultoria Tributária</p>\n    <p style=\"margin:0;font-size:11px;color:#8A9AAC;\">${esc(rodape)}</p>\n  </td></tr>\n</table></td></tr></table></body></html>`;\nconst p = (t) => `<p style=\"margin:0 0 12px 0;font-size:14px;line-height:1.6;\">${t}</p>`;\nconst contatoComercial = i.comercial?.nome\n  ? p(`<span style=\"font-size:13px;color:#3A4A5E;\">Dúvidas? Fale com <strong>${esc(i.comercial.nome)}</strong> (<a href=\"mailto:${esc(i.comercial.email)}\" style=\"color:#E8620E;\">${esc(i.comercial.email)}</a>).</span>`)\n  : '';\n\nconst emails = [];\n\nif (i.etapa === 'retorno') {\n  const saud = primeiro(i.para?.[0]?.nome) ? `Olá, ${esc(primeiro(i.para[0].nome))},` : 'Olá,';\n  emails.push({\n    tipo: 'cliente',\n    from, to: i.para.map(fmt), cc: (i.cc || []).map(fmt),\n    subject: `Lembrete: ${tipo} — ${empresa} aguarda sua revisão`,\n    html: layout({\n      rotulo: `${tipo} · lembrete`,\n      titulo: empresa,\n      corpo: p(saud)\n        + p(`Há ${esc(dias || 'alguns dias')} enviamos o <strong>${esc(tipo.toLowerCase())}</strong> para sua revisão e ainda não recebemos retorno.`)\n        + p('Pelo portal você pode ler, comentar trechos, enviar sua versão ou aprovar o documento — leva poucos minutos.')\n        + contatoComercial,\n      cta: botao(i.links?.portal, 'Revisar documento no portal'),\n      rodape: 'Este é um lembrete automático. O link do portal é pessoal e expira em alguns dias.',\n    }),\n  });\n} else {\n  for (const s of i.pendentes.length ? i.pendentes : i.para.map((d) => ({ ...d, link: null }))) {\n    const jaAssinaram = (i.assinaram || []).length\n      ? p(`<span style=\"font-size:13px;color:#3A4A5E;\">Já assinaram: ${esc(i.assinaram.join(', '))}.</span>`) : '';\n    emails.push({\n      tipo: 'cliente',\n      from, to: [fmt(s)], cc: [],\n      subject: `Lembrete: assinatura pendente — ${tipo} ${empresa}`,\n      html: layout({\n        rotulo: `${tipo} · assinatura pendente`,\n        titulo: empresa,\n        corpo: p(primeiro(s.nome) ? `Olá, ${esc(primeiro(s.nome))},` : 'Olá,')\n          + p(`O documento <strong>${esc(i.titulo)}</strong> está aguardando a sua assinatura${dias ? ` há ${esc(dias)}` : ''}.`)\n          + (s.link ? p('É só clicar no botão abaixo — a assinatura é digital e leva menos de 2 minutos.')\n                    : p('Procure o e-mail da plataforma de assinatura na sua caixa de entrada (verifique também o spam) para concluir.'))\n          + jaAssinaram + (s.lado === 'bms' ? '' : contatoComercial),\n        cta: botao(s.link, 'Assinar documento'),\n        rodape: 'Este é um lembrete automático. Se você já assinou, desconsidere esta mensagem.',\n      }),\n    });\n  }\n}\n\nif (i.aviso && i.aviso.para?.length) {\n  const paraJuridico = i.aviso.destino === 'juridico';\n  const cobrados = i.etapa === 'retorno' ? i.para : (i.pendentes.length ? i.pendentes : i.para);\n  const lista = cobrados.map((d) => `<li>${esc(d.nome || d.email)}${d.nome ? ` — ${esc(d.email)}` : ''}${d.lado ? ` (${d.lado === 'bms' ? 'BMS' : 'cliente'}${d.papel === 'testemunha' ? ', testemunha' : ''})` : ''}</li>`).join('');\n  emails.push({\n    tipo: 'aviso',\n    from, to: i.aviso.para.map(fmt), cc: (i.aviso.cc || []).map(fmt),\n    subject: `[Ação necessária] ${empresa} — ${i.etapa === 'retorno' ? `${tipo} sem retorno do cliente` : `assinatura pendente (${tipo})`}`,\n    html: layout({\n      rotulo: paraJuridico ? 'Aviso ao jurídico' : 'Aviso ao comercial',\n      titulo: `${empresa}${i.oportunidade ? ` · ${i.oportunidade}` : ''}`,\n      corpo: p(primeiro(i.aviso.para[0]?.nome) ? `Olá, ${esc(primeiro(i.aviso.para[0].nome))},` : 'Olá,')\n        + p(esc(i.aviso.motivo))\n        + p(`<strong>${i.etapa === 'retorno' ? 'Contatos cobrados' : 'Ainda não assinaram'}:</strong>`)\n        + `<ul style=\"margin:0 0 12px 0;padding-left:20px;font-size:14px;line-height:1.6;\">${lista}</ul>`\n        + p(paraJuridico\n          ? 'Falta só a assinatura do lado da BMS. Peça para o(s) assinante(s) concluírem pelo link que receberam do Assinafy.'\n          : i.etapa === 'retorno'\n            ? 'As cobranças por e-mail não tiveram resposta. Sugerimos um contato direto (telefone ou WhatsApp) para entender se há dúvidas ou ajustes no documento. Os lembretes automáticos continuam.'\n            : 'Os lembretes por e-mail não foram suficientes. Sugerimos um contato direto com o cliente para concluir a assinatura. Os lembretes automáticos continuam.'),\n      cta: botao(i.links?.juridico, 'Abrir a demanda no sistema'),\n      rodape: 'Aviso automático do follow-up de contratos. Enviado uma vez por etapa.',\n    }),\n  });\n}\n\nreturn emails.map((e) => ({ json: e }));\n\n\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -320,
+          208
+        ],
+        "id": "089abe8e-ddfe-4abb-92b9-e36838dad47d",
+        "name": "Monta e-mails"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.resend.com/emails",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ from: $json.from, to: $json.to, ...($json.cc.length ? { cc: $json.cc } : {}), subject: $json.subject, html: $json.html }) }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          -96,
+          208
+        ],
+        "id": "76c63dae-877e-412c-a7bb-f6c89e8fc611",
+        "name": "Envia pelo Resend",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 3000,
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Junta o resultado dos envios (um item por e-mail, na mesma ordem do \"Monta e-mails\") e prepara o retorno ao sistema.\n// Falha no e-mail ao cliente → resultado \"erro\" (o sistema tenta de novo em 1h). Falha só no aviso interno →\n// a cobrança conta, mas o aviso fica para a próxima rodada.\nconst i = $('Webhook').first().json.body;\nconst emails = $('Monta e-mails').all().map((x) => x.json);\nconst respostas = $input.all().map((x) => x.json);\n\nconst resendIds = [];\nconst erros = [];\nlet comercialAvisado = false;\nemails.forEach((e, n) => {\n  const r = respostas[n] || {};\n  const ok = !r.error && r.id;\n  if (e.tipo === 'aviso') comercialAvisado = !!ok;\n  else if (ok) resendIds.push(r.id);\n  else erros.push(`${e.to.join(', ')}: ${r.error?.message || r.error || 'sem resposta do Resend'}`);\n});\n\nreturn [{ json: {\n  acao: 'registrar',\n  documentoId: i.documentoId,\n  etapa: i.etapa,\n  numero: i.numero,\n  resultado: resendIds.length ? 'enviado' : 'erro',\n  erro: erros.join('; ') || null,\n  para: emails.filter((e) => e.tipo !== 'aviso').flatMap((e) => e.to),\n  resendIds,\n  comercialAvisado,\n  avisoDestino: i.aviso?.destino ?? null,\n} }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          128,
+          208
+        ],
+        "id": "3c2b25e8-ec4e-4376-b6e1-6717125b2451",
+        "name": "Resume o envio"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $('Webhook').first().json.body.callbackUrl }}",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json) }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          352,
+          208
+        ],
+        "id": "21ed7cd2-1964-4b53-a616-1a36184b0535",
+        "name": "Registra no sistema",
+        "retryOnFail": true,
+        "maxTries": 5,
+        "waitBetweenTries": 5000,
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        }
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Monta e-mails",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta e-mails": {
+        "main": [
+          [
+            {
+              "node": "Envia pelo Resend",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Envia pelo Resend": {
+        "main": [
+          [
+            {
+              "node": "Resume o envio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resume o envio": {
+        "main": [
+          [
+            {
+              "node": "Registra no sistema",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version c5a71686",
+    "description": "",
+    "autosaved": false,
+    "createdAt": "2026-10-07T20:18:04.585Z",
+    "updatedAt": "2026-10-07T20:18:05.740Z"
+  },
+  "tags": []
+}
