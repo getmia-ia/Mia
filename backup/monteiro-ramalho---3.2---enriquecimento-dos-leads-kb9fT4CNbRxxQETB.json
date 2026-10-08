@@ -1,26 +1,16 @@
 {
-  "updatedAt": "2026-10-06T14:11:39.346Z",
+  "updatedAt": "2026-10-07T13:19:15.729Z",
   "createdAt": "2026-06-16T20:42:20.169Z",
   "id": "kb9fT4CNbRxxQETB",
   "name": "Monteiro Ramalho - 3.2 - Enriquecimento dos Leads",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
       "parameters": {
         "rule": {
           "interval": [
-            {
-              "field": "weeks",
-              "triggerAtDay": [
-                1,
-                2,
-                3,
-                4,
-                5
-              ],
-              "triggerAtHour": 0
-            }
+            {}
           ]
         }
       },
@@ -88,6 +78,19 @@
       "onError": "continueRegularOutput"
     },
     {
+      "parameters": {
+        "url": "https://api.lusha.com/v3/account/usage",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_key",
+              "value": "6db964c3-6128-4986-8b6c-4b358638c637"
+            }
+          ]
+        },
+        "options": {}
+      },
       "id": "77e18df8-90d1-4a9e-b519-b8000b459de8",
       "name": "Consulta saldo na Lusha",
       "type": "n8n-nodes-base.httpRequest",
@@ -96,26 +99,15 @@
         240,
         176
       ],
-      "parameters": {
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "api_key",
-              "value": "6db964c3-6128-4986-8b6c-4b358638c637"
-            }
-          ]
-        },
-        "method": "GET",
-        "options": {},
-        "sendHeaders": "***REMOVIDO***",
-        "url": "https://api.lusha.com/v3/account/usage"
-      },
-      "notes": "Lê quantos créditos ainda existem. Se falhar, o fluxo dá erro (assim ninguém gasta às cegas).",
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 5000,
+      "notes": "Lê quantos créditos ainda existem. Se falhar, o fluxo dá erro (assim ninguém gasta às cegas)."
     },
     {
+      "parameters": {
+        "jsCode": "// ----- Ajustes (se precisar mudar algo, mude só aqui) -----\nconst LEADS_POR_DIA     = 4; // máximo de leads enriquecidos por dia útil\nconst CUSTO_POR_LEAD    = 7; // créditos gastos por lead (estimativa: 6 do contato + 1 da empresa)\nconst TAXA_DAS_CHAMADAS = 2; // créditos fixos por dia (1 chamada de contatos + 1 de empresas)\n// -----------------------------------------------------------\n\n// Saldo de créditos que a Lusha acabou de informar.\nconst saldo = Number($json.credits?.remaining);\n\n// Se a Lusha não devolveu o saldo, é melhor parar com erro do que gastar sem saber.\nif (!Number.isFinite(saldo)) {\n  throw new Error(\"Não consegui ler o saldo de créditos da Lusha.\");\n}\n\n// Quantos leads o saldo de hoje consegue pagar (já descontando a taxa das chamadas).\nconst leadsQueOSaldoPaga = Math.floor((saldo - TAXA_DAS_CHAMADAS) / CUSTO_POR_LEAD);\n\n// Limite de hoje: o menor entre o máximo por dia e o que o saldo paga.\nconst limite = Math.max(0, Math.min(LEADS_POR_DIA, leadsQueOSaldoPaga));\n\n// Sem saldo para nem 1 lead: não devolve nada, o fluxo para aqui e não dá erro.\nif (limite < 1) {\n  return [];\n}\n\nreturn [{ json: { saldo, limite } }];"
+      },
       "id": "fc519bb2-c6dc-4b16-8371-05bf94bc953e",
       "name": "Calcula limite do dia",
       "type": "n8n-nodes-base.code",
@@ -124,12 +116,12 @@
         480,
         176
       ],
-      "parameters": {
-        "jsCode": "// ----- Ajustes (se precisar mudar algo, mude só aqui) -----\nconst LEADS_POR_DIA     = 6; // máximo de leads enriquecidos por dia útil\nconst CUSTO_POR_LEAD    = 7; // créditos gastos por lead (estimativa: 6 do contato + 1 da empresa)\nconst TAXA_DAS_CHAMADAS = 2; // créditos fixos por dia (1 chamada de contatos + 1 de empresas)\n// -----------------------------------------------------------\n\n// Saldo de créditos que a Lusha acabou de informar.\nconst saldo = Number($json.credits?.remaining);\n\n// Se a Lusha não devolveu o saldo, é melhor parar com erro do que gastar sem saber.\nif (!Number.isFinite(saldo)) {\n  throw new Error(\"Não consegui ler o saldo de créditos da Lusha.\");\n}\n\n// Quantos leads o saldo de hoje consegue pagar (já descontando a taxa das chamadas).\nconst leadsQueOSaldoPaga = Math.floor((saldo - TAXA_DAS_CHAMADAS) / CUSTO_POR_LEAD);\n\n// Limite de hoje: o menor entre o máximo por dia e o que o saldo paga.\nconst limite = Math.max(0, Math.min(LEADS_POR_DIA, leadsQueOSaldoPaga));\n\n// Sem saldo para nem 1 lead: não devolve nada, o fluxo para aqui e não dá erro.\nif (limite < 1) {\n  return [];\n}\n\nreturn [{ json: { saldo, limite } }];"
-      },
       "notes": "Define quantos leads enriquecer hoje (máx. 5, menos se o saldo for baixo). Sem saldo, o fluxo para aqui sem erro."
     },
     {
+      "parameters": {
+        "jsCode": "// Junta os IDs dos leads de hoje em duas listas (contatos e empresas),\n// sem repetir e sem vazios, para mandar tudo de uma vez para a Lusha.\nconst leads = items.map((i) => i.json);\nconst unico = (lista) => [...new Set(lista.filter(Boolean))];\n\nconst contactIds = unico(leads.map((l) => l.lusha_contact_id));\nconst companyIds = unico(leads.map((l) => l.id_company_lusha));\n\n// Sem nenhum contato para enriquecer, não faz nada.\nif (!contactIds.length) return [];\n\nreturn [{ json: { contactIds, companyIds } }];"
+      },
       "id": "69bdabc2-9f33-4dc9-8d3f-33571a57c1ef",
       "name": "Monta lista de IDs",
       "type": "n8n-nodes-base.code",
@@ -138,12 +130,30 @@
         960,
         176
       ],
-      "parameters": {
-        "jsCode": "// Junta os IDs dos leads de hoje em duas listas (contatos e empresas),\n// sem repetir e sem vazios, para mandar tudo de uma vez para a Lusha.\nconst leads = items.map((i) => i.json);\nconst unico = (lista) => [...new Set(lista.filter(Boolean))];\n\nconst contactIds = unico(leads.map((l) => l.lusha_contact_id));\nconst companyIds = unico(leads.map((l) => l.id_company_lusha));\n\n// Sem nenhum contato para enriquecer, não faz nada.\nif (!contactIds.length) return [];\n\nreturn [{ json: { contactIds, companyIds } }];"
-      },
       "notes": "Junta os IDs dos leads de hoje em duas listas (contatos e empresas) para mandar tudo de uma vez."
     },
     {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.lusha.com/v3/contacts/enrich",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "api_key",
+              "value": "6db964c3-6128-4986-8b6c-4b358638c637"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  ids: $json.contactIds,\n  reveal: [\"emails\", \"phones\"]\n}) }}",
+        "options": {}
+      },
       "id": "5633bb0d-fcee-4ed1-8f64-9268cac5ad03",
       "name": "Enrich Contacts",
       "type": "n8n-nodes-base.httpRequest",
@@ -152,7 +162,16 @@
         1200,
         176
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Enriquece todos os contatos de hoje numa chamada só (a Lusha aceita até 100). Retry 3x/5s em erro temporário."
+    },
+    {
       "parameters": {
+        "method": "POST",
+        "url": "https://api.lusha.com/v3/companies/enrich",
+        "sendHeaders": "***REMOVIDO***",
         "headerParameters": {
           "parameters": [
             {
@@ -165,20 +184,11 @@
             }
           ]
         },
-        "jsonBody": "={{ JSON.stringify({\n  ids: $json.contactIds,\n  reveal: [\"emails\", \"phones\"]\n}) }}",
-        "method": "POST",
-        "options": {},
         "sendBody": true,
-        "sendHeaders": "***REMOVIDO***",
         "specifyBody": "json",
-        "url": "https://api.lusha.com/v3/contacts/enrich"
+        "jsonBody": "={{ JSON.stringify({\n  ids: $('Monta lista de IDs').first().json.companyIds,\n  reveal: [\n    \"employeesByLocation\",\n    \"employeesByDepartment\",\n    \"employeesBySeniority\",\n    \"competitors\",\n    \"intent\",\n    \"openJobsTotal\",\n    \"openJobsByDepartment\"\n  ]\n}) }}",
+        "options": {}
       },
-      "notes": "Enriquece todos os contatos de hoje numa chamada só (a Lusha aceita até 100). Retry 3x/5s em erro temporário.",
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
-    },
-    {
       "id": "75bc44f8-3bf4-4fb5-aa5e-c19d8e538a83",
       "name": "Enrich Companies",
       "type": "n8n-nodes-base.httpRequest",
@@ -187,34 +197,16 @@
         1440,
         176
       ],
-      "parameters": {
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "api_key",
-              "value": "6db964c3-6128-4986-8b6c-4b358638c637"
-            }
-          ]
-        },
-        "jsonBody": "={{ JSON.stringify({\n  ids: $('Monta lista de IDs').first().json.companyIds,\n  reveal: [\n    \"employeesByLocation\",\n    \"employeesByDepartment\",\n    \"employeesBySeniority\",\n    \"competitors\",\n    \"intent\",\n    \"openJobsTotal\",\n    \"openJobsByDepartment\"\n  ]\n}) }}",
-        "method": "POST",
-        "options": {},
-        "sendBody": true,
-        "sendHeaders": "***REMOVIDO***",
-        "specifyBody": "json",
-        "url": "https://api.lusha.com/v3/companies/enrich"
-      },
-      "notes": "Enriquece todas as empresas de hoje numa chamada só. Se falhar, o fluxo segue e salva os dados dos contatos (que já foram pagos).",
-      "onError": "continueRegularOutput",
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "notes": "Enriquece todas as empresas de hoje numa chamada só. Se falhar, o fluxo segue e salva os dados dos contatos (que já foram pagos)."
     },
     {
+      "parameters": {
+        "jsCode": "const truncate = (s, n) => (typeof s === \"string\" && s.length > n ? s.slice(0, n) : s ?? null);\nconst clean = (v) => (v === undefined || v === \"\" ? null : v);\n\n// Deixa o telefone no padrão 55 + DDD + número, só com dígitos.\nconst normalizePhone = (phone) => {\n  if (!phone) return null;\n\n  // Remove tudo que não é número\n  let digits = String(phone).replace(/\\D/g, \"\");\n\n  // Remove código do país caso venha duplicado (5555...)\n  while (digits.startsWith(\"5555\")) {\n    digits = digits.slice(2);\n  }\n\n  // Se não tiver DDI, adiciona 55\n  if (!digits.startsWith(\"55\")) {\n    digits = \"55\" + digits;\n  }\n\n  // Após o DDI devem existir DDD + número\n  const ddd = digits.slice(2, 4);\n  let number = digits.slice(4);\n\n  // Celular antigo (8 dígitos) -> adiciona 9\n  if (number.length === 8) {\n    number = \"9\" + number;\n  }\n\n  return `55${ddd}${number}`;\n};\n\n// A Lusha pode devolver mais de um email e mais de um telefone por pessoa.\n// Email: prefere o de trabalho; se não tiver, usa o primeiro da lista.\nconst pickEmail = (emails) => {\n  if (!Array.isArray(emails) || !emails.length) return null;\n  const trabalho = emails.find((e) => e.type === \"work\");\n  return (trabalho || emails[0])?.email ?? null;\n};\n\n// Telefone: prefere celular e evita número marcado como \"não ligar\" quando existe outro.\nconst pickPhone = (phones) => {\n  if (!Array.isArray(phones) || !phones.length) return null;\n  const ligavel = phones.filter((p) => !p.doNotCall);\n  const pool = ligavel.length ? ligavel : phones;\n  const celular = pool.find((p) => p.type === \"mobile\");\n  return (celular || pool[0])?.number ?? null;\n};\n\n// Tamanho da empresa em texto (ex: \"501-1000\").\nconst empresaTamanho = (ec) => {\n  if (!ec) return null;\n  if (ec.exact != null) return String(ec.exact);\n  if (ec.min != null && ec.max != null) return `${ec.min}-${ec.max}`;\n  return ec.min != null ? String(ec.min) : ec.max != null ? String(ec.max) : null;\n};\n\n// Os leads de hoje, do jeito que saíram do banco.\nconst leads = $('Puxa os leads sem dados enriquecidos').all().map((i) => i.json);\n\n// Resposta da Lusha para os contatos (um resultado por contato).\nconst contatos = $('Enrich Contacts').first().json.results || [];\n\n// Resposta da Lusha para as empresas (este passo roda logo depois do Enrich Companies).\n// Se a busca de empresas falhou, esta lista fica vazia e o lead é salvo só com os dados do contato.\nconst empresas = $json.results || [];\n\n// Para achar o resultado de cada lead pelo ID.\nconst contatoPorId = Object.fromEntries(contatos.map((r) => [r.id, r]));\nconst empresaPorId = Object.fromEntries(empresas.map((r) => [r.id, r]));\n\nreturn leads.map((lead) => {\n  const contato = lead.lusha_contact_id ? contatoPorId[lead.lusha_contact_id] : null;\n  const empresa = lead.id_company_lusha ? empresaPorId[lead.id_company_lusha] : null;\n\n  // Se a Lusha não achou ou recusou esse contato, o resultado vem com \"error\".\n  const contatoFalhou = !contato || contato.error;\n\n  const fullName =\n    contato?.fullName ||\n    [contato?.firstName, contato?.lastName].filter(Boolean).join(\" \").trim() ||\n    lead.nome ||\n    null;\n\n  return {\n    json: {\n      id: lead.id, // usado pelo filtro do node \"Atualiza os dados\"\n      nome: clean(fullName),\n      cargo: clean(contato?.jobTitle?.title) ?? lead.cargo ?? null,\n      email: pickEmail(contato?.emails),\n      telefone: normalizePhone(pickPhone(contato?.phones)),\n      linkedin_url: clean(contato?.socialLinks?.linkedin) ?? lead.linkedin_url ?? null,\n      empresa_nome: clean(empresa?.name) ?? clean(contato?.company?.name) ?? lead.empresa_nome ?? null,\n      empresa_site: clean(empresa?.domain) ?? clean(contato?.company?.domain) ?? lead.empresa_site ?? null,\n      empresa_setor: clean(empresa?.subIndustry) ?? clean(empresa?.industry) ?? clean(contato?.company?.industry) ?? null,\n      empresa_tamanho: empresaTamanho(empresa?.employeeCount),\n      empresa_descricao: truncate(empresa?.description, 4000),\n      dados_enriquecimento: { contato: contato ?? null, empresa: empresa ?? null },\n      // Todo lead enriquecido vai para \"Enrich\", mesmo se a Lusha não achou o contato.\n      // Quem não foi achado fica sem telefone e por isso não aparece em \"Disparo inicial\".\n      etapa: \"enrich\",\n      enriquecido_em: new Date().toISOString(),\n      enriquecimento_status: contatoFalhou ? \"falhou\" : \"ok\",\n    },\n  };\n});"
+      },
       "id": "6ad19e00-1058-4daa-97fe-53c7037c3537",
       "name": "Code in JavaScript",
       "type": "n8n-nodes-base.code",
@@ -223,9 +215,6 @@
         1680,
         176
       ],
-      "parameters": {
-        "jsCode": "const truncate = (s, n) => (typeof s === \"string\" && s.length > n ? s.slice(0, n) : s ?? null);\nconst clean = (v) => (v === undefined || v === \"\" ? null : v);\n\n// Deixa o telefone no padrão 55 + DDD + número, só com dígitos.\nconst normalizePhone = (phone) => {\n  if (!phone) return null;\n\n  // Remove tudo que não é número\n  let digits = String(phone).replace(/\\D/g, \"\");\n\n  // Remove código do país caso venha duplicado (5555...)\n  while (digits.startsWith(\"5555\")) {\n    digits = digits.slice(2);\n  }\n\n  // Se não tiver DDI, adiciona 55\n  if (!digits.startsWith(\"55\")) {\n    digits = \"55\" + digits;\n  }\n\n  // Após o DDI devem existir DDD + número\n  const ddd = digits.slice(2, 4);\n  let number = digits.slice(4);\n\n  // Celular antigo (8 dígitos) -> adiciona 9\n  if (number.length === 8) {\n    number = \"9\" + number;\n  }\n\n  return `55${ddd}${number}`;\n};\n\n// A Lusha pode devolver mais de um email e mais de um telefone por pessoa.\n// Email: prefere o de trabalho; se não tiver, usa o primeiro da lista.\nconst pickEmail = (emails) => {\n  if (!Array.isArray(emails) || !emails.length) return null;\n  const trabalho = emails.find((e) => e.type === \"work\");\n  return (trabalho || emails[0])?.email ?? null;\n};\n\n// Telefone: prefere celular e evita número marcado como \"não ligar\" quando existe outro.\nconst pickPhone = (phones) => {\n  if (!Array.isArray(phones) || !phones.length) return null;\n  const ligavel = phones.filter((p) => !p.doNotCall);\n  const pool = ligavel.length ? ligavel : phones;\n  const celular = pool.find((p) => p.type === \"mobile\");\n  return (celular || pool[0])?.number ?? null;\n};\n\n// Tamanho da empresa em texto (ex: \"501-1000\").\nconst empresaTamanho = (ec) => {\n  if (!ec) return null;\n  if (ec.exact != null) return String(ec.exact);\n  if (ec.min != null && ec.max != null) return `${ec.min}-${ec.max}`;\n  return ec.min != null ? String(ec.min) : ec.max != null ? String(ec.max) : null;\n};\n\n// Os leads de hoje, do jeito que saíram do banco.\nconst leads = $('Puxa os leads sem dados enriquecidos').all().map((i) => i.json);\n\n// Resposta da Lusha para os contatos (um resultado por contato).\nconst contatos = $('Enrich Contacts').first().json.results || [];\n\n// Resposta da Lusha para as empresas (este passo roda logo depois do Enrich Companies).\n// Se a busca de empresas falhou, esta lista fica vazia e o lead é salvo só com os dados do contato.\nconst empresas = $json.results || [];\n\n// Para achar o resultado de cada lead pelo ID.\nconst contatoPorId = Object.fromEntries(contatos.map((r) => [r.id, r]));\nconst empresaPorId = Object.fromEntries(empresas.map((r) => [r.id, r]));\n\nreturn leads.map((lead) => {\n  const contato = lead.lusha_contact_id ? contatoPorId[lead.lusha_contact_id] : null;\n  const empresa = lead.id_company_lusha ? empresaPorId[lead.id_company_lusha] : null;\n\n  // Se a Lusha não achou ou recusou esse contato, o resultado vem com \"error\".\n  const contatoFalhou = !contato || contato.error;\n\n  const fullName =\n    contato?.fullName ||\n    [contato?.firstName, contato?.lastName].filter(Boolean).join(\" \").trim() ||\n    lead.nome ||\n    null;\n\n  return {\n    json: {\n      id: lead.id, // usado pelo filtro do node \"Atualiza os dados\"\n      nome: clean(fullName),\n      cargo: clean(contato?.jobTitle?.title) ?? lead.cargo ?? null,\n      email: pickEmail(contato?.emails),\n      telefone: normalizePhone(pickPhone(contato?.phones)),\n      linkedin_url: clean(contato?.socialLinks?.linkedin) ?? lead.linkedin_url ?? null,\n      empresa_nome: clean(empresa?.name) ?? clean(contato?.company?.name) ?? lead.empresa_nome ?? null,\n      empresa_site: clean(empresa?.domain) ?? clean(contato?.company?.domain) ?? lead.empresa_site ?? null,\n      empresa_setor: clean(empresa?.subIndustry) ?? clean(empresa?.industry) ?? clean(contato?.company?.industry) ?? null,\n      empresa_tamanho: empresaTamanho(empresa?.employeeCount),\n      empresa_descricao: truncate(empresa?.description, 4000),\n      dados_enriquecimento: { contato: contato ?? null, empresa: empresa ?? null },\n      // Todo lead enriquecido vai para \"Enrich\", mesmo se a Lusha não achou o contato.\n      // Quem não foi achado fica sem telefone e por isso não aparece em \"Disparo inicial\".\n      etapa: \"enrich\",\n      enriquecido_em: new Date().toISOString(),\n      enriquecimento_status: contatoFalhou ? \"falhou\" : \"ok\",\n    },\n  };\n});"
-      },
       "notes": "Lê as respostas da Lusha (contatos e empresas) e monta uma linha por lead para salvar."
     }
   ],
@@ -343,8 +332,8 @@
     "aiBuilderAssisted": true,
     "builderVariant": "mcp"
   },
-  "versionId": "e718926b-5e89-4de4-a928-616c56b73fe0",
-  "activeVersionId": null,
+  "versionId": "f5354c2c-7a73-4081-844b-7040e8a4e47f",
+  "activeVersionId": "f5354c2c-7a73-4081-844b-7040e8a4e47f",
   "triggerCount": 1,
   "shared": [
     {
@@ -355,6 +344,319 @@
       "updatedAt": "2026-06-16T20:42:20.169Z"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "versionId": "f5354c2c-7a73-4081-844b-7040e8a4e47f",
+    "workflowId": "kb9fT4CNbRxxQETB",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {}
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          0,
+          176
+        ],
+        "id": "a93a832b-b394-450c-8378-cf95716ed40d",
+        "name": "Schedule Trigger"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "select l.*\nfrom leads_tributario l\njoin empresas_tributario e on e.id = l.empresa_id\nwhere l.etapa in ('novo', 'enrich')   -- aprovados; \"enrich\" entra porque o sistema move todos os contatos da empresa juntos\n  and l.enriquecido_em is null        -- ainda não enriquecidos\n  and l.enriquecimento_status is null\n  and l.lusha_contact_id is not null\n  and e.arquivada_em is null\norder by e.ordem asc, l.criado_em asc\nlimit $1;\n",
+          "options": {
+            "queryReplacement": "={{ Math.floor(Number($json.limite)) }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          720,
+          176
+        ],
+        "id": "466b9f9a-6862-4955-befc-03edcf2f26fa",
+        "name": "Puxa os leads sem dados enriquecidos",
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "update",
+          "tableId": "leads_tributario",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $json.id }}"
+              }
+            ]
+          },
+          "dataToSend": "autoMapInputData"
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1920,
+          176
+        ],
+        "id": "81264d72-b1c2-41ae-8749-97da62864ac0",
+        "name": "Atualiza os dados",
+        "credentials": {
+          "supabaseApi": {
+            "id": "FcbZyD53kbkf6Vxp",
+            "name": "Monteiro - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "url": "https://api.lusha.com/v3/account/usage",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "api_key",
+                "value": "6db964c3-6128-4986-8b6c-4b358638c637"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "77e18df8-90d1-4a9e-b519-b8000b459de8",
+        "name": "Consulta saldo na Lusha",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          240,
+          176
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
+        "notes": "Lê quantos créditos ainda existem. Se falhar, o fluxo dá erro (assim ninguém gasta às cegas)."
+      },
+      {
+        "parameters": {
+          "jsCode": "// ----- Ajustes (se precisar mudar algo, mude só aqui) -----\nconst LEADS_POR_DIA     = 4; // máximo de leads enriquecidos por dia útil\nconst CUSTO_POR_LEAD    = 7; // créditos gastos por lead (estimativa: 6 do contato + 1 da empresa)\nconst TAXA_DAS_CHAMADAS = 2; // créditos fixos por dia (1 chamada de contatos + 1 de empresas)\n// -----------------------------------------------------------\n\n// Saldo de créditos que a Lusha acabou de informar.\nconst saldo = Number($json.credits?.remaining);\n\n// Se a Lusha não devolveu o saldo, é melhor parar com erro do que gastar sem saber.\nif (!Number.isFinite(saldo)) {\n  throw new Error(\"Não consegui ler o saldo de créditos da Lusha.\");\n}\n\n// Quantos leads o saldo de hoje consegue pagar (já descontando a taxa das chamadas).\nconst leadsQueOSaldoPaga = Math.floor((saldo - TAXA_DAS_CHAMADAS) / CUSTO_POR_LEAD);\n\n// Limite de hoje: o menor entre o máximo por dia e o que o saldo paga.\nconst limite = Math.max(0, Math.min(LEADS_POR_DIA, leadsQueOSaldoPaga));\n\n// Sem saldo para nem 1 lead: não devolve nada, o fluxo para aqui e não dá erro.\nif (limite < 1) {\n  return [];\n}\n\nreturn [{ json: { saldo, limite } }];"
+        },
+        "id": "fc519bb2-c6dc-4b16-8371-05bf94bc953e",
+        "name": "Calcula limite do dia",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          176
+        ],
+        "notes": "Define quantos leads enriquecer hoje (máx. 5, menos se o saldo for baixo). Sem saldo, o fluxo para aqui sem erro."
+      },
+      {
+        "parameters": {
+          "jsCode": "// Junta os IDs dos leads de hoje em duas listas (contatos e empresas),\n// sem repetir e sem vazios, para mandar tudo de uma vez para a Lusha.\nconst leads = items.map((i) => i.json);\nconst unico = (lista) => [...new Set(lista.filter(Boolean))];\n\nconst contactIds = unico(leads.map((l) => l.lusha_contact_id));\nconst companyIds = unico(leads.map((l) => l.id_company_lusha));\n\n// Sem nenhum contato para enriquecer, não faz nada.\nif (!contactIds.length) return [];\n\nreturn [{ json: { contactIds, companyIds } }];"
+        },
+        "id": "69bdabc2-9f33-4dc9-8d3f-33571a57c1ef",
+        "name": "Monta lista de IDs",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          960,
+          176
+        ],
+        "notes": "Junta os IDs dos leads de hoje em duas listas (contatos e empresas) para mandar tudo de uma vez."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.lusha.com/v3/contacts/enrich",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "api_key",
+                "value": "6db964c3-6128-4986-8b6c-4b358638c637"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({\n  ids: $json.contactIds,\n  reveal: [\"emails\", \"phones\"]\n}) }}",
+          "options": {}
+        },
+        "id": "5633bb0d-fcee-4ed1-8f64-9268cac5ad03",
+        "name": "Enrich Contacts",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1200,
+          176
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
+        "notes": "Enriquece todos os contatos de hoje numa chamada só (a Lusha aceita até 100). Retry 3x/5s em erro temporário."
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.lusha.com/v3/companies/enrich",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "api_key",
+                "value": "6db964c3-6128-4986-8b6c-4b358638c637"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({\n  ids: $('Monta lista de IDs').first().json.companyIds,\n  reveal: [\n    \"employeesByLocation\",\n    \"employeesByDepartment\",\n    \"employeesBySeniority\",\n    \"competitors\",\n    \"intent\",\n    \"openJobsTotal\",\n    \"openJobsByDepartment\"\n  ]\n}) }}",
+          "options": {}
+        },
+        "id": "75bc44f8-3bf4-4fb5-aa5e-c19d8e538a83",
+        "name": "Enrich Companies",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1440,
+          176
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
+        "onError": "continueRegularOutput",
+        "notes": "Enriquece todas as empresas de hoje numa chamada só. Se falhar, o fluxo segue e salva os dados dos contatos (que já foram pagos)."
+      },
+      {
+        "parameters": {
+          "jsCode": "const truncate = (s, n) => (typeof s === \"string\" && s.length > n ? s.slice(0, n) : s ?? null);\nconst clean = (v) => (v === undefined || v === \"\" ? null : v);\n\n// Deixa o telefone no padrão 55 + DDD + número, só com dígitos.\nconst normalizePhone = (phone) => {\n  if (!phone) return null;\n\n  // Remove tudo que não é número\n  let digits = String(phone).replace(/\\D/g, \"\");\n\n  // Remove código do país caso venha duplicado (5555...)\n  while (digits.startsWith(\"5555\")) {\n    digits = digits.slice(2);\n  }\n\n  // Se não tiver DDI, adiciona 55\n  if (!digits.startsWith(\"55\")) {\n    digits = \"55\" + digits;\n  }\n\n  // Após o DDI devem existir DDD + número\n  const ddd = digits.slice(2, 4);\n  let number = digits.slice(4);\n\n  // Celular antigo (8 dígitos) -> adiciona 9\n  if (number.length === 8) {\n    number = \"9\" + number;\n  }\n\n  return `55${ddd}${number}`;\n};\n\n// A Lusha pode devolver mais de um email e mais de um telefone por pessoa.\n// Email: prefere o de trabalho; se não tiver, usa o primeiro da lista.\nconst pickEmail = (emails) => {\n  if (!Array.isArray(emails) || !emails.length) return null;\n  const trabalho = emails.find((e) => e.type === \"work\");\n  return (trabalho || emails[0])?.email ?? null;\n};\n\n// Telefone: prefere celular e evita número marcado como \"não ligar\" quando existe outro.\nconst pickPhone = (phones) => {\n  if (!Array.isArray(phones) || !phones.length) return null;\n  const ligavel = phones.filter((p) => !p.doNotCall);\n  const pool = ligavel.length ? ligavel : phones;\n  const celular = pool.find((p) => p.type === \"mobile\");\n  return (celular || pool[0])?.number ?? null;\n};\n\n// Tamanho da empresa em texto (ex: \"501-1000\").\nconst empresaTamanho = (ec) => {\n  if (!ec) return null;\n  if (ec.exact != null) return String(ec.exact);\n  if (ec.min != null && ec.max != null) return `${ec.min}-${ec.max}`;\n  return ec.min != null ? String(ec.min) : ec.max != null ? String(ec.max) : null;\n};\n\n// Os leads de hoje, do jeito que saíram do banco.\nconst leads = $('Puxa os leads sem dados enriquecidos').all().map((i) => i.json);\n\n// Resposta da Lusha para os contatos (um resultado por contato).\nconst contatos = $('Enrich Contacts').first().json.results || [];\n\n// Resposta da Lusha para as empresas (este passo roda logo depois do Enrich Companies).\n// Se a busca de empresas falhou, esta lista fica vazia e o lead é salvo só com os dados do contato.\nconst empresas = $json.results || [];\n\n// Para achar o resultado de cada lead pelo ID.\nconst contatoPorId = Object.fromEntries(contatos.map((r) => [r.id, r]));\nconst empresaPorId = Object.fromEntries(empresas.map((r) => [r.id, r]));\n\nreturn leads.map((lead) => {\n  const contato = lead.lusha_contact_id ? contatoPorId[lead.lusha_contact_id] : null;\n  const empresa = lead.id_company_lusha ? empresaPorId[lead.id_company_lusha] : null;\n\n  // Se a Lusha não achou ou recusou esse contato, o resultado vem com \"error\".\n  const contatoFalhou = !contato || contato.error;\n\n  const fullName =\n    contato?.fullName ||\n    [contato?.firstName, contato?.lastName].filter(Boolean).join(\" \").trim() ||\n    lead.nome ||\n    null;\n\n  return {\n    json: {\n      id: lead.id, // usado pelo filtro do node \"Atualiza os dados\"\n      nome: clean(fullName),\n      cargo: clean(contato?.jobTitle?.title) ?? lead.cargo ?? null,\n      email: pickEmail(contato?.emails),\n      telefone: normalizePhone(pickPhone(contato?.phones)),\n      linkedin_url: clean(contato?.socialLinks?.linkedin) ?? lead.linkedin_url ?? null,\n      empresa_nome: clean(empresa?.name) ?? clean(contato?.company?.name) ?? lead.empresa_nome ?? null,\n      empresa_site: clean(empresa?.domain) ?? clean(contato?.company?.domain) ?? lead.empresa_site ?? null,\n      empresa_setor: clean(empresa?.subIndustry) ?? clean(empresa?.industry) ?? clean(contato?.company?.industry) ?? null,\n      empresa_tamanho: empresaTamanho(empresa?.employeeCount),\n      empresa_descricao: truncate(empresa?.description, 4000),\n      dados_enriquecimento: { contato: contato ?? null, empresa: empresa ?? null },\n      // Todo lead enriquecido vai para \"Enrich\", mesmo se a Lusha não achou o contato.\n      // Quem não foi achado fica sem telefone e por isso não aparece em \"Disparo inicial\".\n      etapa: \"enrich\",\n      enriquecido_em: new Date().toISOString(),\n      enriquecimento_status: contatoFalhou ? \"falhou\" : \"ok\",\n    },\n  };\n});"
+        },
+        "id": "6ad19e00-1058-4daa-97fe-53c7037c3537",
+        "name": "Code in JavaScript",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1680,
+          176
+        ],
+        "notes": "Lê as respostas da Lusha (contatos e empresas) e monta uma linha por lead para salvar."
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "Consulta saldo na Lusha",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Consulta saldo na Lusha": {
+        "main": [
+          [
+            {
+              "node": "Calcula limite do dia",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Calcula limite do dia": {
+        "main": [
+          [
+            {
+              "node": "Puxa os leads sem dados enriquecidos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Puxa os leads sem dados enriquecidos": {
+        "main": [
+          [
+            {
+              "node": "Monta lista de IDs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta lista de IDs": {
+        "main": [
+          [
+            {
+              "node": "Enrich Contacts",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enrich Contacts": {
+        "main": [
+          [
+            {
+              "node": "Enrich Companies",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enrich Companies": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript": {
+        "main": [
+          [
+            {
+              "node": "Atualiza os dados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "4 leads por dia útil",
+    "description": "Teto diário de enriquecimento muda de 5 para 4 leads por dia útil, para esticar o fôlego dos créditos por mais tempo.",
+    "autosaved": false,
+    "createdAt": "2026-10-07T13:19:15.730Z",
+    "updatedAt": "2026-10-07T22:34:07.674Z"
+  },
   "tags": []
 }
