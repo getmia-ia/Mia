@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-08T20:51:33.145Z",
+  "updatedAt": "2026-10-09T12:20:03.618Z",
   "createdAt": "2026-10-08T20:30:56.929Z",
   "id": "sMDGPDam5o6W11CS",
   "name": "AgroNegociar - Monitor de Conversas (IA)",
@@ -33,7 +33,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        220,
+        224,
         0
       ],
       "parameters": {
@@ -85,30 +85,14 @@
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "with\nprod as (\n  select p.id, coalesce(nullif(t.pt, ''), p.name) as nome\n  from an_prod_types.products p\n  left join an_prod_types.product_translations t on t.id = p.translations_id\n),\nconv as (\n  select bu.id as bu_id, bu.bid_id, bu.user_id as interessado_id, b.creator_id as dono_id, b.product_id,\n         min(c.created) as inicio, max(c.created) as ultima, max(c.id) as ultimo_chat_id,\n         (array_agg(c.sender_id order by c.id desc))[1] as ultimo_remetente,\n         count(*) as n_msgs\n  from an_prod_cbc.chats c\n  join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n  join an_prod_cbc.bids b on b.id = bu.bid_id\n  where not c.deleted and b.status_id = 1\n  group by bu.id, bu.bid_id, bu.user_id, b.creator_id, b.product_id\n  having min(c.created) >= $1::timestamp\n     and max(c.created) <= (now() at time zone 'utc') - make_interval(days => $2::int)\n     and not bool_or(coalesce(c.blocked, false))\n),\nparada as (\n  select 'parada'::text as tipo, ('parada:' || conv.bu_id || ':' || conv.ultimo_chat_id) as chave,\n    jsonb_build_object(\n      'bid_id', conv.bid_id,\n      'produto', (select nome from prod where id = conv.product_id),\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'ultimo_remetente', case when conv.ultimo_remetente = conv.dono_id then 'anunciante' else 'interessado' end,\n      'inicio', to_char(conv.inicio, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'ultima_msg', to_char(conv.ultima, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'dias_parada', floor(extract(epoch from ((now() at time zone 'utc') - conv.ultima)) / 86400)::int,\n      'n_msgs', conv.n_msgs,\n      'mensagens', (\n        select jsonb_agg(m order by m.id) from (\n          select c.id,\n                 case when c.sender_id = conv.dono_id then 'anunciante' else 'interessado' end as quem,\n                 left(regexp_replace(coalesce(c.message, ''), '\\s+', ' ', 'g'), 400) as texto,\n                 to_char(c.created, 'YYYY-MM-DD HH24:MI') as quando\n          from an_prod_cbc.chats c\n          where c.bid_user_id = conv.bu_id and not c.deleted\n          order by c.id desc limit 6\n        ) m)\n    ) as dados\n  from conv\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = conv.interessado_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = conv.dono_id\n  ) ca on true\n),\nproposta as (\n  select 'proposta'::text as tipo, ('proposta:' || dp.id) as chave,\n    jsonb_build_object(\n      'bid_id', d.bid_id,\n      'produto', (select nome from prod where id = b.product_id),\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'proposta_de', case when dp.creator_id = d.dealer_id then 'interessado' else 'anunciante' end,\n      'preco', dp.price,\n      'quantidade', dp.quantity,\n      'enviada_em', to_char(dp.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'dias_parada', floor(extract(epoch from ((now() at time zone 'utc') - dp.created)) / 86400)::int,\n      'mensagens', (\n        select jsonb_agg(m order by m.id) from (\n          select c.id,\n                 case when c.sender_id = b.creator_id then 'anunciante' else 'interessado' end as quem,\n                 left(regexp_replace(coalesce(c.message, ''), '\\s+', ' ', 'g'), 400) as texto,\n                 to_char(c.created, 'YYYY-MM-DD HH24:MI') as quando\n          from an_prod_cbc.chats c\n          join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n          where bu.bid_id = d.bid_id and bu.user_id = d.dealer_id and not c.deleted\n          order by c.id desc limit 6\n        ) m)\n    ) as dados\n  from an_prod_cbc.deals d\n  join an_prod_cbc.deal_proposals dp on dp.id = d.current_proposal_id\n  join an_prod_cbc.bids b on b.id = d.bid_id\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = d.dealer_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = d.bid_owner_id\n  ) ca on true\n  where not d.deleted and d.status_id in (2, 4) and b.status_id = 1\n    and dp.created >= $1::timestamp\n    and dp.created <= (now() at time zone 'utc') - make_interval(days => $2::int)\n    and not exists (select 1 from an_prod_cbc.deal_proposals p2\n                    where p2.deal_id = d.id and p2.id > dp.id and not p2.deleted)\n    and not exists (select 1 from an_prod_cbc.chats c\n                    join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n                    where bu.bid_id = d.bid_id and bu.user_id = d.dealer_id and not c.deleted\n                      and c.created > dp.created and c.sender_id <> dp.creator_id)\n)\nselect * from parada\nunion all select * from proposta\norder by 1, 2",
-        "options": {
-          "queryReplacement": "={{ [$('Config').first().json.desde, $('Config').first().json.dias_sem_resposta] }}"
-        }
+        "query": "=with\nprod as (\n  select p.id, coalesce(nullif(t.pt, ''), p.name) as nome\n  from an_prod_types.products p\n  left join an_prod_types.product_translations t on t.id = p.translations_id\n),\nconv as (\n  select bu.id as bu_id, bu.bid_id, bu.user_id as interessado_id, b.creator_id as dono_id, b.product_id,\n         min(c.created) as inicio, max(c.created) as ultima, max(c.id) as ultimo_chat_id,\n         (array_agg(c.sender_id order by c.id desc))[1] as ultimo_remetente,\n         count(*) as n_msgs\n  from an_prod_cbc.chats c\n  join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n  join an_prod_cbc.bids b on b.id = bu.bid_id\n  where not c.deleted and b.status_id = 1\n  group by bu.id, bu.bid_id, bu.user_id, b.creator_id, b.product_id\n  having min(c.created) >= '{{ $('Config').first().json.desde }}'::timestamp\n     and max(c.created) <= (now() at time zone 'utc') - make_interval(days => {{ Number($('Config').first().json.dias_sem_resposta) }})\n     and not bool_or(coalesce(c.blocked, false))\n),\nparada as (\n  select 'parada'::text as tipo, ('parada:' || conv.bu_id || ':' || conv.ultimo_chat_id) as chave,\n    jsonb_build_object(\n      'bid_id', conv.bid_id,\n      'produto', (select nome from prod where id = conv.product_id),\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'ultimo_remetente', case when conv.ultimo_remetente = conv.dono_id then 'anunciante' else 'interessado' end,\n      'inicio', to_char(conv.inicio, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'ultima_msg', to_char(conv.ultima, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'dias_parada', floor(extract(epoch from ((now() at time zone 'utc') - conv.ultima)) / 86400)::int,\n      'n_msgs', conv.n_msgs,\n      'mensagens', (\n        select jsonb_agg(m order by m.id) from (\n          select c.id,\n                 case when c.sender_id = conv.dono_id then 'anunciante' else 'interessado' end as quem,\n                 left(regexp_replace(coalesce(c.message, ''), '\\s+', ' ', 'g'), 400) as texto,\n                 to_char(c.created, 'YYYY-MM-DD HH24:MI') as quando\n          from an_prod_cbc.chats c\n          where c.bid_user_id = conv.bu_id and not c.deleted\n          order by c.id desc limit 6\n        ) m)\n    ) as dados\n  from conv\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = conv.interessado_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = conv.dono_id\n  ) ca on true\n),\nproposta as (\n  select 'proposta'::text as tipo, ('proposta:' || dp.id) as chave,\n    jsonb_build_object(\n      'bid_id', d.bid_id,\n      'produto', (select nome from prod where id = b.product_id),\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'proposta_de', case when dp.creator_id = d.dealer_id then 'interessado' else 'anunciante' end,\n      'preco', dp.price,\n      'quantidade', dp.quantity,\n      'enviada_em', to_char(dp.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'dias_parada', floor(extract(epoch from ((now() at time zone 'utc') - dp.created)) / 86400)::int,\n      'mensagens', (\n        select jsonb_agg(m order by m.id) from (\n          select c.id,\n                 case when c.sender_id = b.creator_id then 'anunciante' else 'interessado' end as quem,\n                 left(regexp_replace(coalesce(c.message, ''), '\\s+', ' ', 'g'), 400) as texto,\n                 to_char(c.created, 'YYYY-MM-DD HH24:MI') as quando\n          from an_prod_cbc.chats c\n          join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n          where bu.bid_id = d.bid_id and bu.user_id = d.dealer_id and not c.deleted\n          order by c.id desc limit 6\n        ) m)\n    ) as dados\n  from an_prod_cbc.deals d\n  join an_prod_cbc.deal_proposals dp on dp.id = d.current_proposal_id\n  join an_prod_cbc.bids b on b.id = d.bid_id\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = d.dealer_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = d.bid_owner_id\n  ) ca on true\n  where not d.deleted and d.status_id in (2, 4) and b.status_id = 1\n    and dp.created >= '{{ $('Config').first().json.desde }}'::timestamp\n    and dp.created <= (now() at time zone 'utc') - make_interval(days => {{ Number($('Config').first().json.dias_sem_resposta) }})\n    and not exists (select 1 from an_prod_cbc.deal_proposals p2\n                    where p2.deal_id = d.id and p2.id > dp.id and not p2.deleted)\n    and not exists (select 1 from an_prod_cbc.chats c\n                    join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n                    where bu.bid_id = d.bid_id and bu.user_id = d.dealer_id and not c.deleted\n                      and c.created > dp.created and c.sender_id <> dp.creator_id)\n)\n,\nuniao as (\n  select * from parada\n  union all select * from proposta\n)\nselect * from uniao u\nwhere not exists (select 1 from public.notif_enviadas e where e.chave = u.chave)\norder by 1, 2\nlimit {{ Number($('Config').first().json.max_por_execucao) }}",
+        "options": {}
       },
       "credentials": {
         "postgres": {
           "id": "zIilzHxVEjb4gaaH",
           "name": "Supabase Agronegociar"
         }
-      }
-    },
-    {
-      "id": "m4",
-      "name": "Filtra já avisados",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        660,
-        0
-      ],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Só analisa o que ainda não foi avisado. Chave da conversa parada inclui o id da última mensagem:\n// se alguém escrever, a conversa \"reabre\" e pode ser avisada de novo se parar outra vez.\nconst sd = $getWorkflowStaticData('global');\nsd.avisados = sd.avisados || {};\nconst cfg = $('Config').first().json;\nconst limite = Number(cfg.max_por_execucao) || 8;\nconst novos = $input.all().map((i) => i.json).filter((r) => r && r.chave && !sd.avisados[r.chave]);\nreturn novos.slice(0, limite).map((r) => ({ json: r }));"
       }
     },
     {
@@ -121,7 +105,6 @@
         0
       ],
       "parameters": {
-        "mode": "runOnceForAllItems",
         "jsCode": "// Pergunta para a IA SEM e-mail e telefone: ela só precisa do contexto da conversa.\nconst out = [];\nfor (const it of $input.all()) {\n  const r = it.json, d = r.dados || {};\n  const msgs = (d.mensagens || []).map((m) => '[' + m.quando + '] ' + m.quem + ': ' + (m.texto || '(sem texto)')).join('\\n') || '(sem mensagens no chat)';\n  const cab = r.tipo === 'proposta'\n    ? 'Tipo: PROPOSTA sem resposta há ' + d.dias_parada + ' dia(s). A proposta foi enviada pelo ' + d.proposta_de + '. Preço: ' + d.preco + ' · Quantidade: ' + d.quantidade\n    : 'Tipo: CONVERSA parada há ' + d.dias_parada + ' dia(s). A última mensagem foi do ' + d.ultimo_remetente + '. Total de mensagens: ' + d.n_msgs;\n  out.push({ json: { ...r, prompt: cab + '\\nProduto do anúncio: ' + (d.produto || 'não informado') + '\\n\\nÚltimas mensagens (da mais antiga para a mais recente):\\n' + msgs } });\n}\nreturn out;"
       }
     },
@@ -132,7 +115,7 @@
       "typeVersion": 1.6,
       "onError": "continueRegularOutput",
       "position": [
-        1100,
+        1104,
         0
       ],
       "parameters": {
@@ -153,8 +136,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        1100,
-        220
+        1104,
+        224
       ],
       "parameters": {
         "model": "openai/gpt-4o-mini",
@@ -180,7 +163,43 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const limpo = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();\nconst tel = (d) => {\n  const n = String(d || '').replace(/\\D/g, '');\n  if (!n) return 'sem telefone';\n  const l = n.startsWith('55') && n.length >= 12 ? n.slice(2) : n;\n  return l.length === 11 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 7) + '-' + l.slice(7)\n       : l.length === 10 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 6) + '-' + l.slice(6) : '+' + n;\n};\nconst pessoa = (rotulo, p) => {\n  p = p || {};\n  return rotulo + ': ' + (limpo(p.nome) || 'sem nome') + ' · id ' + (p.id == null ? '?' : p.id) +\n    '\\n   ✉ ' + (limpo(p.email) || 'sem e-mail') + ' · 📞 ' + tel(p.telefone);\n};\nconst sd = $getWorkflowStaticData('global');\nsd.avisados = sd.avisados || {};\nconst linhas = $('Prepara pergunta para IA').all();\nconst respostas = $input.all();\n\nfunction lerJson(txt) {\n  if (txt && typeof txt === 'object') return txt;\n  let s = String(txt || '').trim();\n  const cerca = s.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);\n  if (cerca) s = cerca[1].trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a >= 0 && b > a) s = s.slice(a, b + 1);\n  try { return JSON.parse(s); } catch (e) { return null; }\n}\n\nconst saida = [];\nrespostas.forEach((resp, i) => {\n  const r = (linhas[i] || {}).json;\n  if (!r) return;\n  const d = r.dados || {};\n  const falhouIA = !resp.json || resp.json.error;\n  const ia = falhouIA ? null : lerJson(resp.json.text || resp.json.output || resp.json.response);\n  // IA indisponível ou resposta ilegível: avisa mesmo assim (melhor sobrar aviso do que perder conversa).\n  if (ia && ia.alertar === false) { sd.avisados[r.chave] = Date.now(); return; }\n\n  const aguardando = r.tipo === 'proposta'\n    ? (d.proposta_de === 'interessado' ? 'anunciante' : 'interessado')\n    : (d.ultimo_remetente === 'anunciante' ? 'interessado' : 'anunciante');\n  const quem = aguardando === 'anunciante' ? d.anunciante : d.interessado;\n  const titulo = r.tipo === 'proposta'\n    ? '📨 *Proposta sem resposta há ' + d.dias_parada + ' dias*'\n    : '⏳ *Conversa parada há ' + d.dias_parada + ' dias*';\n  const urg = ia && ia.urgencia ? ' · urgência ' + limpo(ia.urgencia) : '';\n  const texto = [\n    titulo,\n    'Produto: ' + (limpo(d.produto) || 'não informado') + ' (anúncio #' + d.bid_id + ')',\n    'Aguardando resposta do ' + aguardando + ': ' + (limpo((quem || {}).nome) || 'sem nome') + urg,\n    ia && ia.resumo ? '🧠 ' + limpo(ia.resumo) : '🧠 (análise da IA indisponível)',\n    pessoa('👤 Interessado', d.interessado),\n    pessoa('🏷 Anunciante', d.anunciante),\n  ].join('\\n');\n  saida.push({ json: { key: r.chave, text: texto } });\n});\nreturn saida;"
+        "jsCode": "const limpo = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();\nconst tel = (d) => {\n  const n = String(d || '').replace(/\\D/g, '');\n  if (!n) return 'sem telefone';\n  const l = n.startsWith('55') && n.length >= 12 ? n.slice(2) : n;\n  return l.length === 11 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 7) + '-' + l.slice(7)\n       : l.length === 10 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 6) + '-' + l.slice(6) : '+' + n;\n};\nconst pessoa = (rotulo, p) => {\n  p = p || {};\n  return rotulo + ': ' + (limpo(p.nome) || 'sem nome') + ' · id ' + (p.id == null ? '?' : p.id) +\n    '\\n   ✉ ' + (limpo(p.email) || 'sem e-mail') + ' · 📞 ' + tel(p.telefone);\n};\nconst linhas = $('Prepara pergunta para IA').all();\nconst respostas = $input.all();\n\nfunction lerJson(txt) {\n  if (txt && typeof txt === 'object') return txt;\n  let s = String(txt || '').trim();\n  const cerca = s.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);\n  if (cerca) s = cerca[1].trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a >= 0 && b > a) s = s.slice(a, b + 1);\n  try { return JSON.parse(s); } catch (e) { return null; }\n}\n\nconst saida = [];\nrespostas.forEach((resp, i) => {\n  const r = (linhas[i] || {}).json;\n  if (!r) return;\n  const d = r.dados || {};\n  const falhouIA = !resp.json || resp.json.error;\n  const ia = falhouIA ? null : lerJson(resp.json.text || resp.json.output || resp.json.response);\n  // A IA mandou ignorar (conversa concluída): vira registro, não mensagem.\n  if (ia && ia.alertar === false) { saida.push({ json: { key: r.chave, enviar: false, text: '' } }); return; }\n  // IA indisponível ou resposta ilegível: avisa mesmo assim (melhor sobrar aviso do que perder conversa).\n  const aguardando = r.tipo === 'proposta'\n    ? (d.proposta_de === 'interessado' ? 'anunciante' : 'interessado')\n    : (d.ultimo_remetente === 'anunciante' ? 'interessado' : 'anunciante');\n  const quem = aguardando === 'anunciante' ? d.anunciante : d.interessado;\n  const titulo = r.tipo === 'proposta'\n    ? '📨 *Proposta sem resposta há ' + d.dias_parada + ' dias*'\n    : '⏳ *Conversa parada há ' + d.dias_parada + ' dias*';\n  const urg = ia && ia.urgencia ? ' · urgência ' + limpo(ia.urgencia) : '';\n  const texto = [\n    titulo,\n    'Produto: ' + (limpo(d.produto) || 'não informado') + ' (anúncio #' + d.bid_id + ')',\n    'Aguardando resposta do ' + aguardando + ': ' + (limpo((quem || {}).nome) || 'sem nome') + urg,\n    ia && ia.resumo ? '🧠 ' + limpo(ia.resumo) : '🧠 (análise da IA indisponível)',\n    pessoa('👤 Interessado', d.interessado),\n    pessoa('🏷 Anunciante', d.anunciante),\n  ].join('\\n');\n  saida.push({ json: { key: r.chave, enviar: true, text: texto } });\n});\nreturn saida;"
+      }
+    },
+    {
+      "id": "m8b",
+      "name": "Registra ignoradas",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "executeOnce": true,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=insert into public.notif_enviadas (chave, fluxo)\nselect jsonb_array_elements_text('{{ (JSON.stringify($input.all().filter((i) => !i.json.enviar).map((i) => i.json.key))).replace(/'/g, \"''\") }}'::jsonb), 'monitor_ignorada'\non conflict (chave) do nothing",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
+        }
+      }
+    },
+    {
+      "id": "m8c",
+      "name": "Seleciona para envio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Interpreta e monta mensagem').all()\n  .filter((i) => i.json.enviar)\n  .map((i) => ({ json: { key: i.json.key, text: i.json.text } }));"
       }
     },
     {
@@ -190,7 +209,7 @@
       "typeVersion": 1,
       "onError": "continueRegularOutput",
       "position": [
-        1540,
+        1980,
         0
       ],
       "parameters": {
@@ -213,12 +232,34 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1760,
+        2200,
         0
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const sd = $getWorkflowStaticData('global');\nsd.avisados = sd.avisados || {};\nconst msgs = $('Interpreta e monta mensagem').all();\nconst res = $('Envia no grupo').all();\nlet ok = 0, falhas = 0;\nres.forEach((r, i) => {\n  const falhou = !r.json || r.json.error || (r.json.success === false);\n  if (falhou) falhas++; else if (msgs[i]) { sd.avisados[msgs[i].json.key] = Date.now(); ok++; }\n});\n// guarda só os 1000 avisos mais recentes\nconst ks = Object.keys(sd.avisados);\nif (ks.length > 1000) ks.sort((a, b) => sd.avisados[a] - sd.avisados[b]).slice(0, ks.length - 1000).forEach((k) => delete sd.avisados[k]);\nreturn [{ json: { avisos_enviados: ok, falhas } }];"
+        "jsCode": "const msgs = $('Seleciona para envio').all();\nconst res = $('Envia no grupo').all();\nconst chaves = [];\nlet falhas = 0;\nres.forEach((r, i) => {\n  const falhou = !r.json || r.json.error || r.json.success === false;\n  if (falhou) falhas++; else if (msgs[i]) chaves.push(msgs[i].json.key);\n});\n// O que falhou não é registrado: a próxima rodada tenta de novo.\nreturn [{ json: { chaves, falhas } }];"
+      }
+    },
+    {
+      "id": "m10b",
+      "name": "Registra avisados",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "executeOnce": true,
+      "position": [
+        2420,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=insert into public.notif_enviadas (chave, fluxo)\nselect jsonb_array_elements_text('{{ (JSON.stringify($('Confirma e registra').first().json.chaves)).replace(/'/g, \"''\") }}'::jsonb), 'monitor'\non conflict (chave) do nothing",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "zIilzHxVEjb4gaaH",
+          "name": "Supabase Agronegociar"
+        }
       }
     },
     {
@@ -228,12 +269,12 @@
       "typeVersion": 1,
       "position": [
         0,
-        -260
+        -256
       ],
       "parameters": {
-        "width": 760,
+        "content": "## AgroNegociar — Monitor de conversas (IA)\nDe hora em hora (8h–19h) procura, só entre conversas iniciadas a partir de 08/10/2026:\n- **conversa parada**: última mensagem há 3+ dias, anúncio ainda ativo;\n- **proposta sem resposta**: proposta aberta há 3+ dias sem contraproposta nem mensagem do outro lado.\n\nUma IA (gpt-4o-mini via OpenRouter) lê as últimas mensagens e decide se vale avisar (ignora conversa concluída). A IA NÃO recebe e-mail nem telefone.\n**Estado** no Supabase (`notif_enviadas`): cada conversa é avisada uma vez; se alguém responder e ela parar de novo, é avisada de novo. As ignoradas pela IA também ficam registradas, para não gastar IA à toa.",
         "height": 220,
-        "content": "## AgroNegociar — Monitor de conversas (IA)\nDe hora em hora (8h–19h) procura, só entre conversas iniciadas a partir de 08/10/2026:\n- **conversa parada**: última mensagem há 3+ dias, anúncio ainda ativo;\n- **proposta sem resposta**: proposta aberta há 3+ dias sem contraproposta nem mensagem do outro lado.\n\nUma IA (gpt-4o-mini via OpenRouter) lê as últimas mensagens e decide se vale avisar (ignora conversa concluída). A IA NÃO recebe e-mail nem telefone.\nCada conversa é avisada uma vez; se alguém responder e ela parar de novo, é avisada de novo."
+        "width": 760
       }
     }
   ],
@@ -261,17 +302,6 @@
       ]
     },
     "Conversas e propostas paradas": {
-      "main": [
-        [
-          {
-            "node": "Filtra já avisados",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Filtra já avisados": {
       "main": [
         [
           {
@@ -308,6 +338,28 @@
       "main": [
         [
           {
+            "node": "Registra ignoradas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registra ignoradas": {
+      "main": [
+        [
+          {
+            "node": "Seleciona para envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seleciona para envio": {
+      "main": [
+        [
+          {
             "node": "Envia no grupo",
             "type": "main",
             "index": 0
@@ -320,6 +372,17 @@
         [
           {
             "node": "Confirma e registra",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirma e registra": {
+      "main": [
+        [
+          {
+            "node": "Registra avisados",
             "type": "main",
             "index": 0
           }
@@ -343,7 +406,8 @@
     "executionOrder": "v1",
     "saveManualExecutions": true,
     "saveDataErrorExecution": "all",
-    "saveDataSuccessExecution": "all"
+    "saveDataSuccessExecution": "all",
+    "binaryMode": "separate"
   },
   "staticData": {
     "node:De hora em hora (8h às 19h)": {
@@ -356,8 +420,8 @@
     }
   },
   "meta": null,
-  "versionId": "1851ab1b-1fb9-4a7b-b5ab-62034b7241dc",
-  "activeVersionId": "1851ab1b-1fb9-4a7b-b5ab-62034b7241dc",
+  "versionId": "9992edb7-ccb8-474c-bc6b-d313a10dec36",
+  "activeVersionId": "9992edb7-ccb8-474c-bc6b-d313a10dec36",
   "triggerCount": 1,
   "shared": [
     {
@@ -369,7 +433,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "1851ab1b-1fb9-4a7b-b5ab-62034b7241dc",
+    "versionId": "9992edb7-ccb8-474c-bc6b-d313a10dec36",
     "workflowId": "sMDGPDam5o6W11CS",
     "nodes": [
       {
@@ -399,7 +463,7 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          220,
+          224,
           0
         ],
         "parameters": {
@@ -451,30 +515,14 @@
         ],
         "parameters": {
           "operation": "executeQuery",
-          "query": "with\nprod as (\n  select p.id, coalesce(nullif(t.pt, ''), p.name) as nome\n  from an_prod_types.products p\n  left join an_prod_types.product_translations t on t.id = p.translations_id\n),\nconv as (\n  select bu.id as bu_id, bu.bid_id, bu.user_id as interessado_id, b.creator_id as dono_id, b.product_id,\n         min(c.created) as inicio, max(c.created) as ultima, max(c.id) as ultimo_chat_id,\n         (array_agg(c.sender_id order by c.id desc))[1] as ultimo_remetente,\n         count(*) as n_msgs\n  from an_prod_cbc.chats c\n  join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n  join an_prod_cbc.bids b on b.id = bu.bid_id\n  where not c.deleted and b.status_id = 1\n  group by bu.id, bu.bid_id, bu.user_id, b.creator_id, b.product_id\n  having min(c.created) >= $1::timestamp\n     and max(c.created) <= (now() at time zone 'utc') - make_interval(days => $2::int)\n     and not bool_or(coalesce(c.blocked, false))\n),\nparada as (\n  select 'parada'::text as tipo, ('parada:' || conv.bu_id || ':' || conv.ultimo_chat_id) as chave,\n    jsonb_build_object(\n      'bid_id', conv.bid_id,\n      'produto', (select nome from prod where id = conv.product_id),\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'ultimo_remetente', case when conv.ultimo_remetente = conv.dono_id then 'anunciante' else 'interessado' end,\n      'inicio', to_char(conv.inicio, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'ultima_msg', to_char(conv.ultima, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'dias_parada', floor(extract(epoch from ((now() at time zone 'utc') - conv.ultima)) / 86400)::int,\n      'n_msgs', conv.n_msgs,\n      'mensagens', (\n        select jsonb_agg(m order by m.id) from (\n          select c.id,\n                 case when c.sender_id = conv.dono_id then 'anunciante' else 'interessado' end as quem,\n                 left(regexp_replace(coalesce(c.message, ''), '\\s+', ' ', 'g'), 400) as texto,\n                 to_char(c.created, 'YYYY-MM-DD HH24:MI') as quando\n          from an_prod_cbc.chats c\n          where c.bid_user_id = conv.bu_id and not c.deleted\n          order by c.id desc limit 6\n        ) m)\n    ) as dados\n  from conv\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = conv.interessado_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = conv.dono_id\n  ) ca on true\n),\nproposta as (\n  select 'proposta'::text as tipo, ('proposta:' || dp.id) as chave,\n    jsonb_build_object(\n      'bid_id', d.bid_id,\n      'produto', (select nome from prod where id = b.product_id),\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'proposta_de', case when dp.creator_id = d.dealer_id then 'interessado' else 'anunciante' end,\n      'preco', dp.price,\n      'quantidade', dp.quantity,\n      'enviada_em', to_char(dp.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'dias_parada', floor(extract(epoch from ((now() at time zone 'utc') - dp.created)) / 86400)::int,\n      'mensagens', (\n        select jsonb_agg(m order by m.id) from (\n          select c.id,\n                 case when c.sender_id = b.creator_id then 'anunciante' else 'interessado' end as quem,\n                 left(regexp_replace(coalesce(c.message, ''), '\\s+', ' ', 'g'), 400) as texto,\n                 to_char(c.created, 'YYYY-MM-DD HH24:MI') as quando\n          from an_prod_cbc.chats c\n          join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n          where bu.bid_id = d.bid_id and bu.user_id = d.dealer_id and not c.deleted\n          order by c.id desc limit 6\n        ) m)\n    ) as dados\n  from an_prod_cbc.deals d\n  join an_prod_cbc.deal_proposals dp on dp.id = d.current_proposal_id\n  join an_prod_cbc.bids b on b.id = d.bid_id\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = d.dealer_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = d.bid_owner_id\n  ) ca on true\n  where not d.deleted and d.status_id in (2, 4) and b.status_id = 1\n    and dp.created >= $1::timestamp\n    and dp.created <= (now() at time zone 'utc') - make_interval(days => $2::int)\n    and not exists (select 1 from an_prod_cbc.deal_proposals p2\n                    where p2.deal_id = d.id and p2.id > dp.id and not p2.deleted)\n    and not exists (select 1 from an_prod_cbc.chats c\n                    join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n                    where bu.bid_id = d.bid_id and bu.user_id = d.dealer_id and not c.deleted\n                      and c.created > dp.created and c.sender_id <> dp.creator_id)\n)\nselect * from parada\nunion all select * from proposta\norder by 1, 2",
-          "options": {
-            "queryReplacement": "={{ [$('Config').first().json.desde, $('Config').first().json.dias_sem_resposta] }}"
-          }
+          "query": "=with\nprod as (\n  select p.id, coalesce(nullif(t.pt, ''), p.name) as nome\n  from an_prod_types.products p\n  left join an_prod_types.product_translations t on t.id = p.translations_id\n),\nconv as (\n  select bu.id as bu_id, bu.bid_id, bu.user_id as interessado_id, b.creator_id as dono_id, b.product_id,\n         min(c.created) as inicio, max(c.created) as ultima, max(c.id) as ultimo_chat_id,\n         (array_agg(c.sender_id order by c.id desc))[1] as ultimo_remetente,\n         count(*) as n_msgs\n  from an_prod_cbc.chats c\n  join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n  join an_prod_cbc.bids b on b.id = bu.bid_id\n  where not c.deleted and b.status_id = 1\n  group by bu.id, bu.bid_id, bu.user_id, b.creator_id, b.product_id\n  having min(c.created) >= '{{ $('Config').first().json.desde }}'::timestamp\n     and max(c.created) <= (now() at time zone 'utc') - make_interval(days => {{ Number($('Config').first().json.dias_sem_resposta) }})\n     and not bool_or(coalesce(c.blocked, false))\n),\nparada as (\n  select 'parada'::text as tipo, ('parada:' || conv.bu_id || ':' || conv.ultimo_chat_id) as chave,\n    jsonb_build_object(\n      'bid_id', conv.bid_id,\n      'produto', (select nome from prod where id = conv.product_id),\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'ultimo_remetente', case when conv.ultimo_remetente = conv.dono_id then 'anunciante' else 'interessado' end,\n      'inicio', to_char(conv.inicio, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'ultima_msg', to_char(conv.ultima, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'dias_parada', floor(extract(epoch from ((now() at time zone 'utc') - conv.ultima)) / 86400)::int,\n      'n_msgs', conv.n_msgs,\n      'mensagens', (\n        select jsonb_agg(m order by m.id) from (\n          select c.id,\n                 case when c.sender_id = conv.dono_id then 'anunciante' else 'interessado' end as quem,\n                 left(regexp_replace(coalesce(c.message, ''), '\\s+', ' ', 'g'), 400) as texto,\n                 to_char(c.created, 'YYYY-MM-DD HH24:MI') as quando\n          from an_prod_cbc.chats c\n          where c.bid_user_id = conv.bu_id and not c.deleted\n          order by c.id desc limit 6\n        ) m)\n    ) as dados\n  from conv\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = conv.interessado_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = conv.dono_id\n  ) ca on true\n),\nproposta as (\n  select 'proposta'::text as tipo, ('proposta:' || dp.id) as chave,\n    jsonb_build_object(\n      'bid_id', d.bid_id,\n      'produto', (select nome from prod where id = b.product_id),\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'proposta_de', case when dp.creator_id = d.dealer_id then 'interessado' else 'anunciante' end,\n      'preco', dp.price,\n      'quantidade', dp.quantity,\n      'enviada_em', to_char(dp.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n      'dias_parada', floor(extract(epoch from ((now() at time zone 'utc') - dp.created)) / 86400)::int,\n      'mensagens', (\n        select jsonb_agg(m order by m.id) from (\n          select c.id,\n                 case when c.sender_id = b.creator_id then 'anunciante' else 'interessado' end as quem,\n                 left(regexp_replace(coalesce(c.message, ''), '\\s+', ' ', 'g'), 400) as texto,\n                 to_char(c.created, 'YYYY-MM-DD HH24:MI') as quando\n          from an_prod_cbc.chats c\n          join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n          where bu.bid_id = d.bid_id and bu.user_id = d.dealer_id and not c.deleted\n          order by c.id desc limit 6\n        ) m)\n    ) as dados\n  from an_prod_cbc.deals d\n  join an_prod_cbc.deal_proposals dp on dp.id = d.current_proposal_id\n  join an_prod_cbc.bids b on b.id = d.bid_id\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = d.dealer_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = d.bid_owner_id\n  ) ca on true\n  where not d.deleted and d.status_id in (2, 4) and b.status_id = 1\n    and dp.created >= '{{ $('Config').first().json.desde }}'::timestamp\n    and dp.created <= (now() at time zone 'utc') - make_interval(days => {{ Number($('Config').first().json.dias_sem_resposta) }})\n    and not exists (select 1 from an_prod_cbc.deal_proposals p2\n                    where p2.deal_id = d.id and p2.id > dp.id and not p2.deleted)\n    and not exists (select 1 from an_prod_cbc.chats c\n                    join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n                    where bu.bid_id = d.bid_id and bu.user_id = d.dealer_id and not c.deleted\n                      and c.created > dp.created and c.sender_id <> dp.creator_id)\n)\n,\nuniao as (\n  select * from parada\n  union all select * from proposta\n)\nselect * from uniao u\nwhere not exists (select 1 from public.notif_enviadas e where e.chave = u.chave)\norder by 1, 2\nlimit {{ Number($('Config').first().json.max_por_execucao) }}",
+          "options": {}
         },
         "credentials": {
           "postgres": {
             "id": "zIilzHxVEjb4gaaH",
             "name": "Supabase Agronegociar"
           }
-        }
-      },
-      {
-        "id": "m4",
-        "name": "Filtra já avisados",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          660,
-          0
-        ],
-        "parameters": {
-          "mode": "runOnceForAllItems",
-          "jsCode": "// Só analisa o que ainda não foi avisado. Chave da conversa parada inclui o id da última mensagem:\n// se alguém escrever, a conversa \"reabre\" e pode ser avisada de novo se parar outra vez.\nconst sd = $getWorkflowStaticData('global');\nsd.avisados = sd.avisados || {};\nconst cfg = $('Config').first().json;\nconst limite = Number(cfg.max_por_execucao) || 8;\nconst novos = $input.all().map((i) => i.json).filter((r) => r && r.chave && !sd.avisados[r.chave]);\nreturn novos.slice(0, limite).map((r) => ({ json: r }));"
         }
       },
       {
@@ -487,7 +535,6 @@
           0
         ],
         "parameters": {
-          "mode": "runOnceForAllItems",
           "jsCode": "// Pergunta para a IA SEM e-mail e telefone: ela só precisa do contexto da conversa.\nconst out = [];\nfor (const it of $input.all()) {\n  const r = it.json, d = r.dados || {};\n  const msgs = (d.mensagens || []).map((m) => '[' + m.quando + '] ' + m.quem + ': ' + (m.texto || '(sem texto)')).join('\\n') || '(sem mensagens no chat)';\n  const cab = r.tipo === 'proposta'\n    ? 'Tipo: PROPOSTA sem resposta há ' + d.dias_parada + ' dia(s). A proposta foi enviada pelo ' + d.proposta_de + '. Preço: ' + d.preco + ' · Quantidade: ' + d.quantidade\n    : 'Tipo: CONVERSA parada há ' + d.dias_parada + ' dia(s). A última mensagem foi do ' + d.ultimo_remetente + '. Total de mensagens: ' + d.n_msgs;\n  out.push({ json: { ...r, prompt: cab + '\\nProduto do anúncio: ' + (d.produto || 'não informado') + '\\n\\nÚltimas mensagens (da mais antiga para a mais recente):\\n' + msgs } });\n}\nreturn out;"
         }
       },
@@ -498,7 +545,7 @@
         "typeVersion": 1.6,
         "onError": "continueRegularOutput",
         "position": [
-          1100,
+          1104,
           0
         ],
         "parameters": {
@@ -519,8 +566,8 @@
         "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
         "typeVersion": 1,
         "position": [
-          1100,
-          220
+          1104,
+          224
         ],
         "parameters": {
           "model": "openai/gpt-4o-mini",
@@ -546,7 +593,43 @@
         ],
         "parameters": {
           "mode": "runOnceForAllItems",
-          "jsCode": "const limpo = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();\nconst tel = (d) => {\n  const n = String(d || '').replace(/\\D/g, '');\n  if (!n) return 'sem telefone';\n  const l = n.startsWith('55') && n.length >= 12 ? n.slice(2) : n;\n  return l.length === 11 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 7) + '-' + l.slice(7)\n       : l.length === 10 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 6) + '-' + l.slice(6) : '+' + n;\n};\nconst pessoa = (rotulo, p) => {\n  p = p || {};\n  return rotulo + ': ' + (limpo(p.nome) || 'sem nome') + ' · id ' + (p.id == null ? '?' : p.id) +\n    '\\n   ✉ ' + (limpo(p.email) || 'sem e-mail') + ' · 📞 ' + tel(p.telefone);\n};\nconst sd = $getWorkflowStaticData('global');\nsd.avisados = sd.avisados || {};\nconst linhas = $('Prepara pergunta para IA').all();\nconst respostas = $input.all();\n\nfunction lerJson(txt) {\n  if (txt && typeof txt === 'object') return txt;\n  let s = String(txt || '').trim();\n  const cerca = s.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);\n  if (cerca) s = cerca[1].trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a >= 0 && b > a) s = s.slice(a, b + 1);\n  try { return JSON.parse(s); } catch (e) { return null; }\n}\n\nconst saida = [];\nrespostas.forEach((resp, i) => {\n  const r = (linhas[i] || {}).json;\n  if (!r) return;\n  const d = r.dados || {};\n  const falhouIA = !resp.json || resp.json.error;\n  const ia = falhouIA ? null : lerJson(resp.json.text || resp.json.output || resp.json.response);\n  // IA indisponível ou resposta ilegível: avisa mesmo assim (melhor sobrar aviso do que perder conversa).\n  if (ia && ia.alertar === false) { sd.avisados[r.chave] = Date.now(); return; }\n\n  const aguardando = r.tipo === 'proposta'\n    ? (d.proposta_de === 'interessado' ? 'anunciante' : 'interessado')\n    : (d.ultimo_remetente === 'anunciante' ? 'interessado' : 'anunciante');\n  const quem = aguardando === 'anunciante' ? d.anunciante : d.interessado;\n  const titulo = r.tipo === 'proposta'\n    ? '📨 *Proposta sem resposta há ' + d.dias_parada + ' dias*'\n    : '⏳ *Conversa parada há ' + d.dias_parada + ' dias*';\n  const urg = ia && ia.urgencia ? ' · urgência ' + limpo(ia.urgencia) : '';\n  const texto = [\n    titulo,\n    'Produto: ' + (limpo(d.produto) || 'não informado') + ' (anúncio #' + d.bid_id + ')',\n    'Aguardando resposta do ' + aguardando + ': ' + (limpo((quem || {}).nome) || 'sem nome') + urg,\n    ia && ia.resumo ? '🧠 ' + limpo(ia.resumo) : '🧠 (análise da IA indisponível)',\n    pessoa('👤 Interessado', d.interessado),\n    pessoa('🏷 Anunciante', d.anunciante),\n  ].join('\\n');\n  saida.push({ json: { key: r.chave, text: texto } });\n});\nreturn saida;"
+          "jsCode": "const limpo = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();\nconst tel = (d) => {\n  const n = String(d || '').replace(/\\D/g, '');\n  if (!n) return 'sem telefone';\n  const l = n.startsWith('55') && n.length >= 12 ? n.slice(2) : n;\n  return l.length === 11 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 7) + '-' + l.slice(7)\n       : l.length === 10 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 6) + '-' + l.slice(6) : '+' + n;\n};\nconst pessoa = (rotulo, p) => {\n  p = p || {};\n  return rotulo + ': ' + (limpo(p.nome) || 'sem nome') + ' · id ' + (p.id == null ? '?' : p.id) +\n    '\\n   ✉ ' + (limpo(p.email) || 'sem e-mail') + ' · 📞 ' + tel(p.telefone);\n};\nconst linhas = $('Prepara pergunta para IA').all();\nconst respostas = $input.all();\n\nfunction lerJson(txt) {\n  if (txt && typeof txt === 'object') return txt;\n  let s = String(txt || '').trim();\n  const cerca = s.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);\n  if (cerca) s = cerca[1].trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a >= 0 && b > a) s = s.slice(a, b + 1);\n  try { return JSON.parse(s); } catch (e) { return null; }\n}\n\nconst saida = [];\nrespostas.forEach((resp, i) => {\n  const r = (linhas[i] || {}).json;\n  if (!r) return;\n  const d = r.dados || {};\n  const falhouIA = !resp.json || resp.json.error;\n  const ia = falhouIA ? null : lerJson(resp.json.text || resp.json.output || resp.json.response);\n  // A IA mandou ignorar (conversa concluída): vira registro, não mensagem.\n  if (ia && ia.alertar === false) { saida.push({ json: { key: r.chave, enviar: false, text: '' } }); return; }\n  // IA indisponível ou resposta ilegível: avisa mesmo assim (melhor sobrar aviso do que perder conversa).\n  const aguardando = r.tipo === 'proposta'\n    ? (d.proposta_de === 'interessado' ? 'anunciante' : 'interessado')\n    : (d.ultimo_remetente === 'anunciante' ? 'interessado' : 'anunciante');\n  const quem = aguardando === 'anunciante' ? d.anunciante : d.interessado;\n  const titulo = r.tipo === 'proposta'\n    ? '📨 *Proposta sem resposta há ' + d.dias_parada + ' dias*'\n    : '⏳ *Conversa parada há ' + d.dias_parada + ' dias*';\n  const urg = ia && ia.urgencia ? ' · urgência ' + limpo(ia.urgencia) : '';\n  const texto = [\n    titulo,\n    'Produto: ' + (limpo(d.produto) || 'não informado') + ' (anúncio #' + d.bid_id + ')',\n    'Aguardando resposta do ' + aguardando + ': ' + (limpo((quem || {}).nome) || 'sem nome') + urg,\n    ia && ia.resumo ? '🧠 ' + limpo(ia.resumo) : '🧠 (análise da IA indisponível)',\n    pessoa('👤 Interessado', d.interessado),\n    pessoa('🏷 Anunciante', d.anunciante),\n  ].join('\\n');\n  saida.push({ json: { key: r.chave, enviar: true, text: texto } });\n});\nreturn saida;"
+        }
+      },
+      {
+        "id": "m8b",
+        "name": "Registra ignoradas",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "executeOnce": true,
+        "position": [
+          1540,
+          0
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "=insert into public.notif_enviadas (chave, fluxo)\nselect jsonb_array_elements_text('{{ (JSON.stringify($input.all().filter((i) => !i.json.enviar).map((i) => i.json.key))).replace(/'/g, \"''\") }}'::jsonb), 'monitor_ignorada'\non conflict (chave) do nothing",
+          "options": {}
+        },
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
+        }
+      },
+      {
+        "id": "m8c",
+        "name": "Seleciona para envio",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1760,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "return $('Interpreta e monta mensagem').all()\n  .filter((i) => i.json.enviar)\n  .map((i) => ({ json: { key: i.json.key, text: i.json.text } }));"
         }
       },
       {
@@ -556,7 +639,7 @@
         "typeVersion": 1,
         "onError": "continueRegularOutput",
         "position": [
-          1540,
+          1980,
           0
         ],
         "parameters": {
@@ -579,12 +662,34 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1760,
+          2200,
           0
         ],
         "parameters": {
           "mode": "runOnceForAllItems",
-          "jsCode": "const sd = $getWorkflowStaticData('global');\nsd.avisados = sd.avisados || {};\nconst msgs = $('Interpreta e monta mensagem').all();\nconst res = $('Envia no grupo').all();\nlet ok = 0, falhas = 0;\nres.forEach((r, i) => {\n  const falhou = !r.json || r.json.error || (r.json.success === false);\n  if (falhou) falhas++; else if (msgs[i]) { sd.avisados[msgs[i].json.key] = Date.now(); ok++; }\n});\n// guarda só os 1000 avisos mais recentes\nconst ks = Object.keys(sd.avisados);\nif (ks.length > 1000) ks.sort((a, b) => sd.avisados[a] - sd.avisados[b]).slice(0, ks.length - 1000).forEach((k) => delete sd.avisados[k]);\nreturn [{ json: { avisos_enviados: ok, falhas } }];"
+          "jsCode": "const msgs = $('Seleciona para envio').all();\nconst res = $('Envia no grupo').all();\nconst chaves = [];\nlet falhas = 0;\nres.forEach((r, i) => {\n  const falhou = !r.json || r.json.error || r.json.success === false;\n  if (falhou) falhas++; else if (msgs[i]) chaves.push(msgs[i].json.key);\n});\n// O que falhou não é registrado: a próxima rodada tenta de novo.\nreturn [{ json: { chaves, falhas } }];"
+        }
+      },
+      {
+        "id": "m10b",
+        "name": "Registra avisados",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "executeOnce": true,
+        "position": [
+          2420,
+          0
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "=insert into public.notif_enviadas (chave, fluxo)\nselect jsonb_array_elements_text('{{ (JSON.stringify($('Confirma e registra').first().json.chaves)).replace(/'/g, \"''\") }}'::jsonb), 'monitor'\non conflict (chave) do nothing",
+          "options": {}
+        },
+        "credentials": {
+          "postgres": {
+            "id": "zIilzHxVEjb4gaaH",
+            "name": "Supabase Agronegociar"
+          }
         }
       },
       {
@@ -594,12 +699,12 @@
         "typeVersion": 1,
         "position": [
           0,
-          -260
+          -256
         ],
         "parameters": {
-          "width": 760,
+          "content": "## AgroNegociar — Monitor de conversas (IA)\nDe hora em hora (8h–19h) procura, só entre conversas iniciadas a partir de 08/10/2026:\n- **conversa parada**: última mensagem há 3+ dias, anúncio ainda ativo;\n- **proposta sem resposta**: proposta aberta há 3+ dias sem contraproposta nem mensagem do outro lado.\n\nUma IA (gpt-4o-mini via OpenRouter) lê as últimas mensagens e decide se vale avisar (ignora conversa concluída). A IA NÃO recebe e-mail nem telefone.\n**Estado** no Supabase (`notif_enviadas`): cada conversa é avisada uma vez; se alguém responder e ela parar de novo, é avisada de novo. As ignoradas pela IA também ficam registradas, para não gastar IA à toa.",
           "height": 220,
-          "content": "## AgroNegociar — Monitor de conversas (IA)\nDe hora em hora (8h–19h) procura, só entre conversas iniciadas a partir de 08/10/2026:\n- **conversa parada**: última mensagem há 3+ dias, anúncio ainda ativo;\n- **proposta sem resposta**: proposta aberta há 3+ dias sem contraproposta nem mensagem do outro lado.\n\nUma IA (gpt-4o-mini via OpenRouter) lê as últimas mensagens e decide se vale avisar (ignora conversa concluída). A IA NÃO recebe e-mail nem telefone.\nCada conversa é avisada uma vez; se alguém responder e ela parar de novo, é avisada de novo."
+          "width": 760
         }
       }
     ],
@@ -627,17 +732,6 @@
         ]
       },
       "Conversas e propostas paradas": {
-        "main": [
-          [
-            {
-              "node": "Filtra já avisados",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Filtra já avisados": {
         "main": [
           [
             {
@@ -674,6 +768,28 @@
         "main": [
           [
             {
+              "node": "Registra ignoradas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Registra ignoradas": {
+        "main": [
+          [
+            {
+              "node": "Seleciona para envio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Seleciona para envio": {
+        "main": [
+          [
+            {
               "node": "Envia no grupo",
               "type": "main",
               "index": 0
@@ -686,6 +802,17 @@
           [
             {
               "node": "Confirma e registra",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Confirma e registra": {
+        "main": [
+          [
+            {
+              "node": "Registra avisados",
               "type": "main",
               "index": 0
             }
@@ -709,8 +836,8 @@
     "name": null,
     "description": null,
     "autosaved": false,
-    "createdAt": "2026-10-08T20:30:56.929Z",
-    "updatedAt": "2026-10-08T20:30:56.929Z"
+    "createdAt": "2026-10-09T12:19:09.222Z",
+    "updatedAt": "2026-10-09T12:19:09.222Z"
   },
   "tags": [
     {
