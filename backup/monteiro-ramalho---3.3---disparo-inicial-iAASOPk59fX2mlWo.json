@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-08T16:07:24.777Z",
+  "updatedAt": "2026-10-09T19:46:19.048Z",
   "createdAt": "2026-06-16T20:47:04.888Z",
   "id": "iAASOPk59fX2mlWo",
   "name": "Monteiro Ramalho - 3.3 - Disparo Inicial",
@@ -71,7 +71,7 @@
         "resource": "messages-api",
         "instanceName": "MIA-LOGS",
         "remoteJid": "=5538998634756",
-        "messageText": "=Erro ao realizar Disparo Inicial (Tributario) Monteiro com {{ $('Loop Over Items').first().json.nome }}",
+        "messageText": "=Erro no disparo inicial (Tributário) — {{ $('Loop Over Items').first().json.nome }} ({{ $('Loop Over Items').first().json.empresa_nome }})\n\nMotivo: {{ $json.envio_erro || 'não informado' }}\nTentativa {{ $json.envio_tentativas || '?' }} de 3. {{ Number($json.envio_tentativas) >= 3 ? 'Não vou tentar de novo: precisa de atenção manual.' : 'Tento de novo no próximo disparo.' }}",
         "options_message": {}
       },
       "type": "n8n-nodes-evolution-api.evolutionApi",
@@ -107,9 +107,9 @@
     },
     {
       "parameters": {
-        "content": "### Disparo para participantes que já confirmaram mas ainda tem campos pendentes",
+        "content": "### Disparo inicial automático — todo dia útil, às 9h\nPega quem está na etapa Enrich, manda WhatsApp e e-mail (cada canal por conta própria) e move o lead pra \"Disparo inicial\". Sucesso se pelo menos um canal funcionar.",
         "height": 784,
-        "width": 3900,
+        "width": 4300,
         "color": 3
       },
       "type": "n8n-nodes-base.stickyNote",
@@ -123,7 +123,7 @@
     },
     {
       "parameters": {
-        "content": "Recebe do sistema os leads que o Monteiro aprovou e reserva cada um antes de enviar (evita mensagem duplicada)",
+        "content": "Todo dia útil, às 9h, escolhe até 25 leads da etapa Enrich (os mais antigos primeiro) e reserva cada um antes de enviar, pra ninguém receber duas vezes. Rodando na mão pelo editor, só entram leads de teste.",
         "height": 304,
         "width": 256,
         "color": 4
@@ -206,8 +206,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        3520,
-        224
+        3760,
+        160
       ],
       "id": "ae42428e-be90-4098-9b4e-d1930ddb95e6",
       "name": "Cria Mensagem no Supabase",
@@ -229,8 +229,8 @@
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
       "position": [
-        3760,
-        224
+        4000,
+        160
       ],
       "id": "5497ba6a-b5c9-41e3-89b6-f9cbfddf6b8e",
       "name": "Adiciona Texto na Memoria",
@@ -379,8 +379,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        4016,
-        560
+        4240,
+        304
       ],
       "id": "dd0c2e4c-e237-4616-a838-4713860b0081",
       "name": "Atualiza o setor e etapa",
@@ -390,47 +390,6 @@
           "name": "Monteiro - Supabase"
         }
       }
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "monteiroramalho-disparo-inicial-tributario",
-        "options": {}
-      },
-      "id": "18bb9dba-c719-4569-b169-26c7ecd16f6a",
-      "name": "Webhook - Aprovação de disparos",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [
-        -496,
-        288
-      ],
-      "webhookId": "90fa9c1f-eb13-469e-9f2c-70d1af8ff21e",
-      "notes": "Recebe do sistema (Lovable) a lista de leads aprovados pelo Monteiro. Responde na hora e envia em segundo plano."
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "with reservados as (\n  update public.leads_tributario l\n     set envio_status           = 'enviando',\n         envio_em               = now(),\n         disparo_solicitado_em  = now(),\n         disparo_solicitado_por = $2\n    from public.empresas_tributario e\n   where e.id = l.empresa_id\n     and l.id = any($1::uuid[])\n     and l.etapa = 'enrich'\n     and e.etapa = 'enrich'\n     and e.arquivada_em is null\n     and (nullif(trim(l.telefone), '') is not null or nullif(trim(l.email), '') is not null)\n     and (\n           l.envio_status is null\n        or l.envio_status = 'falhou'\n        or (l.envio_status = 'enviando' and l.envio_em < now() - interval '30 minutes')\n         )\n  returning l.id\n)\nselect f.*\n  from public.fila_aprovacao_disparo f\n  join reservados r on r.id = f.lead_id;\n",
-        "options": {
-          "queryReplacement": "={{ [$json.ids_pg, $json.aprovado_por] }}"
-        }
-      },
-      "id": "4c57d157-9bce-41f5-85e9-4387d0af1a45",
-      "name": "Reserva e busca os leads",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
-      "position": [
-        -96,
-        288
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "Hr0gqOEXHC8efR0Q",
-          "name": "Monteiro - Postgres"
-        }
-      },
-      "notes": "Reserva cada lead pedido (marca como 'enviando') e devolve os dados. Só pega quem ainda está na fila, tem telefone e não foi reservado por outro pedido. Isso evita mensagem duplicada."
     },
     {
       "parameters": {
@@ -488,20 +447,6 @@
       },
       "onError": "continueRegularOutput",
       "notes": "Se o envio falhar, o lead continua na fila com o motivo do erro, para ser reenviado."
-    },
-    {
-      "parameters": {
-        "jsCode": "// Confere a lista de leads que o sistema mandou.\nconst entrada = items[0].json;\nconst corpo = entrada.body || {};\nconst formatoId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n\n// Lista de leads: só IDs válidos e sem repetir.\nconst ids = [...new Set(\n  (Array.isArray(corpo.lead_ids) ? corpo.lead_ids : [])\n    .filter((id) => typeof id === \"string\" && formatoId.test(id))\n)];\n\nif (!ids.length) {\n  throw new Error(\"Pedido sem leads válidos.\");\n}\n\n// Quem aprovou (e-mail do usuário no sistema).\nconst aprovadoPor = String(corpo.aprovado_por || \"desconhecido\").slice(0, 200);\n\nreturn [{ json: { ids_pg: `{${ids.join(\",\")}}`, aprovado_por: aprovadoPor, total_pedido: ids.length } }];"
-      },
-      "id": "c2504ddf-f0db-4991-88c9-bd5d97c8bebc",
-      "name": "Valida pedido",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -304,
-        288
-      ],
-      "notes": "Confere a lista de leads que o sistema mandou. Se algo estiver errado, para com erro."
     },
     {
       "parameters": {
@@ -748,6 +693,98 @@
         304
       ],
       "notes": "Sucesso se WhatsApp OU e-mail funcionou (não precisa dos dois)."
+    },
+    {
+      "id": "962ef142-d52a-4be1-af0d-777472cfa365",
+      "name": "Todo dia útil, 9h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -496,
+        208
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "expression": "0 9 * * 1-5",
+              "field": "cronExpression"
+            }
+          ]
+        }
+      },
+      "notes": "Disparo automático: segunda a sexta, às 9h (horário de Brasília). Não existe mais disparo manual pelo sistema."
+    },
+    {
+      "id": "0b67d51f-0234-4015-94ba-15e6f75b0b55",
+      "name": "Teste manual (só leads de teste)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -496,
+        368
+      ],
+      "parameters": {},
+      "notes": "Só pra testar aqui no editor. Rodando por este gatilho, entram apenas leads de teste (origem 'teste'), nunca prospect de verdade."
+    },
+    {
+      "id": "37ff719c-8885-4e5f-9996-07226fb052d6",
+      "name": "Reserva os leads de hoje",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -96,
+        288
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [$execution.mode === 'production' && $('Todo dia útil, 9h').isExecuted] }}"
+        },
+        "query": "-- Disparo diário: escolhe quem recebe a 1ª mensagem hoje e já \"reserva\" cada um\n-- (marca como 'enviando'), pra ninguém receber duas vezes.\n--\n-- Quem entra: os leads da etapa Enrich com telefone ou e-mail, pela mesma regra da\n-- fila de disparo (empresa em Enrich, sem bloqueio, não arquivada).\n-- Quem já foi enviado fica de fora. Quem falhou é retentado, até 3 tentativas.\n-- Máximo por dia: 25 (mude o \"limit\" abaixo se precisar). Os mais antigos vão primeiro.\n--\n-- $1 é true na rodada agendada. Quando alguém roda na mão pelo editor, é false e só\n-- entram os leads de teste (origem 'teste'), pra um clique sem querer não mandar\n-- mensagem pra prospect de verdade.\nwith candidatos as (\n  select f.lead_id\n  from public.fila_aprovacao_disparo f\n  join public.leads_tributario l on l.id = f.lead_id\n  where (l.origem = 'teste' or $1::boolean)\n    and (\n          l.envio_status is null\n       or (l.envio_status in ('falhou', 'enviando')\n           and l.envio_tentativas < 3\n           and (l.envio_status = 'falhou' or l.envio_em < now() - interval '30 minutes'))\n        )\n  order by f.dias_na_fila desc, l.criado_em\n  limit 25\n),\nreservados as (\n  update public.leads_tributario l\n     set envio_status           = 'enviando',\n         envio_em               = now(),\n         envio_tentativas       = l.envio_tentativas + 1,\n         disparo_solicitado_em  = now(),\n         disparo_solicitado_por = 'disparo diário automático'\n    from candidatos c\n   where l.id = c.lead_id\n     and (\n           l.envio_status is null\n        or l.envio_status = 'falhou'\n        or (l.envio_status = 'enviando' and l.envio_em < now() - interval '30 minutes')\n         )\n  returning l.id\n)\nselect f.*\n  from public.fila_aprovacao_disparo f\n  join reservados r on r.id = f.lead_id\n order by f.dias_na_fila desc;\n"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      },
+      "notes": "Escolhe quem recebe a 1ª mensagem hoje (etapa Enrich, com telefone ou e-mail, mais antigos primeiro, no máximo 25) e marca cada um como 'enviando' antes de mandar, pra ninguém receber duas vezes. Quem falhou é retentado até 3 vezes."
+    },
+    {
+      "id": "f50a12f7-50f8-4769-9ff5-25551d05705c",
+      "name": "Tem telefone? (guarda histórico)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3520,
+        224
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "e4000000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $('Montar Body da Requisição WhatsApp').first().json.telefone }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      },
+      "notes": "Histórico de WhatsApp e memória da IA são ligados ao telefone. Lead só com e-mail não grava nenhum dos dois (senão ficava uma conversa com telefone vazio), mas continua sendo movido pra Disparo inicial."
     }
   ],
   "connections": {
@@ -881,44 +918,11 @@
         ]
       ]
     },
-    "Reserva e busca os leads": {
-      "main": [
-        [
-          {
-            "node": "Prepara itens",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Prepara itens": {
       "main": [
         [
           {
             "node": "Loop Over Items",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Webhook - Aprovação de disparos": {
-      "main": [
-        [
-          {
-            "node": "Valida pedido",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Valida pedido": {
-      "main": [
-        [
-          {
-            "node": "Reserva e busca os leads",
             "type": "main",
             "index": 0
           }
@@ -1082,7 +1086,7 @@
       "main": [
         [
           {
-            "node": "Cria Mensagem no Supabase",
+            "node": "Tem telefone? (guarda histórico)",
             "type": "main",
             "index": 0
           }
@@ -1098,6 +1102,57 @@
     },
     "Adiciona Texto na Memoria": {
       "main": [
+        [
+          {
+            "node": "Atualiza o setor e etapa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Todo dia útil, 9h": {
+      "main": [
+        [
+          {
+            "node": "Reserva os leads de hoje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Teste manual (só leads de teste)": {
+      "main": [
+        [
+          {
+            "node": "Reserva os leads de hoje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserva os leads de hoje": {
+      "main": [
+        [
+          {
+            "node": "Prepara itens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem telefone? (guarda histórico)": {
+      "main": [
+        [
+          {
+            "node": "Cria Mensagem no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Atualiza o setor e etapa",
@@ -1125,6 +1180,14 @@
       "recurrenceRuleSignatures": [
         null
       ]
+    },
+    "node:Todo dia útil, 9h": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
     }
   },
   "meta": {
@@ -1132,8 +1195,8 @@
     "aiBuilderAssisted": true,
     "builderVariant": "mcp"
   },
-  "versionId": "1b05d2dd-2fe5-40c8-a27a-c5156763a861",
-  "activeVersionId": "1b05d2dd-2fe5-40c8-a27a-c5156763a861",
+  "versionId": "63f71565-b9cb-431c-9b2d-4a5af748c58e",
+  "activeVersionId": "63f71565-b9cb-431c-9b2d-4a5af748c58e",
   "triggerCount": 1,
   "shared": [
     {
@@ -1145,7 +1208,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "1b05d2dd-2fe5-40c8-a27a-c5156763a861",
+    "versionId": "63f71565-b9cb-431c-9b2d-4a5af748c58e",
     "workflowId": "iAASOPk59fX2mlWo",
     "nodes": [
       {
@@ -1213,7 +1276,7 @@
           "resource": "messages-api",
           "instanceName": "MIA-LOGS",
           "remoteJid": "=5538998634756",
-          "messageText": "=Erro ao realizar Disparo Inicial (Tributario) Monteiro com {{ $('Loop Over Items').first().json.nome }}",
+          "messageText": "=Erro no disparo inicial (Tributário) — {{ $('Loop Over Items').first().json.nome }} ({{ $('Loop Over Items').first().json.empresa_nome }})\n\nMotivo: {{ $json.envio_erro || 'não informado' }}\nTentativa {{ $json.envio_tentativas || '?' }} de 3. {{ Number($json.envio_tentativas) >= 3 ? 'Não vou tentar de novo: precisa de atenção manual.' : 'Tento de novo no próximo disparo.' }}",
           "options_message": {}
         },
         "type": "n8n-nodes-evolution-api.evolutionApi",
@@ -1249,9 +1312,9 @@
       },
       {
         "parameters": {
-          "content": "### Disparo para participantes que já confirmaram mas ainda tem campos pendentes",
+          "content": "### Disparo inicial automático — todo dia útil, às 9h\nPega quem está na etapa Enrich, manda WhatsApp e e-mail (cada canal por conta própria) e move o lead pra \"Disparo inicial\". Sucesso se pelo menos um canal funcionar.",
           "height": 784,
-          "width": 3900,
+          "width": 4300,
           "color": 3
         },
         "type": "n8n-nodes-base.stickyNote",
@@ -1265,7 +1328,7 @@
       },
       {
         "parameters": {
-          "content": "Recebe do sistema os leads que o Monteiro aprovou e reserva cada um antes de enviar (evita mensagem duplicada)",
+          "content": "Todo dia útil, às 9h, escolhe até 25 leads da etapa Enrich (os mais antigos primeiro) e reserva cada um antes de enviar, pra ninguém receber duas vezes. Rodando na mão pelo editor, só entram leads de teste.",
           "height": 304,
           "width": 256,
           "color": 4
@@ -1348,8 +1411,8 @@
         "type": "n8n-nodes-base.supabase",
         "typeVersion": 1,
         "position": [
-          3520,
-          224
+          3760,
+          160
         ],
         "id": "ae42428e-be90-4098-9b4e-d1930ddb95e6",
         "name": "Cria Mensagem no Supabase",
@@ -1371,8 +1434,8 @@
         "type": "n8n-nodes-base.redis",
         "typeVersion": 1,
         "position": [
-          3760,
-          224
+          4000,
+          160
         ],
         "id": "5497ba6a-b5c9-41e3-89b6-f9cbfddf6b8e",
         "name": "Adiciona Texto na Memoria",
@@ -1521,8 +1584,8 @@
         "type": "n8n-nodes-base.supabase",
         "typeVersion": 1,
         "position": [
-          4016,
-          560
+          4240,
+          304
         ],
         "id": "dd0c2e4c-e237-4616-a838-4713860b0081",
         "name": "Atualiza o setor e etapa",
@@ -1532,47 +1595,6 @@
             "name": "Monteiro - Supabase"
           }
         }
-      },
-      {
-        "parameters": {
-          "httpMethod": "POST",
-          "path": "monteiroramalho-disparo-inicial-tributario",
-          "options": {}
-        },
-        "id": "18bb9dba-c719-4569-b169-26c7ecd16f6a",
-        "name": "Webhook - Aprovação de disparos",
-        "type": "n8n-nodes-base.webhook",
-        "typeVersion": 2,
-        "position": [
-          -496,
-          288
-        ],
-        "webhookId": "90fa9c1f-eb13-469e-9f2c-70d1af8ff21e",
-        "notes": "Recebe do sistema (Lovable) a lista de leads aprovados pelo Monteiro. Responde na hora e envia em segundo plano."
-      },
-      {
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "with reservados as (\n  update public.leads_tributario l\n     set envio_status           = 'enviando',\n         envio_em               = now(),\n         disparo_solicitado_em  = now(),\n         disparo_solicitado_por = $2\n    from public.empresas_tributario e\n   where e.id = l.empresa_id\n     and l.id = any($1::uuid[])\n     and l.etapa = 'enrich'\n     and e.etapa = 'enrich'\n     and e.arquivada_em is null\n     and (nullif(trim(l.telefone), '') is not null or nullif(trim(l.email), '') is not null)\n     and (\n           l.envio_status is null\n        or l.envio_status = 'falhou'\n        or (l.envio_status = 'enviando' and l.envio_em < now() - interval '30 minutes')\n         )\n  returning l.id\n)\nselect f.*\n  from public.fila_aprovacao_disparo f\n  join reservados r on r.id = f.lead_id;\n",
-          "options": {
-            "queryReplacement": "={{ [$json.ids_pg, $json.aprovado_por] }}"
-          }
-        },
-        "id": "4c57d157-9bce-41f5-85e9-4387d0af1a45",
-        "name": "Reserva e busca os leads",
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.6,
-        "position": [
-          -96,
-          288
-        ],
-        "credentials": {
-          "postgres": {
-            "id": "Hr0gqOEXHC8efR0Q",
-            "name": "Monteiro - Postgres"
-          }
-        },
-        "notes": "Reserva cada lead pedido (marca como 'enviando') e devolve os dados. Só pega quem ainda está na fila, tem telefone e não foi reservado por outro pedido. Isso evita mensagem duplicada."
       },
       {
         "parameters": {
@@ -1630,20 +1652,6 @@
         },
         "onError": "continueRegularOutput",
         "notes": "Se o envio falhar, o lead continua na fila com o motivo do erro, para ser reenviado."
-      },
-      {
-        "parameters": {
-          "jsCode": "// Confere a lista de leads que o sistema mandou.\nconst entrada = items[0].json;\nconst corpo = entrada.body || {};\nconst formatoId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n\n// Lista de leads: só IDs válidos e sem repetir.\nconst ids = [...new Set(\n  (Array.isArray(corpo.lead_ids) ? corpo.lead_ids : [])\n    .filter((id) => typeof id === \"string\" && formatoId.test(id))\n)];\n\nif (!ids.length) {\n  throw new Error(\"Pedido sem leads válidos.\");\n}\n\n// Quem aprovou (e-mail do usuário no sistema).\nconst aprovadoPor = String(corpo.aprovado_por || \"desconhecido\").slice(0, 200);\n\nreturn [{ json: { ids_pg: `{${ids.join(\",\")}}`, aprovado_por: aprovadoPor, total_pedido: ids.length } }];"
-        },
-        "id": "c2504ddf-f0db-4991-88c9-bd5d97c8bebc",
-        "name": "Valida pedido",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          -304,
-          288
-        ],
-        "notes": "Confere a lista de leads que o sistema mandou. Se algo estiver errado, para com erro."
       },
       {
         "parameters": {
@@ -1890,6 +1898,98 @@
           304
         ],
         "notes": "Sucesso se WhatsApp OU e-mail funcionou (não precisa dos dois)."
+      },
+      {
+        "id": "962ef142-d52a-4be1-af0d-777472cfa365",
+        "name": "Todo dia útil, 9h",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          -496,
+          208
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "expression": "0 9 * * 1-5",
+                "field": "cronExpression"
+              }
+            ]
+          }
+        },
+        "notes": "Disparo automático: segunda a sexta, às 9h (horário de Brasília). Não existe mais disparo manual pelo sistema."
+      },
+      {
+        "id": "0b67d51f-0234-4015-94ba-15e6f75b0b55",
+        "name": "Teste manual (só leads de teste)",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          -496,
+          368
+        ],
+        "parameters": {},
+        "notes": "Só pra testar aqui no editor. Rodando por este gatilho, entram apenas leads de teste (origem 'teste'), nunca prospect de verdade."
+      },
+      {
+        "id": "37ff719c-8885-4e5f-9996-07226fb052d6",
+        "name": "Reserva os leads de hoje",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -96,
+          288
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "options": {
+            "queryReplacement": "={{ [$execution.mode === 'production' && $('Todo dia útil, 9h').isExecuted] }}"
+          },
+          "query": "-- Disparo diário: escolhe quem recebe a 1ª mensagem hoje e já \"reserva\" cada um\n-- (marca como 'enviando'), pra ninguém receber duas vezes.\n--\n-- Quem entra: os leads da etapa Enrich com telefone ou e-mail, pela mesma regra da\n-- fila de disparo (empresa em Enrich, sem bloqueio, não arquivada).\n-- Quem já foi enviado fica de fora. Quem falhou é retentado, até 3 tentativas.\n-- Máximo por dia: 25 (mude o \"limit\" abaixo se precisar). Os mais antigos vão primeiro.\n--\n-- $1 é true na rodada agendada. Quando alguém roda na mão pelo editor, é false e só\n-- entram os leads de teste (origem 'teste'), pra um clique sem querer não mandar\n-- mensagem pra prospect de verdade.\nwith candidatos as (\n  select f.lead_id\n  from public.fila_aprovacao_disparo f\n  join public.leads_tributario l on l.id = f.lead_id\n  where (l.origem = 'teste' or $1::boolean)\n    and (\n          l.envio_status is null\n       or (l.envio_status in ('falhou', 'enviando')\n           and l.envio_tentativas < 3\n           and (l.envio_status = 'falhou' or l.envio_em < now() - interval '30 minutes'))\n        )\n  order by f.dias_na_fila desc, l.criado_em\n  limit 25\n),\nreservados as (\n  update public.leads_tributario l\n     set envio_status           = 'enviando',\n         envio_em               = now(),\n         envio_tentativas       = l.envio_tentativas + 1,\n         disparo_solicitado_em  = now(),\n         disparo_solicitado_por = 'disparo diário automático'\n    from candidatos c\n   where l.id = c.lead_id\n     and (\n           l.envio_status is null\n        or l.envio_status = 'falhou'\n        or (l.envio_status = 'enviando' and l.envio_em < now() - interval '30 minutes')\n         )\n  returning l.id\n)\nselect f.*\n  from public.fila_aprovacao_disparo f\n  join reservados r on r.id = f.lead_id\n order by f.dias_na_fila desc;\n"
+        },
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        },
+        "notes": "Escolhe quem recebe a 1ª mensagem hoje (etapa Enrich, com telefone ou e-mail, mais antigos primeiro, no máximo 25) e marca cada um como 'enviando' antes de mandar, pra ninguém receber duas vezes. Quem falhou é retentado até 3 vezes."
+      },
+      {
+        "id": "f50a12f7-50f8-4769-9ff5-25551d05705c",
+        "name": "Tem telefone? (guarda histórico)",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          3520,
+          224
+        ],
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "e4000000-0000-4000-8000-000000000001",
+                "leftValue": "={{ $('Montar Body da Requisição WhatsApp').first().json.telefone }}",
+                "operator": {
+                  "operation": "notEmpty",
+                  "singleValue": true,
+                  "type": "string"
+                },
+                "rightValue": ""
+              }
+            ],
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            }
+          },
+          "options": {}
+        },
+        "notes": "Histórico de WhatsApp e memória da IA são ligados ao telefone. Lead só com e-mail não grava nenhum dos dois (senão ficava uma conversa com telefone vazio), mas continua sendo movido pra Disparo inicial."
       }
     ],
     "connections": {
@@ -2023,44 +2123,11 @@
           ]
         ]
       },
-      "Reserva e busca os leads": {
-        "main": [
-          [
-            {
-              "node": "Prepara itens",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "Prepara itens": {
         "main": [
           [
             {
               "node": "Loop Over Items",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Webhook - Aprovação de disparos": {
-        "main": [
-          [
-            {
-              "node": "Valida pedido",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Valida pedido": {
-        "main": [
-          [
-            {
-              "node": "Reserva e busca os leads",
               "type": "main",
               "index": 0
             }
@@ -2224,7 +2291,7 @@
         "main": [
           [
             {
-              "node": "Cria Mensagem no Supabase",
+              "node": "Tem telefone? (guarda histórico)",
               "type": "main",
               "index": 0
             }
@@ -2248,15 +2315,66 @@
             }
           ]
         ]
+      },
+      "Todo dia útil, 9h": {
+        "main": [
+          [
+            {
+              "node": "Reserva os leads de hoje",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Teste manual (só leads de teste)": {
+        "main": [
+          [
+            {
+              "node": "Reserva os leads de hoje",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Reserva os leads de hoje": {
+        "main": [
+          [
+            {
+              "node": "Prepara itens",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tem telefone? (guarda histórico)": {
+        "main": [
+          [
+            {
+              "node": "Cria Mensagem no Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Atualiza o setor e etapa",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Logo no cabeçalho + remove opt-out",
-    "description": "E-mail ganha a logo da Monteiro Ramalho (versão branca, pixels reais, não filtro CSS) no cabeçalho, acima do texto. Rodapé perde a linha de opt-out (\"Não deseja mais receber...\"), mantendo só o nome do escritório.",
+    "name": "Sem telefone não grava histórico de WhatsApp (de novo)",
+    "description": "Volta a trava que impede lead só com e-mail de gravar conversa de WhatsApp e memória da IA com telefone vazio (os dois são guardados por telefone, então sem telefone não há como gravar de forma útil). O lead continua sendo movido pra Disparo inicial normalmente. É a mesma versão que passou no reteste do lead só com e-mail.",
     "autosaved": false,
-    "createdAt": "2026-10-08T16:07:24.840Z",
-    "updatedAt": "2026-10-08T16:07:24.840Z"
+    "createdAt": "2026-10-09T19:46:19.063Z",
+    "updatedAt": "2026-10-09T20:08:19.563Z"
   },
   "tags": []
 }
