@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-07T13:07:40.576Z",
+  "updatedAt": "2026-10-09T20:04:12.765Z",
   "createdAt": "2026-06-16T17:19:05.152Z",
   "id": "I0o5WTdQXXA3kMgB",
   "name": "Monteiro Ramalho - 3.1 - Captação Lead",
@@ -16,20 +16,6 @@
       ],
       "id": "9c6f505a-7a8d-4ea5-92d6-fb72cfccddff",
       "name": "When clicking ‘Execute workflow’"
-    },
-    {
-      "parameters": {
-        "jsCode": "const leadsBanco = $items('Busca os leads do banco');\n\nconst normLinkedin = (url) =>\n  url ? url.trim().toLowerCase().replace(/\\/$/, '') : '';\n\nconst linkedinExistentes = new Set(\n  leadsBanco\n    .map(item => normLinkedin(item.json.linkedin_url))\n    .filter(Boolean)\n);\n\nconst results = $items('Prospecting Contacts')[0].json.results || [];\n\nconst seen = new Set();\n\nreturn results\n  .map(lead => {\n    const linkedin = normLinkedin(lead.socialLinks?.linkedin);\n    if (!linkedin) return null;\n    if (linkedinExistentes.has(linkedin)) return null;\n    if (seen.has(linkedin)) return null; // dedup dentro do próprio batch\n    seen.add(linkedin);\n\n    const nome = [lead.firstName, lead.lastName]\n      .filter(Boolean)\n      .join(' ')\n      .trim();\n    if (!nome) return null;\n\n    return {\n      json: {\n        nome,\n        cargo: lead.jobTitle?.title ?? null,\n        linkedin_url: lead.socialLinks?.linkedin ?? null,\n        empresa_nome: lead.company?.name ?? null,\n        empresa_site: lead.company?.domain ?? null,\n        empresa_setor: lead.jobTitle?.departments?.[0] ?? null,\n        origem: 'lusha_n8n',\n        lusha_contact_id: lead.id ?? null,\n        id_company_lusha: lead.company.id ?? null\n      },\n    };\n  })\n  .filter(Boolean);"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        928,
-        -192
-      ],
-      "id": "ab2c252d-0ae0-4e72-998f-c3d284ee373d",
-      "name": "Verifica duplicatas",
-      "alwaysOutputData": true
     },
     {
       "parameters": {
@@ -68,17 +54,17 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT linkedin_url FROM leads_tributario\nUNION\nSELECT linkedin_url FROM leads_tributario_aprovacao",
+        "query": "select\n  -- 1) Links que já existem, pra não captar a mesma pessoa duas vezes\n  coalesce(json_agg(distinct lu.linkedin_url) filter (where lu.linkedin_url is not null), '[]'::json)\n    as linkedin_urls_existentes,\n\n  -- 2) Todas as empresas conhecidas, com a situação de cada uma, pra IA comparar.\n  --    Quando a mesma empresa aparece em mais de uma situação, fica com a mais forte\n  --    (cliente > em negociacao > ja no crm).\n  (select coalesce(json_agg(json_build_object('nome', d.nome, 'situacao', d.situacao) order by d.nome), '[]'::json)\n     from (\n       select distinct on (chave)\n              nome,\n              case categoria\n                when 'cliente'       then 'cliente'\n                when 'em_negociacao' then 'em negociacao'\n                else                      'ja no crm'\n              end as situacao\n         from clientes_conhecidos\n        where chave <> ''\n        order by chave,\n                 case categoria when 'cliente' then 0 when 'em_negociacao' then 1 else 2 end\n     ) d\n  ) as lista_empresas\n\nfrom (\n  select linkedin_url from leads_tributario\n  union\n  select linkedin_url from leads_tributario_aprovacao\n) lu;\n",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        736,
+        848,
         -192
       ],
       "id": "7a50903a-af81-4375-8f84-1acbe72bee30",
-      "name": "Busca os leads do banco",
+      "name": "Busca dados do banco",
       "executeOnce": false,
       "alwaysOutputData": true,
       "credentials": {
@@ -148,7 +134,7 @@
           "fieldValues": [
             {
               "fieldId": "page",
-              "fieldValue": "={{ (() => {\n  const cfg  = $('Busca a config ativa do lusha').first().json;\n  const pag  = $('Prospecting Contacts').first().json.pagination || {};\n  const size = Math.min(Number(cfg.page_size) || 50, 50);\n  const next = (Number(cfg.page) || 0) + 1;\n  const total = Number(pag.total) || 0;\n  // Se a proxima pagina passou do total, volta pro inicio em vez de\n  // pedir offset inexistente (e queimar credito de api_search a seco).\n  return (total > 0 && next * size >= total) ? 0 : next;\n})() }}"
+              "fieldValue": "={{ (() => {\n  const cfg   = $('Busca a config ativa do lusha').first().json;\n  const pag   = $('Prospecting Contacts').first().json.pagination || {};\n  const atual = Number(cfg.page) || 0;\n\n  // Só avança se a resposta da Lusha é da página que a configuração pediu\n  // (a Lusha devolve o número da página pedida, ou ele +1, conforme a contagem).\n  // Se vier de outra página — ex.: dados antigos fixados num teste — mantém onde\n  // está, pra um teste não fazer a captação de verdade pular páginas.\n  const respondida = Number(pag.page);\n  if (pag.page !== undefined && respondida !== atual && respondida !== atual + 1) return atual;\n\n  const size  = Math.min(Number(cfg.page_size) || 50, 50);\n  const next  = atual + 1;\n  const total = Number(pag.total) || 0;\n  // Se a proxima pagina passou do total, volta pro inicio em vez de\n  // pedir offset inexistente (e queimar credito de api_search a seco).\n  return (total > 0 && next * size >= total) ? 0 : next;\n})() }}"
             },
             {
               "fieldId": "last_execution_at",
@@ -193,8 +179,8 @@
         "rule": {
           "interval": [
             {
-              "daysInterval": 10,
-              "triggerAtHour": 6
+              "expression": "0 6 1,11,21 * *",
+              "field": "cronExpression"
             }
           ]
         }
@@ -275,7 +261,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
+        2448,
         -192
       ],
       "notes": "Junta os leads novos numa lista só, para conferir os clientes e gravar de uma vez."
@@ -283,7 +269,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "insert into public.leads_tributario_aprovacao\n  (status, nome, cargo, linkedin_url, empresa_nome, empresa_site, empresa_setor, origem,\n   lusha_contact_id, id_company_lusha, cliente_nome, cliente_categoria, cliente_origem, cliente_tipo_match)\nselect\n  -- cliente com nome exato: barrado aqui, não chega para aprovação\n  case when c.categoria = 'cliente' and c.tipo_match = 'exato' then 'cliente' else 'pendente' end,\n  x.nome, x.cargo, x.linkedin_url, x.empresa_nome, x.empresa_site, x.empresa_setor,\n  coalesce(x.origem, 'lusha_n8n'), x.lusha_contact_id, x.id_company_lusha,\n  c.cliente_nome, c.categoria, c.origem, c.tipo_match\nfrom jsonb_to_recordset($1::jsonb) as x(\n  nome text, cargo text, linkedin_url text, empresa_nome text, empresa_site text,\n  empresa_setor text, origem text, lusha_contact_id text, id_company_lusha text\n)\nleft join lateral public.achar_cliente(x.empresa_nome) c on true\non conflict do nothing\nreturning status;\n",
+        "query": "insert into public.leads_tributario_aprovacao\n  (status, nome, cargo, linkedin_url, empresa_nome, empresa_site, empresa_setor, origem,\n   lusha_contact_id, id_company_lusha, cliente_nome, cliente_categoria, cliente_origem, cliente_tipo_match)\nselect\n  -- Só cliente com correspondência EXATA é barrado aqui (não chega pra aprovação).\n  -- \"em negociacao\" e \"ja no crm\" passam normalmente, só com o aviso.\n  -- A checagem por texto (c) fica como rede de segurança, caso a IA deixe passar.\n  case\n    when (x.cliente_categoria_ia = 'cliente' and x.cliente_match = 'exata')\n      or (c.categoria = 'cliente' and c.tipo_match = 'exato')\n    then 'cliente'\n    else 'pendente'\n  end,\n  x.nome, x.cargo, x.linkedin_url, x.empresa_nome, x.empresa_site, x.empresa_setor,\n  coalesce(x.origem, 'lusha_n8n'), x.lusha_contact_id, x.id_company_lusha,\n  -- Vale o que a IA decidiu; sem veredito dela, usa o que o texto achou.\n  coalesce(x.cliente_nome_ia, c.cliente_nome),\n  coalesce(x.cliente_categoria_ia, c.categoria),\n  case when x.cliente_nome_ia is not null then 'sistema_ia' else c.origem end,\n  case when x.cliente_nome_ia is not null\n       then (case when x.cliente_match = 'exata' then 'exato' else 'parecido' end)\n       else c.tipo_match\n  end\nfrom jsonb_to_recordset($1::jsonb) as x(\n  nome text, cargo text, linkedin_url text, empresa_nome text, empresa_site text,\n  empresa_setor text, origem text, lusha_contact_id text, id_company_lusha text,\n  cliente_match text, cliente_categoria_ia text, cliente_nome_ia text, cliente_motivo_ia text\n)\nleft join lateral public.achar_cliente(x.empresa_nome) c on true\non conflict do nothing\nreturning status;\n",
         "options": {
           "queryReplacement": "={{ [$json.leads] }}"
         }
@@ -293,7 +279,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1328,
+        2768,
         -192
       ],
       "credentials": {
@@ -303,6 +289,145 @@
         }
       },
       "notes": "Para cada lead novo, confere se a empresa já é cliente. Cliente com nome exato fica barrado (status 'cliente'). Os demais vão para a aba Aprovação, com aviso quando parecer cliente ou estiver em negociação. Nada entra em 'Novo' antes da aprovação."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=\n* empresa_nome: {{ $json.empresa_nome }}\n* empresa_site: {{ $json.empresa_site }}\n* lista_empresas: {{ JSON.stringify($('Busca dados do banco').first().json.lista_empresas) }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=Você compara uma empresa recém-captada com uma lista de empresas que o escritório já conhece, e diz se é a mesma empresa.\n\nVocê recebe:\n\n* empresa_nome: nome da empresa recém-captada\n* empresa_site: site dela (pode vir vazio)\n* lista_empresas: todas as empresas já conhecidas, cada uma com \"nome\" e \"situacao\"\n\nAs situações possíveis na lista são:\n\n* \"cliente\"       -> já é cliente do escritório\n* \"em negociacao\" -> está negociando contrato\n* \"ja no crm\"     -> já está sendo trabalhada no funil, em alguma etapa\n\n## O que você deve fazer\n\nProcure na lista_empresas alguma empresa que seja A MESMA que a empresa captada.\n\nNomes de empresas no Brasil variam muito: sigla x nome por extenso, grupo x subsidiária, razão social x nome fantasia, \"S.A.\"/\"Ltda\"/\"ME\" no fim, pequenos erros de grafia, acentos. Use seu conhecimento de empresas brasileiras pra enxergar essas variações.\n\n## Como classificar\n\n* \"exata\"    -> você tem certeza de que é a MESMA empresa, mesmo com grafia diferente\n* \"parecida\" -> provavelmente é a mesma, mas há dúvida (pode ser subsidiária, afiliada ou outra empresa do mesmo grupo)\n* \"nenhuma\"  -> não achou nenhuma relação plausível\n\n## Regras\n\n* Quando achar correspondência, devolva o nome EXATAMENTE como está escrito na lista_empresas, e a situacao EXATAMENTE como está lá (\"cliente\", \"em negociacao\" ou \"ja no crm\").\n* Nunca invente um nome que não esteja na lista_empresas.\n* Se a mesma empresa aparecer mais de uma vez, use a primeira que encontrar.\n* Se empresa_nome vier vazio, ou a lista_empresas estiver vazia, responda \"nenhuma\".\n* Nomes genéricos parecidos (ex: duas empresas diferentes que comecem com \"Brasil\") não são a mesma empresa. Na dúvida entre \"parecida\" e \"nenhuma\", prefira \"parecida\" só quando houver indício real de ser a mesma.\n\n## Exemplos\n\nempresa_nome: Kalunga S.A\nlista_empresas: [{\"nome\":\"Kalunga\",\"situacao\":\"cliente\"}]\nResultado:\n```json\n{\"match\": \"exata\", \"situacao\": \"cliente\", \"empresa_correspondente\": \"Kalunga\", \"motivo\": \"Mesma empresa, só com o sufixo societário a mais.\"}\n```\n\nempresa_nome: Kovi Mobilidade\nlista_empresas: [{\"nome\":\"Kovi\",\"situacao\":\"ja no crm\"}]\nResultado:\n```json\n{\"match\": \"exata\", \"situacao\": \"ja no crm\", \"empresa_correspondente\": \"Kovi\", \"motivo\": \"Mesma empresa, já está sendo trabalhada no funil.\"}\n```\n\nempresa_nome: Droga Nossa Ltda\nlista_empresas: [{\"nome\":\"A Nossa Drogaria\",\"situacao\":\"cliente\"}]\nResultado:\n```json\n{\"match\": \"parecida\", \"situacao\": \"cliente\", \"empresa_correspondente\": \"A Nossa Drogaria\", \"motivo\": \"Nome parecido, pode ser a mesma rede com grafia diferente.\"}\n```\n\nempresa_nome: Construtora Horizonte Ltda\nlista_empresas: [{\"nome\":\"Horizonte Participacoes\",\"situacao\":\"em negociacao\"}]\nResultado:\n```json\n{\"match\": \"nenhuma\", \"situacao\": null, \"empresa_correspondente\": null, \"motivo\": \"Nomes parecidos mas setores bem diferentes, provavelmente empresas sem relação.\"}\n```\n\n## Formato da resposta\n\nRetorne exclusivamente um JSON válido:\n\n```json\n{\n  \"match\": \"exata\" | \"parecida\" | \"nenhuma\",\n  \"situacao\": \"cliente\" | \"em negociacao\" | \"ja no crm\" | null,\n  \"empresa_correspondente\": \"nome exato da lista, ou null\",\n  \"motivo\": \"uma frase curta\"\n}\n```\n"
+        }
+      },
+      "id": "90e53752-1b39-4677-84a8-342b3e893c7b",
+      "name": "Confere se já é cliente (IA)",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1808,
+        -192
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "notes": "Compara o nome da empresa captada com a lista de clientes/negociação, entendendo sigla, nome fantasia, grupo econômico etc. Roda uma vez por lead novo."
+    },
+    {
+      "parameters": {
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "5e758130-c706-4c4f-97e8-5e52c85ff940",
+      "name": "Modelo IA Cliente",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1808,
+        -16
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "vmIaRNjxLKMYkFt4",
+          "name": "OpenRouter - Monteiro"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"match\": \"exata\",\n  \"situacao\": \"cliente\",\n  \"empresa_correspondente\": \"Kalunga\",\n  \"motivo\": \"Mesma empresa\"\n}",
+        "autoFix": true
+      },
+      "id": "90a8055b-f6f5-4f35-977e-b5426fbab182",
+      "name": "Formato IA Cliente",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2000,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Roda uma vez por lead novo: junta o lead original com o que a IA decidiu.\n// O lead original é achado pela POSIÇÃO (o 1º que foi pra IA é o 1º que volta),\n// porque o \"Verifica duplicatas\" não informa a ligação item a item e o n8n\n// dá erro a partir do 2º lead quando se usa \"o item ligado\".\nconst leads = $('Verifica duplicatas').all();\nconst lead = leads[$itemIndex]?.json;\nif (!lead || !lead.nome) {\n  throw new Error(`Não achei o lead da posição ${$itemIndex} pra juntar com a resposta da IA.`);\n}\nconst ia = $json.output || {};\n\n// A IA responde a situação em texto; aqui traduz pro código que o banco usa.\nconst mapa = {\n  'cliente': 'cliente',\n  'em negociacao': 'em_negociacao',\n  'em negociação': 'em_negociacao',\n  'ja no crm': 'em_andamento',\n  'já no crm': 'em_andamento',\n};\n\nconst situacao = String(ia.situacao || '').trim().toLowerCase();\nconst achou = ia.empresa_correspondente || null;\n\nreturn {\n  json: {\n    ...lead,\n    cliente_match: ia.match || 'nenhuma',\n    cliente_categoria_ia: achou ? (mapa[situacao] || null) : null,\n    cliente_nome_ia: achou,\n    cliente_motivo_ia: ia.motivo || null,\n  },\n};"
+      },
+      "id": "9f6d2f85-055a-4209-ab83-c26fc5d3b1cc",
+      "name": "Junta veredito da IA no lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2176,
+        -192
+      ],
+      "notes": "Junta o lead original com o que a IA decidiu, pra gravar os dois juntos depois."
+    },
+    {
+      "parameters": {
+        "jsCode": "const resultado = $items('Busca dados do banco')[0]?.json || {};\n\nconst normLinkedin = (url) =>\n  url ? url.trim().toLowerCase().replace(/\\/$/, '') : '';\n\nconst linkedinExistentes = new Set(\n  (resultado.linkedin_urls_existentes || [])\n    .map(normLinkedin)\n    .filter(Boolean)\n);\n\nconst results = $items('Prospecting Contacts')[0].json.results || [];\n\nconst seen = new Set();\n\nreturn results\n  .map(lead => {\n    const linkedin = normLinkedin(lead.socialLinks?.linkedin);\n    if (!linkedin) return null;\n    if (linkedinExistentes.has(linkedin)) return null;\n    if (seen.has(linkedin)) return null; // repetido dentro da própria busca\n    seen.add(linkedin);\n\n    const nome = [lead.firstName, lead.lastName]\n      .filter(Boolean)\n      .join(' ')\n      .trim();\n    if (!nome) return null;\n\n    return {\n      json: {\n        nome,\n        cargo: lead.jobTitle?.title ?? null,\n        linkedin_url: lead.socialLinks?.linkedin ?? null,\n        empresa_nome: lead.company?.name ?? null,\n        empresa_site: lead.company?.domain ?? null,\n        empresa_setor: lead.jobTitle?.departments?.[0] ?? null,\n        origem: 'lusha_n8n',\n        lusha_contact_id: lead.id ?? null,\n        id_company_lusha: lead.company.id ?? null\n      },\n    };\n  })\n  .filter(Boolean);"
+      },
+      "id": "4d60cdc6-877b-4d27-b941-38f06d758569",
+      "name": "Verifica duplicatas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        -192
+      ],
+      "alwaysOutputData": true,
+      "notes": "Tira quem já existe no banco e quem se repete na mesma busca. Se não sobrar ninguém, o fluxo para aqui (nenhum lead novo)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "d3000000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.nome }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      },
+      "id": "7a4b5016-aeaf-4e30-8b83-d6fb7b4e5528",
+      "name": "Tem lead novo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1488,
+        -192
+      ],
+      "notes": "Barreira antes da IA: só passa quem é lead de verdade. Se não sobrou ninguém depois de tirar os duplicados, sai pelo \"falso\" e o fluxo termina sem chamar a IA."
+    },
+    {
+      "parameters": {
+        "content": "**Se o fluxo sair pelo \"falso\" do \"Tem lead novo?\":** nenhum lead novo nesta busca — todos os contatos que a Lusha trouxe já estavam no banco. Não há nada pra classificar, então o fluxo termina aqui (a página da Lusha já avançou normalmente).",
+        "height": 176,
+        "width": 288,
+        "color": 4
+      },
+      "id": "aae0280d-7cad-4c77-b6e9-47c0edf9d751",
+      "name": "Aviso: nenhum lead novo",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        -16
+      ]
     }
   ],
   "connections": {
@@ -335,17 +460,6 @@
         ]
       ]
     },
-    "Busca os leads do banco": {
-      "main": [
-        [
-          {
-            "node": "Verifica duplicatas",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Busca a config ativa do lusha": {
       "main": [
         [
@@ -372,7 +486,7 @@
       "main": [
         [
           {
-            "node": "Busca os leads do banco",
+            "node": "Busca dados do banco",
             "type": "main",
             "index": 0
           }
@@ -390,7 +504,29 @@
         ]
       ]
     },
-    "Verifica duplicatas": {
+    "Monta lista para gravar": {
+      "main": [
+        [
+          {
+            "node": "Confere clientes e grava na aprovação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confere se já é cliente (IA)": {
+      "main": [
+        [
+          {
+            "node": "Junta veredito da IA no lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Junta veredito da IA no lead": {
       "main": [
         [
           {
@@ -401,11 +537,60 @@
         ]
       ]
     },
-    "Monta lista para gravar": {
+    "Modelo IA Cliente": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Confere se já é cliente (IA)",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Formato IA Cliente",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formato IA Cliente": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Confere se já é cliente (IA)",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca dados do banco": {
       "main": [
         [
           {
-            "node": "Confere clientes e grava na aprovação",
+            "node": "Verifica duplicatas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica duplicatas": {
+      "main": [
+        [
+          {
+            "node": "Tem lead novo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem lead novo?": {
+      "main": [
+        [
+          {
+            "node": "Confere se já é cliente (IA)",
             "type": "main",
             "index": 0
           }
@@ -425,10 +610,10 @@
   "staticData": {
     "node:Schedule Trigger": {
       "recurrenceRules": [
-        281
+        null
       ],
       "recurrenceRuleSignatures": [
-        "days:10"
+        null
       ]
     }
   },
@@ -437,8 +622,8 @@
     "aiBuilderAssisted": true,
     "builderVariant": "mcp"
   },
-  "versionId": "0776f4bb-47cb-496f-8089-5e68074e92b3",
-  "activeVersionId": "0776f4bb-47cb-496f-8089-5e68074e92b3",
+  "versionId": "15e3e3fb-5365-436c-8da1-59ef635b1bd6",
+  "activeVersionId": "15e3e3fb-5365-436c-8da1-59ef635b1bd6",
   "triggerCount": 1,
   "shared": [
     {
@@ -450,7 +635,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "0776f4bb-47cb-496f-8089-5e68074e92b3",
+    "versionId": "15e3e3fb-5365-436c-8da1-59ef635b1bd6",
     "workflowId": "I0o5WTdQXXA3kMgB",
     "nodes": [
       {
@@ -463,20 +648,6 @@
         ],
         "id": "9c6f505a-7a8d-4ea5-92d6-fb72cfccddff",
         "name": "When clicking ‘Execute workflow’"
-      },
-      {
-        "parameters": {
-          "jsCode": "const leadsBanco = $items('Busca os leads do banco');\n\nconst normLinkedin = (url) =>\n  url ? url.trim().toLowerCase().replace(/\\/$/, '') : '';\n\nconst linkedinExistentes = new Set(\n  leadsBanco\n    .map(item => normLinkedin(item.json.linkedin_url))\n    .filter(Boolean)\n);\n\nconst results = $items('Prospecting Contacts')[0].json.results || [];\n\nconst seen = new Set();\n\nreturn results\n  .map(lead => {\n    const linkedin = normLinkedin(lead.socialLinks?.linkedin);\n    if (!linkedin) return null;\n    if (linkedinExistentes.has(linkedin)) return null;\n    if (seen.has(linkedin)) return null; // dedup dentro do próprio batch\n    seen.add(linkedin);\n\n    const nome = [lead.firstName, lead.lastName]\n      .filter(Boolean)\n      .join(' ')\n      .trim();\n    if (!nome) return null;\n\n    return {\n      json: {\n        nome,\n        cargo: lead.jobTitle?.title ?? null,\n        linkedin_url: lead.socialLinks?.linkedin ?? null,\n        empresa_nome: lead.company?.name ?? null,\n        empresa_site: lead.company?.domain ?? null,\n        empresa_setor: lead.jobTitle?.departments?.[0] ?? null,\n        origem: 'lusha_n8n',\n        lusha_contact_id: lead.id ?? null,\n        id_company_lusha: lead.company.id ?? null\n      },\n    };\n  })\n  .filter(Boolean);"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          928,
-          -192
-        ],
-        "id": "ab2c252d-0ae0-4e72-998f-c3d284ee373d",
-        "name": "Verifica duplicatas",
-        "alwaysOutputData": true
       },
       {
         "parameters": {
@@ -515,17 +686,17 @@
       {
         "parameters": {
           "operation": "executeQuery",
-          "query": "SELECT linkedin_url FROM leads_tributario\nUNION\nSELECT linkedin_url FROM leads_tributario_aprovacao",
+          "query": "select\n  -- 1) Links que já existem, pra não captar a mesma pessoa duas vezes\n  coalesce(json_agg(distinct lu.linkedin_url) filter (where lu.linkedin_url is not null), '[]'::json)\n    as linkedin_urls_existentes,\n\n  -- 2) Todas as empresas conhecidas, com a situação de cada uma, pra IA comparar.\n  --    Quando a mesma empresa aparece em mais de uma situação, fica com a mais forte\n  --    (cliente > em negociacao > ja no crm).\n  (select coalesce(json_agg(json_build_object('nome', d.nome, 'situacao', d.situacao) order by d.nome), '[]'::json)\n     from (\n       select distinct on (chave)\n              nome,\n              case categoria\n                when 'cliente'       then 'cliente'\n                when 'em_negociacao' then 'em negociacao'\n                else                      'ja no crm'\n              end as situacao\n         from clientes_conhecidos\n        where chave <> ''\n        order by chave,\n                 case categoria when 'cliente' then 0 when 'em_negociacao' then 1 else 2 end\n     ) d\n  ) as lista_empresas\n\nfrom (\n  select linkedin_url from leads_tributario\n  union\n  select linkedin_url from leads_tributario_aprovacao\n) lu;\n",
           "options": {}
         },
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.6,
         "position": [
-          736,
+          848,
           -192
         ],
         "id": "7a50903a-af81-4375-8f84-1acbe72bee30",
-        "name": "Busca os leads do banco",
+        "name": "Busca dados do banco",
         "executeOnce": false,
         "alwaysOutputData": true,
         "credentials": {
@@ -595,7 +766,7 @@
             "fieldValues": [
               {
                 "fieldId": "page",
-                "fieldValue": "={{ (() => {\n  const cfg  = $('Busca a config ativa do lusha').first().json;\n  const pag  = $('Prospecting Contacts').first().json.pagination || {};\n  const size = Math.min(Number(cfg.page_size) || 50, 50);\n  const next = (Number(cfg.page) || 0) + 1;\n  const total = Number(pag.total) || 0;\n  // Se a proxima pagina passou do total, volta pro inicio em vez de\n  // pedir offset inexistente (e queimar credito de api_search a seco).\n  return (total > 0 && next * size >= total) ? 0 : next;\n})() }}"
+                "fieldValue": "={{ (() => {\n  const cfg   = $('Busca a config ativa do lusha').first().json;\n  const pag   = $('Prospecting Contacts').first().json.pagination || {};\n  const atual = Number(cfg.page) || 0;\n\n  // Só avança se a resposta da Lusha é da página que a configuração pediu\n  // (a Lusha devolve o número da página pedida, ou ele +1, conforme a contagem).\n  // Se vier de outra página — ex.: dados antigos fixados num teste — mantém onde\n  // está, pra um teste não fazer a captação de verdade pular páginas.\n  const respondida = Number(pag.page);\n  if (pag.page !== undefined && respondida !== atual && respondida !== atual + 1) return atual;\n\n  const size  = Math.min(Number(cfg.page_size) || 50, 50);\n  const next  = atual + 1;\n  const total = Number(pag.total) || 0;\n  // Se a proxima pagina passou do total, volta pro inicio em vez de\n  // pedir offset inexistente (e queimar credito de api_search a seco).\n  return (total > 0 && next * size >= total) ? 0 : next;\n})() }}"
               },
               {
                 "fieldId": "last_execution_at",
@@ -640,8 +811,8 @@
           "rule": {
             "interval": [
               {
-                "daysInterval": 10,
-                "triggerAtHour": 6
+                "expression": "0 6 1,11,21 * *",
+                "field": "cronExpression"
               }
             ]
           }
@@ -722,7 +893,7 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1120,
+          2448,
           -192
         ],
         "notes": "Junta os leads novos numa lista só, para conferir os clientes e gravar de uma vez."
@@ -730,7 +901,7 @@
       {
         "parameters": {
           "operation": "executeQuery",
-          "query": "insert into public.leads_tributario_aprovacao\n  (status, nome, cargo, linkedin_url, empresa_nome, empresa_site, empresa_setor, origem,\n   lusha_contact_id, id_company_lusha, cliente_nome, cliente_categoria, cliente_origem, cliente_tipo_match)\nselect\n  -- cliente com nome exato: barrado aqui, não chega para aprovação\n  case when c.categoria = 'cliente' and c.tipo_match = 'exato' then 'cliente' else 'pendente' end,\n  x.nome, x.cargo, x.linkedin_url, x.empresa_nome, x.empresa_site, x.empresa_setor,\n  coalesce(x.origem, 'lusha_n8n'), x.lusha_contact_id, x.id_company_lusha,\n  c.cliente_nome, c.categoria, c.origem, c.tipo_match\nfrom jsonb_to_recordset($1::jsonb) as x(\n  nome text, cargo text, linkedin_url text, empresa_nome text, empresa_site text,\n  empresa_setor text, origem text, lusha_contact_id text, id_company_lusha text\n)\nleft join lateral public.achar_cliente(x.empresa_nome) c on true\non conflict do nothing\nreturning status;\n",
+          "query": "insert into public.leads_tributario_aprovacao\n  (status, nome, cargo, linkedin_url, empresa_nome, empresa_site, empresa_setor, origem,\n   lusha_contact_id, id_company_lusha, cliente_nome, cliente_categoria, cliente_origem, cliente_tipo_match)\nselect\n  -- Só cliente com correspondência EXATA é barrado aqui (não chega pra aprovação).\n  -- \"em negociacao\" e \"ja no crm\" passam normalmente, só com o aviso.\n  -- A checagem por texto (c) fica como rede de segurança, caso a IA deixe passar.\n  case\n    when (x.cliente_categoria_ia = 'cliente' and x.cliente_match = 'exata')\n      or (c.categoria = 'cliente' and c.tipo_match = 'exato')\n    then 'cliente'\n    else 'pendente'\n  end,\n  x.nome, x.cargo, x.linkedin_url, x.empresa_nome, x.empresa_site, x.empresa_setor,\n  coalesce(x.origem, 'lusha_n8n'), x.lusha_contact_id, x.id_company_lusha,\n  -- Vale o que a IA decidiu; sem veredito dela, usa o que o texto achou.\n  coalesce(x.cliente_nome_ia, c.cliente_nome),\n  coalesce(x.cliente_categoria_ia, c.categoria),\n  case when x.cliente_nome_ia is not null then 'sistema_ia' else c.origem end,\n  case when x.cliente_nome_ia is not null\n       then (case when x.cliente_match = 'exata' then 'exato' else 'parecido' end)\n       else c.tipo_match\n  end\nfrom jsonb_to_recordset($1::jsonb) as x(\n  nome text, cargo text, linkedin_url text, empresa_nome text, empresa_site text,\n  empresa_setor text, origem text, lusha_contact_id text, id_company_lusha text,\n  cliente_match text, cliente_categoria_ia text, cliente_nome_ia text, cliente_motivo_ia text\n)\nleft join lateral public.achar_cliente(x.empresa_nome) c on true\non conflict do nothing\nreturning status;\n",
           "options": {
             "queryReplacement": "={{ [$json.leads] }}"
           }
@@ -740,7 +911,7 @@
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.6,
         "position": [
-          1328,
+          2768,
           -192
         ],
         "credentials": {
@@ -750,6 +921,145 @@
           }
         },
         "notes": "Para cada lead novo, confere se a empresa já é cliente. Cliente com nome exato fica barrado (status 'cliente'). Os demais vão para a aba Aprovação, com aviso quando parecer cliente ou estiver em negociação. Nada entra em 'Novo' antes da aprovação."
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=\n* empresa_nome: {{ $json.empresa_nome }}\n* empresa_site: {{ $json.empresa_site }}\n* lista_empresas: {{ JSON.stringify($('Busca dados do banco').first().json.lista_empresas) }}",
+          "hasOutputParser": true,
+          "options": {
+            "systemMessage": "=Você compara uma empresa recém-captada com uma lista de empresas que o escritório já conhece, e diz se é a mesma empresa.\n\nVocê recebe:\n\n* empresa_nome: nome da empresa recém-captada\n* empresa_site: site dela (pode vir vazio)\n* lista_empresas: todas as empresas já conhecidas, cada uma com \"nome\" e \"situacao\"\n\nAs situações possíveis na lista são:\n\n* \"cliente\"       -> já é cliente do escritório\n* \"em negociacao\" -> está negociando contrato\n* \"ja no crm\"     -> já está sendo trabalhada no funil, em alguma etapa\n\n## O que você deve fazer\n\nProcure na lista_empresas alguma empresa que seja A MESMA que a empresa captada.\n\nNomes de empresas no Brasil variam muito: sigla x nome por extenso, grupo x subsidiária, razão social x nome fantasia, \"S.A.\"/\"Ltda\"/\"ME\" no fim, pequenos erros de grafia, acentos. Use seu conhecimento de empresas brasileiras pra enxergar essas variações.\n\n## Como classificar\n\n* \"exata\"    -> você tem certeza de que é a MESMA empresa, mesmo com grafia diferente\n* \"parecida\" -> provavelmente é a mesma, mas há dúvida (pode ser subsidiária, afiliada ou outra empresa do mesmo grupo)\n* \"nenhuma\"  -> não achou nenhuma relação plausível\n\n## Regras\n\n* Quando achar correspondência, devolva o nome EXATAMENTE como está escrito na lista_empresas, e a situacao EXATAMENTE como está lá (\"cliente\", \"em negociacao\" ou \"ja no crm\").\n* Nunca invente um nome que não esteja na lista_empresas.\n* Se a mesma empresa aparecer mais de uma vez, use a primeira que encontrar.\n* Se empresa_nome vier vazio, ou a lista_empresas estiver vazia, responda \"nenhuma\".\n* Nomes genéricos parecidos (ex: duas empresas diferentes que comecem com \"Brasil\") não são a mesma empresa. Na dúvida entre \"parecida\" e \"nenhuma\", prefira \"parecida\" só quando houver indício real de ser a mesma.\n\n## Exemplos\n\nempresa_nome: Kalunga S.A\nlista_empresas: [{\"nome\":\"Kalunga\",\"situacao\":\"cliente\"}]\nResultado:\n```json\n{\"match\": \"exata\", \"situacao\": \"cliente\", \"empresa_correspondente\": \"Kalunga\", \"motivo\": \"Mesma empresa, só com o sufixo societário a mais.\"}\n```\n\nempresa_nome: Kovi Mobilidade\nlista_empresas: [{\"nome\":\"Kovi\",\"situacao\":\"ja no crm\"}]\nResultado:\n```json\n{\"match\": \"exata\", \"situacao\": \"ja no crm\", \"empresa_correspondente\": \"Kovi\", \"motivo\": \"Mesma empresa, já está sendo trabalhada no funil.\"}\n```\n\nempresa_nome: Droga Nossa Ltda\nlista_empresas: [{\"nome\":\"A Nossa Drogaria\",\"situacao\":\"cliente\"}]\nResultado:\n```json\n{\"match\": \"parecida\", \"situacao\": \"cliente\", \"empresa_correspondente\": \"A Nossa Drogaria\", \"motivo\": \"Nome parecido, pode ser a mesma rede com grafia diferente.\"}\n```\n\nempresa_nome: Construtora Horizonte Ltda\nlista_empresas: [{\"nome\":\"Horizonte Participacoes\",\"situacao\":\"em negociacao\"}]\nResultado:\n```json\n{\"match\": \"nenhuma\", \"situacao\": null, \"empresa_correspondente\": null, \"motivo\": \"Nomes parecidos mas setores bem diferentes, provavelmente empresas sem relação.\"}\n```\n\n## Formato da resposta\n\nRetorne exclusivamente um JSON válido:\n\n```json\n{\n  \"match\": \"exata\" | \"parecida\" | \"nenhuma\",\n  \"situacao\": \"cliente\" | \"em negociacao\" | \"ja no crm\" | null,\n  \"empresa_correspondente\": \"nome exato da lista, ou null\",\n  \"motivo\": \"uma frase curta\"\n}\n```\n"
+          }
+        },
+        "id": "90e53752-1b39-4677-84a8-342b3e893c7b",
+        "name": "Confere se já é cliente (IA)",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 3,
+        "position": [
+          1808,
+          -192
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 2000,
+        "onError": "continueRegularOutput",
+        "notes": "Compara o nome da empresa captada com a lista de clientes/negociação, entendendo sigla, nome fantasia, grupo econômico etc. Roda uma vez por lead novo."
+      },
+      {
+        "parameters": {
+          "options": {
+            "temperature": 0.1
+          }
+        },
+        "id": "5e758130-c706-4c4f-97e8-5e52c85ff940",
+        "name": "Modelo IA Cliente",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          1808,
+          -16
+        ],
+        "credentials": {
+          "openRouterApi": {
+            "id": "vmIaRNjxLKMYkFt4",
+            "name": "OpenRouter - Monteiro"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsonSchemaExample": "{\n  \"match\": \"exata\",\n  \"situacao\": \"cliente\",\n  \"empresa_correspondente\": \"Kalunga\",\n  \"motivo\": \"Mesma empresa\"\n}",
+          "autoFix": true
+        },
+        "id": "90a8055b-f6f5-4f35-977e-b5426fbab182",
+        "name": "Formato IA Cliente",
+        "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+        "typeVersion": 1.3,
+        "position": [
+          2000,
+          -48
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "// Roda uma vez por lead novo: junta o lead original com o que a IA decidiu.\n// O lead original é achado pela POSIÇÃO (o 1º que foi pra IA é o 1º que volta),\n// porque o \"Verifica duplicatas\" não informa a ligação item a item e o n8n\n// dá erro a partir do 2º lead quando se usa \"o item ligado\".\nconst leads = $('Verifica duplicatas').all();\nconst lead = leads[$itemIndex]?.json;\nif (!lead || !lead.nome) {\n  throw new Error(`Não achei o lead da posição ${$itemIndex} pra juntar com a resposta da IA.`);\n}\nconst ia = $json.output || {};\n\n// A IA responde a situação em texto; aqui traduz pro código que o banco usa.\nconst mapa = {\n  'cliente': 'cliente',\n  'em negociacao': 'em_negociacao',\n  'em negociação': 'em_negociacao',\n  'ja no crm': 'em_andamento',\n  'já no crm': 'em_andamento',\n};\n\nconst situacao = String(ia.situacao || '').trim().toLowerCase();\nconst achou = ia.empresa_correspondente || null;\n\nreturn {\n  json: {\n    ...lead,\n    cliente_match: ia.match || 'nenhuma',\n    cliente_categoria_ia: achou ? (mapa[situacao] || null) : null,\n    cliente_nome_ia: achou,\n    cliente_motivo_ia: ia.motivo || null,\n  },\n};"
+        },
+        "id": "9f6d2f85-055a-4209-ab83-c26fc5d3b1cc",
+        "name": "Junta veredito da IA no lead",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2176,
+          -192
+        ],
+        "notes": "Junta o lead original com o que a IA decidiu, pra gravar os dois juntos depois."
+      },
+      {
+        "parameters": {
+          "jsCode": "const resultado = $items('Busca dados do banco')[0]?.json || {};\n\nconst normLinkedin = (url) =>\n  url ? url.trim().toLowerCase().replace(/\\/$/, '') : '';\n\nconst linkedinExistentes = new Set(\n  (resultado.linkedin_urls_existentes || [])\n    .map(normLinkedin)\n    .filter(Boolean)\n);\n\nconst results = $items('Prospecting Contacts')[0].json.results || [];\n\nconst seen = new Set();\n\nreturn results\n  .map(lead => {\n    const linkedin = normLinkedin(lead.socialLinks?.linkedin);\n    if (!linkedin) return null;\n    if (linkedinExistentes.has(linkedin)) return null;\n    if (seen.has(linkedin)) return null; // repetido dentro da própria busca\n    seen.add(linkedin);\n\n    const nome = [lead.firstName, lead.lastName]\n      .filter(Boolean)\n      .join(' ')\n      .trim();\n    if (!nome) return null;\n\n    return {\n      json: {\n        nome,\n        cargo: lead.jobTitle?.title ?? null,\n        linkedin_url: lead.socialLinks?.linkedin ?? null,\n        empresa_nome: lead.company?.name ?? null,\n        empresa_site: lead.company?.domain ?? null,\n        empresa_setor: lead.jobTitle?.departments?.[0] ?? null,\n        origem: 'lusha_n8n',\n        lusha_contact_id: lead.id ?? null,\n        id_company_lusha: lead.company.id ?? null\n      },\n    };\n  })\n  .filter(Boolean);"
+        },
+        "id": "4d60cdc6-877b-4d27-b941-38f06d758569",
+        "name": "Verifica duplicatas",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1168,
+          -192
+        ],
+        "alwaysOutputData": true,
+        "notes": "Tira quem já existe no banco e quem se repete na mesma busca. Se não sobrar ninguém, o fluxo para aqui (nenhum lead novo)."
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "d3000000-0000-4000-8000-000000000001",
+                "leftValue": "={{ $json.nome }}",
+                "operator": {
+                  "operation": "notEmpty",
+                  "singleValue": true,
+                  "type": "string"
+                },
+                "rightValue": ""
+              }
+            ],
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            }
+          },
+          "options": {}
+        },
+        "id": "7a4b5016-aeaf-4e30-8b83-d6fb7b4e5528",
+        "name": "Tem lead novo?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          1488,
+          -192
+        ],
+        "notes": "Barreira antes da IA: só passa quem é lead de verdade. Se não sobrou ninguém depois de tirar os duplicados, sai pelo \"falso\" e o fluxo termina sem chamar a IA."
+      },
+      {
+        "parameters": {
+          "content": "**Se o fluxo sair pelo \"falso\" do \"Tem lead novo?\":** nenhum lead novo nesta busca — todos os contatos que a Lusha trouxe já estavam no banco. Não há nada pra classificar, então o fluxo termina aqui (a página da Lusha já avançou normalmente).",
+          "height": 176,
+          "width": 288,
+          "color": 4
+        },
+        "id": "aae0280d-7cad-4c77-b6e9-47c0edf9d751",
+        "name": "Aviso: nenhum lead novo",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1440,
+          -16
+        ]
       }
     ],
     "connections": {
@@ -782,17 +1092,6 @@
           ]
         ]
       },
-      "Busca os leads do banco": {
-        "main": [
-          [
-            {
-              "node": "Verifica duplicatas",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "Busca a config ativa do lusha": {
         "main": [
           [
@@ -819,7 +1118,7 @@
         "main": [
           [
             {
-              "node": "Busca os leads do banco",
+              "node": "Busca dados do banco",
               "type": "main",
               "index": 0
             }
@@ -837,17 +1136,6 @@
           ]
         ]
       },
-      "Verifica duplicatas": {
-        "main": [
-          [
-            {
-              "node": "Monta lista para gravar",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "Monta lista para gravar": {
         "main": [
           [
@@ -858,15 +1146,97 @@
             }
           ]
         ]
+      },
+      "Confere se já é cliente (IA)": {
+        "main": [
+          [
+            {
+              "node": "Junta veredito da IA no lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Junta veredito da IA no lead": {
+        "main": [
+          [
+            {
+              "node": "Monta lista para gravar",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Modelo IA Cliente": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Confere se já é cliente (IA)",
+              "type": "ai_languageModel",
+              "index": 0
+            },
+            {
+              "node": "Formato IA Cliente",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Formato IA Cliente": {
+        "ai_outputParser": [
+          [
+            {
+              "node": "Confere se já é cliente (IA)",
+              "type": "ai_outputParser",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca dados do banco": {
+        "main": [
+          [
+            {
+              "node": "Verifica duplicatas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verifica duplicatas": {
+        "main": [
+          [
+            {
+              "node": "Tem lead novo?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tem lead novo?": {
+        "main": [
+          [
+            {
+              "node": "Confere se já é cliente (IA)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Captação a cada 10 dias",
-    "description": "Agenda muda de semanal para a cada 10 dias, para acompanhar o novo ritmo do enriquecimento (5 por dia).",
+    "name": "Agenda da captação: dias 1, 11 e 21",
+    "description": "Agenda explícita: captação nos dias 1, 11 e 21 de cada mês, às 6h. O \"a cada 10 dias\" do n8n vira dias 1, 11, 21 e 31, o que faria a captação rodar em dois dias seguidos na virada de mês (31 e 1). Nada mais mudou.",
     "autosaved": false,
-    "createdAt": "2026-10-07T13:07:40.578Z",
-    "updatedAt": "2026-10-07T13:07:40.578Z"
+    "createdAt": "2026-10-09T20:04:12.768Z",
+    "updatedAt": "2026-10-09T20:08:28.422Z"
   },
   "tags": []
 }
