@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-05T15:24:50.450Z",
+  "updatedAt": "2026-10-09T17:45:59.725Z",
   "createdAt": "2026-09-27T02:22:56.101Z",
   "id": "lKEkMe1jnwdJnNyD",
   "name": "Galera · gerar vídeo",
@@ -87,7 +87,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const ctx = $('Montar contexto').first().json;\nconst hz = ctx.formato === 'Vídeo' && /youtube/i.test(ctx.canal || '');\nconst cfg = Object.fromEntries($('Buscar configuração').all().map(i => [i.json.chave, i.json.valor]));\nlet refs = [];\ntry { refs = JSON.parse(cfg.img_referencias || '[]'); } catch (e) {}\nrefs = refs.slice(0, 4).map(x => String(x).replace(/^data:[^,]+,/, ''));\nconst modelo = refs.length ? 'flux-2-pro' : 'flux-pro-v1-1';\nconst cenas = $input.first().json.output?.cenas || [];\nif (!cenas.length) throw new Error('A Clara não conseguiu preparar as cenas do roteiro (o modelo não devolveu o formato esperado)');\nreturn cenas.map((c, i) => {\n  const body = refs.length\n    ? Object.assign({ prompt: c.prompt_imagem, width: hz ? 1440 : 810, height: hz ? 810 : 1440 }, ...refs.map((x, j) => ({ [j ? 'input_image_' + (j + 1) : 'input_image']: x })))\n    : { prompt: c.prompt_imagem, aspect_ratio: hz ? 'widescreen_16_9' : 'social_story_9_16', output_format: 'jpeg' };\n  const palavras = String(c.locucao || '').split(/\\s+/).filter(Boolean).length;\n  return { json: { numero: Number(c.numero) || i + 1, rodada: ctx.rodada, prompt_imagem: c.prompt_imagem, prompt_movimento: c.prompt_movimento || '', locucao: c.locucao || '', duracao: palavras > 11 ? '10' : '5', modelo_img: modelo, img_body: JSON.stringify(body), hz } };\n});"
+        "jsCode": "const ctx = $('Montar contexto').first().json;\nconst hz = ctx.formato === 'Vídeo' && /youtube/i.test(ctx.canal || '');\nconst cfg = Object.fromEntries($('Buscar configuração').all().map(i => [i.json.chave, i.json.valor]));\nlet refs = [];\ntry { refs = JSON.parse(cfg.img_referencias || '[]'); } catch (e) {}\n// As referências da marca são slides de carrossel com texto: no vídeo o modelo copiava o layout e o texto (letras quebradas por cima da cena). Nas cenas de vídeo não usamos referência.\nrefs = [];\nconst SEM_TEXTO = ', absolutely no text, no letters, no numbers, no words, no logos, no watermark, no captions, no signs, no user interface, no infographic or slide layout; if a phone or screen appears it faces away from the camera or shows only a plain out-of-focus glow';\nconst modelo = refs.length ? 'flux-2-pro' : 'flux-pro-v1-1';\nconst cenas = $input.first().json.output?.cenas || [];\nif (!cenas.length) throw new Error('A Clara não conseguiu preparar as cenas do roteiro (o modelo não devolveu o formato esperado)');\nreturn cenas.map((c, i) => {\n  const body = refs.length\n    ? Object.assign({ prompt: String(c.prompt_imagem || '') + SEM_TEXTO, width: hz ? 1440 : 810, height: hz ? 810 : 1440 }, ...refs.map((x, j) => ({ [j ? 'input_image_' + (j + 1) : 'input_image']: x })))\n    : { prompt: String(c.prompt_imagem || '') + SEM_TEXTO, aspect_ratio: hz ? 'widescreen_16_9' : 'social_story_9_16', output_format: 'jpeg' };\n  const palavras = String(c.locucao || '').split(/\\s+/).filter(Boolean).length;\n  return { json: { numero: Number(c.numero) || i + 1, rodada: ctx.rodada, prompt_imagem: c.prompt_imagem, prompt_movimento: (String(c.prompt_movimento || 'subtle natural motion').replace(/\bslowly\b/gi, 'steadily').replace(/\bslow[- ]?motion\b/gi, 'natural motion').replace(/\bslow\b/gi, 'steady') + '. Natural real-time speed.').slice(0, 480), locucao: c.locucao || '', duracao: palavras > 13 ? '10' : '5', modelo_img: modelo, img_body: JSON.stringify(body), hz } };\n});"
       }
     },
     {
@@ -654,81 +654,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const itens = $input.all().map(i => i.json).filter(j => j.video_url).sort((a, b) => a.numero - b.numero);\nif (!itens.length) {\n  const motivos = $input.all().map(i => i.json.motivo_video || '').filter(Boolean);\n  if (motivos.some(m => /402|insufficient credits/i.test(m))) {\n    throw new Error('Sem crédito no Magnific para animar as cenas: as imagens saíram, o vídeo não.');\n  }\n  throw new Error('Nenhuma cena de vídeo ficou pronta no Magnific' + (motivos[0] ? ': ' + motivos[0] : ''));\n}\nconst peca = $('Montar contexto').first().json.peca_id;\nconst rodada = itens[0]?.rodada ?? 0;\nconst prefixo = peca + '/r' + rodada + '-' + Date.now();\nconst dir = '/home/node/.n8n-files/galera/' + prefixo.replace(/\\//g, '_');\nconst q = (s) => \"'\" + String(s).replace(/'/g, \"'\\\\''\") + \"'\";\nconst linhas = [\n  'set -e',\n  'F=/tmp/ffmpeg; [ -x $F ] || (wget -q -O /tmp/ffmpeg.gz https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-x64.gz && gunzip -f /tmp/ffmpeg.gz && chmod +x $F)',\n  'rm -rf ' + q(dir) + ' && mkdir -p ' + q(dir) + ' && cd ' + q(dir),\n];\nconst lista = [];\nconst T = itens[0]?.hz ? '1280:720' : '720:1280';\nconst vf = '[0:v]scale=' + T + ':force_original_aspect_ratio=increase,crop=' + T + ',setsar=1,fps=30[v]';\nfor (const j of itens) {\n  const n = String(j.numero).padStart(2, '0');\n  linhas.push('wget -q -O v' + n + '.mp4 ' + q(j.video_url));\n  if (j.audio_url) {\n    linhas.push('wget -q -O a' + n + '.mp3 ' + q(j.audio_url));\n    linhas.push('$F -y -loglevel error -i v' + n + '.mp4 -i a' + n + '.mp3 -filter_complex \"' + vf + ';[1:a]apad[a]\" -map \"[v]\" -map \"[a]\" -shortest -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 cena-' + n + '.mp4');\n  } else {\n    linhas.push('$F -y -loglevel error -i v' + n + '.mp4 -f lavfi -i anullsrc=r=44100:cl=stereo -filter_complex \"' + vf + '\" -map \"[v]\" -map 1:a -shortest -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 cena-' + n + '.mp4');\n  }\n  lista.push(\"file 'cena-\" + n + \".mp4'\");\n}\nlinhas.push(\"printf '%s\\\\n' \" + lista.map(l => q(l)).join(' ') + ' > lista.txt');\nlinhas.push('$F -y -loglevel error -f concat -safe 0 -i lista.txt -c copy video-final.mp4');\nlinhas.push('rm -f v*.mp4 a*.mp3 lista.txt && ls -la');\nreturn [{ json: { cmd: linhas.join('\\n'), dir, prefixo, rodada, cenas: itens.map(j => ({ numero: j.numero, locucao: j.locucao, prompt: j.prompt_imagem, duracao: Number(j.duracao) })) } }];"
-      }
-    },
-    {
-      "id": "7ed898a4-5b41-43e0-8a1e-1847e805944c",
-      "name": "Montar vídeo (ffmpeg)",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "alwaysOutputData": true,
-      "onError": "continueRegularOutput",
-      "position": [
-        5060,
-        0
-      ],
-      "parameters": {
-        "command": "={{ $json.cmd }}"
-      }
-    },
-    {
-      "id": "33ad4822-28e3-4b3d-847b-a50ff2bc7d99",
-      "name": "Ler arquivos do vídeo",
-      "type": "n8n-nodes-base.readWriteFile",
-      "typeVersion": 1,
-      "alwaysOutputData": true,
-      "onError": "continueRegularOutput",
-      "position": [
-        5280,
-        0
-      ],
-      "parameters": {
-        "fileSelector": "={{ $('Comando de montagem').first().json.dir + '/*.mp4' }}",
-        "options": {}
-      }
-    },
-    {
-      "id": "71ce72f6-fe23-41e4-9785-558ed7ae2213",
-      "name": "Subir para o Storage",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "alwaysOutputData": true,
-      "retryOnFail": true,
-      "maxTries": 2,
-      "onError": "continueRegularOutput",
-      "position": [
-        5500,
-        0
-      ],
-      "parameters": {
-        "method": "POST",
-        "url": "={{ 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/galera/' + $('Comando de montagem').first().json.prefixo + '/' + $binary.data.fileName }}",
-        "authentication": "***REMOVIDO***",
-        "nodeCredentialType": "supabaseApi",
-        "sendHeaders": "***REMOVIDO***",
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-upsert",
-              "value": "true"
-            },
-            {
-              "name": "Content-Type",
-              "value": "video/mp4"
-            }
-          ]
-        },
-        "sendBody": true,
-        "contentType": "binaryData",
-        "inputDataFieldName": "data",
-        "options": {}
-      },
-      "credentials": {
-        "supabaseApi": {
-          "id": "puaKhAd4sYcKJKVk",
-          "name": "LAB"
-        }
+        "jsCode": "// Aviso visível: vídeo com cena faltando ou sem locução não vai pra frente em silêncio.\nconst planejadas = $('Uma cena por item').all().map(i => i.json);\nconst recebidas = new Map($input.all().map(i => [i.json.numero, i.json]));\nconst problemas = [];\nfor (const c of planejadas) {\n  const j = recebidas.get(c.numero);\n  if (!j) problemas.push('cena ' + c.numero + ': a imagem não saiu');\n  else if (!j.video_url) problemas.push('cena ' + c.numero + ': o vídeo não saiu' + (j.motivo_video ? ' (' + String(j.motivo_video).slice(0, 80) + ')' : ''));\n  else if (j.locucao && !j.audio_url) problemas.push('cena ' + c.numero + ': a locução não saiu');\n}\nconst itens = $input.all().map(i => i.json).filter(j => j.video_url).sort((a, b) => a.numero - b.numero);\n\nif (!itens.length) {\n  const motivos = $input.all().map(i => i.json.motivo_video || '').filter(Boolean);\n  if (motivos.some(m => /402|insufficient credits/i.test(m))) {\n    throw new Error('Sem crédito no Magnific para animar as cenas: as imagens saíram, o vídeo não.');\n  }\n  throw new Error('Nenhuma cena de vídeo ficou pronta no Magnific' + (motivos[0] ? ': ' + motivos[0] : ''));\n}\nif (problemas.length) throw new Error('Vídeo incompleto: ' + problemas.join('; ') + '. Se for crédito do Magnific, recarregue e refaça o vídeo.');\nconst peca = $('Montar contexto').first().json.peca_id;\nconst rodada = itens[0]?.rodada ?? 0;\nconst prefixo = peca + '/r' + rodada + '-' + Date.now();\nconst nomeCena = (j) => 'cena-' + String(j.numero).padStart(2, '0') + '.mp4';\n// A montagem (normalizar cada cena, juntar e enviar) roda no Windmill: f/mia_microservicos/galera_juntar_cenas.\nreturn [{ json: {\n  prefixo, rodada,\n  horizontal: !!itens[0]?.hz,\n  arquivos: ['video-final.mp4', ...itens.map(nomeCena)],\n  clipes: itens.map(j => ({ numero: j.numero, video_url: j.video_url, audio_url: j.audio_url || '', locucao: j.locucao || '' })),\n  cenas: itens.map(j => ({ numero: j.numero, locucao: j.locucao, prompt: j.prompt_imagem, duracao: Number(j.duracao) })),\n} }];"
       }
     },
     {
@@ -737,11 +663,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        5720,
+        7480,
         0
       ],
       "parameters": {
-        "jsCode": "const m = $('Comando de montagem').first().json;\nconst base = 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/public/galera/' + m.prefixo + '/';\nconst peca = $('Montar contexto').first().json.peca_id;\nconst nomes = $('Ler arquivos do vídeo').all().map(i => i.binary?.data?.fileName).filter(Boolean);\nconst linhas = [];\nif (nomes.includes('video-final.mp4')) linhas.push({ peca_id: peca, numero: 0, rodada: m.rodada, video_url: base + 'video-final.mp4', locucao: m.cenas.map(c => c.locucao).join(' '), prompt: '', duracao: m.cenas.reduce((s, c) => s + c.duracao, 0) });\nfor (const c of m.cenas) {\n  const n = 'cena-' + String(c.numero).padStart(2, '0') + '.mp4';\n  if (nomes.includes(n)) linhas.push({ peca_id: peca, numero: c.numero, rodada: m.rodada, video_url: base + n, locucao: c.locucao || '', prompt: c.prompt || '', duracao: c.duracao });\n}\nreturn linhas.length ? linhas.map(json => ({ json })) : [{ json: { vazio: true } }];"
+        "jsCode": "const m = $('Comando de montagem').first().json;\nconst base = 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/public/galera/' + m.prefixo + '/';\nconst peca = $('Montar contexto').first().json.peca_id;\nconst nomes = $('Checar montagem').first().json.enviados || [];\nconst linhas = [];\nif (nomes.includes('video-final.mp4')) linhas.push({ peca_id: peca, numero: 0, rodada: m.rodada, video_url: base + 'video-final.mp4', locucao: m.cenas.map(c => c.locucao).join(' '), prompt: '', duracao: m.cenas.reduce((s, c) => s + c.duracao, 0) });\nfor (const c of m.cenas) {\n  const n = 'cena-' + String(c.numero).padStart(2, '0') + '.mp4';\n  if (nomes.includes(n)) linhas.push({ peca_id: peca, numero: c.numero, rodada: m.rodada, video_url: base + n, locucao: c.locucao || '', prompt: c.prompt || '', duracao: c.duracao });\n}\nreturn linhas.length ? linhas.map(json => ({ json })) : [{ json: { vazio: true } }];"
       }
     },
     {
@@ -752,7 +678,7 @@
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "position": [
-        5940,
+        7700,
         0
       ],
       "parameters": {
@@ -775,7 +701,7 @@
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "position": [
-        6160,
+        7920,
         0
       ],
       "parameters": {
@@ -822,7 +748,7 @@
       "maxTries": 3,
       "waitBetweenTries": 3000,
       "position": [
-        6380,
+        8140,
         0
       ],
       "parameters": {
@@ -903,6 +829,185 @@
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ ok: false, erro: $json.erro }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "42e93b0d-1659-4ae1-9811-f01ef43437d6",
+      "name": "Arquivos para assinar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5060,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const m = $input.first().json;\nreturn m.arquivos.map(nome => ({ json: { nome, caminho: m.prefixo + '/' + nome } }));"
+      }
+    },
+    {
+      "id": "4281423a-d0cc-41ee-a1ed-5d429e2df174",
+      "name": "Assinar upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "position": [
+        5280,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/upload/sign/galera/' + $json.caminho }}",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "puaKhAd4sYcKJKVk",
+          "name": "LAB"
+        }
+      }
+    },
+    {
+      "id": "2465871b-69a7-45ae-b7e4-a3f454fe1e4b",
+      "name": "Pedido ao Windmill",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5500,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const m = $('Comando de montagem').first().json;\nconst nomes = $('Arquivos para assinar').all().map(i => i.json.nome);\nconst uploads = {};\n$input.all().forEach((it, i) => {\n  const u = it.json.url;\n  if (!u) throw new Error('Não consegui URL de upload para ' + nomes[i] + ': ' + JSON.stringify(it.json).slice(0, 200));\n  uploads[nomes[i]] = u.startsWith('http') ? u : 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1' + u;\n});\nreturn [{ json: { cenas: m.clipes, horizontal: m.horizontal, uploads } }];"
+      }
+    },
+    {
+      "id": "e1e91918-0a35-47a0-a42c-03c881328417",
+      "name": "Montar vídeo (Windmill)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5720,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://wll.miabuilder.com/api/w/mia-micro-servicos/jobs/run/p/f/mia_microservicos/galera_juntar_cenas",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "id": "98e14000-d82d-4789-97fe-48122349ac50",
+      "name": "Esperar montagem",
+      "webhookId": "b7addd2d-37fd-44bc-89c2-3f03b3a6dfa0",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5940,
+        0
+      ],
+      "parameters": {
+        "amount": 15
+      }
+    },
+    {
+      "id": "a61500d8-eded-4032-bd3b-bd555f234dd0",
+      "name": "Consultar montagem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        6160,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://wll.miabuilder.com/api/w/mia-micro-servicos/jobs_u/completed/get_result_maybe/' + String($('Montar vídeo (Windmill)').first().json.data).replace(/\"/g, '').trim() }}",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "id": "9e6ed465-152b-4c90-b231-369919cf4f8e",
+      "name": "Checar montagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6380,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const r = $input.first().json || {};\nconst tent = $runIndex + 1;\nif (r.completed && r.success === false) {\n  const e = r.result?.error?.message || r.result?.message || JSON.stringify(r.result || {});\n  throw new Error('A montagem no Windmill falhou: ' + String(e).slice(0, 400));\n}\nif (!r.completed && tent > 60) throw new Error('A montagem no Windmill passou de 15 min sem terminar.');\nreturn [{ json: { pronta: !!r.completed, tent, enviados: r.result?.enviados || [] } }];"
+      }
+    },
+    {
+      "id": "e8cb4bb9-d6c7-4b30-8920-34b8edf84c05",
+      "name": "Montagem pronta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6600,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.pronta }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
         "options": {}
       }
     }
@@ -1169,40 +1274,7 @@
             "index": 0
           },
           {
-            "node": "Montar vídeo (ffmpeg)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Montar vídeo (ffmpeg)": {
-      "main": [
-        [
-          {
-            "node": "Ler arquivos do vídeo",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Ler arquivos do vídeo": {
-      "main": [
-        [
-          {
-            "node": "Subir para o Storage",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Subir para o Storage": {
-      "main": [
-        [
-          {
-            "node": "Linhas dos vídeos",
+            "node": "Arquivos para assinar",
             "type": "main",
             "index": 0
           }
@@ -1310,6 +1382,101 @@
           }
         ]
       ]
+    },
+    "Arquivos para assinar": {
+      "main": [
+        [
+          {
+            "node": "Assinar upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assinar upload": {
+      "main": [
+        [
+          {
+            "node": "Pedido ao Windmill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedido ao Windmill": {
+      "main": [
+        [
+          {
+            "node": "Montar vídeo (Windmill)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar vídeo (Windmill)": {
+      "main": [
+        [
+          {
+            "node": "Esperar montagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar montagem": {
+      "main": [
+        [
+          {
+            "node": "Consultar montagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar montagem": {
+      "main": [
+        [
+          {
+            "node": "Checar montagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checar montagem": {
+      "main": [
+        [
+          {
+            "node": "Montagem pronta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montagem pronta?": {
+      "main": [
+        [
+          {
+            "node": "Linhas dos vídeos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Esperar montagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -1322,8 +1489,8 @@
     "aiBuilderAssisted": true,
     "builderVariant": "mcp"
   },
-  "versionId": "7a845d8f-c52a-45f3-a60a-778e09d6defb",
-  "activeVersionId": "7a845d8f-c52a-45f3-a60a-778e09d6defb",
+  "versionId": "01cd2249-cbad-4211-83cf-8771216ddfb2",
+  "activeVersionId": "01cd2249-cbad-4211-83cf-8771216ddfb2",
   "triggerCount": 1,
   "shared": [
     {
@@ -1335,7 +1502,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "7a845d8f-c52a-45f3-a60a-778e09d6defb",
+    "versionId": "01cd2249-cbad-4211-83cf-8771216ddfb2",
     "workflowId": "lKEkMe1jnwdJnNyD",
     "nodes": [
       {
@@ -1419,7 +1586,7 @@
         ],
         "parameters": {
           "mode": "runOnceForAllItems",
-          "jsCode": "const ctx = $('Montar contexto').first().json;\nconst hz = ctx.formato === 'Vídeo' && /youtube/i.test(ctx.canal || '');\nconst cfg = Object.fromEntries($('Buscar configuração').all().map(i => [i.json.chave, i.json.valor]));\nlet refs = [];\ntry { refs = JSON.parse(cfg.img_referencias || '[]'); } catch (e) {}\nrefs = refs.slice(0, 4).map(x => String(x).replace(/^data:[^,]+,/, ''));\nconst modelo = refs.length ? 'flux-2-pro' : 'flux-pro-v1-1';\nconst cenas = $input.first().json.output?.cenas || [];\nif (!cenas.length) throw new Error('A Clara não conseguiu preparar as cenas do roteiro (o modelo não devolveu o formato esperado)');\nreturn cenas.map((c, i) => {\n  const body = refs.length\n    ? Object.assign({ prompt: c.prompt_imagem, width: hz ? 1440 : 810, height: hz ? 810 : 1440 }, ...refs.map((x, j) => ({ [j ? 'input_image_' + (j + 1) : 'input_image']: x })))\n    : { prompt: c.prompt_imagem, aspect_ratio: hz ? 'widescreen_16_9' : 'social_story_9_16', output_format: 'jpeg' };\n  const palavras = String(c.locucao || '').split(/\\s+/).filter(Boolean).length;\n  return { json: { numero: Number(c.numero) || i + 1, rodada: ctx.rodada, prompt_imagem: c.prompt_imagem, prompt_movimento: c.prompt_movimento || '', locucao: c.locucao || '', duracao: palavras > 11 ? '10' : '5', modelo_img: modelo, img_body: JSON.stringify(body), hz } };\n});"
+          "jsCode": "const ctx = $('Montar contexto').first().json;\nconst hz = ctx.formato === 'Vídeo' && /youtube/i.test(ctx.canal || '');\nconst cfg = Object.fromEntries($('Buscar configuração').all().map(i => [i.json.chave, i.json.valor]));\nlet refs = [];\ntry { refs = JSON.parse(cfg.img_referencias || '[]'); } catch (e) {}\n// As referências da marca são slides de carrossel com texto: no vídeo o modelo copiava o layout e o texto (letras quebradas por cima da cena). Nas cenas de vídeo não usamos referência.\nrefs = [];\nconst SEM_TEXTO = ', absolutely no text, no letters, no numbers, no words, no logos, no watermark, no captions, no signs, no user interface, no infographic or slide layout; if a phone or screen appears it faces away from the camera or shows only a plain out-of-focus glow';\nconst modelo = refs.length ? 'flux-2-pro' : 'flux-pro-v1-1';\nconst cenas = $input.first().json.output?.cenas || [];\nif (!cenas.length) throw new Error('A Clara não conseguiu preparar as cenas do roteiro (o modelo não devolveu o formato esperado)');\nreturn cenas.map((c, i) => {\n  const body = refs.length\n    ? Object.assign({ prompt: String(c.prompt_imagem || '') + SEM_TEXTO, width: hz ? 1440 : 810, height: hz ? 810 : 1440 }, ...refs.map((x, j) => ({ [j ? 'input_image_' + (j + 1) : 'input_image']: x })))\n    : { prompt: String(c.prompt_imagem || '') + SEM_TEXTO, aspect_ratio: hz ? 'widescreen_16_9' : 'social_story_9_16', output_format: 'jpeg' };\n  const palavras = String(c.locucao || '').split(/\\s+/).filter(Boolean).length;\n  return { json: { numero: Number(c.numero) || i + 1, rodada: ctx.rodada, prompt_imagem: c.prompt_imagem, prompt_movimento: (String(c.prompt_movimento || 'subtle natural motion').replace(/\bslowly\b/gi, 'steadily').replace(/\bslow[- ]?motion\b/gi, 'natural motion').replace(/\bslow\b/gi, 'steady') + '. Natural real-time speed.').slice(0, 480), locucao: c.locucao || '', duracao: palavras > 13 ? '10' : '5', modelo_img: modelo, img_body: JSON.stringify(body), hz } };\n});"
         }
       },
       {
@@ -1986,81 +2153,7 @@
           0
         ],
         "parameters": {
-          "jsCode": "const itens = $input.all().map(i => i.json).filter(j => j.video_url).sort((a, b) => a.numero - b.numero);\nif (!itens.length) {\n  const motivos = $input.all().map(i => i.json.motivo_video || '').filter(Boolean);\n  if (motivos.some(m => /402|insufficient credits/i.test(m))) {\n    throw new Error('Sem crédito no Magnific para animar as cenas: as imagens saíram, o vídeo não.');\n  }\n  throw new Error('Nenhuma cena de vídeo ficou pronta no Magnific' + (motivos[0] ? ': ' + motivos[0] : ''));\n}\nconst peca = $('Montar contexto').first().json.peca_id;\nconst rodada = itens[0]?.rodada ?? 0;\nconst prefixo = peca + '/r' + rodada + '-' + Date.now();\nconst dir = '/home/node/.n8n-files/galera/' + prefixo.replace(/\\//g, '_');\nconst q = (s) => \"'\" + String(s).replace(/'/g, \"'\\\\''\") + \"'\";\nconst linhas = [\n  'set -e',\n  'F=/tmp/ffmpeg; [ -x $F ] || (wget -q -O /tmp/ffmpeg.gz https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-x64.gz && gunzip -f /tmp/ffmpeg.gz && chmod +x $F)',\n  'rm -rf ' + q(dir) + ' && mkdir -p ' + q(dir) + ' && cd ' + q(dir),\n];\nconst lista = [];\nconst T = itens[0]?.hz ? '1280:720' : '720:1280';\nconst vf = '[0:v]scale=' + T + ':force_original_aspect_ratio=increase,crop=' + T + ',setsar=1,fps=30[v]';\nfor (const j of itens) {\n  const n = String(j.numero).padStart(2, '0');\n  linhas.push('wget -q -O v' + n + '.mp4 ' + q(j.video_url));\n  if (j.audio_url) {\n    linhas.push('wget -q -O a' + n + '.mp3 ' + q(j.audio_url));\n    linhas.push('$F -y -loglevel error -i v' + n + '.mp4 -i a' + n + '.mp3 -filter_complex \"' + vf + ';[1:a]apad[a]\" -map \"[v]\" -map \"[a]\" -shortest -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 cena-' + n + '.mp4');\n  } else {\n    linhas.push('$F -y -loglevel error -i v' + n + '.mp4 -f lavfi -i anullsrc=r=44100:cl=stereo -filter_complex \"' + vf + '\" -map \"[v]\" -map 1:a -shortest -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 cena-' + n + '.mp4');\n  }\n  lista.push(\"file 'cena-\" + n + \".mp4'\");\n}\nlinhas.push(\"printf '%s\\\\n' \" + lista.map(l => q(l)).join(' ') + ' > lista.txt');\nlinhas.push('$F -y -loglevel error -f concat -safe 0 -i lista.txt -c copy video-final.mp4');\nlinhas.push('rm -f v*.mp4 a*.mp3 lista.txt && ls -la');\nreturn [{ json: { cmd: linhas.join('\\n'), dir, prefixo, rodada, cenas: itens.map(j => ({ numero: j.numero, locucao: j.locucao, prompt: j.prompt_imagem, duracao: Number(j.duracao) })) } }];"
-        }
-      },
-      {
-        "id": "7ed898a4-5b41-43e0-8a1e-1847e805944c",
-        "name": "Montar vídeo (ffmpeg)",
-        "type": "n8n-nodes-base.executeCommand",
-        "typeVersion": 1,
-        "alwaysOutputData": true,
-        "onError": "continueRegularOutput",
-        "position": [
-          5060,
-          0
-        ],
-        "parameters": {
-          "command": "={{ $json.cmd }}"
-        }
-      },
-      {
-        "id": "33ad4822-28e3-4b3d-847b-a50ff2bc7d99",
-        "name": "Ler arquivos do vídeo",
-        "type": "n8n-nodes-base.readWriteFile",
-        "typeVersion": 1,
-        "alwaysOutputData": true,
-        "onError": "continueRegularOutput",
-        "position": [
-          5280,
-          0
-        ],
-        "parameters": {
-          "fileSelector": "={{ $('Comando de montagem').first().json.dir + '/*.mp4' }}",
-          "options": {}
-        }
-      },
-      {
-        "id": "71ce72f6-fe23-41e4-9785-558ed7ae2213",
-        "name": "Subir para o Storage",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.2,
-        "alwaysOutputData": true,
-        "retryOnFail": true,
-        "maxTries": 2,
-        "onError": "continueRegularOutput",
-        "position": [
-          5500,
-          0
-        ],
-        "parameters": {
-          "method": "POST",
-          "url": "={{ 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/galera/' + $('Comando de montagem').first().json.prefixo + '/' + $binary.data.fileName }}",
-          "authentication": "***REMOVIDO***",
-          "nodeCredentialType": "supabaseApi",
-          "sendHeaders": "***REMOVIDO***",
-          "headerParameters": {
-            "parameters": [
-              {
-                "name": "x-upsert",
-                "value": "true"
-              },
-              {
-                "name": "Content-Type",
-                "value": "video/mp4"
-              }
-            ]
-          },
-          "sendBody": true,
-          "contentType": "binaryData",
-          "inputDataFieldName": "data",
-          "options": {}
-        },
-        "credentials": {
-          "supabaseApi": {
-            "id": "puaKhAd4sYcKJKVk",
-            "name": "LAB"
-          }
+          "jsCode": "// Aviso visível: vídeo com cena faltando ou sem locução não vai pra frente em silêncio.\nconst planejadas = $('Uma cena por item').all().map(i => i.json);\nconst recebidas = new Map($input.all().map(i => [i.json.numero, i.json]));\nconst problemas = [];\nfor (const c of planejadas) {\n  const j = recebidas.get(c.numero);\n  if (!j) problemas.push('cena ' + c.numero + ': a imagem não saiu');\n  else if (!j.video_url) problemas.push('cena ' + c.numero + ': o vídeo não saiu' + (j.motivo_video ? ' (' + String(j.motivo_video).slice(0, 80) + ')' : ''));\n  else if (j.locucao && !j.audio_url) problemas.push('cena ' + c.numero + ': a locução não saiu');\n}\nconst itens = $input.all().map(i => i.json).filter(j => j.video_url).sort((a, b) => a.numero - b.numero);\n\nif (!itens.length) {\n  const motivos = $input.all().map(i => i.json.motivo_video || '').filter(Boolean);\n  if (motivos.some(m => /402|insufficient credits/i.test(m))) {\n    throw new Error('Sem crédito no Magnific para animar as cenas: as imagens saíram, o vídeo não.');\n  }\n  throw new Error('Nenhuma cena de vídeo ficou pronta no Magnific' + (motivos[0] ? ': ' + motivos[0] : ''));\n}\nif (problemas.length) throw new Error('Vídeo incompleto: ' + problemas.join('; ') + '. Se for crédito do Magnific, recarregue e refaça o vídeo.');\nconst peca = $('Montar contexto').first().json.peca_id;\nconst rodada = itens[0]?.rodada ?? 0;\nconst prefixo = peca + '/r' + rodada + '-' + Date.now();\nconst nomeCena = (j) => 'cena-' + String(j.numero).padStart(2, '0') + '.mp4';\n// A montagem (normalizar cada cena, juntar e enviar) roda no Windmill: f/mia_microservicos/galera_juntar_cenas.\nreturn [{ json: {\n  prefixo, rodada,\n  horizontal: !!itens[0]?.hz,\n  arquivos: ['video-final.mp4', ...itens.map(nomeCena)],\n  clipes: itens.map(j => ({ numero: j.numero, video_url: j.video_url, audio_url: j.audio_url || '', locucao: j.locucao || '' })),\n  cenas: itens.map(j => ({ numero: j.numero, locucao: j.locucao, prompt: j.prompt_imagem, duracao: Number(j.duracao) })),\n} }];"
         }
       },
       {
@@ -2069,11 +2162,11 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          5720,
+          7480,
           0
         ],
         "parameters": {
-          "jsCode": "const m = $('Comando de montagem').first().json;\nconst base = 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/public/galera/' + m.prefixo + '/';\nconst peca = $('Montar contexto').first().json.peca_id;\nconst nomes = $('Ler arquivos do vídeo').all().map(i => i.binary?.data?.fileName).filter(Boolean);\nconst linhas = [];\nif (nomes.includes('video-final.mp4')) linhas.push({ peca_id: peca, numero: 0, rodada: m.rodada, video_url: base + 'video-final.mp4', locucao: m.cenas.map(c => c.locucao).join(' '), prompt: '', duracao: m.cenas.reduce((s, c) => s + c.duracao, 0) });\nfor (const c of m.cenas) {\n  const n = 'cena-' + String(c.numero).padStart(2, '0') + '.mp4';\n  if (nomes.includes(n)) linhas.push({ peca_id: peca, numero: c.numero, rodada: m.rodada, video_url: base + n, locucao: c.locucao || '', prompt: c.prompt || '', duracao: c.duracao });\n}\nreturn linhas.length ? linhas.map(json => ({ json })) : [{ json: { vazio: true } }];"
+          "jsCode": "const m = $('Comando de montagem').first().json;\nconst base = 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/public/galera/' + m.prefixo + '/';\nconst peca = $('Montar contexto').first().json.peca_id;\nconst nomes = $('Checar montagem').first().json.enviados || [];\nconst linhas = [];\nif (nomes.includes('video-final.mp4')) linhas.push({ peca_id: peca, numero: 0, rodada: m.rodada, video_url: base + 'video-final.mp4', locucao: m.cenas.map(c => c.locucao).join(' '), prompt: '', duracao: m.cenas.reduce((s, c) => s + c.duracao, 0) });\nfor (const c of m.cenas) {\n  const n = 'cena-' + String(c.numero).padStart(2, '0') + '.mp4';\n  if (nomes.includes(n)) linhas.push({ peca_id: peca, numero: c.numero, rodada: m.rodada, video_url: base + n, locucao: c.locucao || '', prompt: c.prompt || '', duracao: c.duracao });\n}\nreturn linhas.length ? linhas.map(json => ({ json })) : [{ json: { vazio: true } }];"
         }
       },
       {
@@ -2084,7 +2177,7 @@
         "alwaysOutputData": true,
         "onError": "continueRegularOutput",
         "position": [
-          5940,
+          7700,
           0
         ],
         "parameters": {
@@ -2107,7 +2200,7 @@
         "alwaysOutputData": true,
         "onError": "continueRegularOutput",
         "position": [
-          6160,
+          7920,
           0
         ],
         "parameters": {
@@ -2154,7 +2247,7 @@
         "maxTries": 3,
         "waitBetweenTries": 3000,
         "position": [
-          6380,
+          8140,
           0
         ],
         "parameters": {
@@ -2235,6 +2328,185 @@
           "contentType": "json",
           "specifyBody": "json",
           "jsonBody": "={{ JSON.stringify({ ok: false, erro: $json.erro }) }}",
+          "options": {}
+        }
+      },
+      {
+        "id": "42e93b0d-1659-4ae1-9811-f01ef43437d6",
+        "name": "Arquivos para assinar",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5060,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const m = $input.first().json;\nreturn m.arquivos.map(nome => ({ json: { nome, caminho: m.prefixo + '/' + nome } }));"
+        }
+      },
+      {
+        "id": "4281423a-d0cc-41ee-a1ed-5d429e2df174",
+        "name": "Assinar upload",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "retryOnFail": true,
+        "maxTries": 2,
+        "position": [
+          5280,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1/object/upload/sign/galera/' + $json.caminho }}",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "supabaseApi",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "x-upsert",
+                "value": "true"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 20000
+          }
+        },
+        "credentials": {
+          "supabaseApi": {
+            "id": "puaKhAd4sYcKJKVk",
+            "name": "LAB"
+          }
+        }
+      },
+      {
+        "id": "2465871b-69a7-45ae-b7e4-a3f454fe1e4b",
+        "name": "Pedido ao Windmill",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5500,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const m = $('Comando de montagem').first().json;\nconst nomes = $('Arquivos para assinar').all().map(i => i.json.nome);\nconst uploads = {};\n$input.all().forEach((it, i) => {\n  const u = it.json.url;\n  if (!u) throw new Error('Não consegui URL de upload para ' + nomes[i] + ': ' + JSON.stringify(it.json).slice(0, 200));\n  uploads[nomes[i]] = u.startsWith('http') ? u : 'https://alrnajijumqvxzmogwpy.supabase.co/storage/v1' + u;\n});\nreturn [{ json: { cenas: m.clipes, horizontal: m.horizontal, uploads } }];"
+        }
+      },
+      {
+        "id": "e1e91918-0a35-47a0-a42c-03c881328417",
+        "name": "Montar vídeo (Windmill)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5720,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://wll.miabuilder.com/api/w/mia-micro-servicos/jobs/run/p/f/mia_microservicos/galera_juntar_cenas",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json) }}",
+          "options": {
+            "timeout": 30000,
+            "response": {
+              "response": {
+                "responseFormat": "text"
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        }
+      },
+      {
+        "id": "98e14000-d82d-4789-97fe-48122349ac50",
+        "name": "Esperar montagem",
+        "webhookId": "b7addd2d-37fd-44bc-89c2-3f03b3a6dfa0",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          5940,
+          0
+        ],
+        "parameters": {
+          "amount": 15
+        }
+      },
+      {
+        "id": "a61500d8-eded-4032-bd3b-bd555f234dd0",
+        "name": "Consultar montagem",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
+        "position": [
+          6160,
+          0
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "={{ 'https://wll.miabuilder.com/api/w/mia-micro-servicos/jobs_u/completed/get_result_maybe/' + String($('Montar vídeo (Windmill)').first().json.data).replace(/\"/g, '').trim() }}",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "options": {
+            "timeout": 20000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        }
+      },
+      {
+        "id": "9e6ed465-152b-4c90-b231-369919cf4f8e",
+        "name": "Checar montagem",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          6380,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const r = $input.first().json || {};\nconst tent = $runIndex + 1;\nif (r.completed && r.success === false) {\n  const e = r.result?.error?.message || r.result?.message || JSON.stringify(r.result || {});\n  throw new Error('A montagem no Windmill falhou: ' + String(e).slice(0, 400));\n}\nif (!r.completed && tent > 60) throw new Error('A montagem no Windmill passou de 15 min sem terminar.');\nreturn [{ json: { pronta: !!r.completed, tent, enviados: r.result?.enviados || [] } }];"
+        }
+      },
+      {
+        "id": "e8cb4bb9-d6c7-4b30-8920-34b8edf84c05",
+        "name": "Montagem pronta?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          6600,
+          0
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.pronta }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
           "options": {}
         }
       }
@@ -2501,40 +2773,7 @@
               "index": 0
             },
             {
-              "node": "Montar vídeo (ffmpeg)",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Montar vídeo (ffmpeg)": {
-        "main": [
-          [
-            {
-              "node": "Ler arquivos do vídeo",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Ler arquivos do vídeo": {
-        "main": [
-          [
-            {
-              "node": "Subir para o Storage",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Subir para o Storage": {
-        "main": [
-          [
-            {
-              "node": "Linhas dos vídeos",
+              "node": "Arquivos para assinar",
               "type": "main",
               "index": 0
             }
@@ -2642,6 +2881,101 @@
             }
           ]
         ]
+      },
+      "Arquivos para assinar": {
+        "main": [
+          [
+            {
+              "node": "Assinar upload",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Assinar upload": {
+        "main": [
+          [
+            {
+              "node": "Pedido ao Windmill",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pedido ao Windmill": {
+        "main": [
+          [
+            {
+              "node": "Montar vídeo (Windmill)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar vídeo (Windmill)": {
+        "main": [
+          [
+            {
+              "node": "Esperar montagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Esperar montagem": {
+        "main": [
+          [
+            {
+              "node": "Consultar montagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Consultar montagem": {
+        "main": [
+          [
+            {
+              "node": "Checar montagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Checar montagem": {
+        "main": [
+          [
+            {
+              "node": "Montagem pronta?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montagem pronta?": {
+        "main": [
+          [
+            {
+              "node": "Linhas dos vídeos",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Esperar montagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "nodeGroups": [],
@@ -2649,8 +2983,8 @@
     "name": null,
     "description": null,
     "autosaved": false,
-    "createdAt": "2026-10-05T15:24:50.453Z",
-    "updatedAt": "2026-10-05T15:24:50.453Z"
+    "createdAt": "2026-10-09T17:45:59.815Z",
+    "updatedAt": "2026-10-09T17:45:59.815Z"
   },
   "tags": []
 }
