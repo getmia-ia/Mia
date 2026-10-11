@@ -1,0 +1,352 @@
+{
+  "updatedAt": "2026-10-10T20:04:35.565Z",
+  "createdAt": "2026-10-10T20:04:35.565Z",
+  "id": "KXljn5cIZqkzs4BF",
+  "name": "[TESTE] OCR validado (escaneados)",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "125bcf01-8d6d-46a0-87ee-46b0d636a825",
+      "name": "Recebe",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "b1b1903a-ca6c-494d-a8bf-cdd1ec3ec4dd",
+      "name": "Mistral OCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "onError": "continueRegularOutput",
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mistral.ai/v1/ocr",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "mistralCloudApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"mistral-ocr-latest\", document: { type: \"document_url\", document_url: $json.fileUrl }, include_image_base64: false }) }}",
+        "options": {
+          "timeout": 170000
+        }
+      },
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "V81QQS8om3rLYwbV",
+          "name": "Mistral Cloud account"
+        }
+      }
+    },
+    {
+      "id": "fa0918f2-3cb5-4644-b9f8-8526ce657652",
+      "name": "Monta pedidos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// divide o texto do OCR em blocos de até ~9000 caracteres (páginas inteiras) e monta um pedido de extração por bloco\nconst pages = (($input.first().json.pages) || []).map(p => ({ i: p.index, md: String(p.markdown || '') }));\nconst blocos = []; let b = { ini: null, fim: null, md: '' };\nfor (const p of pages) { if (b.md && (b.md.length + p.md.length) > 9000) { blocos.push(b); b = { ini: null, fim: null, md: '' }; } if (b.ini == null) b.ini = p.i; b.fim = p.i; b.md += (b.md ? '\\n\\n' : '') + p.md; }\nif (b.md) blocos.push(b);\nconst entrada = $('Recebe').first().json;\nconst SYS = 'Você extrai lançamentos de extratos e faturas bancárias brasileiras a partir de texto de OCR (markdown). Responda APENAS um JSON: ' +\n '{\"lancamentos\":[{\"data\":\"DD/MM/AAAA\"|\"DD/MM\"|null,\"descricao\":\"...\",\"valor\":123.45,\"sinal\":\"+\"|\"-\",\"parcela\":\"03/10\"|null,\"pagamento\":true|false}],' +\n '\"totais\":{\"total_fatura\":null,\"saldo_anterior\":null,\"saldo_inicial\":null,\"saldo_final\":null,\"total_entradas\":null,\"total_saidas\":null,\"vencimento\":\"DD/MM/AAAA\"|null}}. ' +\n 'REGRAS: copie datas, descrições e valores EXATAMENTE como impressos (não corrija, não invente, não some). valor é sempre positivo, com ponto decimal. ' +\n 'sinal \"-\" para compra/débito/saída/encargo e \"+\" para entrada/crédito/estorno. pagamento=true só para linhas de PAGAMENTO DE FATURA ANTERIOR/pagamento recebido. ' +\n 'Ignore cabeçalhos, rodapés, saldos do dia, subtotais e linhas de resumo (não são lançamentos). data=null se a linha não traz data (será herdada da anterior). ' +\n 'Em totais, preencha só o que estiver IMPRESSO neste trecho (total da fatura, saldos inicial/final/anterior, total de entradas/saídas, vencimento); senão null. Sem explicações.';\nreturn blocos.map((x, k) => ({ json: { k, body: { model: 'anthropic/claude-haiku-4.5', temperature: 0, max_tokens: 6000, response_format: { type: 'json_object' },\n  messages: [{ role: 'system', content: SYS }, { role: 'user', content: `Documento: ${entrada.tipo === 'cartao' ? 'fatura de cartão' : 'extrato de conta'} (${entrada.banco || 'banco não informado'}). Parte ${k + 1} de ${blocos.length} (páginas ${x.ini + 1} a ${x.fim + 1}).\\n\\n${x.md}` }] } } }));"
+      }
+    },
+    {
+      "id": "41884d2d-b712-4f06-97fc-78223baa1ce9",
+      "name": "Extrai (Haiku, em paralelo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput",
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 8,
+              "batchInterval": 0
+            }
+          },
+          "timeout": 90000
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "UwoliaFEOcW8kEZD",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "id": "09020e0b-7716-47dd-a40e-f67803a93d88",
+      "name": "Verifica (provas)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// VERIFICAÇÃO POR CÓDIGO (as mesmas provas do serviço, contra o texto do OCR). O LLM só propõe; aqui se decide.\nconst entrada = $('Recebe').first().json, tipo = entrada.tipo === 'cartao' ? 'cartao' : 'extrato', pd = String(entrada.paymentDate || '');\nconst paginas = (($('Mistral OCR').first().json.pages) || []).map(p => String(p.markdown || ''));\nconst sa = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\\s+/g, ' ');\nconst T = sa(paginas.join('\\n'));\nconst r2 = n => Math.round(n * 100) / 100;\nlet lanc = [], tot = {}; const falhas = [];\n$input.all().forEach((r, k) => {\n  try { let t = r.json?.choices?.[0]?.message?.content ?? ''; t = String(t).replace(/^```(?:json)?/i, '').replace(/```$/, '').trim(); const o = JSON.parse(t);\n    (o.lancamentos || []).forEach(x => lanc.push(x)); for (const [a, b] of Object.entries(o.totais || {})) if (b != null && tot[a] == null) tot[a] = b; } catch (e) { falhas.push(`bloco ${k + 1}: resposta sem JSON válido`); }\n});\nif (falhas.length || !lanc.length) return [{ json: { status: 'revisar', motivo: falhas[0] || 'OCR/LLM não devolveu lançamentos', origem: 'ocr' } }];\n// ano de referência: vencimento impresso > mês escolhido\nconst venc = tot.vencimento && /^\\d{2}\\/\\d{2}\\/\\d{4}$/.test(tot.vencimento) ? tot.vencimento.split('/').reverse().join('-') : (pd || null);\nconst refA = venc ? +venc.slice(0, 4) : new Date().getFullYear(), refM = venc ? +venc.slice(5, 7) : 12;\nconst MES = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };\nconst brl = v => { const [i, d] = Math.abs(v).toFixed(2).split('.'); return [`${i.replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.')},${d}`, `${i},${d}`]; };\nconst valorNoTexto = v => brl(v).some(f => new RegExp(`(^|[^\\\\d.,])${f.replace(/[.,]/g, m => '\\\\' + m)}($|[^\\\\d])`).test(T));\nconst dataNoTexto = (dd, mm, aaaa) => new RegExp(`(^|[^\\\\d])0?${+dd}[/.\\\\-]0?${+mm}([/.\\\\-]|[^\\\\d]|$)`).test(T) || new RegExp(`(^|[^\\\\d])0?${+dd} ?(de )?${Object.keys(MES)[+mm - 1]}`).test(T);\nlet ultima = null; const linhas = [];\nfor (const x of lanc) {\n  let d = null, explicita = false, dd, mm, aa = null;\n  const s = String(x.data || '').trim(), m1 = s.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})(?:[\\/.\\-](\\d{2,4}))?$/);\n  if (m1) { dd = +m1[1]; mm = +m1[2]; aa = m1[3] ? (m1[3].length === 2 ? 2000 + +m1[3] : +m1[3]) : null; explicita = true; ultima = { dd, mm, aa }; }\n  else if (ultima) { dd = ultima.dd; mm = ultima.mm; aa = ultima.aa; }\n  if (dd) { const ano = aa ?? (mm > refM ? refA - 1 : refA); d = `${ano}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`; }\n  const valor = Math.abs(Number(x.valor)); if (!(valor > 0)) { falhas.push('lançamento com valor inválido'); continue; }\n  linhas.push({ d, dd, mm, explicita, valor, desc: String(x.descricao || '').trim(), receita: x.sinal === '+', parcela: x.parcela || null, pagamento: !!x.pagamento });\n}\nconst semData = linhas.filter(l => !l.d).length, semValor = linhas.filter(l => !valorNoTexto(l.valor)).length, semDesc = linhas.filter(l => l.desc.replace(/[^A-Za-z0-9]/g, '').length < 2).length;\nconst semDataTxt = linhas.filter(l => l.explicita && !dataNoTexto(l.dd, l.mm)).length;\nif (semData) falhas.push(`${semData} lançamento(s) sem data`); if (semValor) falhas.push(`${semValor} valor(es) não encontrado(s) no texto do OCR`);\nif (semDesc) falhas.push(`${semDesc} descrição(ões) vazia(s)`); if (semDataTxt) falhas.push(`${semDataTxt} data(s) não encontrada(s) no texto do OCR`);\n// os totais impressos também precisam estar no texto\nfor (const k of ['total_fatura', 'saldo_anterior', 'saldo_inicial', 'saldo_final', 'total_entradas', 'total_saidas']) if (tot[k] != null && !valorNoTexto(Number(tot[k]))) tot[k] = null;\nconst soma = f => r2(linhas.filter(f).reduce((a, l) => a + l.valor, 0));\nconst desp = soma(l => !l.receita), rec = soma(l => l.receita), despSP = soma(l => !l.receita && !l.pagamento), recSP = soma(l => l.receita && !l.pagamento);\nlet esperado = null, obtido = null, fonte = 'sem total conferível', ok = false;\nconst cand = [];\nif (tipo === 'cartao') {\n  const T0 = tot.total_fatura != null ? Number(tot.total_fatura) : null, SA = tot.saldo_anterior != null ? Number(tot.saldo_anterior) : null;\n  if (T0 != null) { cand.push([T0, 'total da fatura']); if (SA != null) cand.push([r2(T0 - SA), 'total da fatura − saldo anterior']); }\n  for (const [v, nome] of cand) for (const [liq, rot] of [[r2(desp - rec), 'Σ(compras − créditos)'], [r2(despSP - recSP), 'Σ(compras − créditos) sem pagamento anterior']]) if (!ok && Math.abs(liq - v) < 0.005) { ok = true; esperado = v; obtido = liq; fonte = `OCR: ${rot} == ${nome}`; }\n  if (!ok && cand.length) { esperado = cand[0][0]; obtido = r2(despSP - recSP); fonte = 'OCR: Σ lançamentos ≠ ' + cand[0][1]; }\n} else if (tot.saldo_inicial != null && tot.saldo_final != null) {\n  esperado = Number(tot.saldo_final); obtido = r2(Number(tot.saldo_inicial) + rec - desp); ok = Math.abs(obtido - esperado) < 0.005; fonte = 'OCR: saldo inicial + entradas − saídas == saldo final';\n} else if (tot.total_entradas != null && tot.total_saidas != null) {\n  ok = Math.abs(rec - Number(tot.total_entradas)) < 0.005 && Math.abs(desp - Number(tot.total_saidas)) < 0.005; esperado = r2(Number(tot.total_entradas) - Number(tot.total_saidas)); obtido = r2(rec - desp); fonte = 'OCR: Σ entradas e Σ saídas == totais impressos';\n}\nif (!ok) falhas.push(esperado == null ? 'documento sem total conferível no OCR' : `total não fecha (esperado ${esperado}, obtido ${obtido})`);\nif (falhas.length) return [{ json: { status: 'revisar', motivo: falhas[0], origem: 'ocr', checksum: { esperado, obtido, ok: false, fonte } } }];\nconst dmy = iso => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`, datas = linhas.map(l => l.d).sort();\nreturn [{ json: { status: 'ok', origem: 'ocr', modelo: 'OCR + LLM + verificação por código: ' + fonte, modoTexto: 'ocr',\n  checksum: { esperado, obtido, ok: true, fonte, diferenca: r2(obtido - esperado), exato: Math.abs(obtido - esperado) < 0.005 },\n  resumo: { n: linhas.length, despesas: desp, receitas: rec, dataMin: datas[0], dataMax: datas.at(-1) },\n  output: linhas.map(l => ({ d: dmy(l.d), t: l.desc, v: l.valor, s: l.receita ? '+' : '-', c: null, p: l.parcela })), avisos: [], tempos: {} } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Recebe": {
+      "main": [
+        [
+          {
+            "node": "Mistral OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral OCR": {
+      "main": [
+        [
+          {
+            "node": "Monta pedidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta pedidos": {
+      "main": [
+        [
+          {
+            "node": "Extrai (Haiku, em paralelo)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai (Haiku, em paralelo)": {
+      "main": [
+        [
+          {
+            "node": "Verifica (provas)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveDataSuccessExecution": "none",
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "2c3f4afa-5243-4c3c-8a47-636241727c96",
+  "activeVersionId": "2c3f4afa-5243-4c3c-8a47-636241727c96",
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "KXljn5cIZqkzs4BF",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-10T20:04:35.565Z",
+      "updatedAt": "2026-10-10T20:04:35.565Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "2c3f4afa-5243-4c3c-8a47-636241727c96",
+    "workflowId": "KXljn5cIZqkzs4BF",
+    "nodes": [
+      {
+        "id": "125bcf01-8d6d-46a0-87ee-46b0d636a825",
+        "name": "Recebe",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "b1b1903a-ca6c-494d-a8bf-cdd1ec3ec4dd",
+        "name": "Mistral OCR",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1500,
+        "onError": "continueRegularOutput",
+        "position": [
+          240,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.mistral.ai/v1/ocr",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "mistralCloudApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ model: \"mistral-ocr-latest\", document: { type: \"document_url\", document_url: $json.fileUrl }, include_image_base64: false }) }}",
+          "options": {
+            "timeout": 170000
+          }
+        },
+        "credentials": {
+          "mistralCloudApi": {
+            "id": "V81QQS8om3rLYwbV",
+            "name": "Mistral Cloud account"
+          }
+        }
+      },
+      {
+        "id": "fa0918f2-3cb5-4644-b9f8-8526ce657652",
+        "name": "Monta pedidos",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          0
+        ],
+        "parameters": {
+          "jsCode": "// divide o texto do OCR em blocos de até ~9000 caracteres (páginas inteiras) e monta um pedido de extração por bloco\nconst pages = (($input.first().json.pages) || []).map(p => ({ i: p.index, md: String(p.markdown || '') }));\nconst blocos = []; let b = { ini: null, fim: null, md: '' };\nfor (const p of pages) { if (b.md && (b.md.length + p.md.length) > 9000) { blocos.push(b); b = { ini: null, fim: null, md: '' }; } if (b.ini == null) b.ini = p.i; b.fim = p.i; b.md += (b.md ? '\\n\\n' : '') + p.md; }\nif (b.md) blocos.push(b);\nconst entrada = $('Recebe').first().json;\nconst SYS = 'Você extrai lançamentos de extratos e faturas bancárias brasileiras a partir de texto de OCR (markdown). Responda APENAS um JSON: ' +\n '{\"lancamentos\":[{\"data\":\"DD/MM/AAAA\"|\"DD/MM\"|null,\"descricao\":\"...\",\"valor\":123.45,\"sinal\":\"+\"|\"-\",\"parcela\":\"03/10\"|null,\"pagamento\":true|false}],' +\n '\"totais\":{\"total_fatura\":null,\"saldo_anterior\":null,\"saldo_inicial\":null,\"saldo_final\":null,\"total_entradas\":null,\"total_saidas\":null,\"vencimento\":\"DD/MM/AAAA\"|null}}. ' +\n 'REGRAS: copie datas, descrições e valores EXATAMENTE como impressos (não corrija, não invente, não some). valor é sempre positivo, com ponto decimal. ' +\n 'sinal \"-\" para compra/débito/saída/encargo e \"+\" para entrada/crédito/estorno. pagamento=true só para linhas de PAGAMENTO DE FATURA ANTERIOR/pagamento recebido. ' +\n 'Ignore cabeçalhos, rodapés, saldos do dia, subtotais e linhas de resumo (não são lançamentos). data=null se a linha não traz data (será herdada da anterior). ' +\n 'Em totais, preencha só o que estiver IMPRESSO neste trecho (total da fatura, saldos inicial/final/anterior, total de entradas/saídas, vencimento); senão null. Sem explicações.';\nreturn blocos.map((x, k) => ({ json: { k, body: { model: 'anthropic/claude-haiku-4.5', temperature: 0, max_tokens: 6000, response_format: { type: 'json_object' },\n  messages: [{ role: 'system', content: SYS }, { role: 'user', content: `Documento: ${entrada.tipo === 'cartao' ? 'fatura de cartão' : 'extrato de conta'} (${entrada.banco || 'banco não informado'}). Parte ${k + 1} de ${blocos.length} (páginas ${x.ini + 1} a ${x.fim + 1}).\\n\\n${x.md}` }] } } }));"
+        }
+      },
+      {
+        "id": "41884d2d-b712-4f06-97fc-78223baa1ce9",
+        "name": "Extrai (Haiku, em paralelo)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "onError": "continueRegularOutput",
+        "position": [
+          720,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://openrouter.ai/api/v1/chat/completions",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "openRouterApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.body) }}",
+          "options": {
+            "batching": {
+              "batch": {
+                "batchSize": 8,
+                "batchInterval": 0
+              }
+            },
+            "timeout": 90000
+          }
+        },
+        "credentials": {
+          "openRouterApi": {
+            "id": "UwoliaFEOcW8kEZD",
+            "name": "OpenRouter account"
+          }
+        }
+      },
+      {
+        "id": "09020e0b-7716-47dd-a40e-f67803a93d88",
+        "name": "Verifica (provas)",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          960,
+          0
+        ],
+        "parameters": {
+          "jsCode": "// VERIFICAÇÃO POR CÓDIGO (as mesmas provas do serviço, contra o texto do OCR). O LLM só propõe; aqui se decide.\nconst entrada = $('Recebe').first().json, tipo = entrada.tipo === 'cartao' ? 'cartao' : 'extrato', pd = String(entrada.paymentDate || '');\nconst paginas = (($('Mistral OCR').first().json.pages) || []).map(p => String(p.markdown || ''));\nconst sa = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\\s+/g, ' ');\nconst T = sa(paginas.join('\\n'));\nconst r2 = n => Math.round(n * 100) / 100;\nlet lanc = [], tot = {}; const falhas = [];\n$input.all().forEach((r, k) => {\n  try { let t = r.json?.choices?.[0]?.message?.content ?? ''; t = String(t).replace(/^```(?:json)?/i, '').replace(/```$/, '').trim(); const o = JSON.parse(t);\n    (o.lancamentos || []).forEach(x => lanc.push(x)); for (const [a, b] of Object.entries(o.totais || {})) if (b != null && tot[a] == null) tot[a] = b; } catch (e) { falhas.push(`bloco ${k + 1}: resposta sem JSON válido`); }\n});\nif (falhas.length || !lanc.length) return [{ json: { status: 'revisar', motivo: falhas[0] || 'OCR/LLM não devolveu lançamentos', origem: 'ocr' } }];\n// ano de referência: vencimento impresso > mês escolhido\nconst venc = tot.vencimento && /^\\d{2}\\/\\d{2}\\/\\d{4}$/.test(tot.vencimento) ? tot.vencimento.split('/').reverse().join('-') : (pd || null);\nconst refA = venc ? +venc.slice(0, 4) : new Date().getFullYear(), refM = venc ? +venc.slice(5, 7) : 12;\nconst MES = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };\nconst brl = v => { const [i, d] = Math.abs(v).toFixed(2).split('.'); return [`${i.replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.')},${d}`, `${i},${d}`]; };\nconst valorNoTexto = v => brl(v).some(f => new RegExp(`(^|[^\\\\d.,])${f.replace(/[.,]/g, m => '\\\\' + m)}($|[^\\\\d])`).test(T));\nconst dataNoTexto = (dd, mm, aaaa) => new RegExp(`(^|[^\\\\d])0?${+dd}[/.\\\\-]0?${+mm}([/.\\\\-]|[^\\\\d]|$)`).test(T) || new RegExp(`(^|[^\\\\d])0?${+dd} ?(de )?${Object.keys(MES)[+mm - 1]}`).test(T);\nlet ultima = null; const linhas = [];\nfor (const x of lanc) {\n  let d = null, explicita = false, dd, mm, aa = null;\n  const s = String(x.data || '').trim(), m1 = s.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})(?:[\\/.\\-](\\d{2,4}))?$/);\n  if (m1) { dd = +m1[1]; mm = +m1[2]; aa = m1[3] ? (m1[3].length === 2 ? 2000 + +m1[3] : +m1[3]) : null; explicita = true; ultima = { dd, mm, aa }; }\n  else if (ultima) { dd = ultima.dd; mm = ultima.mm; aa = ultima.aa; }\n  if (dd) { const ano = aa ?? (mm > refM ? refA - 1 : refA); d = `${ano}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`; }\n  const valor = Math.abs(Number(x.valor)); if (!(valor > 0)) { falhas.push('lançamento com valor inválido'); continue; }\n  linhas.push({ d, dd, mm, explicita, valor, desc: String(x.descricao || '').trim(), receita: x.sinal === '+', parcela: x.parcela || null, pagamento: !!x.pagamento });\n}\nconst semData = linhas.filter(l => !l.d).length, semValor = linhas.filter(l => !valorNoTexto(l.valor)).length, semDesc = linhas.filter(l => l.desc.replace(/[^A-Za-z0-9]/g, '').length < 2).length;\nconst semDataTxt = linhas.filter(l => l.explicita && !dataNoTexto(l.dd, l.mm)).length;\nif (semData) falhas.push(`${semData} lançamento(s) sem data`); if (semValor) falhas.push(`${semValor} valor(es) não encontrado(s) no texto do OCR`);\nif (semDesc) falhas.push(`${semDesc} descrição(ões) vazia(s)`); if (semDataTxt) falhas.push(`${semDataTxt} data(s) não encontrada(s) no texto do OCR`);\n// os totais impressos também precisam estar no texto\nfor (const k of ['total_fatura', 'saldo_anterior', 'saldo_inicial', 'saldo_final', 'total_entradas', 'total_saidas']) if (tot[k] != null && !valorNoTexto(Number(tot[k]))) tot[k] = null;\nconst soma = f => r2(linhas.filter(f).reduce((a, l) => a + l.valor, 0));\nconst desp = soma(l => !l.receita), rec = soma(l => l.receita), despSP = soma(l => !l.receita && !l.pagamento), recSP = soma(l => l.receita && !l.pagamento);\nlet esperado = null, obtido = null, fonte = 'sem total conferível', ok = false;\nconst cand = [];\nif (tipo === 'cartao') {\n  const T0 = tot.total_fatura != null ? Number(tot.total_fatura) : null, SA = tot.saldo_anterior != null ? Number(tot.saldo_anterior) : null;\n  if (T0 != null) { cand.push([T0, 'total da fatura']); if (SA != null) cand.push([r2(T0 - SA), 'total da fatura − saldo anterior']); }\n  for (const [v, nome] of cand) for (const [liq, rot] of [[r2(desp - rec), 'Σ(compras − créditos)'], [r2(despSP - recSP), 'Σ(compras − créditos) sem pagamento anterior']]) if (!ok && Math.abs(liq - v) < 0.005) { ok = true; esperado = v; obtido = liq; fonte = `OCR: ${rot} == ${nome}`; }\n  if (!ok && cand.length) { esperado = cand[0][0]; obtido = r2(despSP - recSP); fonte = 'OCR: Σ lançamentos ≠ ' + cand[0][1]; }\n} else if (tot.saldo_inicial != null && tot.saldo_final != null) {\n  esperado = Number(tot.saldo_final); obtido = r2(Number(tot.saldo_inicial) + rec - desp); ok = Math.abs(obtido - esperado) < 0.005; fonte = 'OCR: saldo inicial + entradas − saídas == saldo final';\n} else if (tot.total_entradas != null && tot.total_saidas != null) {\n  ok = Math.abs(rec - Number(tot.total_entradas)) < 0.005 && Math.abs(desp - Number(tot.total_saidas)) < 0.005; esperado = r2(Number(tot.total_entradas) - Number(tot.total_saidas)); obtido = r2(rec - desp); fonte = 'OCR: Σ entradas e Σ saídas == totais impressos';\n}\nif (!ok) falhas.push(esperado == null ? 'documento sem total conferível no OCR' : `total não fecha (esperado ${esperado}, obtido ${obtido})`);\nif (falhas.length) return [{ json: { status: 'revisar', motivo: falhas[0], origem: 'ocr', checksum: { esperado, obtido, ok: false, fonte } } }];\nconst dmy = iso => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`, datas = linhas.map(l => l.d).sort();\nreturn [{ json: { status: 'ok', origem: 'ocr', modelo: 'OCR + LLM + verificação por código: ' + fonte, modoTexto: 'ocr',\n  checksum: { esperado, obtido, ok: true, fonte, diferenca: r2(obtido - esperado), exato: Math.abs(obtido - esperado) < 0.005 },\n  resumo: { n: linhas.length, despesas: desp, receitas: rec, dataMin: datas[0], dataMax: datas.at(-1) },\n  output: linhas.map(l => ({ d: dmy(l.d), t: l.desc, v: l.valor, s: l.receita ? '+' : '-', c: null, p: l.parcela })), avisos: [], tempos: {} } }];"
+        }
+      }
+    ],
+    "connections": {
+      "Recebe": {
+        "main": [
+          [
+            {
+              "node": "Mistral OCR",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mistral OCR": {
+        "main": [
+          [
+            {
+              "node": "Monta pedidos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta pedidos": {
+        "main": [
+          [
+            {
+              "node": "Extrai (Haiku, em paralelo)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai (Haiku, em paralelo)": {
+        "main": [
+          [
+            {
+              "node": "Verifica (provas)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-10-10T20:04:35.565Z",
+    "updatedAt": "2026-10-10T20:04:35.565Z"
+  },
+  "tags": []
+}
