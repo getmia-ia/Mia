@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-09T19:46:19.048Z",
+  "updatedAt": "2026-10-14T14:10:34.854Z",
   "createdAt": "2026-06-16T20:47:04.888Z",
   "id": "iAASOPk59fX2mlWo",
   "name": "Monteiro Ramalho - 3.3 - Disparo Inicial",
@@ -35,7 +35,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://graph.facebook.com/v22.0/1086153471257433/messages",
+        "url": "=https://graph.facebook.com/v22.0/1086153471257433/messages",
         "authentication": "***REMOVIDO***",
         "genericAuthType": "***REMOVIDO***",
         "sendHeaders": "***REMOVIDO***",
@@ -695,6 +695,16 @@
       "notes": "Sucesso se WhatsApp OU e-mail funcionou (não precisa dos dois)."
     },
     {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      },
       "id": "962ef142-d52a-4be1-af0d-777472cfa365",
       "name": "Todo dia útil, 9h",
       "type": "n8n-nodes-base.scheduleTrigger",
@@ -703,19 +713,10 @@
         -496,
         208
       ],
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "expression": "0 9 * * 1-5",
-              "field": "cronExpression"
-            }
-          ]
-        }
-      },
       "notes": "Disparo automático: segunda a sexta, às 9h (horário de Brasília). Não existe mais disparo manual pelo sistema."
     },
     {
+      "parameters": {},
       "id": "0b67d51f-0234-4015-94ba-15e6f75b0b55",
       "name": "Teste manual (só leads de teste)",
       "type": "n8n-nodes-base.manualTrigger",
@@ -724,10 +725,16 @@
         -496,
         368
       ],
-      "parameters": {},
       "notes": "Só pra testar aqui no editor. Rodando por este gatilho, entram apenas leads de teste (origem 'teste'), nunca prospect de verdade."
     },
     {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Disparo diário: escolhe quem recebe a 1ª mensagem hoje e já \"reserva\" cada um\n-- (marca como 'enviando'), pra ninguém receber duas vezes.\n--\n-- Quem entra: os leads da etapa Enrich com telefone ou e-mail, pela mesma regra da\n-- fila de disparo (empresa em Enrich, sem bloqueio, não arquivada).\n-- Quem já foi enviado fica de fora. Quem falhou é retentado, até 3 tentativas.\n-- Máximo por dia: 70 (mude o \"limit\" abaixo se precisar). Os mais antigos vão primeiro.\n--\n-- $1 é true na rodada agendada. Quando alguém roda na mão pelo editor, é false e só\n-- entram os leads de teste (origem 'teste'), pra um clique sem querer não mandar\n-- mensagem pra prospect de verdade.\nwith candidatos as (\n  select f.lead_id\n  from public.fila_aprovacao_disparo f\n  join public.leads_tributario l on l.id = f.lead_id\n  where (l.origem = 'teste' or $1::boolean)\n    and (\n          l.envio_status is null\n       or (l.envio_status in ('falhou', 'enviando')\n           and l.envio_tentativas < 3\n           and (l.envio_status = 'falhou' or l.envio_em < now() - interval '30 minutes'))\n        )\n  order by f.dias_na_fila desc, l.criado_em\n  limit 70\n),\nreservados as (\n  update public.leads_tributario l\n     set envio_status           = 'enviando',\n         envio_em               = now(),\n         envio_tentativas       = l.envio_tentativas + 1,\n         disparo_solicitado_em  = now(),\n         disparo_solicitado_por = 'disparo diário automático'\n    from candidatos c\n   where l.id = c.lead_id\n     and (\n           l.envio_status is null\n        or l.envio_status = 'falhou'\n        or (l.envio_status = 'enviando' and l.envio_em < now() - interval '30 minutes')\n         )\n  returning l.id\n)\nselect f.*\n  from public.fila_aprovacao_disparo f\n  join reservados r on r.id = f.lead_id\n order by f.dias_na_fila desc;\n",
+        "options": {
+          "queryReplacement": "={{ [$execution.mode === 'production' && $('Todo dia útil, 9h').isExecuted] }}"
+        }
+      },
       "id": "37ff719c-8885-4e5f-9996-07226fb052d6",
       "name": "Reserva os leads de hoje",
       "type": "n8n-nodes-base.postgres",
@@ -736,13 +743,6 @@
         -96,
         288
       ],
-      "parameters": {
-        "operation": "executeQuery",
-        "options": {
-          "queryReplacement": "={{ [$execution.mode === 'production' && $('Todo dia útil, 9h').isExecuted] }}"
-        },
-        "query": "-- Disparo diário: escolhe quem recebe a 1ª mensagem hoje e já \"reserva\" cada um\n-- (marca como 'enviando'), pra ninguém receber duas vezes.\n--\n-- Quem entra: os leads da etapa Enrich com telefone ou e-mail, pela mesma regra da\n-- fila de disparo (empresa em Enrich, sem bloqueio, não arquivada).\n-- Quem já foi enviado fica de fora. Quem falhou é retentado, até 3 tentativas.\n-- Máximo por dia: 25 (mude o \"limit\" abaixo se precisar). Os mais antigos vão primeiro.\n--\n-- $1 é true na rodada agendada. Quando alguém roda na mão pelo editor, é false e só\n-- entram os leads de teste (origem 'teste'), pra um clique sem querer não mandar\n-- mensagem pra prospect de verdade.\nwith candidatos as (\n  select f.lead_id\n  from public.fila_aprovacao_disparo f\n  join public.leads_tributario l on l.id = f.lead_id\n  where (l.origem = 'teste' or $1::boolean)\n    and (\n          l.envio_status is null\n       or (l.envio_status in ('falhou', 'enviando')\n           and l.envio_tentativas < 3\n           and (l.envio_status = 'falhou' or l.envio_em < now() - interval '30 minutes'))\n        )\n  order by f.dias_na_fila desc, l.criado_em\n  limit 25\n),\nreservados as (\n  update public.leads_tributario l\n     set envio_status           = 'enviando',\n         envio_em               = now(),\n         envio_tentativas       = l.envio_tentativas + 1,\n         disparo_solicitado_em  = now(),\n         disparo_solicitado_por = 'disparo diário automático'\n    from candidatos c\n   where l.id = c.lead_id\n     and (\n           l.envio_status is null\n        or l.envio_status = 'falhou'\n        or (l.envio_status = 'enviando' and l.envio_em < now() - interval '30 minutes')\n         )\n  returning l.id\n)\nselect f.*\n  from public.fila_aprovacao_disparo f\n  join reservados r on r.id = f.lead_id\n order by f.dias_na_fila desc;\n"
-      },
       "credentials": {
         "postgres": {
           "id": "Hr0gqOEXHC8efR0Q",
@@ -752,14 +752,6 @@
       "notes": "Escolhe quem recebe a 1ª mensagem hoje (etapa Enrich, com telefone ou e-mail, mais antigos primeiro, no máximo 25) e marca cada um como 'enviando' antes de mandar, pra ninguém receber duas vezes. Quem falhou é retentado até 3 vezes."
     },
     {
-      "id": "f50a12f7-50f8-4769-9ff5-25551d05705c",
-      "name": "Tem telefone? (guarda histórico)",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.3,
-      "position": [
-        3520,
-        224
-      ],
       "parameters": {
         "conditions": {
           "combinator": "and",
@@ -784,6 +776,14 @@
         },
         "options": {}
       },
+      "id": "f50a12f7-50f8-4769-9ff5-25551d05705c",
+      "name": "Tem telefone? (guarda histórico)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3520,
+        224
+      ],
       "notes": "Histórico de WhatsApp e memória da IA são ligados ao telefone. Lead só com e-mail não grava nenhum dos dois (senão ficava uma conversa com telefone vazio), mas continua sendo movido pra Disparo inicial."
     }
   ],
@@ -1195,8 +1195,8 @@
     "aiBuilderAssisted": true,
     "builderVariant": "mcp"
   },
-  "versionId": "63f71565-b9cb-431c-9b2d-4a5af748c58e",
-  "activeVersionId": "63f71565-b9cb-431c-9b2d-4a5af748c58e",
+  "versionId": "eb9a245d-0e89-4294-80fe-4dcec9bc2615",
+  "activeVersionId": "eb9a245d-0e89-4294-80fe-4dcec9bc2615",
   "triggerCount": 1,
   "shared": [
     {
@@ -1208,7 +1208,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "63f71565-b9cb-431c-9b2d-4a5af748c58e",
+    "versionId": "eb9a245d-0e89-4294-80fe-4dcec9bc2615",
     "workflowId": "iAASOPk59fX2mlWo",
     "nodes": [
       {
@@ -1240,7 +1240,7 @@
       {
         "parameters": {
           "method": "POST",
-          "url": "https://graph.facebook.com/v22.0/1086153471257433/messages",
+          "url": "=https://graph.facebook.com/v22.0/1086153471257433/messages",
           "authentication": "***REMOVIDO***",
           "genericAuthType": "***REMOVIDO***",
           "sendHeaders": "***REMOVIDO***",
@@ -1900,6 +1900,16 @@
         "notes": "Sucesso se WhatsApp OU e-mail funcionou (não precisa dos dois)."
       },
       {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 9 * * 1-5"
+              }
+            ]
+          }
+        },
         "id": "962ef142-d52a-4be1-af0d-777472cfa365",
         "name": "Todo dia útil, 9h",
         "type": "n8n-nodes-base.scheduleTrigger",
@@ -1908,19 +1918,10 @@
           -496,
           208
         ],
-        "parameters": {
-          "rule": {
-            "interval": [
-              {
-                "expression": "0 9 * * 1-5",
-                "field": "cronExpression"
-              }
-            ]
-          }
-        },
         "notes": "Disparo automático: segunda a sexta, às 9h (horário de Brasília). Não existe mais disparo manual pelo sistema."
       },
       {
+        "parameters": {},
         "id": "0b67d51f-0234-4015-94ba-15e6f75b0b55",
         "name": "Teste manual (só leads de teste)",
         "type": "n8n-nodes-base.manualTrigger",
@@ -1929,10 +1930,16 @@
           -496,
           368
         ],
-        "parameters": {},
         "notes": "Só pra testar aqui no editor. Rodando por este gatilho, entram apenas leads de teste (origem 'teste'), nunca prospect de verdade."
       },
       {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- Disparo diário: escolhe quem recebe a 1ª mensagem hoje e já \"reserva\" cada um\n-- (marca como 'enviando'), pra ninguém receber duas vezes.\n--\n-- Quem entra: os leads da etapa Enrich com telefone ou e-mail, pela mesma regra da\n-- fila de disparo (empresa em Enrich, sem bloqueio, não arquivada).\n-- Quem já foi enviado fica de fora. Quem falhou é retentado, até 3 tentativas.\n-- Máximo por dia: 70 (mude o \"limit\" abaixo se precisar). Os mais antigos vão primeiro.\n--\n-- $1 é true na rodada agendada. Quando alguém roda na mão pelo editor, é false e só\n-- entram os leads de teste (origem 'teste'), pra um clique sem querer não mandar\n-- mensagem pra prospect de verdade.\nwith candidatos as (\n  select f.lead_id\n  from public.fila_aprovacao_disparo f\n  join public.leads_tributario l on l.id = f.lead_id\n  where (l.origem = 'teste' or $1::boolean)\n    and (\n          l.envio_status is null\n       or (l.envio_status in ('falhou', 'enviando')\n           and l.envio_tentativas < 3\n           and (l.envio_status = 'falhou' or l.envio_em < now() - interval '30 minutes'))\n        )\n  order by f.dias_na_fila desc, l.criado_em\n  limit 70\n),\nreservados as (\n  update public.leads_tributario l\n     set envio_status           = 'enviando',\n         envio_em               = now(),\n         envio_tentativas       = l.envio_tentativas + 1,\n         disparo_solicitado_em  = now(),\n         disparo_solicitado_por = 'disparo diário automático'\n    from candidatos c\n   where l.id = c.lead_id\n     and (\n           l.envio_status is null\n        or l.envio_status = 'falhou'\n        or (l.envio_status = 'enviando' and l.envio_em < now() - interval '30 minutes')\n         )\n  returning l.id\n)\nselect f.*\n  from public.fila_aprovacao_disparo f\n  join reservados r on r.id = f.lead_id\n order by f.dias_na_fila desc;\n",
+          "options": {
+            "queryReplacement": "={{ [$execution.mode === 'production' && $('Todo dia útil, 9h').isExecuted] }}"
+          }
+        },
         "id": "37ff719c-8885-4e5f-9996-07226fb052d6",
         "name": "Reserva os leads de hoje",
         "type": "n8n-nodes-base.postgres",
@@ -1941,13 +1948,6 @@
           -96,
           288
         ],
-        "parameters": {
-          "operation": "executeQuery",
-          "options": {
-            "queryReplacement": "={{ [$execution.mode === 'production' && $('Todo dia útil, 9h').isExecuted] }}"
-          },
-          "query": "-- Disparo diário: escolhe quem recebe a 1ª mensagem hoje e já \"reserva\" cada um\n-- (marca como 'enviando'), pra ninguém receber duas vezes.\n--\n-- Quem entra: os leads da etapa Enrich com telefone ou e-mail, pela mesma regra da\n-- fila de disparo (empresa em Enrich, sem bloqueio, não arquivada).\n-- Quem já foi enviado fica de fora. Quem falhou é retentado, até 3 tentativas.\n-- Máximo por dia: 25 (mude o \"limit\" abaixo se precisar). Os mais antigos vão primeiro.\n--\n-- $1 é true na rodada agendada. Quando alguém roda na mão pelo editor, é false e só\n-- entram os leads de teste (origem 'teste'), pra um clique sem querer não mandar\n-- mensagem pra prospect de verdade.\nwith candidatos as (\n  select f.lead_id\n  from public.fila_aprovacao_disparo f\n  join public.leads_tributario l on l.id = f.lead_id\n  where (l.origem = 'teste' or $1::boolean)\n    and (\n          l.envio_status is null\n       or (l.envio_status in ('falhou', 'enviando')\n           and l.envio_tentativas < 3\n           and (l.envio_status = 'falhou' or l.envio_em < now() - interval '30 minutes'))\n        )\n  order by f.dias_na_fila desc, l.criado_em\n  limit 25\n),\nreservados as (\n  update public.leads_tributario l\n     set envio_status           = 'enviando',\n         envio_em               = now(),\n         envio_tentativas       = l.envio_tentativas + 1,\n         disparo_solicitado_em  = now(),\n         disparo_solicitado_por = 'disparo diário automático'\n    from candidatos c\n   where l.id = c.lead_id\n     and (\n           l.envio_status is null\n        or l.envio_status = 'falhou'\n        or (l.envio_status = 'enviando' and l.envio_em < now() - interval '30 minutes')\n         )\n  returning l.id\n)\nselect f.*\n  from public.fila_aprovacao_disparo f\n  join reservados r on r.id = f.lead_id\n order by f.dias_na_fila desc;\n"
-        },
         "credentials": {
           "postgres": {
             "id": "Hr0gqOEXHC8efR0Q",
@@ -1957,14 +1957,6 @@
         "notes": "Escolhe quem recebe a 1ª mensagem hoje (etapa Enrich, com telefone ou e-mail, mais antigos primeiro, no máximo 25) e marca cada um como 'enviando' antes de mandar, pra ninguém receber duas vezes. Quem falhou é retentado até 3 vezes."
       },
       {
-        "id": "f50a12f7-50f8-4769-9ff5-25551d05705c",
-        "name": "Tem telefone? (guarda histórico)",
-        "type": "n8n-nodes-base.if",
-        "typeVersion": 2.3,
-        "position": [
-          3520,
-          224
-        ],
         "parameters": {
           "conditions": {
             "combinator": "and",
@@ -1989,6 +1981,14 @@
           },
           "options": {}
         },
+        "id": "f50a12f7-50f8-4769-9ff5-25551d05705c",
+        "name": "Tem telefone? (guarda histórico)",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          3520,
+          224
+        ],
         "notes": "Histórico de WhatsApp e memória da IA são ligados ao telefone. Lead só com e-mail não grava nenhum dos dois (senão ficava uma conversa com telefone vazio), mas continua sendo movido pra Disparo inicial."
       }
     ],
@@ -2370,11 +2370,11 @@
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Sem telefone não grava histórico de WhatsApp (de novo)",
-    "description": "Volta a trava que impede lead só com e-mail de gravar conversa de WhatsApp e memória da IA com telefone vazio (os dois são guardados por telefone, então sem telefone não há como gravar de forma útil). O lead continua sendo movido pra Disparo inicial normalmente. É a mesma versão que passou no reteste do lead só com e-mail.",
-    "autosaved": false,
-    "createdAt": "2026-10-09T19:46:19.063Z",
-    "updatedAt": "2026-10-09T20:08:19.563Z"
+    "name": "Version eb9a245d",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-10-14T14:10:34.857Z",
+    "updatedAt": "2026-10-14T14:17:11.067Z"
   },
   "tags": []
 }
