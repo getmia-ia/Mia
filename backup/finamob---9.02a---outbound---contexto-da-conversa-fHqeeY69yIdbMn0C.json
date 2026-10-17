@@ -1,0 +1,318 @@
+{
+  "updatedAt": "2026-10-16T19:09:01.755Z",
+  "createdAt": "2026-10-16T19:08:29.179Z",
+  "id": "fHqeeY69yIdbMn0C",
+  "name": "Finamob - 9.02a - Outbound - Contexto da Conversa",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "telefone"
+            },
+            {
+              "name": "mensagem"
+            }
+          ]
+        }
+      },
+      "id": "889bf127-4bfe-4cf7-b728-7d9da2a40826",
+      "name": "Chamado pelo Agente",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -880,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with alvo as (\n  select o.id from public.outbound_contatos o\n  where o.telefone = $1 and o.etapa in ('aguardando_resposta','em_conversa','sem_resposta')\n  order by o.created_at desc limit 1\n),\nupd as (\n  update public.outbound_contatos o\n  set etapa = case when o.etapa = 'em_conversa' then o.etapa else 'em_conversa' end,\n      respondeu_em = coalesce(o.respondeu_em, now()),\n      proximo_fup_em = null, updated_at = now()\n  from alvo where o.id = alvo.id\n  returning o.*, (o.respondeu_em = now()) as primeira_resposta\n)\nselect upd.id, upd.campanha_id, upd.id_externo, upd.nome, upd.contexto, upd.fup_count, upd.primeira_resposta,\n       c.nome as campanha_nome, c.callback_url,\n       c.templates->'disparo'->>'texto' as texto_disparo\nfrom upd join public.outbound_campanhas c on c.id = upd.campanha_id;",
+        "options": {
+          "queryReplacement": "={{ $json.telefone }}"
+        }
+      },
+      "id": "b8505132-5b12-4bbf-b635-733cfeb90f30",
+      "name": "Marca em conversa",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -656,
+        112
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst r = $json || {};\nconst msg = String($('Chamado pelo Agente').first().json.mensagem || '').toLowerCase().trim();\nconst optOut = /^(pare|parar|sair|stop|cancelar|descadastrar|remover)\\b|n[aã]o (quero|tenho interesse).*(mensage|contato)|para de (me )?mandar|me (tira|remove) da lista/.test(msg);\nif (!r.id) return [{ json: { is_outbound: false, opt_out: false, contexto_outbound: '' } }];\nconst etapa = ['a mensagem inicial', 'o 1º follow-up', 'o 2º follow-up'][r.fup_count] || 'um follow-up';\nreturn [{ json: {\n  is_outbound: true,\n  opt_out: optOut,\n  outbound_contato_id: r.id,\n  campanha_id: r.campanha_id,\n  id_externo: r.id_externo,\n  callback_url: r.callback_url,\n  primeira_resposta: r.primeira_resposta === true,\n  contexto_outbound: [\n    `Este lead veio de uma campanha OUTBOUND (campanha: ${r.campanha_nome || r.campanha_id}). Fomos nós que iniciamos o contato; ele não pediu atendimento.`,\n    `Ele respondeu após ${etapa}.`,\n    r.texto_disparo ? `Mensagem que enviamos: \"${r.texto_disparo}\"` : '',\n    r.contexto ? `Contexto do lead (Caccao/SaaS): ${r.contexto}` : '',\n  ].filter(Boolean).join('\\n'),\n}}];\n"
+      },
+      "id": "8a7ceb48-e751-4d22-aa19-445ec554f153",
+      "name": "Monta contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fa0270c8-f1f8-476a-b722-bd30bccff036",
+              "leftValue": "={{ $json.opt_out }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "dfe8c1a1-1508-45fc-aa1c-e399c6303260",
+      "name": "Opt-out?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update public.outbound_contatos\nset etapa = 'opt_out', proximo_fup_em = null, updated_at = now()\nwhere telefone = (select telefone from public.outbound_contatos where id = $1::uuid);",
+        "options": {
+          "queryReplacement": "={{ $json.outbound_contato_id }}"
+        }
+      },
+      "id": "6acbc256-ab1b-477e-8750-bdcdf582a7a0",
+      "name": "Marca opt-out",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fa9ee7cf-971b-44a2-9735-c531c9ee2222",
+              "leftValue": "={{ $json.is_outbound && $json.primeira_resposta && !!$json.callback_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c4b15783-5184-4351-ba85-058ec139b37c",
+      "name": "Avisar SaaS?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.callback_url }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.N8N_CALLBACK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ evento: 'respondeu', campanha_id: $json.campanha_id, contato_id: $json.id_externo }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a5d8a5a1-0ca8-40d5-a223-12e9f9c807c3",
+      "name": "Callback respondeu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        208
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify($('Monta contexto').first().json) }}",
+        "options": {}
+      },
+      "id": "e433ed39-f8c8-4b8d-bf13-9e6a34705c2f",
+      "name": "Retorno",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        480,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Chamado pelo Agente": {
+      "main": [
+        [
+          {
+            "node": "Marca em conversa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca em conversa": {
+      "main": [
+        [
+          {
+            "node": "Monta contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta contexto": {
+      "main": [
+        [
+          {
+            "node": "Opt-out?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Opt-out?": {
+      "main": [
+        [
+          {
+            "node": "Marca opt-out",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avisar SaaS?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca opt-out": {
+      "main": [
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar SaaS?": {
+      "main": [
+        [
+          {
+            "node": "Callback respondeu",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback respondeu": {
+      "main": [
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "c5abf20f-fdef-483a-95ee-0eb51ddf0335",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "fHqeeY69yIdbMn0C",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-16T19:08:29.179Z",
+      "updatedAt": "2026-10-16T19:08:29.179Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
