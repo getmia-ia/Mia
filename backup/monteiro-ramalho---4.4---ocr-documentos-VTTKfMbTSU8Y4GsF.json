@@ -344,7 +344,7 @@
     "builderVariant": "mcp"
   },
   "versionId": "141bc80d-ba04-41fc-a123-3c055bd1e28e",
-  "activeVersionId": "46fe1b8a-0e4f-4563-adad-019b6a79d945",
+  "activeVersionId": "141bc80d-ba04-41fc-a123-3c055bd1e28e",
   "triggerCount": 1,
   "shared": [
     {
@@ -356,7 +356,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "46fe1b8a-0e4f-4563-adad-019b6a79d945",
+    "versionId": "141bc80d-ba04-41fc-a123-3c055bd1e28e",
     "workflowId": "VTTKfMbTSU8Y4GsF",
     "nodes": [
       {
@@ -542,6 +542,9 @@
         "name": "Resposta do processamento"
       },
       {
+        "parameters": {
+          "jsCode": "// Tenta identificar razão social, CNPJ e endereço da empresa direto no\n// texto deste documento (mesma lógica usada na hora de gerar a petição),\n// pra já deixar isso salvo no lead assim que o documento é processado —\n// em vez de só descobrir isso na hora de gerar a petição.\nconst texto = $json.texto || \"\";\nconst leadId = $('Webhook').first().json.body.lead_id;\nconst documentoId = $('Webhook').first().json.body.documento_id;\n\nfunction pareceCodigoDeObraOuRegistro(t) {\n  // Em obras de construção civil, a CTPS às vezes mostra o CNO (Cadastro\n  // Nacional de Obras) no lugar do nome da empresa — isso é um número de\n  // registro, não um nome de empresa. Descarta esse tipo de captura.\n  if (!t) return false;\n  const limpo = t.trim();\n  if (/^CNO\\b/i.test(limpo)) return true;\n  if (/^CEI\\b/i.test(limpo)) return true;\n  if (/^[\\d.\\-\\/\\s]+$/.test(limpo)) return true;\n  return false;\n}\n\nlet razaoSocial = null;\nconst matchEstabelecimento =\n  texto.match(/Estabelecimento\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/) ||\n  texto.match(/Raz[ãa]o\\s*Social\\s*\\n*\\s*\\*\\*(.+?)\\*\\*/i) ||\n  texto.match(/Empregador\\s*\\n*\\s*\\*\\*(.+?)\\*\\*/i);\nif (matchEstabelecimento && !pareceCodigoDeObraOuRegistro(matchEstabelecimento[1])) {\n  razaoSocial = matchEstabelecimento[1].trim();\n}\n\nlet cnpj = null;\nconst matchCnpj = texto.match(/CNPJ:?\\s*\\**\\s*([\\d.\\/-]{14,18})\\s*\\**/i);\nif (matchCnpj) cnpj = matchCnpj[1].trim();\n\nlet endereco = null;\nconst matchEndereco = texto.match(/\\*\\*CNPJ:\\s*[\\d.\\/-]+\\*\\*\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\nif (matchEndereco) endereco = matchEndereco[1].trim();\n\nreturn [{\n  json: {\n    lead_id: leadId,\n    documento_id: documentoId,\n    razao_social_extraida: razaoSocial,\n    cnpj_extraido: cnpj,\n    endereco_extraido: endereco,\n  },\n}];\n"
+        },
         "id": "1acff9d0-3c4c-4c34-abc0-53badd508c75",
         "name": "Extrai dados da empresa do documento",
         "type": "n8n-nodes-base.code",
@@ -549,12 +552,16 @@
         "position": [
           944,
           400
-        ],
-        "parameters": {
-          "jsCode": "// Tenta identificar razão social, CNPJ e endereço da empresa direto no\n// texto deste documento (mesma lógica usada na hora de gerar a petição),\n// pra já deixar isso salvo no lead assim que o documento é processado —\n// em vez de só descobrir isso na hora de gerar a petição.\nconst texto = $json.texto || \"\";\nconst leadId = $('Webhook').first().json.body.lead_id;\nconst documentoId = $('Webhook').first().json.body.documento_id;\n\nfunction pareceCodigoDeObraOuRegistro(t) {\n  // Em obras de construção civil, a CTPS às vezes mostra o CNO (Cadastro\n  // Nacional de Obras) no lugar do nome da empresa — isso é um número de\n  // registro, não um nome de empresa. Descarta esse tipo de captura.\n  if (!t) return false;\n  const limpo = t.trim();\n  if (/^CNO\\b/i.test(limpo)) return true;\n  if (/^CEI\\b/i.test(limpo)) return true;\n  if (/^[\\d.\\-\\/\\s]+$/.test(limpo)) return true;\n  return false;\n}\n\nlet razaoSocial = null;\nconst matchEstabelecimento =\n  texto.match(/Estabelecimento\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/) ||\n  texto.match(/Raz[ãa]o\\s*Social\\s*\\n*\\s*\\*\\*(.+?)\\*\\*/i) ||\n  texto.match(/Empregador\\s*\\n*\\s*\\*\\*(.+?)\\*\\*/i);\nif (matchEstabelecimento && !pareceCodigoDeObraOuRegistro(matchEstabelecimento[1])) {\n  razaoSocial = matchEstabelecimento[1].trim();\n}\n\nlet cnpj = null;\nconst matchCnpj = texto.match(/CNPJ:?\\s*\\**\\s*([\\d.\\/-]{14,18})\\s*\\**/i);\nif (matchCnpj) cnpj = matchCnpj[1].trim();\n\nlet endereco = null;\nconst matchEndereco = texto.match(/\\*\\*CNPJ:\\s*[\\d.\\/-]+\\*\\*\\s*\\n+\\s*\\*\\*(.+?)\\*\\*/);\nif (matchEndereco) endereco = matchEndereco[1].trim();\n\nreturn [{\n  json: {\n    lead_id: leadId,\n    documento_id: documentoId,\n    razao_social_extraida: razaoSocial,\n    cnpj_extraido: cnpj,\n    endereco_extraido: endereco,\n  },\n}];\n"
-        }
+        ]
       },
       {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE leads_crm\nSET triagem = COALESCE(triagem, '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object(\n  'razao_social_empresa', CASE WHEN triagem->>'razao_social_empresa' IS NULL THEN $1::text ELSE NULL END,\n  'cnpj_empresa', CASE WHEN triagem->>'cnpj_empresa' IS NULL THEN $2::text ELSE NULL END,\n  'endereco_empresa', CASE WHEN triagem->>'endereco_empresa' IS NULL THEN $3::text ELSE NULL END\n))\nWHERE id = $4::uuid\n  AND ($1::text IS NOT NULL OR $2::text IS NOT NULL OR $3::text IS NOT NULL);",
+          "options": {
+            "queryReplacement": "={{ [$json.razao_social_extraida, $json.cnpj_extraido, $json.endereco_extraido, $json.lead_id] }}"
+          }
+        },
         "id": "b7d0ac00-6ef0-470f-b4b4-29f62dbe8f70",
         "name": "Atualiza dados da empresa no lead",
         "type": "n8n-nodes-base.postgres",
@@ -563,13 +570,6 @@
           1200,
           400
         ],
-        "parameters": {
-          "operation": "executeQuery",
-          "options": {
-            "queryReplacement": "={{ [$json.razao_social_extraida, $json.cnpj_extraido, $json.endereco_extraido, $json.lead_id] }}"
-          },
-          "query": "UPDATE leads_crm\nSET triagem = COALESCE(triagem, '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object(\n  'razao_social_empresa', CASE WHEN triagem->>'razao_social_empresa' IS NULL THEN $1::text ELSE NULL END,\n  'cnpj_empresa', CASE WHEN triagem->>'cnpj_empresa' IS NULL THEN $2::text ELSE NULL END,\n  'endereco_empresa', CASE WHEN triagem->>'endereco_empresa' IS NULL THEN $3::text ELSE NULL END\n))\nWHERE id = $4::uuid\n  AND ($1::text IS NOT NULL OR $2::text IS NOT NULL OR $3::text IS NOT NULL);"
-        },
         "credentials": {
           "postgres": {
             "id": "Hr0gqOEXHC8efR0Q",
@@ -683,11 +683,11 @@
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Item 2: atribui empresa ao lead assim que documento e processado",
-    "description": "A pedido do Herik: antes, a empresa so era identificada na hora de gerar a peticao (fluxo 4.2); se faltasse, bloqueava e pedia digitacao manual no Lovable. Agora, assim que um documento e processado aqui (4.4 OCR), tenta extrair razao social/CNPJ/endereco do texto (mesma logica ja usada no fluxo 4.2, com filtro de CNO) e grava em leads_crm.triagem via Postgres, so nos campos ainda vazios - nunca sobrescreve dado ja confirmado. Reduz a chance de a peticao bloquear pedindo digitacao manual, que passa a ser ultimo caso. Query de merge testada contra lead real (Vitoria Teles) sem alterar nada, confirmando que respeita valor existente.",
-    "autosaved": false,
-    "createdAt": "2026-09-28T01:55:17.176Z",
-    "updatedAt": "2026-09-28T02:08:33.669Z"
+    "name": "Version 141bc80d",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-09-28T02:08:41.053Z",
+    "updatedAt": "2026-10-20T01:07:03.538Z"
   },
   "tags": []
 }
