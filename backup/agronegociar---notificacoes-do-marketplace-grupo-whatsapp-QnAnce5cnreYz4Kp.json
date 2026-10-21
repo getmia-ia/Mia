@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-09T12:20:02.718Z",
+  "updatedAt": "2026-10-20T17:23:58.439Z",
   "createdAt": "2026-10-08T17:00:25.955Z",
   "id": "QnAnce5cnreYz4Kp",
   "name": "AgroNegociar - Notificações do Marketplace (Grupo WhatsApp)",
@@ -7,14 +7,6 @@
   "isArchived": false,
   "nodes": [
     {
-      "id": "n1",
-      "name": "A cada 2 minutos",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [
-        0,
-        0
-      ],
       "parameters": {
         "rule": {
           "interval": [
@@ -24,18 +16,17 @@
             }
           ]
         }
-      }
+      },
+      "id": "n1",
+      "name": "A cada 2 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
     },
     {
-      "id": "n2",
-      "name": "Config",
-      "notes": "PREENCHER antes de ativar: group_jid = JID do grupo \"Mia e Maya <> AgroNegociar\" (termina em @g.us). O envio usa a credencial MIA-LOGS.",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [
-        224,
-        0
-      ],
       "parameters": {
         "assignments": {
           "assignments": [
@@ -60,22 +51,31 @@
           ]
         },
         "options": {}
-      }
+      },
+      "id": "n2",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        0
+      ],
+      "notes": "PREENCHER antes de ativar: group_jid = JID do grupo \"Mia e Maya <> AgroNegociar\" (termina em @g.us). O envio usa a credencial MIA-LOGS."
     },
     {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with ins as (\n  insert into public.notif_cursores (nome, valor)\n  select n, v from (values\n    ('chat', to_jsonb((select max(id) from an_prod_cbc.chats))),\n    ('rel', to_jsonb((select max(id) from an_prod_cbc.bid_releases))),\n    ('bid', to_jsonb((select max(id) from an_prod_cbc.bids))),\n    ('deals_desde', to_jsonb((select to_char(max(updated), 'YYYY-MM-DD HH24:MI:SS.US') from an_prod_cbc.deals)))\n  ) t(n, v)\n  on conflict (nome) do nothing\n  returning nome\n)\nselect\n  (select count(*) from ins)::int as iniciou_agora,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'chat'), (select max(id) from an_prod_cbc.chats)) as chat,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'rel'), (select max(id) from an_prod_cbc.bid_releases)) as rel,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'bid'), (select max(id) from an_prod_cbc.bids)) as bid,\n  coalesce((select valor #>> '{}' from public.notif_cursores where nome = 'deals_desde'),\n           (select to_char(max(updated), 'YYYY-MM-DD HH24:MI:SS.US') from an_prod_cbc.deals)) as deals_desde",
+        "options": {}
+      },
       "id": "n3",
       "name": "Prepara estado",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        440,
+        448,
         0
       ],
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "=with ins as (\n  insert into public.notif_cursores (nome, valor)\n  select n, v from (values\n    ('chat', to_jsonb((select max(id) from an_prod_cbc.chats))),\n    ('rel', to_jsonb((select max(id) from an_prod_cbc.bid_releases))),\n    ('bid', to_jsonb((select max(id) from an_prod_cbc.bids))),\n    ('deals_desde', to_jsonb((select to_char(max(updated), 'YYYY-MM-DD HH24:MI:SS.US') from an_prod_cbc.deals)))\n  ) t(n, v)\n  on conflict (nome) do nothing\n  returning nome\n)\nselect\n  (select count(*) from ins)::int as iniciou_agora,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'chat'), (select max(id) from an_prod_cbc.chats)) as chat,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'rel'), (select max(id) from an_prod_cbc.bid_releases)) as rel,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'bid'), (select max(id) from an_prod_cbc.bids)) as bid,\n  coalesce((select valor #>> '{}' from public.notif_cursores where nome = 'deals_desde'),\n           (select to_char(max(updated), 'YYYY-MM-DD HH24:MI:SS.US') from an_prod_cbc.deals)) as deals_desde",
-        "options": {}
-      },
       "credentials": {
         "postgres": {
           "id": "zIilzHxVEjb4gaaH",
@@ -84,20 +84,24 @@
       }
     },
     {
+      "parameters": {
+        "jsCode": "const cfg = $('Config').first().json;\nif (!cfg.instance_name || !cfg.group_jid) {\n  throw new Error('Config incompleta: preencha group_jid (JID do grupo, termina em @g.us) no nó \"Config\".');\n}\nconst r = $input.first().json;\n// Primeira execução: o nó anterior acabou de gravar o ponto de partida na tabela notif_cursores.\n// Não avisa o histórico inteiro.\nif (Number(r.iniciou_agora) > 0) return [];\nreturn [{ json: { chat: Number(r.chat), rel: Number(r.rel), bid: Number(r.bid), deals_desde: r.deals_desde } }];"
+      },
       "id": "n4",
       "name": "Estado",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        660,
+        672,
         0
-      ],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const cfg = $('Config').first().json;\nif (!cfg.instance_name || !cfg.group_jid) {\n  throw new Error('Config incompleta: preencha group_jid (JID do grupo, termina em @g.us) no nó \"Config\".');\n}\nconst r = $input.first().json;\n// Primeira execução: o nó anterior acabou de gravar o ponto de partida na tabela notif_cursores.\n// Não avisa o histórico inteiro.\nif (Number(r.iniciou_agora) > 0) return [];\nreturn [{ json: { chat: Number(r.chat), rel: Number(r.rel), bid: Number(r.bid), deals_desde: r.deals_desde } }];"
-      }
+      ]
     },
     {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with\nnomes as (\n  select distinct on (user_id) user_id, name from an_prod_cbc.user_profiles where not deleted order by user_id, id\n),\nprod as (\n  select p.id, coalesce(nullif(t.pt, ''), p.name) as nome\n  from an_prod_types.products p\n  left join an_prod_types.product_translations t on t.id = p.translations_id\n),\nchat_novo as (\n  select 'chat'::text as tipo, c.id as ref_id, to_char(c.created, 'YYYY-MM-DD HH24:MI:SS.US') as ts,\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', bu.bid_id,\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'quem_enviou', case when c.sender_id = b.creator_id then 'anunciante' else 'interessado' end\n    ) as dados\n  from an_prod_cbc.chats c\n  join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n  join an_prod_cbc.bids b on b.id = bu.bid_id\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = bu.user_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = b.creator_id\n  ) ca on true\n  where c.id > {{ Number($json.chat) }} and not c.deleted\n    and not exists (\n      select 1 from an_prod_cbc.chats c2\n      where c2.bid_user_id = c.bid_user_id and c2.id < c.id and not c2.deleted\n    )\n),\ncontato as (\n  select 'contato'::text, r.id, to_char(r.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', r.bid_id,\n      'quem', (select name from nomes where user_id = r.user_id),\n      'dono', (select name from nomes where user_id = b.creator_id)\n    )\n  from an_prod_cbc.bid_releases r\n  join an_prod_cbc.bids b on b.id = r.bid_id\n  where r.id > {{ Number($json.rel) }} and r.released and not r.deleted\n),\nanuncio as (\n  select 'anuncio'::text, b.id, to_char(b.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'operacao', (select name from an_prod_types.bid_operations where id = b.operation_id),\n      'preco', b.price,\n      'quantidade', b.quantity,\n      'uf', (select uf from an_prod_types.states where id = b.state_id),\n      'quem', (select name from nomes where user_id = b.creator_id)\n    )\n  from an_prod_cbc.bids b\n  where b.id > {{ Number($json.bid) }} and not b.deleted\n),\nvenda as (\n  select 'venda'::text, d.id, to_char(d.updated, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', d.bid_id,\n      'dono', (select name from nomes where user_id = d.bid_owner_id),\n      'outra_parte', (select name from nomes where user_id = d.dealer_id),\n      'preco', p.price,\n      'quantidade', p.quantity\n    )\n  from an_prod_cbc.deals d\n  join an_prod_cbc.bids b on b.id = d.bid_id\n  left join an_prod_cbc.deal_proposals p on p.id = d.current_proposal_id\n  where d.status_id = 5 and not d.deleted and d.updated >= '{{ $json.deals_desde }}'::timestamp\n)\n,\nuniao as (\n  select * from chat_novo\n  union all select * from contato\n  union all select * from anuncio\n  union all select * from venda\n)\nselect * from uniao u\nwhere not exists (select 1 from public.notif_enviadas e where e.chave = u.tipo || ':' || u.ref_id)\norder by 3, 2",
+        "options": {}
+      },
       "id": "n5",
       "name": "Eventos novos",
       "type": "n8n-nodes-base.postgres",
@@ -106,11 +110,6 @@
         880,
         0
       ],
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "=with\nnomes as (\n  select distinct on (user_id) user_id, name from an_prod_cbc.user_profiles where not deleted order by user_id, id\n),\nprod as (\n  select p.id, coalesce(nullif(t.pt, ''), p.name) as nome\n  from an_prod_types.products p\n  left join an_prod_types.product_translations t on t.id = p.translations_id\n),\nchat_novo as (\n  select 'chat'::text as tipo, c.id as ref_id, to_char(c.created, 'YYYY-MM-DD HH24:MI:SS.US') as ts,\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', bu.bid_id,\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'quem_enviou', case when c.sender_id = b.creator_id then 'anunciante' else 'interessado' end\n    ) as dados\n  from an_prod_cbc.chats c\n  join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n  join an_prod_cbc.bids b on b.id = bu.bid_id\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = bu.user_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = b.creator_id\n  ) ca on true\n  where c.id > {{ Number($json.chat) }} and not c.deleted\n    and not exists (\n      select 1 from an_prod_cbc.chats c2\n      where c2.bid_user_id = c.bid_user_id and c2.id < c.id and not c2.deleted\n    )\n),\ncontato as (\n  select 'contato'::text, r.id, to_char(r.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', r.bid_id,\n      'quem', (select name from nomes where user_id = r.user_id),\n      'dono', (select name from nomes where user_id = b.creator_id)\n    )\n  from an_prod_cbc.bid_releases r\n  join an_prod_cbc.bids b on b.id = r.bid_id\n  where r.id > {{ Number($json.rel) }} and r.released and not r.deleted\n),\nanuncio as (\n  select 'anuncio'::text, b.id, to_char(b.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'operacao', (select name from an_prod_types.bid_operations where id = b.operation_id),\n      'preco', b.price,\n      'quantidade', b.quantity,\n      'uf', (select uf from an_prod_types.states where id = b.state_id),\n      'quem', (select name from nomes where user_id = b.creator_id)\n    )\n  from an_prod_cbc.bids b\n  where b.id > {{ Number($json.bid) }} and not b.deleted\n),\nvenda as (\n  select 'venda'::text, d.id, to_char(d.updated, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', d.bid_id,\n      'dono', (select name from nomes where user_id = d.bid_owner_id),\n      'outra_parte', (select name from nomes where user_id = d.dealer_id),\n      'preco', p.price,\n      'quantidade', p.quantity\n    )\n  from an_prod_cbc.deals d\n  join an_prod_cbc.bids b on b.id = d.bid_id\n  left join an_prod_cbc.deal_proposals p on p.id = d.current_proposal_id\n  where d.status_id = 5 and not d.deleted and d.updated >= '{{ $json.deals_desde }}'::timestamp\n)\n,\nuniao as (\n  select * from chat_novo\n  union all select * from contato\n  union all select * from anuncio\n  union all select * from venda\n)\nselect * from uniao u\nwhere not exists (select 1 from public.notif_enviadas e where e.chave = u.tipo || ':' || u.ref_id)\norder by 3, 2",
-        "options": {}
-      },
       "credentials": {
         "postgres": {
           "id": "zIilzHxVEjb4gaaH",
@@ -119,29 +118,19 @@
       }
     },
     {
+      "parameters": {
+        "jsCode": "const limpo = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();\nconst tel = (d) => {\n  const n = String(d || '').replace(/\\D/g, '');\n  if (!n) return 'sem telefone';\n  const l = n.startsWith('55') && n.length >= 12 ? n.slice(2) : n;\n  return l.length === 11 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 7) + '-' + l.slice(7)\n       : l.length === 10 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 6) + '-' + l.slice(6) : '+' + n;\n};\nconst pessoa = (rotulo, p) => {\n  p = p || {};\n  return rotulo + ': ' + (limpo(p.nome) || 'sem nome') + ' · id ' + (p.id == null ? '?' : p.id) +\n    '\\n   ✉ ' + (limpo(p.email) || 'sem e-mail') + ' · 📞 ' + tel(p.telefone);\n};\nconst cfg = $('Config').first().json;\n// A consulta já veio sem o que foi avisado (tabela notif_enviadas).\nconst linhas = $input.all().map((i) => i.json).filter((r) => r && r.tipo);\nconst chave = (r) => r.tipo + ':' + r.ref_id;\nconst brl = (n) => 'R$ ' + Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\n\nfunction texto(r) {\n  const d = r.dados || {};\n  const prod = limpo(d.produto) || 'produto não informado';\n  switch (r.tipo) {\n    case 'chat':\n      return '💬 *Novo chat iniciado*\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')\\nPrimeira mensagem de: ' +\n        (d.quem_enviou === 'anunciante' ? 'anunciante' : 'interessado') + '\\n' +\n        pessoa('👤 Interessado', d.interessado) + '\\n' + pessoa('🏷 Anunciante', d.anunciante);\n    case 'contato':\n      return '🔓 *Contato liberado*\\n' + (limpo(d.quem) || 'Um usuário') + ' liberou o contato de ' +\n        (limpo(d.dono) || 'um anunciante') + '\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')';\n    case 'anuncio': {\n      const preco = Number(d.preco) > 0 ? brl(d.preco) : 'a combinar';\n      return '📢 *Novo anúncio*\\n' + (limpo(d.quem) || 'Um usuário') + ' anunciou (' + (limpo(d.operacao).toLowerCase() || 'oferta') + '): ' + prod +\n        '\\nQuantidade: ' + (limpo(d.quantidade) || '—') + ' · Preço: ' + preco + (d.uf ? ' · ' + d.uf : '') + ' (anúncio #' + r.ref_id + ')';\n    }\n    case 'venda':\n      return '💰 *Venda fechada*\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')\\n' + (limpo(d.dono) || 'Anunciante') + ' ⇄ ' +\n        (limpo(d.outra_parte) || 'outra parte') + '\\nQuantidade: ' + (limpo(d.quantidade) || '—') + ' · Preço: ' + (Number(d.preco) > 0 ? brl(d.preco) : 'a combinar');\n    default:\n      return null;\n  }\n}\n\nconst limite = Number(cfg.max_por_execucao) || 10;\nconst out = linhas.slice(0, limite).map((r) => ({ json: { key: chave(r), text: texto(r) } })).filter((i) => i.json.text);\nconst resto = linhas.slice(limite);\nif (resto.length) {\n  const por = resto.reduce((o, r) => ((o[r.tipo] = (o[r.tipo] || 0) + 1), o), {});\n  const nomes = { chat: 'chats', contato: 'contatos liberados', anuncio: 'anúncios', venda: 'vendas' };\n  // as chaves dos não detalhados são registradas junto com o resumo, para não repetir depois\n  out.push({ json: { key: null, extra_keys: resto.map(chave), text: '⚠️ Mais ' + resto.length + ' eventos nesta rodada, não detalhados: ' +\n    Object.entries(por).map(([t, n]) => n + ' ' + nomes[t]).join(', ') + '.' } });\n}\nreturn out;"
+      },
       "id": "n6",
       "name": "Monta mensagens",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1100,
+        1104,
         0
-      ],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const limpo = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();\nconst tel = (d) => {\n  const n = String(d || '').replace(/\\D/g, '');\n  if (!n) return 'sem telefone';\n  const l = n.startsWith('55') && n.length >= 12 ? n.slice(2) : n;\n  return l.length === 11 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 7) + '-' + l.slice(7)\n       : l.length === 10 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 6) + '-' + l.slice(6) : '+' + n;\n};\nconst pessoa = (rotulo, p) => {\n  p = p || {};\n  return rotulo + ': ' + (limpo(p.nome) || 'sem nome') + ' · id ' + (p.id == null ? '?' : p.id) +\n    '\\n   ✉ ' + (limpo(p.email) || 'sem e-mail') + ' · 📞 ' + tel(p.telefone);\n};\nconst cfg = $('Config').first().json;\n// A consulta já veio sem o que foi avisado (tabela notif_enviadas).\nconst linhas = $input.all().map((i) => i.json).filter((r) => r && r.tipo);\nconst chave = (r) => r.tipo + ':' + r.ref_id;\nconst brl = (n) => 'R$ ' + Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\n\nfunction texto(r) {\n  const d = r.dados || {};\n  const prod = limpo(d.produto) || 'produto não informado';\n  switch (r.tipo) {\n    case 'chat':\n      return '💬 *Novo chat iniciado*\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')\\nPrimeira mensagem de: ' +\n        (d.quem_enviou === 'anunciante' ? 'anunciante' : 'interessado') + '\\n' +\n        pessoa('👤 Interessado', d.interessado) + '\\n' + pessoa('🏷 Anunciante', d.anunciante);\n    case 'contato':\n      return '🔓 *Contato liberado*\\n' + (limpo(d.quem) || 'Um usuário') + ' liberou o contato de ' +\n        (limpo(d.dono) || 'um anunciante') + '\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')';\n    case 'anuncio': {\n      const preco = Number(d.preco) > 0 ? brl(d.preco) : 'a combinar';\n      return '📢 *Novo anúncio*\\n' + (limpo(d.quem) || 'Um usuário') + ' anunciou (' + (limpo(d.operacao).toLowerCase() || 'oferta') + '): ' + prod +\n        '\\nQuantidade: ' + (limpo(d.quantidade) || '—') + ' · Preço: ' + preco + (d.uf ? ' · ' + d.uf : '') + ' (anúncio #' + r.ref_id + ')';\n    }\n    case 'venda':\n      return '💰 *Venda fechada*\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')\\n' + (limpo(d.dono) || 'Anunciante') + ' ⇄ ' +\n        (limpo(d.outra_parte) || 'outra parte') + '\\nQuantidade: ' + (limpo(d.quantidade) || '—') + ' · Preço: ' + (Number(d.preco) > 0 ? brl(d.preco) : 'a combinar');\n    default:\n      return null;\n  }\n}\n\nconst limite = Number(cfg.max_por_execucao) || 10;\nconst out = linhas.slice(0, limite).map((r) => ({ json: { key: chave(r), text: texto(r) } })).filter((i) => i.json.text);\nconst resto = linhas.slice(limite);\nif (resto.length) {\n  const por = resto.reduce((o, r) => ((o[r.tipo] = (o[r.tipo] || 0) + 1), o), {});\n  const nomes = { chat: 'chats', contato: 'contatos liberados', anuncio: 'anúncios', venda: 'vendas' };\n  // as chaves dos não detalhados são registradas junto com o resumo, para não repetir depois\n  out.push({ json: { key: null, extra_keys: resto.map(chave), text: '⚠️ Mais ' + resto.length + ' eventos nesta rodada, não detalhados: ' +\n    Object.entries(por).map(([t, n]) => n + ' ' + nomes[t]).join(', ') + '.' } });\n}\nreturn out;"
-      }
+      ]
     },
     {
-      "id": "n7",
-      "name": "Envia no grupo",
-      "type": "n8n-nodes-evolution-api.evolutionApi",
-      "typeVersion": 1,
-      "onError": "continueRegularOutput",
-      "position": [
-        1328,
-        0
-      ],
       "parameters": {
         "resource": "messages-api",
         "instanceName": "={{ $('Config').first().json.instance_name }}",
@@ -149,28 +138,41 @@
         "messageText": "={{ $json.text }}",
         "options_message": {}
       },
+      "id": "n7",
+      "name": "Envia no grupo",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        0
+      ],
       "credentials": {
         "evolutionApi": {
-          "id": "jhxyikodw5k2TTr1",
-          "name": "MIA-LOGS"
+          "id": "PBxKGNUnpI3LPGR3",
+          "name": "MIA-LOGS-2"
         }
-      }
+      },
+      "onError": "continueRegularOutput"
     },
     {
+      "parameters": {
+        "jsCode": "const msgs = $('Monta mensagens').all();\nconst res = $('Envia no grupo').all();\nconst est = $('Estado').first().json;\nconst chaves = [];\nlet falhas = 0;\nres.forEach((r, i) => {\n  const falhou = !r.json || r.json.error || r.json.success === false;\n  if (falhou) { falhas++; return; }\n  const m = msgs[i] && msgs[i].json;\n  if (!m) return;\n  if (m.key) chaves.push(m.key);\n  (m.extra_keys || []).forEach((k) => chaves.push(k));\n});\n// Os cursores só avançam se TODAS as mensagens saíram; as que saíram ficam registradas de qualquer forma.\nconst linhas = $('Eventos novos').all().map((i) => i.json).filter((r) => r && r.tipo);\nconst max = (tipo, base) => {\n  const ids = linhas.filter((r) => r.tipo === tipo).map((r) => Number(r.ref_id));\n  return ids.length ? Math.max(base, ...ids) : base;\n};\nconst ts = linhas.filter((r) => r.tipo === 'venda').map((r) => r.ts).sort();\nconst ultimaVenda = ts.length && ts[ts.length - 1] > est.deals_desde ? ts[ts.length - 1] : est.deals_desde;\nreturn [{ json: { chaves, todos_ok: falhas === 0, falhas, chat: max('chat', est.chat), rel: max('contato', est.rel), bid: max('anuncio', est.bid), deals_desde: ultimaVenda } }];"
+      },
       "id": "n8",
       "name": "Confirma e avança",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1540,
+        1552,
         0
-      ],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const msgs = $('Monta mensagens').all();\nconst res = $('Envia no grupo').all();\nconst est = $('Estado').first().json;\nconst chaves = [];\nlet falhas = 0;\nres.forEach((r, i) => {\n  const falhou = !r.json || r.json.error || r.json.success === false;\n  if (falhou) { falhas++; return; }\n  const m = msgs[i] && msgs[i].json;\n  if (!m) return;\n  if (m.key) chaves.push(m.key);\n  (m.extra_keys || []).forEach((k) => chaves.push(k));\n});\n// Os cursores só avançam se TODAS as mensagens saíram; as que saíram ficam registradas de qualquer forma.\nconst linhas = $('Eventos novos').all().map((i) => i.json).filter((r) => r && r.tipo);\nconst max = (tipo, base) => {\n  const ids = linhas.filter((r) => r.tipo === tipo).map((r) => Number(r.ref_id));\n  return ids.length ? Math.max(base, ...ids) : base;\n};\nconst ts = linhas.filter((r) => r.tipo === 'venda').map((r) => r.ts).sort();\nconst ultimaVenda = ts.length && ts[ts.length - 1] > est.deals_desde ? ts[ts.length - 1] : est.deals_desde;\nreturn [{ json: { chaves, todos_ok: falhas === 0, falhas, chat: max('chat', est.chat), rel: max('contato', est.rel), bid: max('anuncio', est.bid), deals_desde: ultimaVenda } }];"
-      }
+      ]
     },
     {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.notif_enviadas (chave, fluxo)\nselect jsonb_array_elements_text('{{ (JSON.stringify($('Confirma e avança').first().json.chaves)).replace(/'/g, \"''\") }}'::jsonb), 'notificacoes'\non conflict (chave) do nothing",
+        "options": {}
+      },
       "id": "p9",
       "name": "Registra enviadas",
       "type": "n8n-nodes-base.postgres",
@@ -180,11 +182,6 @@
         1760,
         0
       ],
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "=insert into public.notif_enviadas (chave, fluxo)\nselect jsonb_array_elements_text('{{ (JSON.stringify($('Confirma e avança').first().json.chaves)).replace(/'/g, \"''\") }}'::jsonb), 'notificacoes'\non conflict (chave) do nothing",
-        "options": {}
-      },
       "credentials": {
         "postgres": {
           "id": "zIilzHxVEjb4gaaH",
@@ -193,20 +190,20 @@
       }
     },
     {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.notif_cursores (nome, valor)\nselect n, v from (values\n  ('chat', to_jsonb({{ Number($('Confirma e avança').first().json.chat) }}::bigint)),\n  ('rel', to_jsonb({{ Number($('Confirma e avança').first().json.rel) }}::bigint)),\n  ('bid', to_jsonb({{ Number($('Confirma e avança').first().json.bid) }}::bigint)),\n  ('deals_desde', to_jsonb('{{ $('Confirma e avança').first().json.deals_desde }}'::text))\n) t(n, v)\nwhere {{ $('Confirma e avança').first().json.todos_ok ? 'true' : 'false' }}::boolean\non conflict (nome) do update\nset valor = case\n      when public.notif_cursores.nome = 'deals_desde'\n        then to_jsonb(greatest(public.notif_cursores.valor #>> '{}', excluded.valor #>> '{}'))\n      else to_jsonb(greatest((public.notif_cursores.valor #>> '{}')::bigint, (excluded.valor #>> '{}')::bigint))\n    end,\n    atualizado_em = now()",
+        "options": {}
+      },
       "id": "p10",
       "name": "Avança cursores",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "executeOnce": true,
       "position": [
-        1980,
+        1984,
         0
       ],
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "=insert into public.notif_cursores (nome, valor)\nselect n, v from (values\n  ('chat', to_jsonb({{ Number($('Confirma e avança').first().json.chat) }}::bigint)),\n  ('rel', to_jsonb({{ Number($('Confirma e avança').first().json.rel) }}::bigint)),\n  ('bid', to_jsonb({{ Number($('Confirma e avança').first().json.bid) }}::bigint)),\n  ('deals_desde', to_jsonb('{{ $('Confirma e avança').first().json.deals_desde }}'::text))\n) t(n, v)\nwhere {{ $('Confirma e avança').first().json.todos_ok ? 'true' : 'false' }}::boolean\non conflict (nome) do update\nset valor = case\n      when public.notif_cursores.nome = 'deals_desde'\n        then to_jsonb(greatest(public.notif_cursores.valor #>> '{}', excluded.valor #>> '{}'))\n      else to_jsonb(greatest((public.notif_cursores.valor #>> '{}')::bigint, (excluded.valor #>> '{}')::bigint))\n    end,\n    atualizado_em = now()",
-        "options": {}
-      },
       "credentials": {
         "postgres": {
           "id": "zIilzHxVEjb4gaaH",
@@ -215,6 +212,11 @@
       }
     },
     {
+      "parameters": {
+        "content": "## AgroNegociar — Notificações do marketplace no grupo\nA cada 2 min consulta a réplica (schema an_prod_cbc) e avisa no grupo: **primeiro chat**, **contato liberado**, **anúncio novo** e **venda fechada** (deal status 5).\n\n**Estado** fica no Supabase (tabelas `notif_cursores` e `notif_enviadas`), não no staticData — as rodadas agendadas deste n8n não enxergam o staticData da anterior.\nNa primeira execução só grava o ponto de partida, sem despejar histórico.\nNo chat novo, a mensagem traz nome, e-mail, telefone e id dos dois usuários, o produto e o anúncio. Não envia o texto das conversas.",
+        "height": 264,
+        "width": 760
+      },
       "id": "n9",
       "name": "Nota",
       "type": "n8n-nodes-base.stickyNote",
@@ -222,12 +224,7 @@
       "position": [
         0,
         -368
-      ],
-      "parameters": {
-        "content": "## AgroNegociar — Notificações do marketplace no grupo\nA cada 2 min consulta a réplica (schema an_prod_cbc) e avisa no grupo: **primeiro chat**, **contato liberado**, **anúncio novo** e **venda fechada** (deal status 5).\n\n**Estado** fica no Supabase (tabelas `notif_cursores` e `notif_enviadas`), não no staticData — as rodadas agendadas deste n8n não enxergam o staticData da anterior.\nNa primeira execução só grava o ponto de partida, sem despejar histórico.\nNo chat novo, a mensagem traz nome, e-mail, telefone e id dos dois usuários, o produto e o anúncio. Não envia o texto das conversas.",
-        "height": 264,
-        "width": 760
-      }
+      ]
     }
   ],
   "connections": {
@@ -360,8 +357,8 @@
     }
   },
   "meta": null,
-  "versionId": "c0ca8f55-90e0-445c-ae91-f9e0923a951c",
-  "activeVersionId": "c0ca8f55-90e0-445c-ae91-f9e0923a951c",
+  "versionId": "812693a6-7058-4a8c-b49f-35d8572d8be0",
+  "activeVersionId": "812693a6-7058-4a8c-b49f-35d8572d8be0",
   "triggerCount": 1,
   "shared": [
     {
@@ -373,18 +370,10 @@
     }
   ],
   "activeVersion": {
-    "versionId": "c0ca8f55-90e0-445c-ae91-f9e0923a951c",
+    "versionId": "812693a6-7058-4a8c-b49f-35d8572d8be0",
     "workflowId": "QnAnce5cnreYz4Kp",
     "nodes": [
       {
-        "id": "n1",
-        "name": "A cada 2 minutos",
-        "type": "n8n-nodes-base.scheduleTrigger",
-        "typeVersion": 1.2,
-        "position": [
-          0,
-          0
-        ],
         "parameters": {
           "rule": {
             "interval": [
@@ -394,18 +383,17 @@
               }
             ]
           }
-        }
+        },
+        "id": "n1",
+        "name": "A cada 2 minutos",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ]
       },
       {
-        "id": "n2",
-        "name": "Config",
-        "notes": "PREENCHER antes de ativar: group_jid = JID do grupo \"Mia e Maya <> AgroNegociar\" (termina em @g.us). O envio usa a credencial MIA-LOGS.",
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.4,
-        "position": [
-          224,
-          0
-        ],
         "parameters": {
           "assignments": {
             "assignments": [
@@ -430,22 +418,31 @@
             ]
           },
           "options": {}
-        }
+        },
+        "id": "n2",
+        "name": "Config",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          224,
+          0
+        ],
+        "notes": "PREENCHER antes de ativar: group_jid = JID do grupo \"Mia e Maya <> AgroNegociar\" (termina em @g.us). O envio usa a credencial MIA-LOGS."
       },
       {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "with ins as (\n  insert into public.notif_cursores (nome, valor)\n  select n, v from (values\n    ('chat', to_jsonb((select max(id) from an_prod_cbc.chats))),\n    ('rel', to_jsonb((select max(id) from an_prod_cbc.bid_releases))),\n    ('bid', to_jsonb((select max(id) from an_prod_cbc.bids))),\n    ('deals_desde', to_jsonb((select to_char(max(updated), 'YYYY-MM-DD HH24:MI:SS.US') from an_prod_cbc.deals)))\n  ) t(n, v)\n  on conflict (nome) do nothing\n  returning nome\n)\nselect\n  (select count(*) from ins)::int as iniciou_agora,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'chat'), (select max(id) from an_prod_cbc.chats)) as chat,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'rel'), (select max(id) from an_prod_cbc.bid_releases)) as rel,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'bid'), (select max(id) from an_prod_cbc.bids)) as bid,\n  coalesce((select valor #>> '{}' from public.notif_cursores where nome = 'deals_desde'),\n           (select to_char(max(updated), 'YYYY-MM-DD HH24:MI:SS.US') from an_prod_cbc.deals)) as deals_desde",
+          "options": {}
+        },
         "id": "n3",
         "name": "Prepara estado",
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.5,
         "position": [
-          440,
+          448,
           0
         ],
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "=with ins as (\n  insert into public.notif_cursores (nome, valor)\n  select n, v from (values\n    ('chat', to_jsonb((select max(id) from an_prod_cbc.chats))),\n    ('rel', to_jsonb((select max(id) from an_prod_cbc.bid_releases))),\n    ('bid', to_jsonb((select max(id) from an_prod_cbc.bids))),\n    ('deals_desde', to_jsonb((select to_char(max(updated), 'YYYY-MM-DD HH24:MI:SS.US') from an_prod_cbc.deals)))\n  ) t(n, v)\n  on conflict (nome) do nothing\n  returning nome\n)\nselect\n  (select count(*) from ins)::int as iniciou_agora,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'chat'), (select max(id) from an_prod_cbc.chats)) as chat,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'rel'), (select max(id) from an_prod_cbc.bid_releases)) as rel,\n  coalesce((select (valor #>> '{}')::bigint from public.notif_cursores where nome = 'bid'), (select max(id) from an_prod_cbc.bids)) as bid,\n  coalesce((select valor #>> '{}' from public.notif_cursores where nome = 'deals_desde'),\n           (select to_char(max(updated), 'YYYY-MM-DD HH24:MI:SS.US') from an_prod_cbc.deals)) as deals_desde",
-          "options": {}
-        },
         "credentials": {
           "postgres": {
             "id": "zIilzHxVEjb4gaaH",
@@ -454,20 +451,24 @@
         }
       },
       {
+        "parameters": {
+          "jsCode": "const cfg = $('Config').first().json;\nif (!cfg.instance_name || !cfg.group_jid) {\n  throw new Error('Config incompleta: preencha group_jid (JID do grupo, termina em @g.us) no nó \"Config\".');\n}\nconst r = $input.first().json;\n// Primeira execução: o nó anterior acabou de gravar o ponto de partida na tabela notif_cursores.\n// Não avisa o histórico inteiro.\nif (Number(r.iniciou_agora) > 0) return [];\nreturn [{ json: { chat: Number(r.chat), rel: Number(r.rel), bid: Number(r.bid), deals_desde: r.deals_desde } }];"
+        },
         "id": "n4",
         "name": "Estado",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          660,
+          672,
           0
-        ],
-        "parameters": {
-          "mode": "runOnceForAllItems",
-          "jsCode": "const cfg = $('Config').first().json;\nif (!cfg.instance_name || !cfg.group_jid) {\n  throw new Error('Config incompleta: preencha group_jid (JID do grupo, termina em @g.us) no nó \"Config\".');\n}\nconst r = $input.first().json;\n// Primeira execução: o nó anterior acabou de gravar o ponto de partida na tabela notif_cursores.\n// Não avisa o histórico inteiro.\nif (Number(r.iniciou_agora) > 0) return [];\nreturn [{ json: { chat: Number(r.chat), rel: Number(r.rel), bid: Number(r.bid), deals_desde: r.deals_desde } }];"
-        }
+        ]
       },
       {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "with\nnomes as (\n  select distinct on (user_id) user_id, name from an_prod_cbc.user_profiles where not deleted order by user_id, id\n),\nprod as (\n  select p.id, coalesce(nullif(t.pt, ''), p.name) as nome\n  from an_prod_types.products p\n  left join an_prod_types.product_translations t on t.id = p.translations_id\n),\nchat_novo as (\n  select 'chat'::text as tipo, c.id as ref_id, to_char(c.created, 'YYYY-MM-DD HH24:MI:SS.US') as ts,\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', bu.bid_id,\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'quem_enviou', case when c.sender_id = b.creator_id then 'anunciante' else 'interessado' end\n    ) as dados\n  from an_prod_cbc.chats c\n  join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n  join an_prod_cbc.bids b on b.id = bu.bid_id\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = bu.user_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = b.creator_id\n  ) ca on true\n  where c.id > {{ Number($json.chat) }} and not c.deleted\n    and not exists (\n      select 1 from an_prod_cbc.chats c2\n      where c2.bid_user_id = c.bid_user_id and c2.id < c.id and not c2.deleted\n    )\n),\ncontato as (\n  select 'contato'::text, r.id, to_char(r.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', r.bid_id,\n      'quem', (select name from nomes where user_id = r.user_id),\n      'dono', (select name from nomes where user_id = b.creator_id)\n    )\n  from an_prod_cbc.bid_releases r\n  join an_prod_cbc.bids b on b.id = r.bid_id\n  where r.id > {{ Number($json.rel) }} and r.released and not r.deleted\n),\nanuncio as (\n  select 'anuncio'::text, b.id, to_char(b.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'operacao', (select name from an_prod_types.bid_operations where id = b.operation_id),\n      'preco', b.price,\n      'quantidade', b.quantity,\n      'uf', (select uf from an_prod_types.states where id = b.state_id),\n      'quem', (select name from nomes where user_id = b.creator_id)\n    )\n  from an_prod_cbc.bids b\n  where b.id > {{ Number($json.bid) }} and not b.deleted\n),\nvenda as (\n  select 'venda'::text, d.id, to_char(d.updated, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', d.bid_id,\n      'dono', (select name from nomes where user_id = d.bid_owner_id),\n      'outra_parte', (select name from nomes where user_id = d.dealer_id),\n      'preco', p.price,\n      'quantidade', p.quantity\n    )\n  from an_prod_cbc.deals d\n  join an_prod_cbc.bids b on b.id = d.bid_id\n  left join an_prod_cbc.deal_proposals p on p.id = d.current_proposal_id\n  where d.status_id = 5 and not d.deleted and d.updated >= '{{ $json.deals_desde }}'::timestamp\n)\n,\nuniao as (\n  select * from chat_novo\n  union all select * from contato\n  union all select * from anuncio\n  union all select * from venda\n)\nselect * from uniao u\nwhere not exists (select 1 from public.notif_enviadas e where e.chave = u.tipo || ':' || u.ref_id)\norder by 3, 2",
+          "options": {}
+        },
         "id": "n5",
         "name": "Eventos novos",
         "type": "n8n-nodes-base.postgres",
@@ -476,11 +477,6 @@
           880,
           0
         ],
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "=with\nnomes as (\n  select distinct on (user_id) user_id, name from an_prod_cbc.user_profiles where not deleted order by user_id, id\n),\nprod as (\n  select p.id, coalesce(nullif(t.pt, ''), p.name) as nome\n  from an_prod_types.products p\n  left join an_prod_types.product_translations t on t.id = p.translations_id\n),\nchat_novo as (\n  select 'chat'::text as tipo, c.id as ref_id, to_char(c.created, 'YYYY-MM-DD HH24:MI:SS.US') as ts,\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', bu.bid_id,\n      'interessado', jsonb_build_object('id', ci.id, 'nome', ci.nome, 'email', ci.email, 'telefone', ci.telefone),\n      'anunciante', jsonb_build_object('id', ca.id, 'nome', ca.nome, 'email', ca.email, 'telefone', ca.telefone),\n      'quem_enviou', case when c.sender_id = b.creator_id then 'anunciante' else 'interessado' end\n    ) as dados\n  from an_prod_cbc.chats c\n  join an_prod_cbc.bid_users bu on bu.id = c.bid_user_id\n  join an_prod_cbc.bids b on b.id = bu.bid_id\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = bu.user_id\n  ) ci on true\n  left join lateral (\n    select u.id, u.email,\n      (select up.name from an_prod_cbc.user_profiles up where up.user_id = u.id and not up.deleted order by up.id limit 1) as nome,\n      (select regexp_replace(ph.number, '\\D', '', 'g')\n         from an_prod_cbc.user_profiles up\n         join an_prod_cbc.profile_phones pp on pp.profile_id = up.id\n         join an_prod_cbc.phones ph on ph.id = pp.phone_id\n         left join an_prod_types.phone_types pt on pt.id = ph.type_id\n        where up.user_id = u.id and not ph.deleted\n          and length(regexp_replace(ph.number, '\\D', '', 'g')) between 10 and 13\n        order by (pt.name = 'Celular') desc nulls last, ph.id desc\n        limit 1) as telefone\n    from an_prod_cbc.users u where u.id = b.creator_id\n  ) ca on true\n  where c.id > {{ Number($json.chat) }} and not c.deleted\n    and not exists (\n      select 1 from an_prod_cbc.chats c2\n      where c2.bid_user_id = c.bid_user_id and c2.id < c.id and not c2.deleted\n    )\n),\ncontato as (\n  select 'contato'::text, r.id, to_char(r.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', r.bid_id,\n      'quem', (select name from nomes where user_id = r.user_id),\n      'dono', (select name from nomes where user_id = b.creator_id)\n    )\n  from an_prod_cbc.bid_releases r\n  join an_prod_cbc.bids b on b.id = r.bid_id\n  where r.id > {{ Number($json.rel) }} and r.released and not r.deleted\n),\nanuncio as (\n  select 'anuncio'::text, b.id, to_char(b.created, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'operacao', (select name from an_prod_types.bid_operations where id = b.operation_id),\n      'preco', b.price,\n      'quantidade', b.quantity,\n      'uf', (select uf from an_prod_types.states where id = b.state_id),\n      'quem', (select name from nomes where user_id = b.creator_id)\n    )\n  from an_prod_cbc.bids b\n  where b.id > {{ Number($json.bid) }} and not b.deleted\n),\nvenda as (\n  select 'venda'::text, d.id, to_char(d.updated, 'YYYY-MM-DD HH24:MI:SS.US'),\n    jsonb_build_object(\n      'produto', (select nome from prod where id = b.product_id),\n      'bid_id', d.bid_id,\n      'dono', (select name from nomes where user_id = d.bid_owner_id),\n      'outra_parte', (select name from nomes where user_id = d.dealer_id),\n      'preco', p.price,\n      'quantidade', p.quantity\n    )\n  from an_prod_cbc.deals d\n  join an_prod_cbc.bids b on b.id = d.bid_id\n  left join an_prod_cbc.deal_proposals p on p.id = d.current_proposal_id\n  where d.status_id = 5 and not d.deleted and d.updated >= '{{ $json.deals_desde }}'::timestamp\n)\n,\nuniao as (\n  select * from chat_novo\n  union all select * from contato\n  union all select * from anuncio\n  union all select * from venda\n)\nselect * from uniao u\nwhere not exists (select 1 from public.notif_enviadas e where e.chave = u.tipo || ':' || u.ref_id)\norder by 3, 2",
-          "options": {}
-        },
         "credentials": {
           "postgres": {
             "id": "zIilzHxVEjb4gaaH",
@@ -489,29 +485,19 @@
         }
       },
       {
+        "parameters": {
+          "jsCode": "const limpo = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();\nconst tel = (d) => {\n  const n = String(d || '').replace(/\\D/g, '');\n  if (!n) return 'sem telefone';\n  const l = n.startsWith('55') && n.length >= 12 ? n.slice(2) : n;\n  return l.length === 11 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 7) + '-' + l.slice(7)\n       : l.length === 10 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 6) + '-' + l.slice(6) : '+' + n;\n};\nconst pessoa = (rotulo, p) => {\n  p = p || {};\n  return rotulo + ': ' + (limpo(p.nome) || 'sem nome') + ' · id ' + (p.id == null ? '?' : p.id) +\n    '\\n   ✉ ' + (limpo(p.email) || 'sem e-mail') + ' · 📞 ' + tel(p.telefone);\n};\nconst cfg = $('Config').first().json;\n// A consulta já veio sem o que foi avisado (tabela notif_enviadas).\nconst linhas = $input.all().map((i) => i.json).filter((r) => r && r.tipo);\nconst chave = (r) => r.tipo + ':' + r.ref_id;\nconst brl = (n) => 'R$ ' + Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\n\nfunction texto(r) {\n  const d = r.dados || {};\n  const prod = limpo(d.produto) || 'produto não informado';\n  switch (r.tipo) {\n    case 'chat':\n      return '💬 *Novo chat iniciado*\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')\\nPrimeira mensagem de: ' +\n        (d.quem_enviou === 'anunciante' ? 'anunciante' : 'interessado') + '\\n' +\n        pessoa('👤 Interessado', d.interessado) + '\\n' + pessoa('🏷 Anunciante', d.anunciante);\n    case 'contato':\n      return '🔓 *Contato liberado*\\n' + (limpo(d.quem) || 'Um usuário') + ' liberou o contato de ' +\n        (limpo(d.dono) || 'um anunciante') + '\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')';\n    case 'anuncio': {\n      const preco = Number(d.preco) > 0 ? brl(d.preco) : 'a combinar';\n      return '📢 *Novo anúncio*\\n' + (limpo(d.quem) || 'Um usuário') + ' anunciou (' + (limpo(d.operacao).toLowerCase() || 'oferta') + '): ' + prod +\n        '\\nQuantidade: ' + (limpo(d.quantidade) || '—') + ' · Preço: ' + preco + (d.uf ? ' · ' + d.uf : '') + ' (anúncio #' + r.ref_id + ')';\n    }\n    case 'venda':\n      return '💰 *Venda fechada*\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')\\n' + (limpo(d.dono) || 'Anunciante') + ' ⇄ ' +\n        (limpo(d.outra_parte) || 'outra parte') + '\\nQuantidade: ' + (limpo(d.quantidade) || '—') + ' · Preço: ' + (Number(d.preco) > 0 ? brl(d.preco) : 'a combinar');\n    default:\n      return null;\n  }\n}\n\nconst limite = Number(cfg.max_por_execucao) || 10;\nconst out = linhas.slice(0, limite).map((r) => ({ json: { key: chave(r), text: texto(r) } })).filter((i) => i.json.text);\nconst resto = linhas.slice(limite);\nif (resto.length) {\n  const por = resto.reduce((o, r) => ((o[r.tipo] = (o[r.tipo] || 0) + 1), o), {});\n  const nomes = { chat: 'chats', contato: 'contatos liberados', anuncio: 'anúncios', venda: 'vendas' };\n  // as chaves dos não detalhados são registradas junto com o resumo, para não repetir depois\n  out.push({ json: { key: null, extra_keys: resto.map(chave), text: '⚠️ Mais ' + resto.length + ' eventos nesta rodada, não detalhados: ' +\n    Object.entries(por).map(([t, n]) => n + ' ' + nomes[t]).join(', ') + '.' } });\n}\nreturn out;"
+        },
         "id": "n6",
         "name": "Monta mensagens",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1100,
+          1104,
           0
-        ],
-        "parameters": {
-          "mode": "runOnceForAllItems",
-          "jsCode": "const limpo = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();\nconst tel = (d) => {\n  const n = String(d || '').replace(/\\D/g, '');\n  if (!n) return 'sem telefone';\n  const l = n.startsWith('55') && n.length >= 12 ? n.slice(2) : n;\n  return l.length === 11 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 7) + '-' + l.slice(7)\n       : l.length === 10 ? '+55 (' + l.slice(0, 2) + ') ' + l.slice(2, 6) + '-' + l.slice(6) : '+' + n;\n};\nconst pessoa = (rotulo, p) => {\n  p = p || {};\n  return rotulo + ': ' + (limpo(p.nome) || 'sem nome') + ' · id ' + (p.id == null ? '?' : p.id) +\n    '\\n   ✉ ' + (limpo(p.email) || 'sem e-mail') + ' · 📞 ' + tel(p.telefone);\n};\nconst cfg = $('Config').first().json;\n// A consulta já veio sem o que foi avisado (tabela notif_enviadas).\nconst linhas = $input.all().map((i) => i.json).filter((r) => r && r.tipo);\nconst chave = (r) => r.tipo + ':' + r.ref_id;\nconst brl = (n) => 'R$ ' + Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\n\nfunction texto(r) {\n  const d = r.dados || {};\n  const prod = limpo(d.produto) || 'produto não informado';\n  switch (r.tipo) {\n    case 'chat':\n      return '💬 *Novo chat iniciado*\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')\\nPrimeira mensagem de: ' +\n        (d.quem_enviou === 'anunciante' ? 'anunciante' : 'interessado') + '\\n' +\n        pessoa('👤 Interessado', d.interessado) + '\\n' + pessoa('🏷 Anunciante', d.anunciante);\n    case 'contato':\n      return '🔓 *Contato liberado*\\n' + (limpo(d.quem) || 'Um usuário') + ' liberou o contato de ' +\n        (limpo(d.dono) || 'um anunciante') + '\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')';\n    case 'anuncio': {\n      const preco = Number(d.preco) > 0 ? brl(d.preco) : 'a combinar';\n      return '📢 *Novo anúncio*\\n' + (limpo(d.quem) || 'Um usuário') + ' anunciou (' + (limpo(d.operacao).toLowerCase() || 'oferta') + '): ' + prod +\n        '\\nQuantidade: ' + (limpo(d.quantidade) || '—') + ' · Preço: ' + preco + (d.uf ? ' · ' + d.uf : '') + ' (anúncio #' + r.ref_id + ')';\n    }\n    case 'venda':\n      return '💰 *Venda fechada*\\nProduto: ' + prod + ' (anúncio #' + d.bid_id + ')\\n' + (limpo(d.dono) || 'Anunciante') + ' ⇄ ' +\n        (limpo(d.outra_parte) || 'outra parte') + '\\nQuantidade: ' + (limpo(d.quantidade) || '—') + ' · Preço: ' + (Number(d.preco) > 0 ? brl(d.preco) : 'a combinar');\n    default:\n      return null;\n  }\n}\n\nconst limite = Number(cfg.max_por_execucao) || 10;\nconst out = linhas.slice(0, limite).map((r) => ({ json: { key: chave(r), text: texto(r) } })).filter((i) => i.json.text);\nconst resto = linhas.slice(limite);\nif (resto.length) {\n  const por = resto.reduce((o, r) => ((o[r.tipo] = (o[r.tipo] || 0) + 1), o), {});\n  const nomes = { chat: 'chats', contato: 'contatos liberados', anuncio: 'anúncios', venda: 'vendas' };\n  // as chaves dos não detalhados são registradas junto com o resumo, para não repetir depois\n  out.push({ json: { key: null, extra_keys: resto.map(chave), text: '⚠️ Mais ' + resto.length + ' eventos nesta rodada, não detalhados: ' +\n    Object.entries(por).map(([t, n]) => n + ' ' + nomes[t]).join(', ') + '.' } });\n}\nreturn out;"
-        }
+        ]
       },
       {
-        "id": "n7",
-        "name": "Envia no grupo",
-        "type": "n8n-nodes-evolution-api.evolutionApi",
-        "typeVersion": 1,
-        "onError": "continueRegularOutput",
-        "position": [
-          1328,
-          0
-        ],
         "parameters": {
           "resource": "messages-api",
           "instanceName": "={{ $('Config').first().json.instance_name }}",
@@ -519,28 +505,41 @@
           "messageText": "={{ $json.text }}",
           "options_message": {}
         },
+        "id": "n7",
+        "name": "Envia no grupo",
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          1328,
+          0
+        ],
         "credentials": {
           "evolutionApi": {
-            "id": "jhxyikodw5k2TTr1",
-            "name": "MIA-LOGS"
+            "id": "PBxKGNUnpI3LPGR3",
+            "name": "MIA-LOGS-2"
           }
-        }
+        },
+        "onError": "continueRegularOutput"
       },
       {
+        "parameters": {
+          "jsCode": "const msgs = $('Monta mensagens').all();\nconst res = $('Envia no grupo').all();\nconst est = $('Estado').first().json;\nconst chaves = [];\nlet falhas = 0;\nres.forEach((r, i) => {\n  const falhou = !r.json || r.json.error || r.json.success === false;\n  if (falhou) { falhas++; return; }\n  const m = msgs[i] && msgs[i].json;\n  if (!m) return;\n  if (m.key) chaves.push(m.key);\n  (m.extra_keys || []).forEach((k) => chaves.push(k));\n});\n// Os cursores só avançam se TODAS as mensagens saíram; as que saíram ficam registradas de qualquer forma.\nconst linhas = $('Eventos novos').all().map((i) => i.json).filter((r) => r && r.tipo);\nconst max = (tipo, base) => {\n  const ids = linhas.filter((r) => r.tipo === tipo).map((r) => Number(r.ref_id));\n  return ids.length ? Math.max(base, ...ids) : base;\n};\nconst ts = linhas.filter((r) => r.tipo === 'venda').map((r) => r.ts).sort();\nconst ultimaVenda = ts.length && ts[ts.length - 1] > est.deals_desde ? ts[ts.length - 1] : est.deals_desde;\nreturn [{ json: { chaves, todos_ok: falhas === 0, falhas, chat: max('chat', est.chat), rel: max('contato', est.rel), bid: max('anuncio', est.bid), deals_desde: ultimaVenda } }];"
+        },
         "id": "n8",
         "name": "Confirma e avança",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1540,
+          1552,
           0
-        ],
-        "parameters": {
-          "mode": "runOnceForAllItems",
-          "jsCode": "const msgs = $('Monta mensagens').all();\nconst res = $('Envia no grupo').all();\nconst est = $('Estado').first().json;\nconst chaves = [];\nlet falhas = 0;\nres.forEach((r, i) => {\n  const falhou = !r.json || r.json.error || r.json.success === false;\n  if (falhou) { falhas++; return; }\n  const m = msgs[i] && msgs[i].json;\n  if (!m) return;\n  if (m.key) chaves.push(m.key);\n  (m.extra_keys || []).forEach((k) => chaves.push(k));\n});\n// Os cursores só avançam se TODAS as mensagens saíram; as que saíram ficam registradas de qualquer forma.\nconst linhas = $('Eventos novos').all().map((i) => i.json).filter((r) => r && r.tipo);\nconst max = (tipo, base) => {\n  const ids = linhas.filter((r) => r.tipo === tipo).map((r) => Number(r.ref_id));\n  return ids.length ? Math.max(base, ...ids) : base;\n};\nconst ts = linhas.filter((r) => r.tipo === 'venda').map((r) => r.ts).sort();\nconst ultimaVenda = ts.length && ts[ts.length - 1] > est.deals_desde ? ts[ts.length - 1] : est.deals_desde;\nreturn [{ json: { chaves, todos_ok: falhas === 0, falhas, chat: max('chat', est.chat), rel: max('contato', est.rel), bid: max('anuncio', est.bid), deals_desde: ultimaVenda } }];"
-        }
+        ]
       },
       {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "insert into public.notif_enviadas (chave, fluxo)\nselect jsonb_array_elements_text('{{ (JSON.stringify($('Confirma e avança').first().json.chaves)).replace(/'/g, \"''\") }}'::jsonb), 'notificacoes'\non conflict (chave) do nothing",
+          "options": {}
+        },
         "id": "p9",
         "name": "Registra enviadas",
         "type": "n8n-nodes-base.postgres",
@@ -550,11 +549,6 @@
           1760,
           0
         ],
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "=insert into public.notif_enviadas (chave, fluxo)\nselect jsonb_array_elements_text('{{ (JSON.stringify($('Confirma e avança').first().json.chaves)).replace(/'/g, \"''\") }}'::jsonb), 'notificacoes'\non conflict (chave) do nothing",
-          "options": {}
-        },
         "credentials": {
           "postgres": {
             "id": "zIilzHxVEjb4gaaH",
@@ -563,20 +557,20 @@
         }
       },
       {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "insert into public.notif_cursores (nome, valor)\nselect n, v from (values\n  ('chat', to_jsonb({{ Number($('Confirma e avança').first().json.chat) }}::bigint)),\n  ('rel', to_jsonb({{ Number($('Confirma e avança').first().json.rel) }}::bigint)),\n  ('bid', to_jsonb({{ Number($('Confirma e avança').first().json.bid) }}::bigint)),\n  ('deals_desde', to_jsonb('{{ $('Confirma e avança').first().json.deals_desde }}'::text))\n) t(n, v)\nwhere {{ $('Confirma e avança').first().json.todos_ok ? 'true' : 'false' }}::boolean\non conflict (nome) do update\nset valor = case\n      when public.notif_cursores.nome = 'deals_desde'\n        then to_jsonb(greatest(public.notif_cursores.valor #>> '{}', excluded.valor #>> '{}'))\n      else to_jsonb(greatest((public.notif_cursores.valor #>> '{}')::bigint, (excluded.valor #>> '{}')::bigint))\n    end,\n    atualizado_em = now()",
+          "options": {}
+        },
         "id": "p10",
         "name": "Avança cursores",
         "type": "n8n-nodes-base.postgres",
         "typeVersion": 2.5,
         "executeOnce": true,
         "position": [
-          1980,
+          1984,
           0
         ],
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "=insert into public.notif_cursores (nome, valor)\nselect n, v from (values\n  ('chat', to_jsonb({{ Number($('Confirma e avança').first().json.chat) }}::bigint)),\n  ('rel', to_jsonb({{ Number($('Confirma e avança').first().json.rel) }}::bigint)),\n  ('bid', to_jsonb({{ Number($('Confirma e avança').first().json.bid) }}::bigint)),\n  ('deals_desde', to_jsonb('{{ $('Confirma e avança').first().json.deals_desde }}'::text))\n) t(n, v)\nwhere {{ $('Confirma e avança').first().json.todos_ok ? 'true' : 'false' }}::boolean\non conflict (nome) do update\nset valor = case\n      when public.notif_cursores.nome = 'deals_desde'\n        then to_jsonb(greatest(public.notif_cursores.valor #>> '{}', excluded.valor #>> '{}'))\n      else to_jsonb(greatest((public.notif_cursores.valor #>> '{}')::bigint, (excluded.valor #>> '{}')::bigint))\n    end,\n    atualizado_em = now()",
-          "options": {}
-        },
         "credentials": {
           "postgres": {
             "id": "zIilzHxVEjb4gaaH",
@@ -585,6 +579,11 @@
         }
       },
       {
+        "parameters": {
+          "content": "## AgroNegociar — Notificações do marketplace no grupo\nA cada 2 min consulta a réplica (schema an_prod_cbc) e avisa no grupo: **primeiro chat**, **contato liberado**, **anúncio novo** e **venda fechada** (deal status 5).\n\n**Estado** fica no Supabase (tabelas `notif_cursores` e `notif_enviadas`), não no staticData — as rodadas agendadas deste n8n não enxergam o staticData da anterior.\nNa primeira execução só grava o ponto de partida, sem despejar histórico.\nNo chat novo, a mensagem traz nome, e-mail, telefone e id dos dois usuários, o produto e o anúncio. Não envia o texto das conversas.",
+          "height": 264,
+          "width": 760
+        },
         "id": "n9",
         "name": "Nota",
         "type": "n8n-nodes-base.stickyNote",
@@ -592,12 +591,7 @@
         "position": [
           0,
           -368
-        ],
-        "parameters": {
-          "content": "## AgroNegociar — Notificações do marketplace no grupo\nA cada 2 min consulta a réplica (schema an_prod_cbc) e avisa no grupo: **primeiro chat**, **contato liberado**, **anúncio novo** e **venda fechada** (deal status 5).\n\n**Estado** fica no Supabase (tabelas `notif_cursores` e `notif_enviadas`), não no staticData — as rodadas agendadas deste n8n não enxergam o staticData da anterior.\nNa primeira execução só grava o ponto de partida, sem despejar histórico.\nNo chat novo, a mensagem traz nome, e-mail, telefone e id dos dois usuários, o produto e o anúncio. Não envia o texto das conversas.",
-          "height": 264,
-          "width": 760
-        }
+        ]
       }
     ],
     "connections": {
@@ -703,11 +697,11 @@
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": null,
-    "description": null,
-    "autosaved": false,
-    "createdAt": "2026-10-09T12:20:02.735Z",
-    "updatedAt": "2026-10-09T12:20:02.735Z"
+    "name": "Version 812693a6",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-10-20T17:23:58.449Z",
+    "updatedAt": "2026-10-20T17:24:03.746Z"
   },
   "tags": [
     {
