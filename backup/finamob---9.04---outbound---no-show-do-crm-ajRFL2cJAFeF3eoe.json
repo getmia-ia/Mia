@@ -3,7 +3,7 @@
   "createdAt": "2026-10-19T18:45:14.315Z",
   "id": "ajRFL2cJAFeF3eoe",
   "name": "Finamob - 9.04 - Outbound - No-show do CRM",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
@@ -301,7 +301,7 @@
   },
   "meta": null,
   "versionId": "cb64bbc9-2eb2-4b95-954e-03478d58e270",
-  "activeVersionId": null,
+  "activeVersionId": "cb64bbc9-2eb2-4b95-954e-03478d58e270",
   "triggerCount": 1,
   "shared": [
     {
@@ -312,6 +312,291 @@
       "updatedAt": "2026-10-19T18:45:14.315Z"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "versionId": "cb64bbc9-2eb2-4b95-954e-03478d58e270",
+    "workflowId": "ajRFL2cJAFeF3eoe",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 30
+              }
+            ]
+          }
+        },
+        "id": "1f569964-4b3c-4ac9-ac4a-28a5e2bd9d29",
+        "name": "A cada 30 min",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -224,
+          64
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "select id, mailing_id from public.outbound_contatos\nwhere etapa = 'reuniao_agendada' and mailing_id is not null;",
+          "options": {}
+        },
+        "id": "d83c4c6f-130b-41ff-8ce6-94b846c8bb08",
+        "name": "Contatos com reunião",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          0,
+          64
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "66699910-bcf1-44e8-b804-37db966ad639",
+                "leftValue": "={{ $json.mailing_id }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "adb27fa8-e805-4ae0-8194-3f8ed1ae6f85",
+        "name": "Tem contato?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          224,
+          64
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Um item com a lista de ids (inteiros vindos do nosso banco) para uma única consulta no CRM.\nconst ids = [...new Set($input.all().map(i => Number(i.json.mailing_id)).filter(Number.isInteger))];\nreturn [{ json: { ids: ids.join(',') } }];"
+        },
+        "id": "2eea594c-d5f7-4b9b-92f3-85b8bb303694",
+        "name": "Ids dos mailings",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          448,
+          64
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- Contato outbound em reunião cuja call mais recente (por telefone) está em no_show.\n-- id = mailing_id, que é como o contato outbound guarda o vínculo com o CRM.\nSELECT DISTINCT cp.mailing_id AS id\nFROM calls_pipeline cp\nWHERE cp.mailing_id IN ({{ $json.ids }})\n  AND cp.status = 'no_show'\n  AND cp.lixeira = 0\n  AND NOT EXISTS (\n      SELECT 1 FROM calls_pipeline x\n      WHERE x.lixeira = 0\n        AND x.id > cp.id\n        AND x.telefone = cp.telefone\n  );",
+          "options": {}
+        },
+        "id": "388e8cf2-eacd-4680-9dbd-beb91f235943",
+        "name": "No-show no CRM",
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.5,
+        "position": [
+          656,
+          64
+        ],
+        "credentials": {
+          "mySql": {
+            "id": "8ItpiHe2joMjz6qf",
+            "name": "Finamob database"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "2edd6265-301e-456a-aa5d-d0bdbd251c38",
+                "leftValue": "={{ $json.id }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "b2bc46a9-74ae-435a-a9b2-d5c3858a4fd0",
+        "name": "Achou no-show?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          880,
+          64
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{ json: { ids: '{' + $input.all().map(i => Number(i.json.id)).join(',') + '}' } }];"
+        },
+        "id": "13fd6de1-c342-48cb-afde-9273965a484b",
+        "name": "Ids no-show",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1104,
+          48
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "update public.outbound_contatos\nset etapa = 'no_show', updated_at = now()\nwhere etapa = 'reuniao_agendada' and mailing_id = any($1::bigint[]);",
+          "options": {
+            "queryReplacement": "={{ $json.ids }}"
+          }
+        },
+        "id": "67084003-4712-4c36-89d1-29d4a2b9c791",
+        "name": "Marca no-show",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1328,
+          48
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## Outbound - no-show vindo do CRM\nA cada 30 min: pega os contatos outbound em **reunião agendada**, consulta a call mais recente de cada um em `calls_pipeline` no CRM da Finamob e, se estiver com `status = 'no_show'`, move o contato para **No-show**.\n\nReunião agendada/cancelada é automática (trigger em `sdr_eventos`). Se o lead reagendar, volta para **Reunião agendada** sozinho.",
+          "height": 180,
+          "width": 760
+        },
+        "id": "fe9735c7-7860-48b2-83dd-8e76bddfb19d",
+        "name": "Sticky Note",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -224,
+          -160
+        ]
+      }
+    ],
+    "connections": {
+      "A cada 30 min": {
+        "main": [
+          [
+            {
+              "node": "Contatos com reunião",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Contatos com reunião": {
+        "main": [
+          [
+            {
+              "node": "Tem contato?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tem contato?": {
+        "main": [
+          [
+            {
+              "node": "Ids dos mailings",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ids dos mailings": {
+        "main": [
+          [
+            {
+              "node": "No-show no CRM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "No-show no CRM": {
+        "main": [
+          [
+            {
+              "node": "Achou no-show?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Achou no-show?": {
+        "main": [
+          [
+            {
+              "node": "Ids no-show",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ids no-show": {
+        "main": [
+          [
+            {
+              "node": "Marca no-show",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version cb64bbc9",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-10-19T20:32:13.701Z",
+    "updatedAt": "2026-10-20T18:04:52.952Z"
+  },
   "tags": []
 }
