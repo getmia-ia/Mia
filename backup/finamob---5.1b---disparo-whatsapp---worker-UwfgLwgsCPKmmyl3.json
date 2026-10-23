@@ -1,0 +1,1860 @@
+{
+  "updatedAt": "2026-10-22T20:11:15.238Z",
+  "createdAt": "2026-10-22T19:32:13.919Z",
+  "id": "UwfgLwgsCPKmmyl3",
+  "name": "Finamob - 5.1b - Disparo WhatsApp - Worker",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "disparo-finamob-fila",
+        "options": {}
+      },
+      "id": "69acb24a-6ca2-4ddd-999a-9ba810478fd7",
+      "name": "Webhook Fila",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2928,
+        208
+      ],
+      "webhookId": "disparo-finamob-fila"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c0",
+              "name": "disparo_id",
+              "value": "={{ $json.body.disparo_id }}",
+              "type": "string"
+            },
+            {
+              "id": "c1",
+              "name": "lote",
+              "value": 100,
+              "type": "number"
+            },
+            {
+              "id": "c7",
+              "name": "lote_evolution",
+              "value": 10,
+              "type": "number"
+            },
+            {
+              "id": "c6",
+              "name": "webhook_fila",
+              "value": "https://webhook.miabuilder.com/webhook/disparo-finamob-fila",
+              "type": "string"
+            },
+            {
+              "id": "c2",
+              "name": "phone_id_marketing",
+              "value": "1279082001960816",
+              "type": "string"
+            },
+            {
+              "id": "c3",
+              "name": "phone_id_advisor",
+              "value": "1195821910283433",
+              "type": "string"
+            },
+            {
+              "id": "c4",
+              "name": "phone_id_remarketing",
+              "value": "1202871396233612",
+              "type": "string"
+            },
+            {
+              "id": "c5",
+              "name": "phone_id_inbound",
+              "value": "1292568043938721",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7a58d07b-c210-4507-adad-e65b4a6fe882",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2704,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from public.claim_leads_whatsapp($1::uuid, $2::int, $3::int);",
+        "options": {
+          "queryReplacement": "={{ [$json.disparo_id, $json.lote, $json.lote_evolution] }}"
+        }
+      },
+      "id": "7271c82e-decd-49b5-aad3-50ec7d5afd17",
+      "name": "Pegar lote da fila",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2480,
+        208
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Monta o envio de cada lead do lote (sem I/O por item).\n// SDRs oficiais vão pela Cloud API da Meta (número de cada SDR); \"Diogo IA\" vai pela Evolution API.\nconst cfg = $('Config').first().json;\nconst PHONE_IDS = {\n  'SDR-MARKETING': cfg.phone_id_marketing,\n  'SDR-ADVISOR': cfg.phone_id_advisor,\n  'SDR-REMARKETING': cfg.phone_id_remarketing,\n  'SDR-INBOUND': cfg.phone_id_inbound,\n};\n\nfunction normalizeTelefone(raw) {\n  if (raw == null) return '';\n  let d = String(raw).replace(/\\D/g, '').replace(/^0+/, '');\n  if (!d) return '';\n  if (d.startsWith('55')) d = d.slice(2);\n  if (d.length === 10 && ['6', '7', '8', '9'].includes(d[2])) d = d.slice(0, 2) + '9' + d.slice(2);\n  return '55' + d;\n}\n\nreturn $input.all().map(({ json: l }) => {\n  const telefone = normalizeTelefone(l.telefone);\n  const evolution = l.origem_disparo === 'Diogo IA';\n  const phoneId = PHONE_IDS[l.origem_disparo];\n  const tipoMidia = String(l.tipo_midia ?? '').toLowerCase().trim();\n  const params = [l.param_1, l.param_2, l.param_3, l.param_4, l.param_5]\n    .map((v) => String(v ?? '').trim())\n    .filter((t) => t !== '')\n    .map((text) => ({ type: 'text', text }));\n  const components = [{ type: 'body', parameters: params }];\n  const comImagem = tipoMidia === 'imagem' && !!l.imagem_url;\n  if (comImagem) {\n    components.unshift({ type: 'header', parameters: [{ type: 'image', image: { link: l.imagem_url } }] });\n  }\n  const mensagem = l.mensagem_completa ?? '';\n  return { json: {\n    canal: evolution ? 'evolution' : 'meta',\n    id: l.id,\n    id_disparo: l.id_disparo,\n    nome: l.nome,\n    telefone,\n    origem: l.origem_disparo,\n    nome_app: evolution ? 'SDR-DIOGO' : l.origem_disparo,\n    tipo_midia: tipoMidia,\n    imagem_url: l.imagem_url,\n    mensagem,\n    // Telefone inválido, ou SDR oficial sem número da Meta/template: o erro registrado é o nosso.\n    invalido: !telefone || telefone.length < 12 || (!evolution && (!phoneId || !l.template_name)),\n    mensagem_historico: l.origem_disparo === 'SDR-MARKETING' && comImagem ? `${l.imagem_url}\\n\\n${mensagem}` : mensagem,\n    url: `https://graph.facebook.com/v22.0/${phoneId}/messages`,\n    meta_body: {\n      messaging_product: 'whatsapp',\n      to: telefone,\n      type: 'template',\n      template: { name: l.template_name, language: { code: 'pt_BR' }, components },\n    },\n  }};\n});\n"
+      },
+      "id": "ab05fd1c-e8f3-4806-a9d2-ea1e80de53c0",
+      "name": "Montar envio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2256,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "meta-regra",
+                    "leftValue": "={{ $json.canal }}",
+                    "rightValue": "meta",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "meta"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "evolution-regra",
+                    "leftValue": "={{ $json.canal }}",
+                    "rightValue": "evolution",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "evolution"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2247b969-f852-471d-8159-f947133d92c0",
+      "name": "Canal",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -2048,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "adae48d5-49f6-4c20-8533-c2d3c4d139a8",
+      "name": "Loop Meta",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1824,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ 3 + Math.floor(Math.random() * 5) }}"
+      },
+      "id": "867c7696-22fc-433a-b658-5da9972512b2",
+      "name": "Intervalo Meta",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1600,
+        208
+      ],
+      "webhookId": "disparo-worker-intervalo-meta"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.meta_body) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "817bca86-bdc9-4739-9e27-b2ed18207e12",
+      "name": "Enviar template Meta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1376,
+        208
+      ],
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Run Once for Each Item: converte a resposta da Meta no formato do registrar_envios_whatsapp.\n// Falha transitória (rate limit / 5xx / timeout) volta para a fila; o resto vira 'erro'.\nconst RETRY_CODES = [4, 80007, 130429, 131000, 131016, 131048, 133004];\nconst l = $('Loop Meta').item.json;\nconst r = $json;\nconst status = Number(r.statusCode ?? 0);\nconst body = r.body ?? r;\nconst wamid = body?.messages?.[0]?.id ?? null;\n// Lead inválido também passa pela Meta (que rejeita), mas o erro registrado é o nosso.\nconst ok = !l.invalido && status >= 200 && status < 300 && !!wamid;\nconst code = Number(body?.error?.code ?? 0);\nconst retry = !ok && !l.invalido && (status === 0 || status === 429 || status >= 500 || RETRY_CODES.includes(code));\nconst erro = ok ? null\n  : l.invalido ? 'Telefone inválido, origem sem número da Meta ou disparo sem template'\n  : body?.error ? `[${code}] ${body.error.message ?? ''} ${body.error.error_data?.details ?? ''}`.trim()\n  : (r.error?.message ?? `HTTP ${status}`);\nreturn { json: { id: l.id, id_disparo: l.id_disparo, origem: l.origem, telefone: l.telefone, nome: l.nome,\n  nome_app: l.nome_app, mensagem: l.mensagem_historico, ok, retry, wamid, erro } };\n"
+      },
+      "id": "8eb23b74-9937-49c5-8b98-75adddf74a46",
+      "name": "Resultado Meta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1168,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A Evolution recebe a mídia em base64: baixa UMA vez por lote, com timeout.\nfunction stripBOM(buf) { return (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) ? buf.slice(3) : buf; }\nfunction fixPngSignature(buf) {\n  if (buf.length >= 7 && buf[0] === 0x50 && buf[1] === 0x4E && buf[2] === 0x47 && buf[3] === 0x0D && buf[4] === 0x0A && buf[5] === 0x1A && buf[6] === 0x0A) {\n    return Buffer.concat([Buffer.from([0x89]), buf]);\n  }\n  return buf;\n}\n\nconst items = $input.all();\nconst first = items[0]?.json || {};\nconst url = String(first.imagem_url || '').trim();\nlet base64 = '';\nlet mime = '';\nif (url && ['imagem', 'video'].includes(first.tipo_midia)) {\n  try {\n    const res = await this.helpers.httpRequest({\n      method: 'GET', url, headers: { 'User-Agent': 'Mozilla/5.0' },\n      responseFormat: 'arraybuffer', returnFullResponse: true, timeout: 20000,\n    });\n    let buf = stripBOM(Buffer.from(res.body ?? res.data ?? res));\n    mime = (res.headers?.['content-type'] || '').split(';')[0].trim();\n    const isPng = mime.includes('png') || (buf.length >= 3 && buf[0] === 0x50 && buf[1] === 0x4E && buf[2] === 0x47);\n    if (first.tipo_midia === 'imagem' && isPng) buf = fixPngSignature(buf);\n    base64 = buf.toString('base64');\n  } catch (e) {\n    base64 = '';\n  }\n}\nreturn items.map(({ json }) => ({ json: { ...json, base64, mime } }));\n"
+      },
+      "id": "4303cffa-66d1-41b8-b22d-3ac1d75b1c8c",
+      "name": "Baixar mídia Evolution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1856,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "bc5299ba-8d0a-45d6-beff-e545d5056e15",
+      "name": "Loop Evolution",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1632,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ 10 + Math.floor(Math.random() * 10) }}"
+      },
+      "id": "9023da5f-9def-4d89-b3b3-3ca47f44d146",
+      "name": "Intervalo Evolution",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1360,
+        608
+      ],
+      "webhookId": "disparo-worker-intervalo-evolution"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "imagem-regra",
+                    "leftValue": "={{ $json.tipo_midia }}",
+                    "rightValue": "imagem",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "imagem"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "video-regra",
+                    "leftValue": "={{ $json.tipo_midia }}",
+                    "rightValue": "video",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "video"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "texto-regra",
+                    "leftValue": "={{ $json.tipo_midia }}",
+                    "rightValue": "^(imagem|video)$",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notRegex"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "texto"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "623c30c0-35ef-4f43-93f1-20e5ff2194c4",
+      "name": "Tipo de mídia Evolution",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -1152,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "operation": "send-image",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "={{ $json.telefone }}",
+        "media": "={{ $json.base64 }}",
+        "caption": "={{ $json.mensagem }}\n\n",
+        "options_message": {}
+      },
+      "id": "8b965816-4620-4490-ae14-7cb67b43dd42",
+      "name": "Evolution imagem",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        -928,
+        448
+      ],
+      "credentials": {
+        "evolutionApi": {
+          "id": "keWx5OuE8n8WEbw0",
+          "name": "EMI-SDR-DIOGO"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "operation": "send-video",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "={{ $json.telefone }}",
+        "media": "={{ $json.base64 }}",
+        "caption": "={{ $json.mensagem }}\n",
+        "options_message": {}
+      },
+      "id": "6cafb9ad-7d6a-4224-a85d-ab28fb61beb7",
+      "name": "Evolution video",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        -928,
+        608
+      ],
+      "credentials": {
+        "evolutionApi": {
+          "id": "keWx5OuE8n8WEbw0",
+          "name": "EMI-SDR-DIOGO"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "EMI-SDR-DIOGO",
+        "remoteJid": "={{ $json.telefone }}",
+        "messageText": "={{ $json.mensagem }}\n",
+        "options_message": {}
+      },
+      "id": "e29ab15a-661d-495f-9ca7-674c250a4379",
+      "name": "Evolution texto",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        -928,
+        752
+      ],
+      "credentials": {
+        "evolutionApi": {
+          "id": "keWx5OuE8n8WEbw0",
+          "name": "EMI-SDR-DIOGO"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Run Once for Each Item: converte a resposta da Evolution no formato do registrar_envios_whatsapp.\nconst l = $('Loop Evolution').item.json;\nconst r = $json;\nconst wamid = r?.key?.id ?? null;\nconst ok = !l.invalido && !!wamid;\nconst msgErro = String(r?.error?.message ?? r?.error ?? r?.message ?? '');\nconst erro = ok ? null : (l.invalido ? 'Telefone inválido' : (msgErro || 'Evolution não retornou o id da mensagem'));\n// Só falha de rede volta para a fila; erro de número/instância não adianta repetir.\nconst retry = !ok && !l.invalido && /timeout|ECONN|ETIMEDOUT|socket hang up/i.test(msgErro);\nreturn { json: { id: l.id, id_disparo: l.id_disparo, origem: l.origem, telefone: '+' + l.telefone, nome: l.nome,\n  nome_app: l.nome_app, mensagem: l.mensagem, ok, retry, wamid, erro } };\n"
+      },
+      "id": "a8fc9d3d-29ce-4de1-a513-afd01574dd9e",
+      "name": "Resultado Evolution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -704,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from public.registrar_envios_whatsapp($1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($input.all().map(i => i.json))] }}"
+        }
+      },
+      "id": "0c98805d-d795-4cb9-ba8c-9bcba5e6a637",
+      "name": "Registrar no Supabase",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1600,
+        16
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f5",
+              "leftValue": "={{ $json.tem_mais }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b674115b-f22d-481f-a3c5-a9359e8fcf42",
+      "name": "Tem mais lead?",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        -1376,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.webhook_fila }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ disparo_id: $json.disparo_id }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "9c356379-438d-448f-94f9-1beca5741856",
+      "name": "Chamar proximo lote",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1152,
+        16
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f2",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "f3",
+              "leftValue": "={{ ['SDR-REMARKETING', 'SDR-INBOUND'].includes($json.origem) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "17b9deab-9cb4-4b47-a90c-66ee3db1bc10",
+      "name": "Atualiza CRM Finamob?",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        -1600,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://finamob.com.br/api/update_mailing_api.php",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ phone: $json.telefone, ultimo_contato: $now.toFormat('yyyy-MM-dd') }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 10
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "2b42e2fe-cdc3-461e-988f-52436fe0588c",
+      "name": "API Finamob",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1376,
+        -144
+      ],
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Disparo WhatsApp — Worker (todos os SDRs)\nO sistema grava os leads em `leads` (status_envio = pendente) e chama este webhook só com o `disparo_id`.\nCada execução pega um lote do disparo (claim com SKIP LOCKED), envia pelo canal do SDR, registra tudo de uma vez no Supabase e, se ainda houver lead, chama o próprio webhook para o próximo lote.\n- SDR-MARKETING / ADVISOR / REMARKETING / INBOUND: Cloud API da Meta, número de cada SDR no nó Config, um lead por vez com intervalo de 3–7 s, lotes de `lote`.\n- Diogo IA: Evolution API com intervalo de 10–20 s entre envios, lotes de `lote_evolution`.\nSem disparo, nada executa. Se a corrente quebrar, o pg_cron `reacionar-disparos-whatsapp` (no banco) chama o webhook de novo.\nFalha transitória volta para a fila (até 3 tentativas); o disparo vira 'Enviado' quando não sobra lead.",
+        "height": 300,
+        "width": 760,
+        "color": 4
+      },
+      "id": "3746d55d-84e8-40a2-9797-c2e21d2981af",
+      "name": "Sobre o worker",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2928,
+        -144
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Fila": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Pegar lote da fila",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pegar lote da fila": {
+      "main": [
+        [
+          {
+            "node": "Montar envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar envio": {
+      "main": [
+        [
+          {
+            "node": "Canal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Canal": {
+      "main": [
+        [
+          {
+            "node": "Loop Meta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Baixar mídia Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Meta": {
+      "main": [
+        [
+          {
+            "node": "Registrar no Supabase",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Atualiza CRM Finamob?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Intervalo Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intervalo Meta": {
+      "main": [
+        [
+          {
+            "node": "Enviar template Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar template Meta": {
+      "main": [
+        [
+          {
+            "node": "Resultado Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resultado Meta": {
+      "main": [
+        [
+          {
+            "node": "Loop Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixar mídia Evolution": {
+      "main": [
+        [
+          {
+            "node": "Loop Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Evolution": {
+      "main": [
+        [
+          {
+            "node": "Registrar no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Intervalo Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intervalo Evolution": {
+      "main": [
+        [
+          {
+            "node": "Tipo de mídia Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tipo de mídia Evolution": {
+      "main": [
+        [
+          {
+            "node": "Evolution imagem",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Evolution video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Evolution texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evolution imagem": {
+      "main": [
+        [
+          {
+            "node": "Resultado Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evolution video": {
+      "main": [
+        [
+          {
+            "node": "Resultado Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evolution texto": {
+      "main": [
+        [
+          {
+            "node": "Resultado Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resultado Evolution": {
+      "main": [
+        [
+          {
+            "node": "Loop Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza CRM Finamob?": {
+      "main": [
+        [
+          {
+            "node": "API Finamob",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar no Supabase": {
+      "main": [
+        [
+          {
+            "node": "Tem mais lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem mais lead?": {
+      "main": [
+        [
+          {
+            "node": "Chamar proximo lote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "executionTimeout": 7200
+  },
+  "staticData": null,
+  "meta": null,
+  "versionId": "9f08db4d-d6ec-4824-8dcd-ddeeedf84449",
+  "activeVersionId": "9f08db4d-d6ec-4824-8dcd-ddeeedf84449",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "UwfgLwgsCPKmmyl3",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-22T19:32:13.919Z",
+      "updatedAt": "2026-10-22T19:32:13.919Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "9f08db4d-d6ec-4824-8dcd-ddeeedf84449",
+    "workflowId": "UwfgLwgsCPKmmyl3",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "disparo-finamob-fila",
+          "options": {}
+        },
+        "id": "69acb24a-6ca2-4ddd-999a-9ba810478fd7",
+        "name": "Webhook Fila",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          -2928,
+          208
+        ],
+        "webhookId": "disparo-finamob-fila"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "c0",
+                "name": "disparo_id",
+                "value": "={{ $json.body.disparo_id }}",
+                "type": "string"
+              },
+              {
+                "id": "c1",
+                "name": "lote",
+                "value": 100,
+                "type": "number"
+              },
+              {
+                "id": "c7",
+                "name": "lote_evolution",
+                "value": 10,
+                "type": "number"
+              },
+              {
+                "id": "c6",
+                "name": "webhook_fila",
+                "value": "https://webhook.miabuilder.com/webhook/disparo-finamob-fila",
+                "type": "string"
+              },
+              {
+                "id": "c2",
+                "name": "phone_id_marketing",
+                "value": "1279082001960816",
+                "type": "string"
+              },
+              {
+                "id": "c3",
+                "name": "phone_id_advisor",
+                "value": "1195821910283433",
+                "type": "string"
+              },
+              {
+                "id": "c4",
+                "name": "phone_id_remarketing",
+                "value": "1202871396233612",
+                "type": "string"
+              },
+              {
+                "id": "c5",
+                "name": "phone_id_inbound",
+                "value": "1292568043938721",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "7a58d07b-c210-4507-adad-e65b4a6fe882",
+        "name": "Config",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          -2704,
+          208
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "select * from public.claim_leads_whatsapp($1::uuid, $2::int, $3::int);",
+          "options": {
+            "queryReplacement": "={{ [$json.disparo_id, $json.lote, $json.lote_evolution] }}"
+          }
+        },
+        "id": "7271c82e-decd-49b5-aad3-50ec7d5afd17",
+        "name": "Pegar lote da fila",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -2480,
+          208
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Monta o envio de cada lead do lote (sem I/O por item).\n// SDRs oficiais vão pela Cloud API da Meta (número de cada SDR); \"Diogo IA\" vai pela Evolution API.\nconst cfg = $('Config').first().json;\nconst PHONE_IDS = {\n  'SDR-MARKETING': cfg.phone_id_marketing,\n  'SDR-ADVISOR': cfg.phone_id_advisor,\n  'SDR-REMARKETING': cfg.phone_id_remarketing,\n  'SDR-INBOUND': cfg.phone_id_inbound,\n};\n\nfunction normalizeTelefone(raw) {\n  if (raw == null) return '';\n  let d = String(raw).replace(/\\D/g, '').replace(/^0+/, '');\n  if (!d) return '';\n  if (d.startsWith('55')) d = d.slice(2);\n  if (d.length === 10 && ['6', '7', '8', '9'].includes(d[2])) d = d.slice(0, 2) + '9' + d.slice(2);\n  return '55' + d;\n}\n\nreturn $input.all().map(({ json: l }) => {\n  const telefone = normalizeTelefone(l.telefone);\n  const evolution = l.origem_disparo === 'Diogo IA';\n  const phoneId = PHONE_IDS[l.origem_disparo];\n  const tipoMidia = String(l.tipo_midia ?? '').toLowerCase().trim();\n  const params = [l.param_1, l.param_2, l.param_3, l.param_4, l.param_5]\n    .map((v) => String(v ?? '').trim())\n    .filter((t) => t !== '')\n    .map((text) => ({ type: 'text', text }));\n  const components = [{ type: 'body', parameters: params }];\n  const comImagem = tipoMidia === 'imagem' && !!l.imagem_url;\n  if (comImagem) {\n    components.unshift({ type: 'header', parameters: [{ type: 'image', image: { link: l.imagem_url } }] });\n  }\n  const mensagem = l.mensagem_completa ?? '';\n  return { json: {\n    canal: evolution ? 'evolution' : 'meta',\n    id: l.id,\n    id_disparo: l.id_disparo,\n    nome: l.nome,\n    telefone,\n    origem: l.origem_disparo,\n    nome_app: evolution ? 'SDR-DIOGO' : l.origem_disparo,\n    tipo_midia: tipoMidia,\n    imagem_url: l.imagem_url,\n    mensagem,\n    // Telefone inválido, ou SDR oficial sem número da Meta/template: o erro registrado é o nosso.\n    invalido: !telefone || telefone.length < 12 || (!evolution && (!phoneId || !l.template_name)),\n    mensagem_historico: l.origem_disparo === 'SDR-MARKETING' && comImagem ? `${l.imagem_url}\\n\\n${mensagem}` : mensagem,\n    url: `https://graph.facebook.com/v22.0/${phoneId}/messages`,\n    meta_body: {\n      messaging_product: 'whatsapp',\n      to: telefone,\n      type: 'template',\n      template: { name: l.template_name, language: { code: 'pt_BR' }, components },\n    },\n  }};\n});\n"
+        },
+        "id": "ab05fd1c-e8f3-4806-a9d2-ea1e80de53c0",
+        "name": "Montar envio",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -2256,
+          208
+        ]
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "loose",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "id": "meta-regra",
+                      "leftValue": "={{ $json.canal }}",
+                      "rightValue": "meta",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "meta"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "loose",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "id": "evolution-regra",
+                      "leftValue": "={{ $json.canal }}",
+                      "rightValue": "evolution",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "evolution"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "2247b969-f852-471d-8159-f947133d92c0",
+        "name": "Canal",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3.2,
+        "position": [
+          -2048,
+          208
+        ]
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "id": "adae48d5-49f6-4c20-8533-c2d3c4d139a8",
+        "name": "Loop Meta",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          -1824,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "amount": "={{ 3 + Math.floor(Math.random() * 5) }}"
+        },
+        "id": "867c7696-22fc-433a-b658-5da9972512b2",
+        "name": "Intervalo Meta",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          -1600,
+          208
+        ],
+        "webhookId": "disparo-worker-intervalo-meta"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $json.url }}",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.meta_body) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 20000
+          }
+        },
+        "id": "817bca86-bdc9-4739-9e27-b2ed18207e12",
+        "name": "Enviar template Meta",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -1376,
+          208
+        ],
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "// Run Once for Each Item: converte a resposta da Meta no formato do registrar_envios_whatsapp.\n// Falha transitória (rate limit / 5xx / timeout) volta para a fila; o resto vira 'erro'.\nconst RETRY_CODES = [4, 80007, 130429, 131000, 131016, 131048, 133004];\nconst l = $('Loop Meta').item.json;\nconst r = $json;\nconst status = Number(r.statusCode ?? 0);\nconst body = r.body ?? r;\nconst wamid = body?.messages?.[0]?.id ?? null;\n// Lead inválido também passa pela Meta (que rejeita), mas o erro registrado é o nosso.\nconst ok = !l.invalido && status >= 200 && status < 300 && !!wamid;\nconst code = Number(body?.error?.code ?? 0);\nconst retry = !ok && !l.invalido && (status === 0 || status === 429 || status >= 500 || RETRY_CODES.includes(code));\nconst erro = ok ? null\n  : l.invalido ? 'Telefone inválido, origem sem número da Meta ou disparo sem template'\n  : body?.error ? `[${code}] ${body.error.message ?? ''} ${body.error.error_data?.details ?? ''}`.trim()\n  : (r.error?.message ?? `HTTP ${status}`);\nreturn { json: { id: l.id, id_disparo: l.id_disparo, origem: l.origem, telefone: l.telefone, nome: l.nome,\n  nome_app: l.nome_app, mensagem: l.mensagem_historico, ok, retry, wamid, erro } };\n"
+        },
+        "id": "8eb23b74-9937-49c5-8b98-75adddf74a46",
+        "name": "Resultado Meta",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -1168,
+          208
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// A Evolution recebe a mídia em base64: baixa UMA vez por lote, com timeout.\nfunction stripBOM(buf) { return (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) ? buf.slice(3) : buf; }\nfunction fixPngSignature(buf) {\n  if (buf.length >= 7 && buf[0] === 0x50 && buf[1] === 0x4E && buf[2] === 0x47 && buf[3] === 0x0D && buf[4] === 0x0A && buf[5] === 0x1A && buf[6] === 0x0A) {\n    return Buffer.concat([Buffer.from([0x89]), buf]);\n  }\n  return buf;\n}\n\nconst items = $input.all();\nconst first = items[0]?.json || {};\nconst url = String(first.imagem_url || '').trim();\nlet base64 = '';\nlet mime = '';\nif (url && ['imagem', 'video'].includes(first.tipo_midia)) {\n  try {\n    const res = await this.helpers.httpRequest({\n      method: 'GET', url, headers: { 'User-Agent': 'Mozilla/5.0' },\n      responseFormat: 'arraybuffer', returnFullResponse: true, timeout: 20000,\n    });\n    let buf = stripBOM(Buffer.from(res.body ?? res.data ?? res));\n    mime = (res.headers?.['content-type'] || '').split(';')[0].trim();\n    const isPng = mime.includes('png') || (buf.length >= 3 && buf[0] === 0x50 && buf[1] === 0x4E && buf[2] === 0x47);\n    if (first.tipo_midia === 'imagem' && isPng) buf = fixPngSignature(buf);\n    base64 = buf.toString('base64');\n  } catch (e) {\n    base64 = '';\n  }\n}\nreturn items.map(({ json }) => ({ json: { ...json, base64, mime } }));\n"
+        },
+        "id": "4303cffa-66d1-41b8-b22d-3ac1d75b1c8c",
+        "name": "Baixar mídia Evolution",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -1856,
+          592
+        ]
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "id": "bc5299ba-8d0a-45d6-beff-e545d5056e15",
+        "name": "Loop Evolution",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          -1632,
+          592
+        ]
+      },
+      {
+        "parameters": {
+          "amount": "={{ 10 + Math.floor(Math.random() * 10) }}"
+        },
+        "id": "9023da5f-9def-4d89-b3b3-3ca47f44d146",
+        "name": "Intervalo Evolution",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          -1360,
+          608
+        ],
+        "webhookId": "disparo-worker-intervalo-evolution"
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "loose",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "id": "imagem-regra",
+                      "leftValue": "={{ $json.tipo_midia }}",
+                      "rightValue": "imagem",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "imagem"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "loose",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "id": "video-regra",
+                      "leftValue": "={{ $json.tipo_midia }}",
+                      "rightValue": "video",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "video"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "loose",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "id": "texto-regra",
+                      "leftValue": "={{ $json.tipo_midia }}",
+                      "rightValue": "^(imagem|video)$",
+                      "operator": {
+                        "type": "string",
+                        "operation": "notRegex"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "texto"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "623c30c0-35ef-4f43-93f1-20e5ff2194c4",
+        "name": "Tipo de mídia Evolution",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3.2,
+        "position": [
+          -1152,
+          592
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "operation": "send-image",
+          "instanceName": "EMI-SDR-DIOGO",
+          "remoteJid": "={{ $json.telefone }}",
+          "media": "={{ $json.base64 }}",
+          "caption": "={{ $json.mensagem }}\n\n",
+          "options_message": {}
+        },
+        "id": "8b965816-4620-4490-ae14-7cb67b43dd42",
+        "name": "Evolution imagem",
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          -928,
+          448
+        ],
+        "credentials": {
+          "evolutionApi": {
+            "id": "keWx5OuE8n8WEbw0",
+            "name": "EMI-SDR-DIOGO"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "operation": "send-video",
+          "instanceName": "EMI-SDR-DIOGO",
+          "remoteJid": "={{ $json.telefone }}",
+          "media": "={{ $json.base64 }}",
+          "caption": "={{ $json.mensagem }}\n",
+          "options_message": {}
+        },
+        "id": "6cafb9ad-7d6a-4224-a85d-ab28fb61beb7",
+        "name": "Evolution video",
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          -928,
+          608
+        ],
+        "credentials": {
+          "evolutionApi": {
+            "id": "keWx5OuE8n8WEbw0",
+            "name": "EMI-SDR-DIOGO"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "EMI-SDR-DIOGO",
+          "remoteJid": "={{ $json.telefone }}",
+          "messageText": "={{ $json.mensagem }}\n",
+          "options_message": {}
+        },
+        "id": "e29ab15a-661d-495f-9ca7-674c250a4379",
+        "name": "Evolution texto",
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          -928,
+          752
+        ],
+        "credentials": {
+          "evolutionApi": {
+            "id": "keWx5OuE8n8WEbw0",
+            "name": "EMI-SDR-DIOGO"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "// Run Once for Each Item: converte a resposta da Evolution no formato do registrar_envios_whatsapp.\nconst l = $('Loop Evolution').item.json;\nconst r = $json;\nconst wamid = r?.key?.id ?? null;\nconst ok = !l.invalido && !!wamid;\nconst msgErro = String(r?.error?.message ?? r?.error ?? r?.message ?? '');\nconst erro = ok ? null : (l.invalido ? 'Telefone inválido' : (msgErro || 'Evolution não retornou o id da mensagem'));\n// Só falha de rede volta para a fila; erro de número/instância não adianta repetir.\nconst retry = !ok && !l.invalido && /timeout|ECONN|ETIMEDOUT|socket hang up/i.test(msgErro);\nreturn { json: { id: l.id, id_disparo: l.id_disparo, origem: l.origem, telefone: '+' + l.telefone, nome: l.nome,\n  nome_app: l.nome_app, mensagem: l.mensagem, ok, retry, wamid, erro } };\n"
+        },
+        "id": "a8fc9d3d-29ce-4de1-a513-afd01574dd9e",
+        "name": "Resultado Evolution",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -704,
+          608
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "select * from public.registrar_envios_whatsapp($1::jsonb);",
+          "options": {
+            "queryReplacement": "={{ [JSON.stringify($input.all().map(i => i.json))] }}"
+          }
+        },
+        "id": "0c98805d-d795-4cb9-ba8c-9bcba5e6a637",
+        "name": "Registrar no Supabase",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          -1600,
+          16
+        ],
+        "executeOnce": true,
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "f5",
+                "leftValue": "={{ $json.tem_mais }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "b674115b-f22d-481f-a3c5-a9359e8fcf42",
+        "name": "Tem mais lead?",
+        "type": "n8n-nodes-base.filter",
+        "typeVersion": 2.2,
+        "position": [
+          -1376,
+          16
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $('Config').first().json.webhook_fila }}",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ disparo_id: $json.disparo_id }) }}",
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "id": "9c356379-438d-448f-94f9-1beca5741856",
+        "name": "Chamar proximo lote",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -1152,
+          16
+        ],
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "f2",
+                "leftValue": "={{ $json.ok }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              },
+              {
+                "id": "f3",
+                "leftValue": "={{ ['SDR-REMARKETING', 'SDR-INBOUND'].includes($json.origem) }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "17b9deab-9cb4-4b47-a90c-66ee3db1bc10",
+        "name": "Atualiza CRM Finamob?",
+        "type": "n8n-nodes-base.filter",
+        "typeVersion": 2.2,
+        "position": [
+          -1600,
+          -144
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://finamob.com.br/api/update_mailing_api.php",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ phone: $json.telefone, ultimo_contato: $now.toFormat('yyyy-MM-dd') }) }}",
+          "options": {
+            "batching": {
+              "batch": {
+                "batchSize": 10
+              }
+            },
+            "timeout": 20000
+          }
+        },
+        "id": "2b42e2fe-cdc3-461e-988f-52436fe0588c",
+        "name": "API Finamob",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -1376,
+          -144
+        ],
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "content": "## Disparo WhatsApp — Worker (todos os SDRs)\nO sistema grava os leads em `leads` (status_envio = pendente) e chama este webhook só com o `disparo_id`.\nCada execução pega um lote do disparo (claim com SKIP LOCKED), envia pelo canal do SDR, registra tudo de uma vez no Supabase e, se ainda houver lead, chama o próprio webhook para o próximo lote.\n- SDR-MARKETING / ADVISOR / REMARKETING / INBOUND: Cloud API da Meta, número de cada SDR no nó Config, um lead por vez com intervalo de 3–7 s, lotes de `lote`.\n- Diogo IA: Evolution API com intervalo de 10–20 s entre envios, lotes de `lote_evolution`.\nSem disparo, nada executa. Se a corrente quebrar, o pg_cron `reacionar-disparos-whatsapp` (no banco) chama o webhook de novo.\nFalha transitória volta para a fila (até 3 tentativas); o disparo vira 'Enviado' quando não sobra lead.",
+          "height": 300,
+          "width": 760,
+          "color": 4
+        },
+        "id": "3746d55d-84e8-40a2-9797-c2e21d2981af",
+        "name": "Sobre o worker",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -2928,
+          -144
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook Fila": {
+        "main": [
+          [
+            {
+              "node": "Config",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Config": {
+        "main": [
+          [
+            {
+              "node": "Pegar lote da fila",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pegar lote da fila": {
+        "main": [
+          [
+            {
+              "node": "Montar envio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar envio": {
+        "main": [
+          [
+            {
+              "node": "Canal",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Canal": {
+        "main": [
+          [
+            {
+              "node": "Loop Meta",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Baixar mídia Evolution",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Meta": {
+        "main": [
+          [
+            {
+              "node": "Registrar no Supabase",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Atualiza CRM Finamob?",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Intervalo Meta",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Intervalo Meta": {
+        "main": [
+          [
+            {
+              "node": "Enviar template Meta",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar template Meta": {
+        "main": [
+          [
+            {
+              "node": "Resultado Meta",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resultado Meta": {
+        "main": [
+          [
+            {
+              "node": "Loop Meta",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Baixar mídia Evolution": {
+        "main": [
+          [
+            {
+              "node": "Loop Evolution",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Evolution": {
+        "main": [
+          [
+            {
+              "node": "Registrar no Supabase",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Intervalo Evolution",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Intervalo Evolution": {
+        "main": [
+          [
+            {
+              "node": "Tipo de mídia Evolution",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tipo de mídia Evolution": {
+        "main": [
+          [
+            {
+              "node": "Evolution imagem",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Evolution video",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Evolution texto",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Evolution imagem": {
+        "main": [
+          [
+            {
+              "node": "Resultado Evolution",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Evolution video": {
+        "main": [
+          [
+            {
+              "node": "Resultado Evolution",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Evolution texto": {
+        "main": [
+          [
+            {
+              "node": "Resultado Evolution",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resultado Evolution": {
+        "main": [
+          [
+            {
+              "node": "Loop Evolution",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Atualiza CRM Finamob?": {
+        "main": [
+          [
+            {
+              "node": "API Finamob",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Registrar no Supabase": {
+        "main": [
+          [
+            {
+              "node": "Tem mais lead?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tem mais lead?": {
+        "main": [
+          [
+            {
+              "node": "Chamar proximo lote",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version 9f08db4d",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-10-22T20:00:40.823Z",
+    "updatedAt": "2026-10-22T20:01:03.366Z"
+  },
+  "tags": []
+}
