@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-10-22T23:07:44.204Z",
+  "updatedAt": "2026-10-23T22:19:18.890Z",
   "createdAt": "2026-10-22T22:56:22.934Z",
   "id": "iRSfUEkUXrdN8do8",
   "name": "Mia - 2.7 - Retomadas",
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
@@ -78,7 +78,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// ===================== CONFIGURAÇÃO =====================\nconst CFG = {\n  // Só leads cuja ÚLTIMA mensagem é depois desta data entram nas retomadas.\n  // Evita mandar retomada para conversas antigas no dia em que ligar o fluxo.\n  inicio: '2026-10-23T00:00:00-03:00',\n  // Durante os testes, só estes números recebem retomadas. Lista vazia = todos.\n  numeros_liberados: ['5511913626617'],\n  maxRetomadas: 5,\n  janelaInicio: 8,   // 8h\n  janelaFim: 20,     // 20h\n  // Se a retomada atrasar mais que isso (ex.: fluxo ficou parado), não envia mais aquela.\n  toleranciaHoras: 24\n};\n// ========================================================\n\n// Textos dos templates aprovados na Meta ({{1}} = primeiro nome)\nconst TEMPLATES = {\n  1: 'Oi, {{1}}! Aqui é a Mia, da M[IA]. Ficou alguma dúvida sobre o que conversamos? Se fizer sentido, sigo daqui com você.',\n  2: 'Oi, {{1}}, tudo bem? Passando pra saber se ainda faz sentido a gente conversar sobre IA na sua empresa.',\n  3: 'Oi, {{1}}! Sei que a rotina aperta. Se quiser, te mostro em 30 minutos como a IA pode tirar tarefas repetitivas do seu time. Topa?',\n  4: 'E aí, {{1}}? Não quero ser insistente rs. Só me diz se ainda tem interesse ou se é melhor a gente falar mais pra frente.',\n  5: 'Oi, {{1}}! Essa é minha última mensagem por aqui. Se um dia quiser retomar o papo sobre IA, é só me chamar. Boa sorte por aí!'\n};\n\nconst TZ = 'America/Sao_Paulo';\nconst agora = new Date();\nconst inicio = new Date(CFG.inicio);\n\n// Converte uma data para \"relógio de São Paulo\" (para mexer em dia/hora)\nconst toSP = d => new Date(d.toLocaleString('en-US', { timeZone: TZ }));\nconst offsetMs = d => toSP(d).getTime() - d.getTime();         // diferença SP x UTC\n\n// Soma N dias ÚTEIS mantendo o mesmo horário e ajusta para a janela 8h–20h\nfunction proximoEnvio(ultima, n) {\n  let sp = toSP(ultima);\n  let somados = 0;\n  while (somados < n) {\n    sp.setDate(sp.getDate() + 1);\n    if (sp.getDay() !== 0 && sp.getDay() !== 6) somados++;\n  }\n  // Fora da janela (antes das 8h ou a partir das 20h): envia às 8h desse mesmo dia útil\n  const h = sp.getHours();\n  if (h < CFG.janelaInicio || h >= CFG.janelaFim) sp.setHours(CFG.janelaInicio, 0, 0, 0);\n  return new Date(sp.getTime() - offsetMs(ultima));\n}\n\n// Agrupa o histórico por telefone\nconst porTel = {};\nfor (const it of $input.all()) {\n  const r = it.json;\n  if (!r || !r.telefone) continue;\n  (porTel[r.telefone] = porTel[r.telefone] || []).push(r);\n}\n\nconst saida = [];\nfor (const [tel, rows] of Object.entries(porTel)) {\n  if (CFG.numeros_liberados.length && !CFG.numeros_liberados.includes(String(tel))) continue;\n  rows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));\n\n  const doLead = rows.filter(r => !String(r.message_type || '').startsWith('retomada') && String(r.mensagem_usuario || '').trim() !== '');\n  if (!doLead.length) continue;\n  const ultimaLead = doLead[doLead.length - 1];\n  const ultimaData = new Date(ultimaLead.created_at);\n  if (ultimaData < inicio) continue;\n\n  const enviadas = rows.filter(r => String(r.message_type || '').startsWith('retomada') && new Date(r.created_at) > ultimaData).length;\n  const numero = enviadas + 1;                                  // 1..5 = retomada, 6 = perda\n  if (numero > CFG.maxRetomadas + 1) continue;                  // já tratado\n\n  const quando = proximoEnvio(ultimaData, numero);\n  const atrasoH = (agora - quando) / 3600000;\n  if (atrasoH < 0 || atrasoH > CFG.toleranciaHoras) continue;   // ainda não é hora, ou passou muito\n\n  const nomeCompleto = String(ultimaLead.nome_usuario || '').trim();\n  const primeiro = nomeCompleto.split(/\\s+/)[0] || 'tudo bem';\n  const acao = numero <= CFG.maxRetomadas ? 'retomada' : 'perda';\n  saida.push({ json: {\n    telefone: String(tel),\n    chat_id: String(rows[rows.length - 1].id_usuario || ultimaLead.id_usuario || ''),\n    primeiro_nome: primeiro,\n    nome_usuario: nomeCompleto,\n    acao,\n    template: acao === 'retomada' ? 'mia_retomada_' + numero : null,\n    texto: acao === 'retomada' ? TEMPLATES[numero].replace('{{1}}', primeiro) : null,\n    numero,\n    ultima_mensagem_lead: ultimaData.toISOString(),\n    envio_previsto: quando.toISOString()\n  }});\n}\nreturn saida;\n"
+        "jsCode": "// ===================== CONFIGURAÇÃO =====================\nconst CFG = {\n  // Só leads cuja ÚLTIMA mensagem é depois desta data entram nas retomadas.\n  // Evita mandar retomada para conversas antigas no dia em que ligar o fluxo.\n  inicio: '2026-10-23T00:00:00-03:00',\n  // Durante os testes, só estes números recebem retomadas. Lista vazia = todos.\n  numeros_liberados: [],\n  maxRetomadas: 5,\n  janelaInicio: 8,   // 8h\n  janelaFim: 20,     // 20h\n  // Se a retomada atrasar mais que isso (ex.: fluxo ficou parado), não envia mais aquela.\n  toleranciaHoras: 24\n};\n// ========================================================\n\n// Textos dos templates aprovados na Meta ({{1}} = primeiro nome)\n// Templates aprovados na Meta (conta da Mia) — {{1}} = primeiro nome do lead\nconst TEMPLATES = {\n  1: { nome: 'mia_followup_1', texto: 'Oii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊' },\n  2: { nome: 'mia_followup_2', texto: 'Tudo bem, {{1}}? Tem um minutinho? 😄' },\n  3: { nome: 'mia_followup_3', texto: 'Opa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?' },\n  4: { nome: 'mia_followup_4', texto: 'Oi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?' },\n  5: { nome: 'mia_despedida_encerramento', texto: 'Oi {{1}}! Por aqui é a Mia, da M[IA]. [mensagem de despedida]' }\n};\n\nconst TZ = 'America/Sao_Paulo';\nconst agora = new Date();\nconst inicio = new Date(CFG.inicio);\n\n// Converte uma data para \"relógio de São Paulo\" (para mexer em dia/hora)\nconst toSP = d => new Date(d.toLocaleString('en-US', { timeZone: TZ }));\nconst offsetMs = d => toSP(d).getTime() - d.getTime();         // diferença SP x UTC\n\n// Soma N dias ÚTEIS mantendo o mesmo horário e ajusta para a janela 8h–20h\nfunction proximoEnvio(ultima, n) {\n  let sp = toSP(ultima);\n  let somados = 0;\n  while (somados < n) {\n    sp.setDate(sp.getDate() + 1);\n    if (sp.getDay() !== 0 && sp.getDay() !== 6) somados++;\n  }\n  // Fora da janela (antes das 8h ou a partir das 20h): envia às 8h desse mesmo dia útil\n  const h = sp.getHours();\n  if (h < CFG.janelaInicio || h >= CFG.janelaFim) sp.setHours(CFG.janelaInicio, 0, 0, 0);\n    // Na última hora da janela (19h–19h59), adianta para 19h00, senão a rodada das 19h05 perderia o envio\n  else if (h === CFG.janelaFim - 1) sp.setHours(CFG.janelaFim - 1, 0, 0, 0);\n  return new Date(sp.getTime() - offsetMs(ultima));\n}\n\n// Agrupa o histórico por telefone\nconst porTel = {};\nfor (const it of $input.all()) {\n  const r = it.json;\n  if (!r || !r.telefone) continue;\n  (porTel[r.telefone] = porTel[r.telefone] || []).push(r);\n}\n\nconst saida = [];\nfor (const [tel, rows] of Object.entries(porTel)) {\n  if (CFG.numeros_liberados.length && !CFG.numeros_liberados.includes(String(tel))) continue;\n  rows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));\n\n  const doLead = rows.filter(r => !String(r.message_type || '').startsWith('retomada') && String(r.mensagem_usuario || '').trim() !== '');\n  if (!doLead.length) continue;\n  const ultimaLead = doLead[doLead.length - 1];\n  const ultimaData = new Date(ultimaLead.created_at);\n  if (ultimaData < inicio) continue;\n\n  const enviadas = rows.filter(r => String(r.message_type || '').startsWith('retomada') && new Date(r.created_at) > ultimaData).length;\n  const numero = enviadas + 1;                                  // 1..5 = retomada, 6 = perda\n  if (numero > CFG.maxRetomadas + 1) continue;                  // já tratado\n\n  const quando = proximoEnvio(ultimaData, numero);\n  const atrasoH = (agora - quando) / 3600000;\n  if (atrasoH < 0 || atrasoH > CFG.toleranciaHoras) continue;   // ainda não é hora, ou passou muito\n\n  const nomeCompleto = String(ultimaLead.nome_usuario || '').trim();\n  const primeiro = nomeCompleto.split(/\\s+/)[0] || 'tudo bem';\n  const acao = numero <= CFG.maxRetomadas ? 'retomada' : 'perda';\n  saida.push({ json: {\n    telefone: String(tel),\n    chat_id: String(rows[rows.length - 1].id_usuario || ultimaLead.id_usuario || ''),\n    primeiro_nome: primeiro,\n    nome_usuario: nomeCompleto,\n    acao,\n    template: acao === 'retomada' ? TEMPLATES[numero].nome : null,\n    texto: acao === 'retomada' ? TEMPLATES[numero].texto.replace('{{1}}', primeiro) : null,\n    numero,\n    ultima_mensagem_lead: ultimaData.toISOString(),\n    envio_previsto: quando.toISOString()\n  }});\n}\nreturn saida;\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -558,13 +558,25 @@
     "binaryMode": "separate",
     "timeSavedMode": "fixed",
     "callerPolicy": "workflowsFromSameOwner",
-    "availableInMCP": true
+    "availableInMCP": true,
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
   },
-  "staticData": null,
+  "staticData": {
+    "node:A cada hora": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
   "meta": null,
-  "versionId": "776b8bc8-88df-4b84-8263-66e8e5a0355f",
-  "activeVersionId": null,
-  "triggerCount": 0,
+  "versionId": "19e6b1d6-6bad-40b1-915a-549be61f7048",
+  "activeVersionId": "19e6b1d6-6bad-40b1-915a-549be61f7048",
+  "triggerCount": 1,
   "shared": [
     {
       "role": "workflow:owner",
@@ -574,6 +586,564 @@
       "updatedAt": "2026-10-22T22:56:22.934Z"
     }
   ],
-  "activeVersion": null,
+  "activeVersion": {
+    "versionId": "19e6b1d6-6bad-40b1-915a-549be61f7048",
+    "workflowId": "iRSfUEkUXrdN8do8",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "hours",
+                "triggerAtMinute": 5
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          608,
+          272
+        ],
+        "id": "f4b343da-df54-4601-8336-ea48ae45b3a5",
+        "name": "A cada hora"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Só roda de segunda a sexta, entre 8h e 20h (horário de São Paulo)\nconst agora = new Date();\nconst sp = new Date(agora.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));\nconst dia = sp.getDay();       // 0 = domingo, 6 = sábado\nconst hora = sp.getHours();\nconst dentro = dia >= 1 && dia <= 5 && hora >= 8 && hora < 20;\nreturn dentro ? [{ json: { agora: agora.toISOString(), horaSP: hora, diaSemana: dia } }] : [];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          832,
+          272
+        ],
+        "id": "5a0f3b10-53da-4766-9579-989d924db231",
+        "name": "Janela permitida?"
+      },
+      {
+        "parameters": {
+          "operation": "getAll",
+          "tableId": "mia-historico_mensagens",
+          "returnAll": true,
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "nome_app",
+                "condition": "eq",
+                "keyValue": "SDR-MIA"
+              },
+              {
+                "keyName": "created_at",
+                "condition": "gte",
+                "keyValue": "={{ new Date(Date.now() - 15*24*60*60*1000).toISOString() }}"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1056,
+          272
+        ],
+        "id": "68d23a10-48ff-48e1-892d-a95da4354c66",
+        "name": "Ler histórico (15 dias)",
+        "executeOnce": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "FsQeUlxQ7Q6O8mbE",
+            "name": "MIA - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// ===================== CONFIGURAÇÃO =====================\nconst CFG = {\n  // Só leads cuja ÚLTIMA mensagem é depois desta data entram nas retomadas.\n  // Evita mandar retomada para conversas antigas no dia em que ligar o fluxo.\n  inicio: '2026-10-23T00:00:00-03:00',\n  // Durante os testes, só estes números recebem retomadas. Lista vazia = todos.\n  numeros_liberados: [],\n  maxRetomadas: 5,\n  janelaInicio: 8,   // 8h\n  janelaFim: 20,     // 20h\n  // Se a retomada atrasar mais que isso (ex.: fluxo ficou parado), não envia mais aquela.\n  toleranciaHoras: 24\n};\n// ========================================================\n\n// Textos dos templates aprovados na Meta ({{1}} = primeiro nome)\n// Templates aprovados na Meta (conta da Mia) — {{1}} = primeiro nome do lead\nconst TEMPLATES = {\n  1: { nome: 'mia_followup_1', texto: 'Oii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊' },\n  2: { nome: 'mia_followup_2', texto: 'Tudo bem, {{1}}? Tem um minutinho? 😄' },\n  3: { nome: 'mia_followup_3', texto: 'Opa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?' },\n  4: { nome: 'mia_followup_4', texto: 'Oi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?' },\n  5: { nome: 'mia_despedida_encerramento', texto: 'Oi {{1}}! Por aqui é a Mia, da M[IA]. [mensagem de despedida]' }\n};\n\nconst TZ = 'America/Sao_Paulo';\nconst agora = new Date();\nconst inicio = new Date(CFG.inicio);\n\n// Converte uma data para \"relógio de São Paulo\" (para mexer em dia/hora)\nconst toSP = d => new Date(d.toLocaleString('en-US', { timeZone: TZ }));\nconst offsetMs = d => toSP(d).getTime() - d.getTime();         // diferença SP x UTC\n\n// Soma N dias ÚTEIS mantendo o mesmo horário e ajusta para a janela 8h–20h\nfunction proximoEnvio(ultima, n) {\n  let sp = toSP(ultima);\n  let somados = 0;\n  while (somados < n) {\n    sp.setDate(sp.getDate() + 1);\n    if (sp.getDay() !== 0 && sp.getDay() !== 6) somados++;\n  }\n  // Fora da janela (antes das 8h ou a partir das 20h): envia às 8h desse mesmo dia útil\n  const h = sp.getHours();\n  if (h < CFG.janelaInicio || h >= CFG.janelaFim) sp.setHours(CFG.janelaInicio, 0, 0, 0);\n    // Na última hora da janela (19h–19h59), adianta para 19h00, senão a rodada das 19h05 perderia o envio\n  else if (h === CFG.janelaFim - 1) sp.setHours(CFG.janelaFim - 1, 0, 0, 0);\n  return new Date(sp.getTime() - offsetMs(ultima));\n}\n\n// Agrupa o histórico por telefone\nconst porTel = {};\nfor (const it of $input.all()) {\n  const r = it.json;\n  if (!r || !r.telefone) continue;\n  (porTel[r.telefone] = porTel[r.telefone] || []).push(r);\n}\n\nconst saida = [];\nfor (const [tel, rows] of Object.entries(porTel)) {\n  if (CFG.numeros_liberados.length && !CFG.numeros_liberados.includes(String(tel))) continue;\n  rows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));\n\n  const doLead = rows.filter(r => !String(r.message_type || '').startsWith('retomada') && String(r.mensagem_usuario || '').trim() !== '');\n  if (!doLead.length) continue;\n  const ultimaLead = doLead[doLead.length - 1];\n  const ultimaData = new Date(ultimaLead.created_at);\n  if (ultimaData < inicio) continue;\n\n  const enviadas = rows.filter(r => String(r.message_type || '').startsWith('retomada') && new Date(r.created_at) > ultimaData).length;\n  const numero = enviadas + 1;                                  // 1..5 = retomada, 6 = perda\n  if (numero > CFG.maxRetomadas + 1) continue;                  // já tratado\n\n  const quando = proximoEnvio(ultimaData, numero);\n  const atrasoH = (agora - quando) / 3600000;\n  if (atrasoH < 0 || atrasoH > CFG.toleranciaHoras) continue;   // ainda não é hora, ou passou muito\n\n  const nomeCompleto = String(ultimaLead.nome_usuario || '').trim();\n  const primeiro = nomeCompleto.split(/\\s+/)[0] || 'tudo bem';\n  const acao = numero <= CFG.maxRetomadas ? 'retomada' : 'perda';\n  saida.push({ json: {\n    telefone: String(tel),\n    chat_id: String(rows[rows.length - 1].id_usuario || ultimaLead.id_usuario || ''),\n    primeiro_nome: primeiro,\n    nome_usuario: nomeCompleto,\n    acao,\n    template: acao === 'retomada' ? TEMPLATES[numero].nome : null,\n    texto: acao === 'retomada' ? TEMPLATES[numero].texto.replace('{{1}}', primeiro) : null,\n    numero,\n    ultima_mensagem_lead: ultimaData.toISOString(),\n    envio_previsto: quando.toISOString()\n  }});\n}\nreturn saida;\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1280,
+          272
+        ],
+        "id": "ec3e17ea-8b47-4b0c-8c17-a9a04142f1cb",
+        "name": "Calcular retomadas"
+      },
+      {
+        "parameters": {
+          "url": "https://vclwmydunloeqomsmaah.supabase.co/functions/v1/api-v1/leads/search",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "phone",
+                "value": "={{ $json.telefone }}"
+              }
+            ]
+          },
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "***REMOVIDO***"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1488,
+          272
+        ],
+        "id": "3495a236-dce7-47be-b0f5-06b6065bb8a6",
+        "name": "Buscar lead no CRM",
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "url": "=https://chat.miabuilder.com/api/v1/accounts/39/conversations/{{ $('Calcular retomadas').item.json.chat_id }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "api_access_token",
+                "value": "SEPcKuFk5wqM67AsKE4FLPf6"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1712,
+          272
+        ],
+        "id": "2cbf2f66-760e-4165-866f-ef8208ee0b2d",
+        "name": "Ver conversa (Chatwoot)",
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Junta o cálculo com a etapa no CRM e a situação da conversa no Chatwoot\nconst calc = $('Calcular retomadas').all();\nconst leads = $('Buscar lead no CRM').all();\nconst convs = $input.all();\nconst ETAPAS_RETOMADA = ['Disparo Inicial', 'Follow-up'];\n\nconst saida = [];\ncalc.forEach((c, i) => {\n  const lead = leads[i] && leads[i].json && leads[i].json.lead;\n  const conv = (convs[i] && convs[i].json) || {};\n  const etapa = lead && lead.current_stage;\n  const humano = !!(conv.meta && conv.meta.assignee);\n  const erroConversa = !!conv.error;\n  if (!lead || !ETAPAS_RETOMADA.includes(etapa) || humano || erroConversa) return;\n  saida.push({ json: { ...c.json, lead_id: lead.id, etapa_atual: etapa } });\n});\nreturn saida;\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1936,
+          272
+        ],
+        "id": "d568558b-0973-4811-b3d0-d272533758f2",
+        "name": "Pode retomar?"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "5819d6c0-0f61-4695-ac94-5b1180a589c6",
+                "leftValue": "={{ $json.acao === 'perda' }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2160,
+          272
+        ],
+        "id": "bd408dba-7ade-4e08-a4f0-4442be1baf07",
+        "name": "É a hora de perder?"
+      },
+      {
+        "parameters": {
+          "tableId": "mia-historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $json.chat_id }}"
+              },
+              {
+                "fieldId": "mensagem_usuario"
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "={{ $json.texto }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $json.nome_usuario }}"
+              },
+              {
+                "fieldId": "id_conversa",
+                "fieldValue": "={{ 'retomada_' + $json.numero }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "retomada"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "SDR-MIA"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2368,
+          400
+        ],
+        "id": "ac900e64-b6d7-4b17-9af0-498212a54bf7",
+        "name": "Registrar retomada",
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "FsQeUlxQ7Q6O8mbE",
+            "name": "MIA - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://chat.miabuilder.com/api/v1/accounts/39/conversations/{{ $('Pode retomar?').item.json.chat_id }}/messages",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "api_access_token",
+                "value": "SEPcKuFk5wqM67AsKE4FLPf6"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ content: $('Pode retomar?').item.json.texto, message_type: 'outgoing', template_params: { name: $('Pode retomar?').item.json.template, category: 'MARKETING', language: 'pt_BR', processed_params: { '1': $('Pode retomar?').item.json.primeiro_nome } } }) }}",
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2592,
+          400
+        ],
+        "id": "d5a13035-3621-4c61-aa78-fdf9e7d4e42e",
+        "name": "Enviar retomada (template)",
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "RQuWEVCvVF5HpofG",
+            "mode": "list",
+            "cachedResultName": "Mia - 2.6 - Mover etapa do lead"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "lead_id": "={{ $('Pode retomar?').item.json.lead_id }}",
+              "etapa_atual": "={{ $('Pode retomar?').item.json.etapa_atual }}",
+              "etapa": "Lead Perdido",
+              "motivo": "Sem resposta",
+              "comentario": "Sem resposta após 5 retomadas"
+            },
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "lead_id",
+                "displayName": "lead_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "etapa_atual",
+                "displayName": "etapa_atual",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "etapa",
+                "displayName": "etapa",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "motivo",
+                "displayName": "motivo",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              },
+              {
+                "id": "comentario",
+                "displayName": "comentario",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "canBeUsedToMatch": true,
+                "type": "string",
+                "removed": false
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          2592,
+          160
+        ],
+        "id": "8ed6100c-cee4-4ba2-9ac5-61e9588c9823",
+        "name": "Mover para Lead Perdido (2.6)",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "tableId": "mia-historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $json.chat_id }}"
+              },
+              {
+                "fieldId": "mensagem_usuario"
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "[Lead Perdido: Sem resposta após 5 retomadas]"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $json.nome_usuario }}"
+              },
+              {
+                "fieldId": "id_conversa",
+                "fieldValue": "retomada_fim"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "retomada_fim"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "SDR-MIA"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2368,
+          160
+        ],
+        "id": "a22eb7f6-5e62-46e1-922f-54896b8cc1fd",
+        "name": "Registrar fim das retomadas",
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "FsQeUlxQ7Q6O8mbE",
+            "name": "MIA - Supabase"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "A cada hora": {
+        "main": [
+          [
+            {
+              "node": "Janela permitida?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Janela permitida?": {
+        "main": [
+          [
+            {
+              "node": "Ler histórico (15 dias)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ler histórico (15 dias)": {
+        "main": [
+          [
+            {
+              "node": "Calcular retomadas",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Calcular retomadas": {
+        "main": [
+          [
+            {
+              "node": "Buscar lead no CRM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar lead no CRM": {
+        "main": [
+          [
+            {
+              "node": "Ver conversa (Chatwoot)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ver conversa (Chatwoot)": {
+        "main": [
+          [
+            {
+              "node": "Pode retomar?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pode retomar?": {
+        "main": [
+          [
+            {
+              "node": "É a hora de perder?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "É a hora de perder?": {
+        "main": [
+          [
+            {
+              "node": "Registrar fim das retomadas",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Registrar retomada",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Registrar retomada": {
+        "main": [
+          [
+            {
+              "node": "Enviar retomada (template)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Registrar fim das retomadas": {
+        "main": [
+          [
+            {
+              "node": "Mover para Lead Perdido (2.6)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version 19e6b1d6",
+    "description": "",
+    "autosaved": false,
+    "createdAt": "2026-10-23T22:15:46.354Z",
+    "updatedAt": "2026-10-23T22:15:47.464Z"
+  },
   "tags": []
 }
