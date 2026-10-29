@@ -1,0 +1,1469 @@
+{
+  "updatedAt": "2026-10-28T13:39:06.022Z",
+  "createdAt": "2026-10-28T12:42:33.040Z",
+  "id": "Nw09p6h2Nf23BfKl",
+  "name": "Monteiro Ramalho - 03.08 - LinkedIn: convites",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 10 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "5ff0b54f-24e1-4a3f-a421-93c297f355d5",
+      "name": "Todo dia útil, 10h30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Escolhe quem o LinkedIn do Monteiro aborda hoje e já reserva cada um.\n-- Rodada agendada ($1 = true): leads que já receberam o disparo inicial e continuam nessa etapa.\n-- Rodada manual pelo editor ($1 = false): só leads de teste (origem 'teste').\n--  * Convites: até 10 por dia, quem ainda não foi verificado (status vazio).\n--  * Mensagem direta: até 10 por dia, quem já é conexão do Monteiro (marcado pela sincronização) e ainda não recebeu mensagem.\n-- Quem for descoberto como conexão na hora também recebe a mensagem direta em vez do convite.\nwith base as (\n  select l.id, l.envio_em, l.linkedin_status, l.linkedin_convite_em, l.linkedin_mensagem_em\n  from public.leads_tributario l\n  where coalesce(l.linkedin_url, '') <> ''\n    and (\n          ($1::boolean and l.envio_status = 'enviado' and l.etapa = 'disparo_inicial')\n       or (not $1::boolean and l.origem = 'teste')\n        )\n),\nconvites as (\n  select id from base\n  where linkedin_status is null\n     or (linkedin_status = 'processando' and linkedin_convite_em < now() - interval '2 hours')\n  order by envio_em desc nulls last\n  limit 10\n),\nmensagens as (\n  select id from base\n  where linkedin_status = 'ja_conectado' and linkedin_mensagem_em is null\n  order by envio_em desc nulls last\n  limit 10\n),\ncandidatos as (\n  select id from convites union select id from mensagens\n)\nupdate public.leads_tributario l\n   set linkedin_status = 'processando',\n       linkedin_convite_em = now()\n  from candidatos c\n where l.id = c.id\nreturning l.id, l.nome, l.empresa_nome, l.linkedin_url;",
+        "options": {
+          "queryReplacement": "={{ [$execution.mode === 'production' && $('Todo dia útil, 10h30').isExecuted] }}"
+        }
+      },
+      "id": "79020b53-7315-4419-9840-072595688f9d",
+      "name": "Reserva os convites de hoje",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        464
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "2eea7a5b-b17f-43b0-b453-9b82a1a3c955",
+      "name": "Teste manual (só leads de teste)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Pega o identificador do perfil a partir da URL (linkedin.com/in/<identificador>).\nconst url = String($json.linkedin_url || '').trim();\nconst m = url.match(/linkedin\\.com\\/in\\/([^\\/?#\\s]+)/i);\nlet slug = '';\nif (m) { try { slug = decodeURIComponent(m[1]); } catch (e) { slug = m[1]; } }\nreturn { json: { id: String($json.id), nome: $json.nome, empresa_nome: $json.empresa_nome, linkedin_url: url, slug } };"
+      },
+      "id": "a6c69962-d2e0-4f13-b931-35ce63fb45b1",
+      "name": "Extrai o perfil da URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.slug }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e81af49f-0e9d-45bd-b55f-2c1798269830",
+      "name": "URL de perfil válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api2.unipile.com:13224/api/v1/users/\" + encodeURIComponent($json.slug) }}",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "account_id",
+              "value": "zdo39fpWTRSOpVoU6WUDMg"
+            }
+          ]
+        },
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "99b30443-e5f5-41e0-89d1-3c4e8704af4e",
+      "name": "Unipile - Busca o perfil",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1120,
+        288
+      ],
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: { id: $json.id, status: 'sem_perfil', provider_id: '', erro: 'URL do LinkedIn não é de um perfil (linkedin.com/in/...).' } };"
+      },
+      "id": "29bd52cc-8187-446b-a1b9-70636f785bc9",
+      "name": "Marca: URL inválida",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update public.leads_tributario\n   set linkedin_status      = nullif($2, ''),\n       linkedin_provider_id = coalesce(nullif($3, ''), linkedin_provider_id),\n       linkedin_convite_em  = case when $2 = 'convidado' then now() when $2 = '' then null else linkedin_convite_em end,\n       linkedin_erro        = nullif($4, ''),\n       linkedin_mensagem_em = case when $5 = 'sim' then now() else linkedin_mensagem_em end\n where id::text = $1;",
+        "options": {
+          "queryReplacement": "={{ [$json.id, $json.status, $json.provider_id || '', $json.erro || '', $json.mensagem ? 'sim' : ''] }}"
+        }
+      },
+      "id": "e7ed0f22-c2bf-4031-8546-e05e62ebcb38",
+      "name": "Atualiza o status do LinkedIn",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2240,
+        384
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "dc6cf6ee-ee88-441a-9872-36469f13fddd",
+      "name": "Um lead por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        448,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const lead = $('Extrai o perfil da URL').item.json;\nconst p = $json || {};\nconst dist = String(p.network_distance || '').toUpperCase();\nconst jaConectado = p.is_relationship === true || dist === 'FIRST_DEGREE' || dist === 'DISTANCE_1';\nreturn { json: { ...lead, provider_id: p.provider_id || '', ja_conectado: jaConectado } };"
+      },
+      "id": "92197a9a-4342-42d6-bd79-a30cc9fa96b6",
+      "name": "Já é conexão?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ja_conectado }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0a43f2d5-59a4-44f2-a20b-cdc5854b1b82",
+      "name": "Pula quem já é conexão",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1568,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const l = $('Monta mensagem direta').item.json;\nreturn { json: { id: l.id, status: 'ja_conectado', provider_id: l.provider_id, erro: '', mensagem: true } };"
+      },
+      "id": "ba87a293-34ed-4f54-bfe0-e059fa3f2f7b",
+      "name": "Marca: já era conexão",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api2.unipile.com:13224/api/v1/users/invite",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ provider_id: $json.provider_id, account_id: \"zdo39fpWTRSOpVoU6WUDMg\" }) }}",
+        "options": {}
+      },
+      "id": "412be127-03c1-461b-aa61-da81e821c9a4",
+      "name": "Unipile - Envia convite (sem mensagem)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1792,
+        288
+      ],
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const l = $('Extrai o perfil da URL').item.json;\nconst raw = JSON.stringify($json).toLowerCase();\nconst naoExiste = raw.includes('404') || raw.includes('not_found') || raw.includes('not found');\nconst limite = raw.includes('429') || raw.includes('limit') || raw.includes('too many');\nconst status = naoExiste ? 'sem_perfil' : (limite ? '' : 'erro');\nreturn { json: { id: l.id, status, provider_id: '', erro: JSON.stringify($json).slice(0, 500) } };"
+      },
+      "id": "9af7e8e5-7add-4735-9272-bf5f4f841757",
+      "name": "Trata erro na busca do perfil",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const l = $('Já é conexão?').item.json;\nreturn { json: { id: l.id, status: 'convidado', provider_id: l.provider_id, erro: '' } };"
+      },
+      "id": "a49ecc27-97ff-4677-95b2-8886d3409f7a",
+      "name": "Marca: convidado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Limite do LinkedIn (cannot_resend_yet / 429): volta pra fila e tenta outro dia.\n// Convite já pendente: conta como convidado. Resto: erro, com o motivo salvo.\nconst l = $('Já é conexão?').item.json;\nconst raw = JSON.stringify($json).toLowerCase();\nlet status = 'erro';\nif (raw.includes('already_invited') || raw.includes('already invited') || raw.includes('pending')) status = 'convidado';\nelse if (raw.includes('cannot_resend_yet') || raw.includes('429') || raw.includes('limit') || raw.includes('too many')) status = '';\nreturn { json: { id: l.id, status, provider_id: l.provider_id, erro: JSON.stringify($json).slice(0, 500) } };"
+      },
+      "id": "58c98145-d629-499a-9625-38618ab0522f",
+      "name": "Trata erro no convite",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $execution.mode === 'production' ? Math.floor(120 + Math.random() * 240) : 3 }}"
+      },
+      "id": "7147528f-1e4c-46d8-b81d-b7732fc299bb",
+      "name": "Espera de 2 a 6 min",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2464,
+        656
+      ],
+      "webhookId": "0ac385ba-860a-42d5-b72e-0045e9726da2"
+    },
+    {
+      "parameters": {
+        "content": "### Convites no LinkedIn — todo dia útil, 10h30\nPega até 10 leads que receberam o disparo inicial (WhatsApp/e-mail), têm LinkedIn e ainda não foram convidados, e manda o convite pelo LinkedIn do Monteiro (Unipile), **sem mensagem** (conta gratuita).\nQuem já é conexão é pulado. Entre um convite e outro espera de 2 a 6 min.\nRodando na mão pelo editor, só entram leads de teste (origem 'teste').",
+        "color": 4
+      },
+      "id": "bc9436bb-1481-4931-932a-4d1bd20e264e",
+      "name": "Sticky Note 4600c6de",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1168,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Status salvos em leads_tributario.linkedin_status\nconvidado · ja_conectado · sem_perfil · erro (motivo em linkedin_erro)\nLimite do LinkedIn atingido: o lead volta pra fila e tenta outro dia.",
+        "color": 7
+      },
+      "id": "cecdb6a9-5e4c-4f36-97bf-8f7ba5d121f9",
+      "name": "Sticky Note 431aac81",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1168,
+        1024
+      ]
+    },
+    {
+      "id": "a07664c2-a3c2-4aec-8195-3ededb7cc759",
+      "name": "Monta mensagem direta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Para quem já é conexão do Monteiro: mensagem direta no LinkedIn, sem convite.\nconst primeiroNome = String($json.nome || '').trim().split(/\\s+/)[0] || '';\nconst empresa = String($json.empresa_nome || '').trim() || 'sua empresa';\nconst saudacao = primeiroNome ? `Oi ${primeiroNome}, tudo bem?` : 'Oi, tudo bem?';\nconst texto = `${saudacao} Te mandei uma mensagem no WhatsApp sobre uma oportunidade de recuperação de créditos tributários que identificamos para a ${empresa}. Se preferir, podemos falar por aqui.`;\nreturn { json: { id: $json.id, provider_id: $json.provider_id, texto } };",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "9ea1fa6c-ccc7-4d88-a887-c581d7b1f82a",
+      "name": "Unipile - Mensagem direta (já conexão)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1940,
+        200
+      ],
+      "parameters": {
+        "authentication": "***REMOVIDO***",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "account_id",
+              "parameterType": "formData",
+              "value": "zdo39fpWTRSOpVoU6WUDMg"
+            },
+            {
+              "name": "attendees_ids",
+              "parameterType": "formData",
+              "value": "={{ $json.provider_id }}"
+            },
+            {
+              "name": "text",
+              "parameterType": "formData",
+              "value": "={{ $json.texto }}"
+            }
+          ]
+        },
+        "contentType": "multipart-form-data",
+        "genericAuthType": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": "***REMOVIDO***",
+        "url": "https://api2.unipile.com:13224/api/v1/chats"
+      },
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c3f40b4d-95ce-45be-8659-f05284db315d",
+      "name": "Marca: falha na mensagem direta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2180,
+        380
+      ],
+      "parameters": {
+        "jsCode": "// Continua marcado como conexão; sem registrar mensagem enviada, tenta de novo amanhã.\nconst l = $('Monta mensagem direta').item.json;\nreturn { json: { id: l.id, status: 'ja_conectado', provider_id: l.provider_id, erro: ('Falha na mensagem direta: ' + JSON.stringify($json)).slice(0, 500), mensagem: false } };",
+        "mode": "runOnceForEachItem"
+      }
+    }
+  ],
+  "connections": {
+    "Todo dia útil, 10h30": {
+      "main": [
+        [
+          {
+            "node": "Reserva os convites de hoje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserva os convites de hoje": {
+      "main": [
+        [
+          {
+            "node": "Um lead por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Teste manual (só leads de teste)": {
+      "main": [
+        [
+          {
+            "node": "Reserva os convites de hoje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai o perfil da URL": {
+      "main": [
+        [
+          {
+            "node": "URL de perfil válida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "URL de perfil válida?": {
+      "main": [
+        [
+          {
+            "node": "Unipile - Busca o perfil",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marca: URL inválida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unipile - Busca o perfil": {
+      "main": [
+        [
+          {
+            "node": "Já é conexão?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Trata erro na busca do perfil",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca: URL inválida": {
+      "main": [
+        [
+          {
+            "node": "Atualiza o status do LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza o status do LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Espera de 2 a 6 min",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Um lead por vez": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Extrai o perfil da URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Já é conexão?": {
+      "main": [
+        [
+          {
+            "node": "Pula quem já é conexão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pula quem já é conexão": {
+      "main": [
+        [
+          {
+            "node": "Monta mensagem direta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unipile - Envia convite (sem mensagem)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca: já era conexão": {
+      "main": [
+        [
+          {
+            "node": "Atualiza o status do LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unipile - Envia convite (sem mensagem)": {
+      "main": [
+        [
+          {
+            "node": "Marca: convidado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Trata erro no convite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trata erro na busca do perfil": {
+      "main": [
+        [
+          {
+            "node": "Atualiza o status do LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca: convidado": {
+      "main": [
+        [
+          {
+            "node": "Atualiza o status do LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trata erro no convite": {
+      "main": [
+        [
+          {
+            "node": "Atualiza o status do LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Espera de 2 a 6 min": {
+      "main": [
+        [
+          {
+            "node": "Um lead por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta mensagem direta": {
+      "main": [
+        [
+          {
+            "node": "Unipile - Mensagem direta (já conexão)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unipile - Mensagem direta (já conexão)": {
+      "main": [
+        [
+          {
+            "node": "Marca: já era conexão",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marca: falha na mensagem direta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca: falha na mensagem direta": {
+      "main": [
+        [
+          {
+            "node": "Atualiza o status do LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": {
+    "node:Todo dia útil, 10h30": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "4fbf95bc-c025-4fee-b0ec-dd67e5274206",
+  "activeVersionId": "4fbf95bc-c025-4fee-b0ec-dd67e5274206",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "Nw09p6h2Nf23BfKl",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-28T12:42:33.040Z",
+      "updatedAt": "2026-10-28T12:42:33.040Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "4fbf95bc-c025-4fee-b0ec-dd67e5274206",
+    "workflowId": "Nw09p6h2Nf23BfKl",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "30 10 * * 1-5"
+              }
+            ]
+          }
+        },
+        "id": "5ff0b54f-24e1-4a3f-a421-93c297f355d5",
+        "name": "Todo dia útil, 10h30",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          0,
+          368
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- Escolhe quem o LinkedIn do Monteiro aborda hoje e já reserva cada um.\n-- Rodada agendada ($1 = true): leads que já receberam o disparo inicial e continuam nessa etapa.\n-- Rodada manual pelo editor ($1 = false): só leads de teste (origem 'teste').\n--  * Convites: até 10 por dia, quem ainda não foi verificado (status vazio).\n--  * Mensagem direta: até 10 por dia, quem já é conexão do Monteiro (marcado pela sincronização) e ainda não recebeu mensagem.\n-- Quem for descoberto como conexão na hora também recebe a mensagem direta em vez do convite.\nwith base as (\n  select l.id, l.envio_em, l.linkedin_status, l.linkedin_convite_em, l.linkedin_mensagem_em\n  from public.leads_tributario l\n  where coalesce(l.linkedin_url, '') <> ''\n    and (\n          ($1::boolean and l.envio_status = 'enviado' and l.etapa = 'disparo_inicial')\n       or (not $1::boolean and l.origem = 'teste')\n        )\n),\nconvites as (\n  select id from base\n  where linkedin_status is null\n     or (linkedin_status = 'processando' and linkedin_convite_em < now() - interval '2 hours')\n  order by envio_em desc nulls last\n  limit 10\n),\nmensagens as (\n  select id from base\n  where linkedin_status = 'ja_conectado' and linkedin_mensagem_em is null\n  order by envio_em desc nulls last\n  limit 10\n),\ncandidatos as (\n  select id from convites union select id from mensagens\n)\nupdate public.leads_tributario l\n   set linkedin_status = 'processando',\n       linkedin_convite_em = now()\n  from candidatos c\n where l.id = c.id\nreturning l.id, l.nome, l.empresa_nome, l.linkedin_url;",
+          "options": {
+            "queryReplacement": "={{ [$execution.mode === 'production' && $('Todo dia útil, 10h30').isExecuted] }}"
+          }
+        },
+        "id": "79020b53-7315-4419-9840-072595688f9d",
+        "name": "Reserva os convites de hoje",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          224,
+          464
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {},
+        "id": "2eea7a5b-b17f-43b0-b453-9b82a1a3c955",
+        "name": "Teste manual (só leads de teste)",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          560
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "// Pega o identificador do perfil a partir da URL (linkedin.com/in/<identificador>).\nconst url = String($json.linkedin_url || '').trim();\nconst m = url.match(/linkedin\\.com\\/in\\/([^\\/?#\\s]+)/i);\nlet slug = '';\nif (m) { try { slug = decodeURIComponent(m[1]); } catch (e) { slug = m[1]; } }\nreturn { json: { id: String($json.id), nome: $json.nome, empresa_nome: $json.empresa_nome, linkedin_url: url, slug } };"
+        },
+        "id": "a6c69962-d2e0-4f13-b931-35ce63fb45b1",
+        "name": "Extrai o perfil da URL",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          672,
+          384
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.slug }}",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                },
+                "rightValue": ""
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "e81af49f-0e9d-45bd-b55f-2c1798269830",
+        "name": "URL de perfil válida?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          896,
+          384
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ \"https://api2.unipile.com:13224/api/v1/users/\" + encodeURIComponent($json.slug) }}",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "account_id",
+                "value": "zdo39fpWTRSOpVoU6WUDMg"
+              }
+            ]
+          },
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "99b30443-e5f5-41e0-89d1-3c4e8704af4e",
+        "name": "Unipile - Busca o perfil",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1120,
+          288
+        ],
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "return { json: { id: $json.id, status: 'sem_perfil', provider_id: '', erro: 'URL do LinkedIn não é de um perfil (linkedin.com/in/...).' } };"
+        },
+        "id": "29bd52cc-8187-446b-a1b9-70636f785bc9",
+        "name": "Marca: URL inválida",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2016,
+          768
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "update public.leads_tributario\n   set linkedin_status      = nullif($2, ''),\n       linkedin_provider_id = coalesce(nullif($3, ''), linkedin_provider_id),\n       linkedin_convite_em  = case when $2 = 'convidado' then now() when $2 = '' then null else linkedin_convite_em end,\n       linkedin_erro        = nullif($4, ''),\n       linkedin_mensagem_em = case when $5 = 'sim' then now() else linkedin_mensagem_em end\n where id::text = $1;",
+          "options": {
+            "queryReplacement": "={{ [$json.id, $json.status, $json.provider_id || '', $json.erro || '', $json.mensagem ? 'sim' : ''] }}"
+          }
+        },
+        "id": "e7ed0f22-c2bf-4031-8546-e05e62ebcb38",
+        "name": "Atualiza o status do LinkedIn",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          2240,
+          384
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "id": "dc6cf6ee-ee88-441a-9872-36469f13fddd",
+        "name": "Um lead por vez",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          448,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const lead = $('Extrai o perfil da URL').item.json;\nconst p = $json || {};\nconst dist = String(p.network_distance || '').toUpperCase();\nconst jaConectado = p.is_relationship === true || dist === 'FIRST_DEGREE' || dist === 'DISTANCE_1';\nreturn { json: { ...lead, provider_id: p.provider_id || '', ja_conectado: jaConectado } };"
+        },
+        "id": "92197a9a-4342-42d6-bd79-a30cc9fa96b6",
+        "name": "Já é conexão?",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1344,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.ja_conectado }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                },
+                "rightValue": ""
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "0a43f2d5-59a4-44f2-a20b-cdc5854b1b82",
+        "name": "Pula quem já é conexão",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1568,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const l = $('Monta mensagem direta').item.json;\nreturn { json: { id: l.id, status: 'ja_conectado', provider_id: l.provider_id, erro: '', mensagem: true } };"
+        },
+        "id": "ba87a293-34ed-4f54-bfe0-e059fa3f2f7b",
+        "name": "Marca: já era conexão",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2016,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api2.unipile.com:13224/api/v1/users/invite",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ provider_id: $json.provider_id, account_id: \"zdo39fpWTRSOpVoU6WUDMg\" }) }}",
+          "options": {}
+        },
+        "id": "412be127-03c1-461b-aa61-da81e821c9a4",
+        "name": "Unipile - Envia convite (sem mensagem)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1792,
+          288
+        ],
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const l = $('Extrai o perfil da URL').item.json;\nconst raw = JSON.stringify($json).toLowerCase();\nconst naoExiste = raw.includes('404') || raw.includes('not_found') || raw.includes('not found');\nconst limite = raw.includes('429') || raw.includes('limit') || raw.includes('too many');\nconst status = naoExiste ? 'sem_perfil' : (limite ? '' : 'erro');\nreturn { json: { id: l.id, status, provider_id: '', erro: JSON.stringify($json).slice(0, 500) } };"
+        },
+        "id": "9af7e8e5-7add-4735-9272-bf5f4f841757",
+        "name": "Trata erro na busca do perfil",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2016,
+          576
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const l = $('Já é conexão?').item.json;\nreturn { json: { id: l.id, status: 'convidado', provider_id: l.provider_id, erro: '' } };"
+        },
+        "id": "a49ecc27-97ff-4677-95b2-8886d3409f7a",
+        "name": "Marca: convidado",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2016,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "// Limite do LinkedIn (cannot_resend_yet / 429): volta pra fila e tenta outro dia.\n// Convite já pendente: conta como convidado. Resto: erro, com o motivo salvo.\nconst l = $('Já é conexão?').item.json;\nconst raw = JSON.stringify($json).toLowerCase();\nlet status = 'erro';\nif (raw.includes('already_invited') || raw.includes('already invited') || raw.includes('pending')) status = 'convidado';\nelse if (raw.includes('cannot_resend_yet') || raw.includes('429') || raw.includes('limit') || raw.includes('too many')) status = '';\nreturn { json: { id: l.id, status, provider_id: l.provider_id, erro: JSON.stringify($json).slice(0, 500) } };"
+        },
+        "id": "58c98145-d629-499a-9625-38618ab0522f",
+        "name": "Trata erro no convite",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2016,
+          384
+        ]
+      },
+      {
+        "parameters": {
+          "amount": "={{ $execution.mode === 'production' ? Math.floor(120 + Math.random() * 240) : 3 }}"
+        },
+        "id": "7147528f-1e4c-46d8-b81d-b7732fc299bb",
+        "name": "Espera de 2 a 6 min",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          2464,
+          656
+        ],
+        "webhookId": "0ac385ba-860a-42d5-b72e-0045e9726da2"
+      },
+      {
+        "parameters": {
+          "content": "### Convites no LinkedIn — todo dia útil, 10h30\nPega até 10 leads que receberam o disparo inicial (WhatsApp/e-mail), têm LinkedIn e ainda não foram convidados, e manda o convite pelo LinkedIn do Monteiro (Unipile), **sem mensagem** (conta gratuita).\nQuem já é conexão é pulado. Entre um convite e outro espera de 2 a 6 min.\nRodando na mão pelo editor, só entram leads de teste (origem 'teste').",
+          "color": 4
+        },
+        "id": "bc9436bb-1481-4931-932a-4d1bd20e264e",
+        "name": "Sticky Note 4600c6de",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1168,
+          768
+        ]
+      },
+      {
+        "parameters": {
+          "content": "### Status salvos em leads_tributario.linkedin_status\nconvidado · ja_conectado · sem_perfil · erro (motivo em linkedin_erro)\nLimite do LinkedIn atingido: o lead volta pra fila e tenta outro dia.",
+          "color": 7
+        },
+        "id": "cecdb6a9-5e4c-4f36-97bf-8f7ba5d121f9",
+        "name": "Sticky Note 431aac81",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1168,
+          1024
+        ]
+      },
+      {
+        "id": "a07664c2-a3c2-4aec-8195-3ededb7cc759",
+        "name": "Monta mensagem direta",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1700,
+          200
+        ],
+        "parameters": {
+          "jsCode": "// Para quem já é conexão do Monteiro: mensagem direta no LinkedIn, sem convite.\nconst primeiroNome = String($json.nome || '').trim().split(/\\s+/)[0] || '';\nconst empresa = String($json.empresa_nome || '').trim() || 'sua empresa';\nconst saudacao = primeiroNome ? `Oi ${primeiroNome}, tudo bem?` : 'Oi, tudo bem?';\nconst texto = `${saudacao} Te mandei uma mensagem no WhatsApp sobre uma oportunidade de recuperação de créditos tributários que identificamos para a ${empresa}. Se preferir, podemos falar por aqui.`;\nreturn { json: { id: $json.id, provider_id: $json.provider_id, texto } };",
+          "mode": "runOnceForEachItem"
+        }
+      },
+      {
+        "id": "9ea1fa6c-ccc7-4d88-a887-c581d7b1f82a",
+        "name": "Unipile - Mensagem direta (já conexão)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1940,
+          200
+        ],
+        "parameters": {
+          "authentication": "***REMOVIDO***",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "account_id",
+                "parameterType": "formData",
+                "value": "zdo39fpWTRSOpVoU6WUDMg"
+              },
+              {
+                "name": "attendees_ids",
+                "parameterType": "formData",
+                "value": "={{ $json.provider_id }}"
+              },
+              {
+                "name": "text",
+                "parameterType": "formData",
+                "value": "={{ $json.texto }}"
+              }
+            ]
+          },
+          "contentType": "multipart-form-data",
+          "genericAuthType": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "method": "POST",
+          "options": {},
+          "sendBody": true,
+          "sendHeaders": "***REMOVIDO***",
+          "url": "https://api2.unipile.com:13224/api/v1/chats"
+        },
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "id": "c3f40b4d-95ce-45be-8659-f05284db315d",
+        "name": "Marca: falha na mensagem direta",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2180,
+          380
+        ],
+        "parameters": {
+          "jsCode": "// Continua marcado como conexão; sem registrar mensagem enviada, tenta de novo amanhã.\nconst l = $('Monta mensagem direta').item.json;\nreturn { json: { id: l.id, status: 'ja_conectado', provider_id: l.provider_id, erro: ('Falha na mensagem direta: ' + JSON.stringify($json)).slice(0, 500), mensagem: false } };",
+          "mode": "runOnceForEachItem"
+        }
+      }
+    ],
+    "connections": {
+      "Todo dia útil, 10h30": {
+        "main": [
+          [
+            {
+              "node": "Reserva os convites de hoje",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Reserva os convites de hoje": {
+        "main": [
+          [
+            {
+              "node": "Um lead por vez",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Teste manual (só leads de teste)": {
+        "main": [
+          [
+            {
+              "node": "Reserva os convites de hoje",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrai o perfil da URL": {
+        "main": [
+          [
+            {
+              "node": "URL de perfil válida?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "URL de perfil válida?": {
+        "main": [
+          [
+            {
+              "node": "Unipile - Busca o perfil",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Marca: URL inválida",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Unipile - Busca o perfil": {
+        "main": [
+          [
+            {
+              "node": "Já é conexão?",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Trata erro na busca do perfil",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marca: URL inválida": {
+        "main": [
+          [
+            {
+              "node": "Atualiza o status do LinkedIn",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Atualiza o status do LinkedIn": {
+        "main": [
+          [
+            {
+              "node": "Espera de 2 a 6 min",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Um lead por vez": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Extrai o perfil da URL",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Já é conexão?": {
+        "main": [
+          [
+            {
+              "node": "Pula quem já é conexão",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pula quem já é conexão": {
+        "main": [
+          [
+            {
+              "node": "Monta mensagem direta",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Unipile - Envia convite (sem mensagem)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marca: já era conexão": {
+        "main": [
+          [
+            {
+              "node": "Atualiza o status do LinkedIn",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Unipile - Envia convite (sem mensagem)": {
+        "main": [
+          [
+            {
+              "node": "Marca: convidado",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Trata erro no convite",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Trata erro na busca do perfil": {
+        "main": [
+          [
+            {
+              "node": "Atualiza o status do LinkedIn",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marca: convidado": {
+        "main": [
+          [
+            {
+              "node": "Atualiza o status do LinkedIn",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Trata erro no convite": {
+        "main": [
+          [
+            {
+              "node": "Atualiza o status do LinkedIn",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Espera de 2 a 6 min": {
+        "main": [
+          [
+            {
+              "node": "Um lead por vez",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta mensagem direta": {
+        "main": [
+          [
+            {
+              "node": "Unipile - Mensagem direta (já conexão)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Unipile - Mensagem direta (já conexão)": {
+        "main": [
+          [
+            {
+              "node": "Marca: já era conexão",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Marca: falha na mensagem direta",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marca: falha na mensagem direta": {
+        "main": [
+          [
+            {
+              "node": "Atualiza o status do LinkedIn",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Mensagem direta para quem já é conexão",
+    "description": "Added nodes: Monta mensagem direta, Unipile - Mensagem direta (já conexão), Marca: falha na mensagem direta\nUpdated nodes: Reserva os convites de hoje, Atualiza o status do LinkedIn, Marca: já era conexão\nConnections: 5 added, 1 removed",
+    "autosaved": false,
+    "createdAt": "2026-10-28T13:39:06.025Z",
+    "updatedAt": "2026-10-28T13:39:06.025Z"
+  },
+  "tags": []
+}
