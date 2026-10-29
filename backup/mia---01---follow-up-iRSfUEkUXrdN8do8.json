@@ -1,0 +1,1519 @@
+{
+  "updatedAt": "2026-10-28T21:32:05.572Z",
+  "createdAt": "2026-10-22T22:56:22.934Z",
+  "id": "iRSfUEkUXrdN8do8",
+  "name": "Mia - 01 - Follow up",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        400,
+        304
+      ],
+      "id": "f4b343da-df54-4601-8336-ea48ae45b3a5",
+      "name": "Todo dia às 9h"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "clients",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "keyValue": "={{ $json.client_id }}"
+            }
+          ]
+        }
+      },
+      "id": "1b42988f-6724-415c-8e1f-b2aecae26721",
+      "name": "Cliente de cada contrato (Flow)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        848,
+        304
+      ],
+      "executeOnce": false,
+      "credentials": {
+        "supabaseApi": {
+          "id": "bAoDHJoMSHRhHw5u",
+          "name": "Flow - Supabase"
+        }
+      },
+      "notes": "Todos os leads da organização M[IA] que estão na etapa Follow-up no Flow."
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "mia-historico_mensagens",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "nome_app",
+              "condition": "eq",
+              "keyValue": "SDR-MIA"
+            },
+            {
+              "keyName": "created_at",
+              "condition": "gte",
+              "keyValue": "={{ new Date(Date.now() - 30*24*60*60*1000).toISOString() }}"
+            }
+          ]
+        }
+      },
+      "id": "1f4cc0ad-c866-487d-9fc5-46f4b59f37b1",
+      "name": "Ler histórico (30 dias)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        304
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "FsQeUlxQ7Q6O8mbE",
+          "name": "MIA - Supabase"
+        }
+      },
+      "notes": "Histórico de mensagens do WhatsApp da Mia, para saber quem respondeu e quantos follow-ups cada um já recebeu."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===================== CONFIGURAÇÃO =====================\nconst CFG = {\n  // Para testar: só estes telefones entram (lista vazia = todos)\n  numeros_liberados: [],\n  totalFollowups: 4,\n  // Não manda nada se teve qualquer mensagem na conversa nas últimas X horas\n  // (conversa em andamento ou follow-up já enviado hoje)\n  intervaloMinHoras: 20\n};\n// Templates aprovados na Meta (conta da Mia) - {{1}} = primeiro nome do lead\nconst TEMPLATES = {\n  1: { nome: 'mia_followup_1', texto: 'Oii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊' },\n  2: { nome: 'mia_followup_2', texto: 'Tudo bem, {{1}}? Tem um minutinho? 😄' },\n  3: { nome: 'mia_followup_3', texto: 'Opa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?' },\n  4: { nome: 'mia_followup_4', texto: 'Oi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?' }\n};\n// ========================================================\n// Saída: um item por lead em Follow-up, com \"acao\":\n//   agendar  -> respondeu depois de um follow-up\n//   perda    -> recebeu os 4 e não respondeu\n//   enviar   -> manda o próximo follow-up\n//   ignorar  -> não faz nada hoje (o campo \"motivo\" explica)\n\nconst last8 = v => String(v || '').replace(/\\D/g, '').slice(-8);\nconst tipo = r => String(r.message_type || '');\nconst isRet = r => tipo(r) === 'retomada';\nconst isLead = r => !tipo(r).startsWith('retomada') && String(r.mensagem_usuario || '').trim() !== '';\nconst ts = r => new Date(r.created_at).getTime();\nconst agora = Date.now();\nconst liberados = CFG.numeros_liberados.map(last8);\n\n// Histórico agrupado pelos 8 últimos dígitos do telefone\nconst porTel = {};\nfor (const it of $('Ler histórico (30 dias)').all()) {\n  const r = it.json;\n  if (!r || !r.telefone || !r.created_at) continue;\n  const k = last8(r.telefone);\n  if (k.length === 8) (porTel[k] = porTel[k] || []).push(r);\n}\n\nconst saida = [];\nconst vistos = new Set();\nfor (const it of $('Cliente de cada contrato (Flow)').all()) {\n  const lead = it.json;\n  if (!lead || !lead.id || vistos.has(lead.id)) continue;\n  vistos.add(lead.id);\n\n  let contatos = lead.social_media && lead.social_media.contacts;\n  if (typeof contatos === 'string') { try { contatos = JSON.parse(contatos); } catch { contatos = []; } }\n  if (!Array.isArray(contatos)) contatos = [];\n\n  const chaves = [...new Set([lead.whatsapp, lead.phone, ...contatos.map(c => c && c.whatsapp)]\n    .map(last8).filter(k => k.length === 8))];\n  const rows = chaves.flatMap(k => porTel[k] || []).sort((a, b) => ts(a) - ts(b));\n\n  const ultimaLead = [...rows].reverse().find(isLead);\n  const ultimaRet = [...rows].reverse().find(isRet);\n  const tLead = ultimaLead ? ts(ultimaLead) : 0;\n  const tRet = ultimaRet ? ts(ultimaRet) : 0;\n  const ultima = rows[rows.length - 1];\n\n  const nomeCompleto = String(lead.contact_name || (ultimaLead && ultimaLead.nome_usuario) || lead.name || '').trim();\n  const base = {\n    lead_id: lead.id,\n    empresa: lead.name,\n    etapa_atual: 'Follow-up',\n    telefone: ultima ? String((ultimaLead || ultima).telefone) : (lead.whatsapp || lead.phone || ''),\n    chat_id: ultima ? String(ultima.id_usuario || (ultimaLead && ultimaLead.id_usuario) || '') : '',\n    nome_usuario: nomeCompleto,\n    primeiro_nome: nomeCompleto.split(/\\s+/)[0] || 'tudo bem'\n  };\n  const ignorar = motivo => saida.push({ json: { ...base, acao: 'ignorar', motivo } });\n\n  if (liberados.length && !chaves.some(k => liberados.includes(k))) { ignorar('fora da lista de teste (numeros_liberados)'); continue; }\n  if (!chaves.length) { ignorar('sem telefone/WhatsApp no cadastro'); continue; }\n  if (!rows.length) { ignorar('sem conversa no WhatsApp nos últimos 30 dias'); continue; }\n\n  // 1) Respondeu depois de algum follow-up -> Agendar reunião\n  if (tRet && tLead > tRet) { saida.push({ json: { ...base, acao: 'agendar' } }); continue; }\n\n  if (rows.some(r => tipo(r) === 'retomada_fim' && ts(r) > tLead)) { ignorar('já encerrado pelo fluxo antigo, sem resposta depois'); continue; }\n\n  const horas = (agora - ts(ultima)) / 3600000;\n  if (horas < CFG.intervaloMinHoras) { ignorar('teve mensagem há ' + horas.toFixed(1) + 'h (espera ' + CFG.intervaloMinHoras + 'h)'); continue; }\n\n  const enviados = rows.filter(r => isRet(r) && ts(r) > tLead).length;\n\n  // 2) Já recebeu os 4 e não respondeu -> Lead Perdido\n  if (enviados >= CFG.totalFollowups) { saida.push({ json: { ...base, acao: 'perda', numero: enviados } }); continue; }\n\n  // 3) Manda o próximo follow-up\n  const numero = enviados + 1;\n  const t = TEMPLATES[numero];\n  saida.push({ json: { ...base, acao: 'enviar', numero, template: t.nome, texto: t.texto.replace('{{1}}', base.primeiro_nome) } });\n}\nreturn saida;\n"
+      },
+      "id": "582342ff-d8c2-48a7-9481-ef1a0dd9fbe5",
+      "name": "Decidir ação de cada lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        304
+      ],
+      "notes": "Para cada lead em Follow-up: respondeu depois de um follow-up -> Agendar reunião; já recebeu os 4 sem responder -> Lead Perdido; senão -> manda o próximo follow-up."
+    },
+    {
+      "parameters": {
+        "url": "=https://chat.miabuilder.com/api/v1/accounts/39/conversations/{{ $json.chat_id }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "SEPcKuFk5wqM67AsKE4FLPf6"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "7ec3637e-3ef0-4f21-9b02-39653245d173",
+      "name": "Ver conversa (Chatwoot)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1520,
+        304
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const decisoes = $('Decidir ação de cada lead').all();\nconst convs = $input.all();\nconst saida = [];\ndecisoes.forEach((d, i) => {\n  const conv = (convs[i] && convs[i].json) || {};\n  const humano = !!(conv.meta && conv.meta.assignee);\n  const erro = !!conv.error;\n  if (d.json.acao !== 'agendar' && (humano || erro)) return;\n  saida.push({ json: d.json });\n});\nreturn saida;\n"
+      },
+      "id": "e4d4a0ec-28d2-4123-9863-03afed00d9f7",
+      "name": "Tira quem está com humano",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        304
+      ],
+      "notes": "Se um atendente humano assumiu a conversa no Chatwoot, não manda follow-up nem marca como perdido. Quem respondeu (Agendar reunião) é movido mesmo assim."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "f1000000-0000-4000-8000-000000000001",
+                    "leftValue": "={{ $json.acao }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "agendar"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "Respondeu"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "f1000000-0000-4000-8000-000000000002",
+                    "leftValue": "={{ $json.acao }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "perda"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "Sem resposta"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "f1000000-0000-4000-8000-000000000003",
+                    "leftValue": "={{ $json.acao }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "enviar"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "Enviar follow-up"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6b0f1124-0f15-48be-b9ec-78fff6378dec",
+      "name": "Qual ação?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1968,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "RQuWEVCvVF5HpofG",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/RQuWEVCvVF5HpofG",
+          "cachedResultName": "Mia - 2.6 - Mover etapa do lead"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "lead_id",
+              "id": "lead_id",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "etapa_atual",
+              "id": "etapa_atual",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "etapa",
+              "id": "etapa",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "motivo",
+              "id": "motivo",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "comentario",
+              "id": "comentario",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "comentario": "",
+            "etapa": "Agendar reunião",
+            "etapa_atual": "={{ $json.etapa_atual }}",
+            "lead_id": "={{ $json.lead_id }}",
+            "motivo": ""
+          }
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "c9b40e4e-b4c2-4a17-ba54-4c76cb138484",
+      "name": "Mover para Agendar reunião (2.6)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2240,
+        112
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "tableId": "mia-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $json.chat_id }}"
+            },
+            {
+              "fieldId": "mensagem_usuario"
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "[Lead Perdido: sem resposta após 4 follow-ups]"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $json.nome_usuario }}"
+            },
+            {
+              "fieldId": "id_conversa",
+              "fieldValue": "retomada_fim"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "retomada_fim"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-MIA"
+            }
+          ]
+        }
+      },
+      "id": "3dcc267f-e222-4db4-9539-db575bd70415",
+      "name": "Registrar fim dos follow-ups",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2240,
+        304
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "FsQeUlxQ7Q6O8mbE",
+          "name": "MIA - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "RQuWEVCvVF5HpofG",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/RQuWEVCvVF5HpofG",
+          "cachedResultName": "Mia - 2.3 - Mover etapa do lead"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "lead_id",
+              "id": "lead_id",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "etapa_atual",
+              "id": "etapa_atual",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "etapa",
+              "id": "etapa",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "motivo",
+              "id": "motivo",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "comentario",
+              "id": "comentario",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "comentario": "Sem resposta após 4 follow-ups",
+            "etapa": "Lead Perdido",
+            "etapa_atual": "={{ $('Qual ação?').item.json.etapa_atual }}",
+            "lead_id": "={{ $('Qual ação?').item.json.lead_id }}",
+            "motivo": "Sem resposta"
+          }
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "a5a57766-dce9-4de0-9c9d-5d7a1a94adfb",
+      "name": "Mover para Lead Perdido (2.6)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2464,
+        304
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://chat.miabuilder.com/api/v1/accounts/39/conversations/{{ $json.chat_id }}/messages",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "SEPcKuFk5wqM67AsKE4FLPf6"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.texto, message_type: 'outgoing', template_params: { name: $json.template, category: 'MARKETING', language: 'pt_BR', processed_params: { '1': $json.primeiro_nome } } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "b37d1be8-099a-4d70-89d3-b3b88b465b4b",
+      "name": "Enviar follow-up (template)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        512
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "Envia o template aprovado pela Meta pelo Chatwoot, que usa o número da API oficial."
+    },
+    {
+      "parameters": {
+        "tableId": "mia-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $('Qual ação?').item.json.chat_id }}"
+            },
+            {
+              "fieldId": "mensagem_usuario"
+            },
+            {
+              "fieldId": "mensagem_agente",
+              "fieldValue": "={{ $('Qual ação?').item.json.texto }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Qual ação?').item.json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $('Qual ação?').item.json.nome_usuario }}"
+            },
+            {
+              "fieldId": "id_conversa",
+              "fieldValue": "={{ 'retomada_' + $('Qual ação?').item.json.numero }}"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "retomada"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-MIA"
+            }
+          ]
+        }
+      },
+      "id": "f5fa59be-8c62-4d72-9ba5-405622d5e2e5",
+      "name": "Registrar follow-up enviado",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2464,
+        512
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "FsQeUlxQ7Q6O8mbE",
+          "name": "MIA - Supabase"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Só registra se o envio deu certo; é esse registro que conta quantos follow-ups o lead já recebeu."
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "contracts",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "organization_id",
+              "condition": "eq",
+              "keyValue": "140da18c-c111-417f-95a6-57cec8d94a22"
+            },
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "negociando"
+            },
+            {
+              "keyName": "stage_id",
+              "condition": "eq",
+              "keyValue": "173412d2-11a4-4d00-9547-5b495f288eff"
+            }
+          ]
+        }
+      },
+      "id": "ec058c3a-b76e-4a90-ac2b-10655d161036",
+      "name": "Contratos em Follow-up (Flow)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        624,
+        304
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "bAoDHJoMSHRhHw5u",
+          "name": "Flow - Supabase"
+        }
+      },
+      "notes": "O funil do Flow posiciona o card pelo contrato em negociação. Aqui pegamos os contratos negociando na etapa Follow-up da M[IA] = exatamente quem aparece na coluna Follow-up."
+    }
+  ],
+  "connections": {
+    "Ler histórico (30 dias)": {
+      "main": [
+        [
+          {
+            "node": "Decidir ação de cada lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir ação de cada lead": {
+      "main": [
+        [
+          {
+            "node": "Ver conversa (Chatwoot)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ver conversa (Chatwoot)": {
+      "main": [
+        [
+          {
+            "node": "Tira quem está com humano",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tira quem está com humano": {
+      "main": [
+        [
+          {
+            "node": "Qual ação?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qual ação?": {
+      "main": [
+        [
+          {
+            "node": "Mover para Agendar reunião (2.6)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar fim dos follow-ups",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar follow-up (template)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar fim dos follow-ups": {
+      "main": [
+        [
+          {
+            "node": "Mover para Lead Perdido (2.6)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar follow-up (template)": {
+      "main": [
+        [
+          {
+            "node": "Registrar follow-up enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Todo dia às 9h": {
+      "main": [
+        [
+          {
+            "node": "Contratos em Follow-up (Flow)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contratos em Follow-up (Flow)": {
+      "main": [
+        [
+          {
+            "node": "Cliente de cada contrato (Flow)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cliente de cada contrato (Flow)": {
+      "main": [
+        [
+          {
+            "node": "Ler histórico (30 dias)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": true,
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "America/Sao_Paulo"
+  },
+  "staticData": {
+    "node:A cada hora": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    },
+    "node:Todo dia às 9h": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "b1d22354-8cca-441b-8cf6-643e41443efa",
+  "activeVersionId": "b1d22354-8cca-441b-8cf6-643e41443efa",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "iRSfUEkUXrdN8do8",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-22T22:56:22.934Z",
+      "updatedAt": "2026-10-22T22:56:22.934Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "b1d22354-8cca-441b-8cf6-643e41443efa",
+    "workflowId": "iRSfUEkUXrdN8do8",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 9
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          400,
+          304
+        ],
+        "id": "f4b343da-df54-4601-8336-ea48ae45b3a5",
+        "name": "Todo dia às 9h"
+      },
+      {
+        "parameters": {
+          "operation": "get",
+          "tableId": "clients",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "id",
+                "keyValue": "={{ $json.client_id }}"
+              }
+            ]
+          }
+        },
+        "id": "1b42988f-6724-415c-8e1f-b2aecae26721",
+        "name": "Cliente de cada contrato (Flow)",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          848,
+          304
+        ],
+        "executeOnce": false,
+        "credentials": {
+          "supabaseApi": {
+            "id": "bAoDHJoMSHRhHw5u",
+            "name": "Flow - Supabase"
+          }
+        },
+        "notes": "Todos os leads da organização M[IA] que estão na etapa Follow-up no Flow."
+      },
+      {
+        "parameters": {
+          "operation": "getAll",
+          "tableId": "mia-historico_mensagens",
+          "returnAll": true,
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "nome_app",
+                "condition": "eq",
+                "keyValue": "SDR-MIA"
+              },
+              {
+                "keyName": "created_at",
+                "condition": "gte",
+                "keyValue": "={{ new Date(Date.now() - 30*24*60*60*1000).toISOString() }}"
+              }
+            ]
+          }
+        },
+        "id": "1f4cc0ad-c866-487d-9fc5-46f4b59f37b1",
+        "name": "Ler histórico (30 dias)",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          1072,
+          304
+        ],
+        "alwaysOutputData": true,
+        "executeOnce": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "FsQeUlxQ7Q6O8mbE",
+            "name": "MIA - Supabase"
+          }
+        },
+        "notes": "Histórico de mensagens do WhatsApp da Mia, para saber quem respondeu e quantos follow-ups cada um já recebeu."
+      },
+      {
+        "parameters": {
+          "jsCode": "// ===================== CONFIGURAÇÃO =====================\nconst CFG = {\n  // Para testar: só estes telefones entram (lista vazia = todos)\n  numeros_liberados: [],\n  totalFollowups: 4,\n  // Não manda nada se teve qualquer mensagem na conversa nas últimas X horas\n  // (conversa em andamento ou follow-up já enviado hoje)\n  intervaloMinHoras: 20\n};\n// Templates aprovados na Meta (conta da Mia) - {{1}} = primeiro nome do lead\nconst TEMPLATES = {\n  1: { nome: 'mia_followup_1', texto: 'Oii {{1}}! Tudo bem? Vi que você ainda não respondeu. Fica à vontade, tá tudo tranquilo! Só queria saber se ficou alguma dúvida sobre como a M[IA] pode ajudar sua empresa. 😊' },\n  2: { nome: 'mia_followup_2', texto: 'Tudo bem, {{1}}? Tem um minutinho? 😄' },\n  3: { nome: 'mia_followup_3', texto: 'Opa {{1}}!!, sabia que empresas que implementam IA reduzem até 40% do tempo em tarefas operacionais? A M[IA] já fez isso acontecer para vários negócios. Faz sentido a gente conversar 30 minutinhos sobre isso?' },\n  4: { nome: 'mia_followup_4', texto: 'Oi {{1}}! Tenho um caso aqui que acho que vai te interessar. Um dos nossos clientes automatizou o atendimento e triplicou a capacidade de resposta sem contratar ninguém. Quer entender como funciona na prática?' }\n};\n// ========================================================\n// Saída: um item por lead em Follow-up, com \"acao\":\n//   agendar  -> respondeu depois de um follow-up\n//   perda    -> recebeu os 4 e não respondeu\n//   enviar   -> manda o próximo follow-up\n//   ignorar  -> não faz nada hoje (o campo \"motivo\" explica)\n\nconst last8 = v => String(v || '').replace(/\\D/g, '').slice(-8);\nconst tipo = r => String(r.message_type || '');\nconst isRet = r => tipo(r) === 'retomada';\nconst isLead = r => !tipo(r).startsWith('retomada') && String(r.mensagem_usuario || '').trim() !== '';\nconst ts = r => new Date(r.created_at).getTime();\nconst agora = Date.now();\nconst liberados = CFG.numeros_liberados.map(last8);\n\n// Histórico agrupado pelos 8 últimos dígitos do telefone\nconst porTel = {};\nfor (const it of $('Ler histórico (30 dias)').all()) {\n  const r = it.json;\n  if (!r || !r.telefone || !r.created_at) continue;\n  const k = last8(r.telefone);\n  if (k.length === 8) (porTel[k] = porTel[k] || []).push(r);\n}\n\nconst saida = [];\nconst vistos = new Set();\nfor (const it of $('Cliente de cada contrato (Flow)').all()) {\n  const lead = it.json;\n  if (!lead || !lead.id || vistos.has(lead.id)) continue;\n  vistos.add(lead.id);\n\n  let contatos = lead.social_media && lead.social_media.contacts;\n  if (typeof contatos === 'string') { try { contatos = JSON.parse(contatos); } catch { contatos = []; } }\n  if (!Array.isArray(contatos)) contatos = [];\n\n  const chaves = [...new Set([lead.whatsapp, lead.phone, ...contatos.map(c => c && c.whatsapp)]\n    .map(last8).filter(k => k.length === 8))];\n  const rows = chaves.flatMap(k => porTel[k] || []).sort((a, b) => ts(a) - ts(b));\n\n  const ultimaLead = [...rows].reverse().find(isLead);\n  const ultimaRet = [...rows].reverse().find(isRet);\n  const tLead = ultimaLead ? ts(ultimaLead) : 0;\n  const tRet = ultimaRet ? ts(ultimaRet) : 0;\n  const ultima = rows[rows.length - 1];\n\n  const nomeCompleto = String(lead.contact_name || (ultimaLead && ultimaLead.nome_usuario) || lead.name || '').trim();\n  const base = {\n    lead_id: lead.id,\n    empresa: lead.name,\n    etapa_atual: 'Follow-up',\n    telefone: ultima ? String((ultimaLead || ultima).telefone) : (lead.whatsapp || lead.phone || ''),\n    chat_id: ultima ? String(ultima.id_usuario || (ultimaLead && ultimaLead.id_usuario) || '') : '',\n    nome_usuario: nomeCompleto,\n    primeiro_nome: nomeCompleto.split(/\\s+/)[0] || 'tudo bem'\n  };\n  const ignorar = motivo => saida.push({ json: { ...base, acao: 'ignorar', motivo } });\n\n  if (liberados.length && !chaves.some(k => liberados.includes(k))) { ignorar('fora da lista de teste (numeros_liberados)'); continue; }\n  if (!chaves.length) { ignorar('sem telefone/WhatsApp no cadastro'); continue; }\n  if (!rows.length) { ignorar('sem conversa no WhatsApp nos últimos 30 dias'); continue; }\n\n  // 1) Respondeu depois de algum follow-up -> Agendar reunião\n  if (tRet && tLead > tRet) { saida.push({ json: { ...base, acao: 'agendar' } }); continue; }\n\n  if (rows.some(r => tipo(r) === 'retomada_fim' && ts(r) > tLead)) { ignorar('já encerrado pelo fluxo antigo, sem resposta depois'); continue; }\n\n  const horas = (agora - ts(ultima)) / 3600000;\n  if (horas < CFG.intervaloMinHoras) { ignorar('teve mensagem há ' + horas.toFixed(1) + 'h (espera ' + CFG.intervaloMinHoras + 'h)'); continue; }\n\n  const enviados = rows.filter(r => isRet(r) && ts(r) > tLead).length;\n\n  // 2) Já recebeu os 4 e não respondeu -> Lead Perdido\n  if (enviados >= CFG.totalFollowups) { saida.push({ json: { ...base, acao: 'perda', numero: enviados } }); continue; }\n\n  // 3) Manda o próximo follow-up\n  const numero = enviados + 1;\n  const t = TEMPLATES[numero];\n  saida.push({ json: { ...base, acao: 'enviar', numero, template: t.nome, texto: t.texto.replace('{{1}}', base.primeiro_nome) } });\n}\nreturn saida;\n"
+        },
+        "id": "582342ff-d8c2-48a7-9481-ef1a0dd9fbe5",
+        "name": "Decidir ação de cada lead",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1296,
+          304
+        ],
+        "notes": "Para cada lead em Follow-up: respondeu depois de um follow-up -> Agendar reunião; já recebeu os 4 sem responder -> Lead Perdido; senão -> manda o próximo follow-up."
+      },
+      {
+        "parameters": {
+          "url": "=https://chat.miabuilder.com/api/v1/accounts/39/conversations/{{ $json.chat_id }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "api_access_token",
+                "value": "SEPcKuFk5wqM67AsKE4FLPf6"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "id": "7ec3637e-3ef0-4f21-9b02-39653245d173",
+        "name": "Ver conversa (Chatwoot)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1520,
+          304
+        ],
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const decisoes = $('Decidir ação de cada lead').all();\nconst convs = $input.all();\nconst saida = [];\ndecisoes.forEach((d, i) => {\n  const conv = (convs[i] && convs[i].json) || {};\n  const humano = !!(conv.meta && conv.meta.assignee);\n  const erro = !!conv.error;\n  if (d.json.acao !== 'agendar' && (humano || erro)) return;\n  saida.push({ json: d.json });\n});\nreturn saida;\n"
+        },
+        "id": "e4d4a0ec-28d2-4123-9863-03afed00d9f7",
+        "name": "Tira quem está com humano",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1744,
+          304
+        ],
+        "notes": "Se um atendente humano assumiu a conversa no Chatwoot, não manda follow-up nem marca como perdido. Quem respondeu (Agendar reunião) é movido mesmo assim."
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "combinator": "and",
+                  "conditions": [
+                    {
+                      "id": "f1000000-0000-4000-8000-000000000001",
+                      "leftValue": "={{ $json.acao }}",
+                      "operator": {
+                        "operation": "equals",
+                        "type": "string"
+                      },
+                      "rightValue": "agendar"
+                    }
+                  ],
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  }
+                },
+                "renameOutput": true,
+                "outputKey": "Respondeu"
+              },
+              {
+                "conditions": {
+                  "combinator": "and",
+                  "conditions": [
+                    {
+                      "id": "f1000000-0000-4000-8000-000000000002",
+                      "leftValue": "={{ $json.acao }}",
+                      "operator": {
+                        "operation": "equals",
+                        "type": "string"
+                      },
+                      "rightValue": "perda"
+                    }
+                  ],
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  }
+                },
+                "renameOutput": true,
+                "outputKey": "Sem resposta"
+              },
+              {
+                "conditions": {
+                  "combinator": "and",
+                  "conditions": [
+                    {
+                      "id": "f1000000-0000-4000-8000-000000000003",
+                      "leftValue": "={{ $json.acao }}",
+                      "operator": {
+                        "operation": "equals",
+                        "type": "string"
+                      },
+                      "rightValue": "enviar"
+                    }
+                  ],
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  }
+                },
+                "renameOutput": true,
+                "outputKey": "Enviar follow-up"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "6b0f1124-0f15-48be-b9ec-78fff6378dec",
+        "name": "Qual ação?",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3.2,
+        "position": [
+          1968,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "RQuWEVCvVF5HpofG",
+            "mode": "list",
+            "cachedResultUrl": "/workflow/RQuWEVCvVF5HpofG",
+            "cachedResultName": "Mia - 2.6 - Mover etapa do lead"
+          },
+          "workflowInputs": {
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true,
+            "mappingMode": "defineBelow",
+            "matchingColumns": [],
+            "schema": [
+              {
+                "canBeUsedToMatch": true,
+                "defaultMatch": false,
+                "display": true,
+                "displayName": "lead_id",
+                "id": "lead_id",
+                "removed": false,
+                "required": false,
+                "type": "string"
+              },
+              {
+                "canBeUsedToMatch": true,
+                "defaultMatch": false,
+                "display": true,
+                "displayName": "etapa_atual",
+                "id": "etapa_atual",
+                "removed": false,
+                "required": false,
+                "type": "string"
+              },
+              {
+                "canBeUsedToMatch": true,
+                "defaultMatch": false,
+                "display": true,
+                "displayName": "etapa",
+                "id": "etapa",
+                "removed": false,
+                "required": false,
+                "type": "string"
+              },
+              {
+                "canBeUsedToMatch": true,
+                "defaultMatch": false,
+                "display": true,
+                "displayName": "motivo",
+                "id": "motivo",
+                "removed": false,
+                "required": false,
+                "type": "string"
+              },
+              {
+                "canBeUsedToMatch": true,
+                "defaultMatch": false,
+                "display": true,
+                "displayName": "comentario",
+                "id": "comentario",
+                "removed": false,
+                "required": false,
+                "type": "string"
+              }
+            ],
+            "value": {
+              "comentario": "",
+              "etapa": "Agendar reunião",
+              "etapa_atual": "={{ $json.etapa_atual }}",
+              "lead_id": "={{ $json.lead_id }}",
+              "motivo": ""
+            }
+          },
+          "mode": "each",
+          "options": {}
+        },
+        "id": "c9b40e4e-b4c2-4a17-ba54-4c76cb138484",
+        "name": "Mover para Agendar reunião (2.6)",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          2240,
+          112
+        ],
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "tableId": "mia-historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $json.chat_id }}"
+              },
+              {
+                "fieldId": "mensagem_usuario"
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "[Lead Perdido: sem resposta após 4 follow-ups]"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $json.nome_usuario }}"
+              },
+              {
+                "fieldId": "id_conversa",
+                "fieldValue": "retomada_fim"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "retomada_fim"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "SDR-MIA"
+              }
+            ]
+          }
+        },
+        "id": "3dcc267f-e222-4db4-9539-db575bd70415",
+        "name": "Registrar fim dos follow-ups",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2240,
+          304
+        ],
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "FsQeUlxQ7Q6O8mbE",
+            "name": "MIA - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "RQuWEVCvVF5HpofG",
+            "mode": "list",
+            "cachedResultUrl": "/workflow/RQuWEVCvVF5HpofG",
+            "cachedResultName": "Mia - 2.3 - Mover etapa do lead"
+          },
+          "workflowInputs": {
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true,
+            "mappingMode": "defineBelow",
+            "matchingColumns": [],
+            "schema": [
+              {
+                "canBeUsedToMatch": true,
+                "defaultMatch": false,
+                "display": true,
+                "displayName": "lead_id",
+                "id": "lead_id",
+                "removed": false,
+                "required": false,
+                "type": "string"
+              },
+              {
+                "canBeUsedToMatch": true,
+                "defaultMatch": false,
+                "display": true,
+                "displayName": "etapa_atual",
+                "id": "etapa_atual",
+                "removed": false,
+                "required": false,
+                "type": "string"
+              },
+              {
+                "canBeUsedToMatch": true,
+                "defaultMatch": false,
+                "display": true,
+                "displayName": "etapa",
+                "id": "etapa",
+                "removed": false,
+                "required": false,
+                "type": "string"
+              },
+              {
+                "canBeUsedToMatch": true,
+                "defaultMatch": false,
+                "display": true,
+                "displayName": "motivo",
+                "id": "motivo",
+                "removed": false,
+                "required": false,
+                "type": "string"
+              },
+              {
+                "canBeUsedToMatch": true,
+                "defaultMatch": false,
+                "display": true,
+                "displayName": "comentario",
+                "id": "comentario",
+                "removed": false,
+                "required": false,
+                "type": "string"
+              }
+            ],
+            "value": {
+              "comentario": "Sem resposta após 4 follow-ups",
+              "etapa": "Lead Perdido",
+              "etapa_atual": "={{ $('Qual ação?').item.json.etapa_atual }}",
+              "lead_id": "={{ $('Qual ação?').item.json.lead_id }}",
+              "motivo": "Sem resposta"
+            }
+          },
+          "mode": "each",
+          "options": {}
+        },
+        "id": "a5a57766-dce9-4de0-9c9d-5d7a1a94adfb",
+        "name": "Mover para Lead Perdido (2.6)",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          2464,
+          304
+        ],
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://chat.miabuilder.com/api/v1/accounts/39/conversations/{{ $json.chat_id }}/messages",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "api_access_token",
+                "value": "SEPcKuFk5wqM67AsKE4FLPf6"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ content: $json.texto, message_type: 'outgoing', template_params: { name: $json.template, category: 'MARKETING', language: 'pt_BR', processed_params: { '1': $json.primeiro_nome } } }) }}",
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "id": "b37d1be8-099a-4d70-89d3-b3b88b465b4b",
+        "name": "Enviar follow-up (template)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2240,
+          512
+        ],
+        "onError": "continueErrorOutput",
+        "notes": "Envia o template aprovado pela Meta pelo Chatwoot, que usa o número da API oficial."
+      },
+      {
+        "parameters": {
+          "tableId": "mia-historico_mensagens",
+          "fieldsUi": {
+            "fieldValues": [
+              {
+                "fieldId": "id_usuario",
+                "fieldValue": "={{ $('Qual ação?').item.json.chat_id }}"
+              },
+              {
+                "fieldId": "mensagem_usuario"
+              },
+              {
+                "fieldId": "mensagem_agente",
+                "fieldValue": "={{ $('Qual ação?').item.json.texto }}"
+              },
+              {
+                "fieldId": "telefone",
+                "fieldValue": "={{ $('Qual ação?').item.json.telefone }}"
+              },
+              {
+                "fieldId": "nome_usuario",
+                "fieldValue": "={{ $('Qual ação?').item.json.nome_usuario }}"
+              },
+              {
+                "fieldId": "id_conversa",
+                "fieldValue": "={{ 'retomada_' + $('Qual ação?').item.json.numero }}"
+              },
+              {
+                "fieldId": "message_type",
+                "fieldValue": "retomada"
+              },
+              {
+                "fieldId": "ativo",
+                "fieldValue": "true"
+              },
+              {
+                "fieldId": "nome_app",
+                "fieldValue": "SDR-MIA"
+              }
+            ]
+          }
+        },
+        "id": "f5fa59be-8c62-4d72-9ba5-405622d5e2e5",
+        "name": "Registrar follow-up enviado",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          2464,
+          512
+        ],
+        "credentials": {
+          "supabaseApi": {
+            "id": "FsQeUlxQ7Q6O8mbE",
+            "name": "MIA - Supabase"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "notes": "Só registra se o envio deu certo; é esse registro que conta quantos follow-ups o lead já recebeu."
+      },
+      {
+        "parameters": {
+          "operation": "getAll",
+          "tableId": "contracts",
+          "returnAll": true,
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "organization_id",
+                "condition": "eq",
+                "keyValue": "140da18c-c111-417f-95a6-57cec8d94a22"
+              },
+              {
+                "keyName": "status",
+                "condition": "eq",
+                "keyValue": "negociando"
+              },
+              {
+                "keyName": "stage_id",
+                "condition": "eq",
+                "keyValue": "173412d2-11a4-4d00-9547-5b495f288eff"
+              }
+            ]
+          }
+        },
+        "id": "ec058c3a-b76e-4a90-ac2b-10655d161036",
+        "name": "Contratos em Follow-up (Flow)",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          624,
+          304
+        ],
+        "credentials": {
+          "supabaseApi": {
+            "id": "bAoDHJoMSHRhHw5u",
+            "name": "Flow - Supabase"
+          }
+        },
+        "notes": "O funil do Flow posiciona o card pelo contrato em negociação. Aqui pegamos os contratos negociando na etapa Follow-up da M[IA] = exatamente quem aparece na coluna Follow-up."
+      }
+    ],
+    "connections": {
+      "Ler histórico (30 dias)": {
+        "main": [
+          [
+            {
+              "node": "Decidir ação de cada lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Decidir ação de cada lead": {
+        "main": [
+          [
+            {
+              "node": "Ver conversa (Chatwoot)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ver conversa (Chatwoot)": {
+        "main": [
+          [
+            {
+              "node": "Tira quem está com humano",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tira quem está com humano": {
+        "main": [
+          [
+            {
+              "node": "Qual ação?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Qual ação?": {
+        "main": [
+          [
+            {
+              "node": "Mover para Agendar reunião (2.6)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Registrar fim dos follow-ups",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Enviar follow-up (template)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Registrar fim dos follow-ups": {
+        "main": [
+          [
+            {
+              "node": "Mover para Lead Perdido (2.6)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar follow-up (template)": {
+        "main": [
+          [
+            {
+              "node": "Registrar follow-up enviado",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Todo dia às 9h": {
+        "main": [
+          [
+            {
+              "node": "Contratos em Follow-up (Flow)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Contratos em Follow-up (Flow)": {
+        "main": [
+          [
+            {
+              "node": "Cliente de cada contrato (Flow)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cliente de cada contrato (Flow)": {
+        "main": [
+          [
+            {
+              "node": "Ler histórico (30 dias)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version b1d22354",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-10-28T21:32:05.576Z",
+    "updatedAt": "2026-10-28T21:34:43.624Z"
+  },
+  "tags": []
+}
