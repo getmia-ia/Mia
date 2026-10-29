@@ -1,0 +1,1950 @@
+{
+  "updatedAt": "2026-10-28T12:42:37.996Z",
+  "createdAt": "2026-10-14T17:25:03.649Z",
+  "id": "7p0ACEoXZnR5YLUj",
+  "name": "Monteiro Ramalho - 03.09 - Follow-up em massa",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/10 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "59890c7e-3358-4328-9e0a-224d8026f36e",
+      "name": "Gatilho agendado",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -16,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- 1) Quem ficou \"enviando\" por mais de 30 minutos (o fluxo travou no meio) volta pra fila.\n-- 2) Se o modelo do envio foi rejeitado pela Meta, ninguém vai receber: quem estava na fila vira \"não enviado\".\n-- 3) Envio que não tem mais ninguém na fila é marcado como concluído (no caso do modelo rejeitado, isso\n--    acontece na rodada seguinte, já sem ninguém na fila).\nwith destrava as (\n  update public.fup_envio_destinatarios_tributario\n     set status = 'pendente', motivo = 'Reiniciado depois de travar'\n   where status = 'enviando'\n     and atualizado_em < now() - interval '30 minutes'\n  returning id\n),\nrejeitados as (\n  update public.fup_envio_destinatarios_tributario d\n     set status = 'pulado', motivo = 'O modelo foi rejeitado pela Meta'\n    from public.fup_envios_tributario e\n    join public.fup_modelos_tributario m on m.id = e.modelo_id\n   where d.envio_id = e.id\n     and e.status = 'ativo'\n     and m.status = 'rejeitado'\n     and d.status = 'pendente'\n  returning d.id\n),\nfecha as (\n  update public.fup_envios_tributario e\n     set status = 'concluido', concluido_em = now()\n   where e.status = 'ativo'\n     and exists (select 1 from public.fup_envio_destinatarios_tributario d where d.envio_id = e.id)\n     and not exists (select 1 from public.fup_envio_destinatarios_tributario d\n                      where d.envio_id = e.id and d.status in ('pendente', 'enviando'))\n  returning e.id\n)\nselect (select count(*) from destrava) as destravados,\n       (select count(*) from rejeitados) as dispensados_por_modelo_rejeitado,\n       (select count(*) from fecha) as encerrados;",
+        "options": {}
+      },
+      "id": "623559b3-24d9-42cb-81fc-e7bd094ad3ee",
+      "name": "Destrava e encerra envios",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        560
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Escolhe quem recebe follow-up agora e já \"reserva\" cada um (marca como 'enviando'),\n-- pra ninguém receber duas vezes.\n--\n-- Regras:\n--  * só envios ativos, com modelo APROVADO pela Meta e já na hora de começar\n--    (sem data de início = na próxima rodada; com data = na primeira rodada depois dela);\n--  * sem limite de pessoas por envio e sem horário fixo: manda pra todo mundo da lista, a qualquer hora;\n--  * quem respondeu depois que o envio foi criado, foi bloqueado ou teve a empresa arquivada é pulado;\n--  * quem falhou é tentado de novo depois de 1 hora, até 3 tentativas;\n--  * a cada rodada (1 a cada 10 minutos) reserva até 500 pessoas, e só reserva mais se houver menos de\n--    1000 sendo enviadas ao mesmo tempo. Isso só evita sobrecarregar o fluxo: todo mundo da lista recebe.\n-- $1 é true na rodada agendada. Rodando na mão pelo editor é false e só entram leads de teste\n-- (origem 'teste'), pra um clique sem querer não mandar mensagem pra prospect de verdade.\nwith pular as (\n  update public.fup_envio_destinatarios_tributario d\n     set status = 'pulado',\n         motivo = case\n           when l.disparo_bloqueado then 'Foi bloqueado depois que o envio foi criado'\n           when e.arquivada_em is not null then 'A empresa foi arquivada'\n           else 'Já respondeu antes de receber esta mensagem'\n         end\n    from public.fup_envios_tributario en,\n         public.leads_tributario l\n         left join public.empresas_tributario e on e.id = l.empresa_id\n   where d.envio_id = en.id\n     and l.id = d.lead_id\n     and en.status = 'ativo'\n     and d.status = 'pendente'\n     and (\n           l.disparo_bloqueado\n        or e.arquivada_em is not null\n        or exists (\n             select 1 from public.historico_mensagens h\n              where h.nome_app = 'SDR-MONTEIRO-TRIBUTARIO'\n                and h.telefone = d.telefone\n                and h.mensagem_usuario is not null\n                and h.created_at > en.criado_em\n           )\n         )\n  returning d.id\n),\nativos as (\n  select en.id as envio_id, en.enviar_email, en.ia_atende,\n         m.meta_template_name, m.idioma, m.texto, m.rodape, m.assunto_email\n    from public.fup_envios_tributario en\n    join public.fup_modelos_tributario m on m.id = en.modelo_id\n   where en.status = 'ativo'\n     and m.status = 'aprovado'\n     and (en.iniciar_em is null or en.iniciar_em <= now())\n),\nem_andamento as (\n  select count(*)::int as n\n    from public.fup_envio_destinatarios_tributario\n   where status = 'enviando'\n),\ncandidatos as (\n  select d.id, d.criado_em\n    from public.fup_envio_destinatarios_tributario d\n    join ativos a on a.envio_id = d.envio_id\n    join public.leads_tributario l on l.id = d.lead_id\n   where d.status = 'pendente'\n     and d.tentativas < 3\n     and (d.tentativas = 0 or d.atualizado_em < now() - interval '60 minutes')\n     and d.id not in (select id from pular)\n     and (l.origem = 'teste' or $1::boolean)\n),\nescolhidos as (\n  select c.id\n    from candidatos c, em_andamento e\n   where e.n < 1000\n   order by c.criado_em, c.id\n   limit 500\n),\nreservados as (\n  update public.fup_envio_destinatarios_tributario d\n     set status = 'enviando', tentativas = d.tentativas + 1\n    from escolhidos x\n   where d.id = x.id and d.status = 'pendente'\n  returning d.id, d.envio_id, d.lead_id, d.nome, d.empresa, d.telefone, d.email, d.valores, d.tentativas, d.criado_em\n),\niniciou as (\n  update public.fup_envios_tributario en\n     set iniciado_em = coalesce(en.iniciado_em, now())\n   where en.id in (select envio_id from reservados)\n  returning 1\n)\nselect r.id as destinatario_id, r.envio_id, r.lead_id, r.nome, r.empresa, r.telefone, r.email,\n       r.valores, r.tentativas,\n       a.meta_template_name, a.idioma, a.texto, a.rodape, a.assunto_email, a.enviar_email, a.ia_atende\n  from reservados r\n  join ativos a on a.envio_id = r.envio_id\n order by r.criado_em;",
+        "options": {
+          "queryReplacement": "={{ [$execution.mode === 'production' && $('Gatilho agendado').isExecuted] }}"
+        }
+      },
+      "id": "47d703bc-1c98-4d0c-86eb-780674aebb98",
+      "name": "Reserva quem recebe agora",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        768
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Junta o texto do modelo com os dados da pessoa e prepara o envio pela Meta.\nvar d = $json;\n\n// Valores que entram no lugar de {{1}}, {{2}}... (a Meta não aceita quebra de linha nem campo vazio)\nvar valores = Array.isArray(d.valores) ? d.valores : [];\nvar limpos = valores.map(function (v) {\n  return String(v == null ? '' : v).replace(/[\\n\\r\\t]+/g, ' ').replace(/ {2,}/g, ' ').trim().slice(0, 1000);\n});\nvar dadosOk = limpos.every(function (v) { return v.length > 0; });\n\n// Troca {{n}} pelo valor correspondente\nfunction preencher(texto, lista) {\n  var partes = String(texto || '').split('{{');\n  var saida = partes[0];\n  for (var i = 1; i < partes.length; i++) {\n    var fim = partes[i].indexOf('}}');\n    if (fim === -1) { saida += '{{' + partes[i]; continue; }\n    var n = parseInt(partes[i].slice(0, fim).trim(), 10);\n    var v = (!isNaN(n) && lista[n - 1] !== undefined) ? lista[n - 1] : '';\n    saida += v + partes[i].slice(fim + 2);\n  }\n  return saida;\n}\n\nvar telefone = String(d.telefone || '').replace(/\\D/g, '');\nvar corpo = preencher(d.texto, limpos);\nvar mensagemVisual = d.rodape ? corpo + '\\n\\n' + d.rodape : corpo;\n\nvar template = { name: d.meta_template_name, language: { code: d.idioma || 'pt_BR' } };\nif (limpos.length > 0) {\n  template.components = [{ type: 'body', parameters: limpos.map(function (v) { return { type: 'text', text: v }; }) }];\n}\n\nvar podeWhatsapp = telefone.length > 0 && dadosOk;\nvar motivoSemWhatsapp = telefone.length === 0\n  ? 'Pessoa sem telefone cadastrado.'\n  : (dadosOk ? null : 'Faltou um dado da pessoa para preencher a mensagem.');\n\n// Mensagem no formato que a memória da IA guarda (assim a IA sabe o que foi enviado)\nvar memoria = JSON.stringify({\n  type: 'ai',\n  data: { content: mensagemVisual, tool_calls: [], invalid_tool_calls: [], additional_kwargs: {}, response_metadata: {} }\n});\n\nreturn [{ json: Object.assign({}, d, {\n  telefone: telefone,\n  mensagem_visual: mensagemVisual,\n  resultado_api: { messaging_product: 'whatsapp', to: telefone, type: 'template', template: template },\n  redis_memory_message: memoria,\n  pode_whatsapp: podeWhatsapp,\n  motivo_sem_whatsapp: motivoSemWhatsapp\n}) }];"
+      },
+      "id": "27a76417-eac8-4878-8dcb-917c446d49f9",
+      "name": "Monta a mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f9000000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.pode_whatsapp }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d51f03f8-3d53-4d4b-a815-227ffcb0814c",
+      "name": "Pode enviar WhatsApp?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        944,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/1086153471257433/messages",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.resultado_api }}",
+        "options": {}
+      },
+      "id": "e839521e-15d5-4c66-9167-bf20857bfc65",
+      "name": "Enviar modelo pelo WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1168,
+        848
+      ],
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f9000000-0000-4000-8000-000000000002",
+              "leftValue": "={{ $json.messages?.[0]?.message_status }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "accepted"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b992b45-e4c4-419e-9c20-a5cca6138b23",
+      "name": "Meta aceitou?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1392,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "var lead = $('Monta a mensagem').first().json;\nreturn [{ json: Object.assign({}, lead, { whatsapp_ok: true, whatsapp_motivo: null }) }];"
+      },
+      "id": "440c9f5f-8bb7-4238-a0df-21bf3eb16da1",
+      "name": "Marca WhatsApp OK",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f9000000-0000-4000-8000-000000000003",
+              "leftValue": "={{ $json.enviar_email }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            },
+            {
+              "id": "f9000000-0000-4000-8000-000000000004",
+              "leftValue": "={{ $json.email }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f7f123ca-bbb5-49db-b4d6-f69046346573",
+      "name": "Envia e-mail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1840,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Monta assunto + HTML do e-mail com a identidade visual da BMS Consultoria Tributária.\n// Usa o mesmo texto que foi no WhatsApp, só formatado em parágrafos.\n// O logo vai DENTRO do e-mail (anexo \"inline\"): Gmail e Outlook não mostram imagem SVG e muitos\n// e-mails bloqueiam imagens que vêm de um endereço externo.\nvar esc = function (s) {\n  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n};\n\nvar LOGO_BASE64 = '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';\nvar WHATSAPP_NUMERO = '558523980088';\nvar AZUL_BMS = '#021D44';\nvar LARANJA_BMS = '#FF7F00';\nvar COR_TEXTO = '#14233D';\n\nvar d = $json;\nvar subject = (d.assunto_email && String(d.assunto_email).trim()) ? d.assunto_email : 'Retomando nosso contato';\n\nvar paragrafos = String(d.mensagem_visual || '')\n  .split(/\\n\\s*\\n/)\n  .map(function (p) { return p.trim(); })\n  .filter(Boolean)\n  .map(function (p) {\n    return '<p style=\"margin:0 0 16px 0;font-family:Georgia,serif;font-size:14px;line-height:1.7;color:' + COR_TEXTO + ';\">' + esc(p).replace(/\\n/g, '<br/>') + '</p>';\n  })\n  .join('');\n\nvar botao = '<div style=\"text-align:center;margin:8px 0 8px 0;\"><a href=\"https://wa.me/' + WHATSAPP_NUMERO + '\" style=\"display:inline-block;background:#25D366;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:4px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;letter-spacing:0.04em;\">Falar no WhatsApp</a></div>';\n\nvar html = '<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /><title>BMS Consultoria Tributária</title></head>'\n  + '<body style=\"margin:0;padding:0;background:#F2F4F7;font-family:Georgia,serif;color:' + COR_TEXTO + ';\">'\n  + '<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:#F2F4F7;padding:32px 12px;\"><tr><td align=\"center\">'\n  + '<table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"max-width:600px;width:100%;background:#ffffff;border:1px solid #DDE3EC;border-radius:6px;overflow:hidden;\">'\n  + '<tr><td style=\"background:' + AZUL_BMS + ';padding:30px 32px;text-align:center;\">'\n  + '<img src=\"cid:bms-logo\" alt=\"BMS Consultoria Tributária\" width=\"200\" height=\"49\" style=\"display:block;margin:0 auto;border:0;width:200px;height:auto;max-width:100%;\" />'\n  + '</td></tr><tr><td style=\"height:3px;background:' + LARANJA_BMS + ';font-size:0;line-height:0;\">&nbsp;</td></tr>'\n  + '<tr><td style=\"padding:36px 32px 8px 32px;\">' + paragrafos + botao + '</td></tr>'\n  + '<tr><td style=\"border-top:1px solid #DDE3EC;\"></td></tr>'\n  + '<tr><td style=\"padding:20px 32px;background:#F7F8FA;text-align:center;\"><p style=\"margin:0;font-family:Georgia,serif;font-size:13px;color:' + AZUL_BMS + ';font-weight:600;\">BMS Consultoria Tributária</p></td></tr>'\n  + '</table></td></tr></table></body></html>';\n\nvar anexos = [{ filename: 'bms-logo.png', content: LOGO_BASE64, content_type: 'image/png', content_id: 'bms-logo' }];\n\nreturn [{ json: Object.assign({}, d, { subject: subject, html: html, anexos: anexos }) }];"
+      },
+      "id": "a154ccf7-ff99-49e4-9478-cc552eb6f2fc",
+      "name": "Monta o html do email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2064,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ from: \"BMS Consultoria Tributária <monteironeto@bmsprojetos.com>\", to: [ $json.email ], subject: $json.subject, html: $json.html, attachments: $json.anexos }) }}",
+        "options": {}
+      },
+      "id": "607ee619-4721-447c-8c12-d61b5cd861c2",
+      "name": "Envia Email via Resend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2288,
+        752
+      ],
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// A resposta do Resend substitui o item; recupera os dados acumulados e marca se deu certo.\nvar antes = $('Monta o html do email').first().json;\nvar resp = $json;\nvar ok = typeof (resp && resp.id) === 'string' && !(resp && resp.error);\nvar motivo = ok ? null : ((resp && resp.error && resp.error.message) || (resp && resp.message) || 'Falha ao enviar pelo Resend.');\nreturn [{ json: Object.assign({}, antes, { email_ok: ok, email_motivo: motivo }) }];"
+      },
+      "id": "8d141d9f-1046-45a4-9225-4d1f6223703c",
+      "name": "Marca Email Resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2512,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f9000000-0000-4000-8000-000000000005",
+              "leftValue": "={{ $json.whatsapp_ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            },
+            {
+              "id": "f9000000-0000-4000-8000-000000000006",
+              "leftValue": "={{ $json.email_ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "7ab420fb-6a69-4db5-953e-e3548da56208",
+      "name": "Pelo menos um canal funcionou?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2736,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update public.fup_envio_destinatarios_tributario\n   set status = 'enviado', whatsapp_ok = $2::boolean, email_ok = $3::boolean, enviado_em = now(), motivo = null\n where id = $1::uuid\nreturning id;",
+        "options": {
+          "queryReplacement": "={{ [ $('Pelo menos um canal funcionou?').first().json.destinatario_id, $('Pelo menos um canal funcionou?').first().json.whatsapp_ok === true, $('Pelo menos um canal funcionou?').first().json.email_ok === true ] }}"
+        }
+      },
+      "id": "54477bda-c707-4f34-b2a1-f1dd9a645a6b",
+      "name": "Registra enviado",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2960,
+        752
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f9000000-0000-4000-8000-000000000007",
+              "leftValue": "={{ $('Pelo menos um canal funcionou?').first().json.whatsapp_ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d8710c17-33eb-4396-aeee-6442b4bbc77e",
+      "name": "Foi enviado pelo WhatsApp?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3184,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Guarda a mensagem na conversa do WhatsApp da pessoa e define quem atende quando ela responder:\n-- $1 = true: a IA continua a conversa; false: a equipe atende (a IA fica pausada).\nwith a as (\n  update public.historico_mensagens\n     set ativo = $1::boolean\n   where nome_app = 'SDR-MONTEIRO-TRIBUTARIO' and telefone = $2\n  returning 1\n),\nl as (\n  update public.leads_tributario\n     set inteligencia = $1::boolean\n   where id = $3::uuid\n  returning 1\n)\ninsert into public.historico_mensagens (mensagem_agente, telefone, nome_usuario, message_type, ativo, nome_app)\nvalues ($4, $2, $5, 'text', $1::boolean, 'SDR-MONTEIRO-TRIBUTARIO')\nreturning id;",
+        "options": {
+          "queryReplacement": "={{ [ $('Monta a mensagem').first().json.ia_atende === true, $('Monta a mensagem').first().json.telefone, $('Monta a mensagem').first().json.lead_id, $('Monta a mensagem').first().json.mensagem_visual, $('Monta a mensagem').first().json.nome ] }}"
+        }
+      },
+      "id": "bc6ad64c-4f55-46fe-8347-e071ddb780ec",
+      "name": "Grava a conversa",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3408,
+        752
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $('Monta a mensagem').first().json.telefone }}_mem_agent_Monteiro_Tributario",
+        "messageData": "={{ $('Monta a mensagem').first().json.redis_memory_message }}"
+      },
+      "id": "a30ea9c4-355a-496d-8935-d6f00e229d20",
+      "name": "Memória da IA",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        3632,
+        1184
+      ],
+      "credentials": {
+        "redis": {
+          "id": "yCgIZfEuGHPTHhp7",
+          "name": "Redis n8n Workflow"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "49e1f307-6455-4132-9d65-96652f95dd49",
+      "name": "Rodar follow-up por pessoa",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        448,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Falhou: volta pra fila (tenta de novo daqui a 1 hora) até a 3ª tentativa; na 3ª vira \"falhou\".\n-- \"avisar\" só é verdadeiro na PRIMEIRA pessoa que falha de vez em cada envio, pra o aviso no grupo\n-- não virar uma enxurrada quando muita gente falha pelo mesmo motivo.\nwith u as (\n  update public.fup_envio_destinatarios_tributario\n     set status = case when tentativas >= 3 then 'falhou' else 'pendente' end,\n         motivo = left($2, 400),\n         whatsapp_ok = $3::boolean,\n         email_ok = $4::boolean\n   where id = $1::uuid\n  returning id, envio_id, status, tentativas, motivo\n)\nselect u.id, u.status, u.tentativas, u.motivo,\n       (u.status = 'falhou' and not exists (\n          select 1 from public.fup_envio_destinatarios_tributario o\n           where o.envio_id = u.envio_id and o.status = 'falhou' and o.id <> u.id)) as avisar,\n       (select e.nome from public.fup_envios_tributario e where e.id = u.envio_id) as envio_nome\n  from u;",
+        "options": {
+          "queryReplacement": "={{ [ $('Pelo menos um canal funcionou?').first().json.destinatario_id, [ $('Pelo menos um canal funcionou?').first().json.whatsapp_motivo, $('Pelo menos um canal funcionou?').first().json.email_motivo ].filter(Boolean).join(' | ') || 'Falhou sem motivo informado.', $('Pelo menos um canal funcionou?').first().json.whatsapp_ok === true, $('Pelo menos um canal funcionou?').first().json.email_ok === true ] }}"
+        }
+      },
+      "id": "84f4af06-60dc-4ddc-b04f-6290fef4dacc",
+      "name": "Registra falha",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2960,
+        1136
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f9000000-0000-4000-8000-000000000008",
+              "leftValue": "={{ $json.avisar }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5251de4a-c07f-4d2f-9f9d-d7be230bac3e",
+      "name": "Falhou de vez?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3184,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS",
+        "remoteJid": "5538998634756",
+        "messageText": "=Follow-up em massa (Tributário): o envio \"{{ $json.envio_nome }}\" teve pessoas que não conseguimos alcançar.\n\nPrimeira pessoa: {{ $('Pelo menos um canal funcionou?').first().json.nome }} ({{ $('Pelo menos um canal funcionou?').first().json.empresa }})\nMotivo: {{ $json.motivo }}\n\nVeja os detalhes na tela do envio. Esse aviso vem uma vez só por envio.",
+        "options_message": {}
+      },
+      "id": "45cc68e3-e79e-4346-aa95-f21fe2a7181f",
+      "name": "Avisa falha no grupo de logs",
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        3408,
+        1168
+      ],
+      "credentials": {
+        "evolutionApi": {
+          "id": "jhxyikodw5k2TTr1",
+          "name": "MIA-LOGS"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: Object.assign({}, $json, {\n  email_ok: false,\n  email_motivo: $json.enviar_email ? 'Pessoa sem e-mail cadastrado.' : null\n}) }];"
+      },
+      "id": "fc12a881-d482-4d99-8c35-ff1113e3815b",
+      "name": "Marca Sem Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2512,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "var lead = $('Monta a mensagem').first().json;\nreturn [{ json: Object.assign({}, lead, { whatsapp_ok: false, whatsapp_motivo: 'A Meta não confirmou a entrega da mensagem.' }) }];"
+      },
+      "id": "867fa7d1-5097-43d0-8773-53458bf22d71",
+      "name": "Marca WhatsApp Recusado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A chamada pra Meta falhou. Traduz o erro dela pra uma frase simples (o código fica entre parênteses).\nvar lead = $('Monta a mensagem').first().json;\nvar bruto = ($json && $json.error && $json.error.message) ? String($json.error.message) : JSON.stringify($json);\n\n// O n8n entrega o erro da Meta como um texto com um JSON dentro; abre esse JSON.\nvar erroMeta = null;\ntry {\n  var a = bruto.indexOf('\"');\n  var b = bruto.lastIndexOf('\"');\n  if (a >= 0 && b > a) {\n    var texto = JSON.parse(bruto.slice(a, b + 1));\n    var obj = JSON.parse(texto);\n    erroMeta = obj && obj.error ? obj.error : null;\n  }\n} catch (e) {\n  erroMeta = null;\n}\n\nvar codigo = erroMeta && erroMeta.code ? String(erroMeta.code) : '';\nvar detalhe = (erroMeta && erroMeta.error_data && erroMeta.error_data.details)\n  ? erroMeta.error_data.details\n  : (erroMeta && erroMeta.message ? erroMeta.message : bruto);\n\nvar amigavel = {\n  '132001': 'O modelo não existe na Meta (confira o nome do modelo).',\n  '132000': 'A quantidade de campos do modelo não confere com a da Meta.',\n  '132005': 'A Meta não aceitou o texto de um dos campos do modelo.',\n  '132012': 'A Meta não aceitou o formato de um dos campos do modelo.',\n  '131026': 'Não foi possível entregar: o número não tem WhatsApp ou não pode receber mensagens.',\n  '131049': 'A Meta segurou esta mensagem de marketing para proteger a pessoa de excesso de mensagens. Vamos tentar de novo mais tarde.',\n  '131048': 'A Meta limitou os envios por suspeita de spam.',\n  '131056': 'Muitas mensagens para o mesmo número em pouco tempo. Vamos tentar de novo.',\n  '130429': 'O limite de envios por segundo da Meta foi atingido. Vamos tentar de novo.',\n  '131042': 'Há um problema de pagamento na conta da Meta.',\n  '133010': 'O número de WhatsApp do escritório não está ativo na Meta.',\n  '190': 'O acesso do sistema à Meta expirou. Avise o suporte.',\n  '100': 'A Meta recusou algum dado do envio.'\n};\n\nvar frase = amigavel[codigo] ? amigavel[codigo] : ('A Meta devolveu um erro: ' + String(detalhe).slice(0, 160));\nvar motivo = codigo ? (frase + ' (código ' + codigo + ')') : frase;\n\nreturn [{ json: Object.assign({}, lead, { whatsapp_ok: false, whatsapp_motivo: motivo }) }];"
+      },
+      "id": "56c7722a-80ae-4100-aed2-ce0610dc8234",
+      "name": "Marca WhatsApp Erro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "var lead = $('Monta a mensagem').first().json;\nreturn [{ json: Object.assign({}, lead, { whatsapp_ok: false, whatsapp_motivo: lead.motivo_sem_whatsapp || 'Sem WhatsApp.' }) }];"
+      },
+      "id": "731fe021-a455-421a-96f6-32d6c9fded32",
+      "name": "Marca Sem WhatsApp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        1136
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "8cbe6bfc-c1ad-499d-b5e3-49878c1d946e",
+      "name": "Teste manual (só leads de teste)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -16,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Follow-up em massa (Tributário)\n\nA cada 10 minutos, todos os dias e a qualquer hora, pega quem está na fila dos envios criados na tela \"Follow-ups\" (modelo já aprovado pela Meta) e manda o modelo por WhatsApp (e por e-mail, se o envio pediu). Sem data de início, o envio sai na próxima rodada; com data, sai na primeira rodada depois dela. Não há limite de pessoas por envio nem horário fixo: quem decide quando e quantos é a equipe, na tela. Quem respondeu, foi bloqueado ou teve a empresa arquivada é pulado. Falhas são tentadas de novo depois de 1 hora, até 3 vezes; na 3ª o aviso vai pro grupo de logs (uma vez só por envio). Se o modelo for rejeitado pela Meta, quem estava na fila vira \"não enviado\" e o envio é encerrado. Rodando na mão pelo editor, só entram leads de teste.",
+        "height": 544,
+        "color": 4
+      },
+      "id": "3baa41d8-a5e7-4f4c-a2f7-77fa0f12e25b",
+      "name": "Sticky Note 396ec3bf",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -368,
+        448
+      ]
+    }
+  ],
+  "connections": {
+    "Gatilho agendado": {
+      "main": [
+        [
+          {
+            "node": "Destrava e encerra envios",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Reserva quem recebe agora",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserva quem recebe agora": {
+      "main": [
+        [
+          {
+            "node": "Rodar follow-up por pessoa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta a mensagem": {
+      "main": [
+        [
+          {
+            "node": "Pode enviar WhatsApp?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pode enviar WhatsApp?": {
+      "main": [
+        [
+          {
+            "node": "Enviar modelo pelo WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marca Sem WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar modelo pelo WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Meta aceitou?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marca WhatsApp Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta aceitou?": {
+      "main": [
+        [
+          {
+            "node": "Marca WhatsApp OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marca WhatsApp Recusado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca WhatsApp OK": {
+      "main": [
+        [
+          {
+            "node": "Envia e-mail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia e-mail?": {
+      "main": [
+        [
+          {
+            "node": "Monta o html do email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marca Sem Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta o html do email": {
+      "main": [
+        [
+          {
+            "node": "Envia Email via Resend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia Email via Resend": {
+      "main": [
+        [
+          {
+            "node": "Marca Email Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca Email Resultado": {
+      "main": [
+        [
+          {
+            "node": "Pelo menos um canal funcionou?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pelo menos um canal funcionou?": {
+      "main": [
+        [
+          {
+            "node": "Registra enviado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registra falha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registra enviado": {
+      "main": [
+        [
+          {
+            "node": "Foi enviado pelo WhatsApp?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Foi enviado pelo WhatsApp?": {
+      "main": [
+        [
+          {
+            "node": "Grava a conversa",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rodar follow-up por pessoa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Grava a conversa": {
+      "main": [
+        [
+          {
+            "node": "Memória da IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memória da IA": {
+      "main": [
+        [
+          {
+            "node": "Rodar follow-up por pessoa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rodar follow-up por pessoa": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Monta a mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registra falha": {
+      "main": [
+        [
+          {
+            "node": "Falhou de vez?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falhou de vez?": {
+      "main": [
+        [
+          {
+            "node": "Avisa falha no grupo de logs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rodar follow-up por pessoa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisa falha no grupo de logs": {
+      "main": [
+        [
+          {
+            "node": "Rodar follow-up por pessoa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca Sem Email": {
+      "main": [
+        [
+          {
+            "node": "Pelo menos um canal funcionou?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca WhatsApp Recusado": {
+      "main": [
+        [
+          {
+            "node": "Envia e-mail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca WhatsApp Erro": {
+      "main": [
+        [
+          {
+            "node": "Envia e-mail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marca Sem WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Envia e-mail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Teste manual (só leads de teste)": {
+      "main": [
+        [
+          {
+            "node": "Reserva quem recebe agora",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "xfondpEOYdGLoDo4"
+  },
+  "staticData": {
+    "node:Gatilho agendado": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "48061e05-fb65-42ef-8290-f2acfc128532",
+  "activeVersionId": "48061e05-fb65-42ef-8290-f2acfc128532",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "7p0ACEoXZnR5YLUj",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-14T17:25:03.649Z",
+      "updatedAt": "2026-10-14T17:25:03.649Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "48061e05-fb65-42ef-8290-f2acfc128532",
+    "workflowId": "7p0ACEoXZnR5YLUj",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "*/10 * * * *"
+              }
+            ]
+          }
+        },
+        "id": "59890c7e-3358-4328-9e0a-224d8026f36e",
+        "name": "Gatilho agendado",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          -16,
+          768
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- 1) Quem ficou \"enviando\" por mais de 30 minutos (o fluxo travou no meio) volta pra fila.\n-- 2) Se o modelo do envio foi rejeitado pela Meta, ninguém vai receber: quem estava na fila vira \"não enviado\".\n-- 3) Envio que não tem mais ninguém na fila é marcado como concluído (no caso do modelo rejeitado, isso\n--    acontece na rodada seguinte, já sem ninguém na fila).\nwith destrava as (\n  update public.fup_envio_destinatarios_tributario\n     set status = 'pendente', motivo = 'Reiniciado depois de travar'\n   where status = 'enviando'\n     and atualizado_em < now() - interval '30 minutes'\n  returning id\n),\nrejeitados as (\n  update public.fup_envio_destinatarios_tributario d\n     set status = 'pulado', motivo = 'O modelo foi rejeitado pela Meta'\n    from public.fup_envios_tributario e\n    join public.fup_modelos_tributario m on m.id = e.modelo_id\n   where d.envio_id = e.id\n     and e.status = 'ativo'\n     and m.status = 'rejeitado'\n     and d.status = 'pendente'\n  returning d.id\n),\nfecha as (\n  update public.fup_envios_tributario e\n     set status = 'concluido', concluido_em = now()\n   where e.status = 'ativo'\n     and exists (select 1 from public.fup_envio_destinatarios_tributario d where d.envio_id = e.id)\n     and not exists (select 1 from public.fup_envio_destinatarios_tributario d\n                      where d.envio_id = e.id and d.status in ('pendente', 'enviando'))\n  returning e.id\n)\nselect (select count(*) from destrava) as destravados,\n       (select count(*) from rejeitados) as dispensados_por_modelo_rejeitado,\n       (select count(*) from fecha) as encerrados;",
+          "options": {}
+        },
+        "id": "623559b3-24d9-42cb-81fc-e7bd094ad3ee",
+        "name": "Destrava e encerra envios",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          224,
+          560
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- Escolhe quem recebe follow-up agora e já \"reserva\" cada um (marca como 'enviando'),\n-- pra ninguém receber duas vezes.\n--\n-- Regras:\n--  * só envios ativos, com modelo APROVADO pela Meta e já na hora de começar\n--    (sem data de início = na próxima rodada; com data = na primeira rodada depois dela);\n--  * sem limite de pessoas por envio e sem horário fixo: manda pra todo mundo da lista, a qualquer hora;\n--  * quem respondeu depois que o envio foi criado, foi bloqueado ou teve a empresa arquivada é pulado;\n--  * quem falhou é tentado de novo depois de 1 hora, até 3 tentativas;\n--  * a cada rodada (1 a cada 10 minutos) reserva até 500 pessoas, e só reserva mais se houver menos de\n--    1000 sendo enviadas ao mesmo tempo. Isso só evita sobrecarregar o fluxo: todo mundo da lista recebe.\n-- $1 é true na rodada agendada. Rodando na mão pelo editor é false e só entram leads de teste\n-- (origem 'teste'), pra um clique sem querer não mandar mensagem pra prospect de verdade.\nwith pular as (\n  update public.fup_envio_destinatarios_tributario d\n     set status = 'pulado',\n         motivo = case\n           when l.disparo_bloqueado then 'Foi bloqueado depois que o envio foi criado'\n           when e.arquivada_em is not null then 'A empresa foi arquivada'\n           else 'Já respondeu antes de receber esta mensagem'\n         end\n    from public.fup_envios_tributario en,\n         public.leads_tributario l\n         left join public.empresas_tributario e on e.id = l.empresa_id\n   where d.envio_id = en.id\n     and l.id = d.lead_id\n     and en.status = 'ativo'\n     and d.status = 'pendente'\n     and (\n           l.disparo_bloqueado\n        or e.arquivada_em is not null\n        or exists (\n             select 1 from public.historico_mensagens h\n              where h.nome_app = 'SDR-MONTEIRO-TRIBUTARIO'\n                and h.telefone = d.telefone\n                and h.mensagem_usuario is not null\n                and h.created_at > en.criado_em\n           )\n         )\n  returning d.id\n),\nativos as (\n  select en.id as envio_id, en.enviar_email, en.ia_atende,\n         m.meta_template_name, m.idioma, m.texto, m.rodape, m.assunto_email\n    from public.fup_envios_tributario en\n    join public.fup_modelos_tributario m on m.id = en.modelo_id\n   where en.status = 'ativo'\n     and m.status = 'aprovado'\n     and (en.iniciar_em is null or en.iniciar_em <= now())\n),\nem_andamento as (\n  select count(*)::int as n\n    from public.fup_envio_destinatarios_tributario\n   where status = 'enviando'\n),\ncandidatos as (\n  select d.id, d.criado_em\n    from public.fup_envio_destinatarios_tributario d\n    join ativos a on a.envio_id = d.envio_id\n    join public.leads_tributario l on l.id = d.lead_id\n   where d.status = 'pendente'\n     and d.tentativas < 3\n     and (d.tentativas = 0 or d.atualizado_em < now() - interval '60 minutes')\n     and d.id not in (select id from pular)\n     and (l.origem = 'teste' or $1::boolean)\n),\nescolhidos as (\n  select c.id\n    from candidatos c, em_andamento e\n   where e.n < 1000\n   order by c.criado_em, c.id\n   limit 500\n),\nreservados as (\n  update public.fup_envio_destinatarios_tributario d\n     set status = 'enviando', tentativas = d.tentativas + 1\n    from escolhidos x\n   where d.id = x.id and d.status = 'pendente'\n  returning d.id, d.envio_id, d.lead_id, d.nome, d.empresa, d.telefone, d.email, d.valores, d.tentativas, d.criado_em\n),\niniciou as (\n  update public.fup_envios_tributario en\n     set iniciado_em = coalesce(en.iniciado_em, now())\n   where en.id in (select envio_id from reservados)\n  returning 1\n)\nselect r.id as destinatario_id, r.envio_id, r.lead_id, r.nome, r.empresa, r.telefone, r.email,\n       r.valores, r.tentativas,\n       a.meta_template_name, a.idioma, a.texto, a.rodape, a.assunto_email, a.enviar_email, a.ia_atende\n  from reservados r\n  join ativos a on a.envio_id = r.envio_id\n order by r.criado_em;",
+          "options": {
+            "queryReplacement": "={{ [$execution.mode === 'production' && $('Gatilho agendado').isExecuted] }}"
+          }
+        },
+        "id": "47d703bc-1c98-4d0c-86eb-780674aebb98",
+        "name": "Reserva quem recebe agora",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          224,
+          768
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Junta o texto do modelo com os dados da pessoa e prepara o envio pela Meta.\nvar d = $json;\n\n// Valores que entram no lugar de {{1}}, {{2}}... (a Meta não aceita quebra de linha nem campo vazio)\nvar valores = Array.isArray(d.valores) ? d.valores : [];\nvar limpos = valores.map(function (v) {\n  return String(v == null ? '' : v).replace(/[\\n\\r\\t]+/g, ' ').replace(/ {2,}/g, ' ').trim().slice(0, 1000);\n});\nvar dadosOk = limpos.every(function (v) { return v.length > 0; });\n\n// Troca {{n}} pelo valor correspondente\nfunction preencher(texto, lista) {\n  var partes = String(texto || '').split('{{');\n  var saida = partes[0];\n  for (var i = 1; i < partes.length; i++) {\n    var fim = partes[i].indexOf('}}');\n    if (fim === -1) { saida += '{{' + partes[i]; continue; }\n    var n = parseInt(partes[i].slice(0, fim).trim(), 10);\n    var v = (!isNaN(n) && lista[n - 1] !== undefined) ? lista[n - 1] : '';\n    saida += v + partes[i].slice(fim + 2);\n  }\n  return saida;\n}\n\nvar telefone = String(d.telefone || '').replace(/\\D/g, '');\nvar corpo = preencher(d.texto, limpos);\nvar mensagemVisual = d.rodape ? corpo + '\\n\\n' + d.rodape : corpo;\n\nvar template = { name: d.meta_template_name, language: { code: d.idioma || 'pt_BR' } };\nif (limpos.length > 0) {\n  template.components = [{ type: 'body', parameters: limpos.map(function (v) { return { type: 'text', text: v }; }) }];\n}\n\nvar podeWhatsapp = telefone.length > 0 && dadosOk;\nvar motivoSemWhatsapp = telefone.length === 0\n  ? 'Pessoa sem telefone cadastrado.'\n  : (dadosOk ? null : 'Faltou um dado da pessoa para preencher a mensagem.');\n\n// Mensagem no formato que a memória da IA guarda (assim a IA sabe o que foi enviado)\nvar memoria = JSON.stringify({\n  type: 'ai',\n  data: { content: mensagemVisual, tool_calls: [], invalid_tool_calls: [], additional_kwargs: {}, response_metadata: {} }\n});\n\nreturn [{ json: Object.assign({}, d, {\n  telefone: telefone,\n  mensagem_visual: mensagemVisual,\n  resultado_api: { messaging_product: 'whatsapp', to: telefone, type: 'template', template: template },\n  redis_memory_message: memoria,\n  pode_whatsapp: podeWhatsapp,\n  motivo_sem_whatsapp: motivoSemWhatsapp\n}) }];"
+        },
+        "id": "27a76417-eac8-4878-8dcb-917c446d49f9",
+        "name": "Monta a mensagem",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          720,
+          944
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "f9000000-0000-4000-8000-000000000001",
+                "leftValue": "={{ $json.pode_whatsapp }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                },
+                "rightValue": ""
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "d51f03f8-3d53-4d4b-a815-227ffcb0814c",
+        "name": "Pode enviar WhatsApp?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          944,
+          944
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://graph.facebook.com/v22.0/1086153471257433/messages",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ $json.resultado_api }}",
+          "options": {}
+        },
+        "id": "e839521e-15d5-4c66-9167-bf20857bfc65",
+        "name": "Enviar modelo pelo WhatsApp",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1168,
+          848
+        ],
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "f9000000-0000-4000-8000-000000000002",
+                "leftValue": "={{ $json.messages?.[0]?.message_status }}",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                },
+                "rightValue": "accepted"
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "8b992b45-e4c4-419e-9c20-a5cca6138b23",
+        "name": "Meta aceitou?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          1392,
+          656
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "var lead = $('Monta a mensagem').first().json;\nreturn [{ json: Object.assign({}, lead, { whatsapp_ok: true, whatsapp_motivo: null }) }];"
+        },
+        "id": "440c9f5f-8bb7-4238-a0df-21bf3eb16da1",
+        "name": "Marca WhatsApp OK",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1616,
+          560
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "f9000000-0000-4000-8000-000000000003",
+                "leftValue": "={{ $json.enviar_email }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                },
+                "rightValue": ""
+              },
+              {
+                "id": "f9000000-0000-4000-8000-000000000004",
+                "leftValue": "={{ $json.email }}",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                },
+                "rightValue": ""
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "f7f123ca-bbb5-49db-b4d6-f69046346573",
+        "name": "Envia e-mail?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          1840,
+          944
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Monta assunto + HTML do e-mail com a identidade visual da BMS Consultoria Tributária.\n// Usa o mesmo texto que foi no WhatsApp, só formatado em parágrafos.\n// O logo vai DENTRO do e-mail (anexo \"inline\"): Gmail e Outlook não mostram imagem SVG e muitos\n// e-mails bloqueiam imagens que vêm de um endereço externo.\nvar esc = function (s) {\n  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n};\n\nvar LOGO_BASE64 = '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';\nvar WHATSAPP_NUMERO = '558523980088';\nvar AZUL_BMS = '#021D44';\nvar LARANJA_BMS = '#FF7F00';\nvar COR_TEXTO = '#14233D';\n\nvar d = $json;\nvar subject = (d.assunto_email && String(d.assunto_email).trim()) ? d.assunto_email : 'Retomando nosso contato';\n\nvar paragrafos = String(d.mensagem_visual || '')\n  .split(/\\n\\s*\\n/)\n  .map(function (p) { return p.trim(); })\n  .filter(Boolean)\n  .map(function (p) {\n    return '<p style=\"margin:0 0 16px 0;font-family:Georgia,serif;font-size:14px;line-height:1.7;color:' + COR_TEXTO + ';\">' + esc(p).replace(/\\n/g, '<br/>') + '</p>';\n  })\n  .join('');\n\nvar botao = '<div style=\"text-align:center;margin:8px 0 8px 0;\"><a href=\"https://wa.me/' + WHATSAPP_NUMERO + '\" style=\"display:inline-block;background:#25D366;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:4px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;letter-spacing:0.04em;\">Falar no WhatsApp</a></div>';\n\nvar html = '<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /><title>BMS Consultoria Tributária</title></head>'\n  + '<body style=\"margin:0;padding:0;background:#F2F4F7;font-family:Georgia,serif;color:' + COR_TEXTO + ';\">'\n  + '<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:#F2F4F7;padding:32px 12px;\"><tr><td align=\"center\">'\n  + '<table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"max-width:600px;width:100%;background:#ffffff;border:1px solid #DDE3EC;border-radius:6px;overflow:hidden;\">'\n  + '<tr><td style=\"background:' + AZUL_BMS + ';padding:30px 32px;text-align:center;\">'\n  + '<img src=\"cid:bms-logo\" alt=\"BMS Consultoria Tributária\" width=\"200\" height=\"49\" style=\"display:block;margin:0 auto;border:0;width:200px;height:auto;max-width:100%;\" />'\n  + '</td></tr><tr><td style=\"height:3px;background:' + LARANJA_BMS + ';font-size:0;line-height:0;\">&nbsp;</td></tr>'\n  + '<tr><td style=\"padding:36px 32px 8px 32px;\">' + paragrafos + botao + '</td></tr>'\n  + '<tr><td style=\"border-top:1px solid #DDE3EC;\"></td></tr>'\n  + '<tr><td style=\"padding:20px 32px;background:#F7F8FA;text-align:center;\"><p style=\"margin:0;font-family:Georgia,serif;font-size:13px;color:' + AZUL_BMS + ';font-weight:600;\">BMS Consultoria Tributária</p></td></tr>'\n  + '</table></td></tr></table></body></html>';\n\nvar anexos = [{ filename: 'bms-logo.png', content: LOGO_BASE64, content_type: 'image/png', content_id: 'bms-logo' }];\n\nreturn [{ json: Object.assign({}, d, { subject: subject, html: html, anexos: anexos }) }];"
+        },
+        "id": "a154ccf7-ff99-49e4-9478-cc552eb6f2fc",
+        "name": "Monta o html do email",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2064,
+          752
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.resend.com/emails",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ from: \"BMS Consultoria Tributária <monteironeto@bmsprojetos.com>\", to: [ $json.email ], subject: $json.subject, html: $json.html, attachments: $json.anexos }) }}",
+          "options": {}
+        },
+        "id": "607ee619-4721-447c-8c12-d61b5cd861c2",
+        "name": "Envia Email via Resend",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          2288,
+          752
+        ],
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "// A resposta do Resend substitui o item; recupera os dados acumulados e marca se deu certo.\nvar antes = $('Monta o html do email').first().json;\nvar resp = $json;\nvar ok = typeof (resp && resp.id) === 'string' && !(resp && resp.error);\nvar motivo = ok ? null : ((resp && resp.error && resp.error.message) || (resp && resp.message) || 'Falha ao enviar pelo Resend.');\nreturn [{ json: Object.assign({}, antes, { email_ok: ok, email_motivo: motivo }) }];"
+        },
+        "id": "8d141d9f-1046-45a4-9225-4d1f6223703c",
+        "name": "Marca Email Resultado",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2512,
+          752
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "f9000000-0000-4000-8000-000000000005",
+                "leftValue": "={{ $json.whatsapp_ok }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                },
+                "rightValue": ""
+              },
+              {
+                "id": "f9000000-0000-4000-8000-000000000006",
+                "leftValue": "={{ $json.email_ok }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                },
+                "rightValue": ""
+              }
+            ],
+            "combinator": "or"
+          },
+          "options": {}
+        },
+        "id": "7ab420fb-6a69-4db5-953e-e3548da56208",
+        "name": "Pelo menos um canal funcionou?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          2736,
+          944
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "update public.fup_envio_destinatarios_tributario\n   set status = 'enviado', whatsapp_ok = $2::boolean, email_ok = $3::boolean, enviado_em = now(), motivo = null\n where id = $1::uuid\nreturning id;",
+          "options": {
+            "queryReplacement": "={{ [ $('Pelo menos um canal funcionou?').first().json.destinatario_id, $('Pelo menos um canal funcionou?').first().json.whatsapp_ok === true, $('Pelo menos um canal funcionou?').first().json.email_ok === true ] }}"
+          }
+        },
+        "id": "54477bda-c707-4f34-b2a1-f1dd9a645a6b",
+        "name": "Registra enviado",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          2960,
+          752
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "f9000000-0000-4000-8000-000000000007",
+                "leftValue": "={{ $('Pelo menos um canal funcionou?').first().json.whatsapp_ok }}",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                },
+                "rightValue": ""
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "d8710c17-33eb-4396-aeee-6442b4bbc77e",
+        "name": "Foi enviado pelo WhatsApp?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          3184,
+          752
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- Guarda a mensagem na conversa do WhatsApp da pessoa e define quem atende quando ela responder:\n-- $1 = true: a IA continua a conversa; false: a equipe atende (a IA fica pausada).\nwith a as (\n  update public.historico_mensagens\n     set ativo = $1::boolean\n   where nome_app = 'SDR-MONTEIRO-TRIBUTARIO' and telefone = $2\n  returning 1\n),\nl as (\n  update public.leads_tributario\n     set inteligencia = $1::boolean\n   where id = $3::uuid\n  returning 1\n)\ninsert into public.historico_mensagens (mensagem_agente, telefone, nome_usuario, message_type, ativo, nome_app)\nvalues ($4, $2, $5, 'text', $1::boolean, 'SDR-MONTEIRO-TRIBUTARIO')\nreturning id;",
+          "options": {
+            "queryReplacement": "={{ [ $('Monta a mensagem').first().json.ia_atende === true, $('Monta a mensagem').first().json.telefone, $('Monta a mensagem').first().json.lead_id, $('Monta a mensagem').first().json.mensagem_visual, $('Monta a mensagem').first().json.nome ] }}"
+          }
+        },
+        "id": "bc6ad64c-4f55-46fe-8347-e071ddb780ec",
+        "name": "Grava a conversa",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          3408,
+          752
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "operation": "push",
+          "list": "={{ $('Monta a mensagem').first().json.telefone }}_mem_agent_Monteiro_Tributario",
+          "messageData": "={{ $('Monta a mensagem').first().json.redis_memory_message }}"
+        },
+        "id": "a30ea9c4-355a-496d-8935-d6f00e229d20",
+        "name": "Memória da IA",
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [
+          3632,
+          1184
+        ],
+        "credentials": {
+          "redis": {
+            "id": "yCgIZfEuGHPTHhp7",
+            "name": "Redis n8n Workflow"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "id": "49e1f307-6455-4132-9d65-96652f95dd49",
+        "name": "Rodar follow-up por pessoa",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          448,
+          768
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- Falhou: volta pra fila (tenta de novo daqui a 1 hora) até a 3ª tentativa; na 3ª vira \"falhou\".\n-- \"avisar\" só é verdadeiro na PRIMEIRA pessoa que falha de vez em cada envio, pra o aviso no grupo\n-- não virar uma enxurrada quando muita gente falha pelo mesmo motivo.\nwith u as (\n  update public.fup_envio_destinatarios_tributario\n     set status = case when tentativas >= 3 then 'falhou' else 'pendente' end,\n         motivo = left($2, 400),\n         whatsapp_ok = $3::boolean,\n         email_ok = $4::boolean\n   where id = $1::uuid\n  returning id, envio_id, status, tentativas, motivo\n)\nselect u.id, u.status, u.tentativas, u.motivo,\n       (u.status = 'falhou' and not exists (\n          select 1 from public.fup_envio_destinatarios_tributario o\n           where o.envio_id = u.envio_id and o.status = 'falhou' and o.id <> u.id)) as avisar,\n       (select e.nome from public.fup_envios_tributario e where e.id = u.envio_id) as envio_nome\n  from u;",
+          "options": {
+            "queryReplacement": "={{ [ $('Pelo menos um canal funcionou?').first().json.destinatario_id, [ $('Pelo menos um canal funcionou?').first().json.whatsapp_motivo, $('Pelo menos um canal funcionou?').first().json.email_motivo ].filter(Boolean).join(' | ') || 'Falhou sem motivo informado.', $('Pelo menos um canal funcionou?').first().json.whatsapp_ok === true, $('Pelo menos um canal funcionou?').first().json.email_ok === true ] }}"
+          }
+        },
+        "id": "84f4af06-60dc-4ddc-b04f-6290fef4dacc",
+        "name": "Registra falha",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          2960,
+          1136
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "f9000000-0000-4000-8000-000000000008",
+                "leftValue": "={{ $json.avisar }}",
+                "operator": {
+                  "operation": "true",
+                  "singleValue": true,
+                  "type": "boolean"
+                },
+                "rightValue": ""
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "5251de4a-c07f-4d2f-9f9d-d7be230bac3e",
+        "name": "Falhou de vez?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          3184,
+          1136
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "MIA-LOGS",
+          "remoteJid": "5538998634756",
+          "messageText": "=Follow-up em massa (Tributário): o envio \"{{ $json.envio_nome }}\" teve pessoas que não conseguimos alcançar.\n\nPrimeira pessoa: {{ $('Pelo menos um canal funcionou?').first().json.nome }} ({{ $('Pelo menos um canal funcionou?').first().json.empresa }})\nMotivo: {{ $json.motivo }}\n\nVeja os detalhes na tela do envio. Esse aviso vem uma vez só por envio.",
+          "options_message": {}
+        },
+        "id": "45cc68e3-e79e-4346-aa95-f21fe2a7181f",
+        "name": "Avisa falha no grupo de logs",
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          3408,
+          1168
+        ],
+        "credentials": {
+          "evolutionApi": {
+            "id": "jhxyikodw5k2TTr1",
+            "name": "MIA-LOGS"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{ json: Object.assign({}, $json, {\n  email_ok: false,\n  email_motivo: $json.enviar_email ? 'Pessoa sem e-mail cadastrado.' : null\n}) }];"
+        },
+        "id": "fc12a881-d482-4d99-8c35-ff1113e3815b",
+        "name": "Marca Sem Email",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2512,
+          1136
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "var lead = $('Monta a mensagem').first().json;\nreturn [{ json: Object.assign({}, lead, { whatsapp_ok: false, whatsapp_motivo: 'A Meta não confirmou a entrega da mensagem.' }) }];"
+        },
+        "id": "867fa7d1-5097-43d0-8773-53458bf22d71",
+        "name": "Marca WhatsApp Recusado",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1616,
+          752
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// A chamada pra Meta falhou. Traduz o erro dela pra uma frase simples (o código fica entre parênteses).\nvar lead = $('Monta a mensagem').first().json;\nvar bruto = ($json && $json.error && $json.error.message) ? String($json.error.message) : JSON.stringify($json);\n\n// O n8n entrega o erro da Meta como um texto com um JSON dentro; abre esse JSON.\nvar erroMeta = null;\ntry {\n  var a = bruto.indexOf('\"');\n  var b = bruto.lastIndexOf('\"');\n  if (a >= 0 && b > a) {\n    var texto = JSON.parse(bruto.slice(a, b + 1));\n    var obj = JSON.parse(texto);\n    erroMeta = obj && obj.error ? obj.error : null;\n  }\n} catch (e) {\n  erroMeta = null;\n}\n\nvar codigo = erroMeta && erroMeta.code ? String(erroMeta.code) : '';\nvar detalhe = (erroMeta && erroMeta.error_data && erroMeta.error_data.details)\n  ? erroMeta.error_data.details\n  : (erroMeta && erroMeta.message ? erroMeta.message : bruto);\n\nvar amigavel = {\n  '132001': 'O modelo não existe na Meta (confira o nome do modelo).',\n  '132000': 'A quantidade de campos do modelo não confere com a da Meta.',\n  '132005': 'A Meta não aceitou o texto de um dos campos do modelo.',\n  '132012': 'A Meta não aceitou o formato de um dos campos do modelo.',\n  '131026': 'Não foi possível entregar: o número não tem WhatsApp ou não pode receber mensagens.',\n  '131049': 'A Meta segurou esta mensagem de marketing para proteger a pessoa de excesso de mensagens. Vamos tentar de novo mais tarde.',\n  '131048': 'A Meta limitou os envios por suspeita de spam.',\n  '131056': 'Muitas mensagens para o mesmo número em pouco tempo. Vamos tentar de novo.',\n  '130429': 'O limite de envios por segundo da Meta foi atingido. Vamos tentar de novo.',\n  '131042': 'Há um problema de pagamento na conta da Meta.',\n  '133010': 'O número de WhatsApp do escritório não está ativo na Meta.',\n  '190': 'O acesso do sistema à Meta expirou. Avise o suporte.',\n  '100': 'A Meta recusou algum dado do envio.'\n};\n\nvar frase = amigavel[codigo] ? amigavel[codigo] : ('A Meta devolveu um erro: ' + String(detalhe).slice(0, 160));\nvar motivo = codigo ? (frase + ' (código ' + codigo + ')') : frase;\n\nreturn [{ json: Object.assign({}, lead, { whatsapp_ok: false, whatsapp_motivo: motivo }) }];"
+        },
+        "id": "56c7722a-80ae-4100-aed2-ce0610dc8234",
+        "name": "Marca WhatsApp Erro",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1616,
+          944
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "var lead = $('Monta a mensagem').first().json;\nreturn [{ json: Object.assign({}, lead, { whatsapp_ok: false, whatsapp_motivo: lead.motivo_sem_whatsapp || 'Sem WhatsApp.' }) }];"
+        },
+        "id": "731fe021-a455-421a-96f6-32d6c9fded32",
+        "name": "Marca Sem WhatsApp",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1616,
+          1136
+        ]
+      },
+      {
+        "parameters": {},
+        "id": "8cbe6bfc-c1ad-499d-b5e3-49878c1d946e",
+        "name": "Teste manual (só leads de teste)",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          -16,
+          992
+        ]
+      },
+      {
+        "parameters": {
+          "content": "## Follow-up em massa (Tributário)\n\nA cada 10 minutos, todos os dias e a qualquer hora, pega quem está na fila dos envios criados na tela \"Follow-ups\" (modelo já aprovado pela Meta) e manda o modelo por WhatsApp (e por e-mail, se o envio pediu). Sem data de início, o envio sai na próxima rodada; com data, sai na primeira rodada depois dela. Não há limite de pessoas por envio nem horário fixo: quem decide quando e quantos é a equipe, na tela. Quem respondeu, foi bloqueado ou teve a empresa arquivada é pulado. Falhas são tentadas de novo depois de 1 hora, até 3 vezes; na 3ª o aviso vai pro grupo de logs (uma vez só por envio). Se o modelo for rejeitado pela Meta, quem estava na fila vira \"não enviado\" e o envio é encerrado. Rodando na mão pelo editor, só entram leads de teste.",
+          "height": 544,
+          "color": 4
+        },
+        "id": "3baa41d8-a5e7-4f4c-a2f7-77fa0f12e25b",
+        "name": "Sticky Note 396ec3bf",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -368,
+          448
+        ]
+      }
+    ],
+    "connections": {
+      "Gatilho agendado": {
+        "main": [
+          [
+            {
+              "node": "Destrava e encerra envios",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Reserva quem recebe agora",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Reserva quem recebe agora": {
+        "main": [
+          [
+            {
+              "node": "Rodar follow-up por pessoa",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta a mensagem": {
+        "main": [
+          [
+            {
+              "node": "Pode enviar WhatsApp?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pode enviar WhatsApp?": {
+        "main": [
+          [
+            {
+              "node": "Enviar modelo pelo WhatsApp",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Marca Sem WhatsApp",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar modelo pelo WhatsApp": {
+        "main": [
+          [
+            {
+              "node": "Meta aceitou?",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Marca WhatsApp Erro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Meta aceitou?": {
+        "main": [
+          [
+            {
+              "node": "Marca WhatsApp OK",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Marca WhatsApp Recusado",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marca WhatsApp OK": {
+        "main": [
+          [
+            {
+              "node": "Envia e-mail?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Envia e-mail?": {
+        "main": [
+          [
+            {
+              "node": "Monta o html do email",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Marca Sem Email",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Monta o html do email": {
+        "main": [
+          [
+            {
+              "node": "Envia Email via Resend",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Envia Email via Resend": {
+        "main": [
+          [
+            {
+              "node": "Marca Email Resultado",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marca Email Resultado": {
+        "main": [
+          [
+            {
+              "node": "Pelo menos um canal funcionou?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pelo menos um canal funcionou?": {
+        "main": [
+          [
+            {
+              "node": "Registra enviado",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Registra falha",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Registra enviado": {
+        "main": [
+          [
+            {
+              "node": "Foi enviado pelo WhatsApp?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Foi enviado pelo WhatsApp?": {
+        "main": [
+          [
+            {
+              "node": "Grava a conversa",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Rodar follow-up por pessoa",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Grava a conversa": {
+        "main": [
+          [
+            {
+              "node": "Memória da IA",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Memória da IA": {
+        "main": [
+          [
+            {
+              "node": "Rodar follow-up por pessoa",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Rodar follow-up por pessoa": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Monta a mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Registra falha": {
+        "main": [
+          [
+            {
+              "node": "Falhou de vez?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Falhou de vez?": {
+        "main": [
+          [
+            {
+              "node": "Avisa falha no grupo de logs",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Rodar follow-up por pessoa",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Avisa falha no grupo de logs": {
+        "main": [
+          [
+            {
+              "node": "Rodar follow-up por pessoa",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marca Sem Email": {
+        "main": [
+          [
+            {
+              "node": "Pelo menos um canal funcionou?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marca WhatsApp Recusado": {
+        "main": [
+          [
+            {
+              "node": "Envia e-mail?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marca WhatsApp Erro": {
+        "main": [
+          [
+            {
+              "node": "Envia e-mail?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Marca Sem WhatsApp": {
+        "main": [
+          [
+            {
+              "node": "Envia e-mail?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Teste manual (só leads de teste)": {
+        "main": [
+          [
+            {
+              "node": "Reserva quem recebe agora",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "E-mail com identidade da BMS",
+    "description": "E-mail do follow-up passa a ter a identidade visual da BMS Consultoria Tributária (azul #021D44, laranja #FF7F00, logo da BMS) e a ser enviado por monteironeto@bmsprojetos.com. O logo vai embutido no e-mail (PNG convertido do SVG), porque Gmail e Outlook não mostram SVG. Mesma fonte do texto (Georgia).",
+    "autosaved": false,
+    "createdAt": "2026-10-15T14:23:23.547Z",
+    "updatedAt": "2026-10-15T14:23:23.547Z"
+  },
+  "tags": []
+}
