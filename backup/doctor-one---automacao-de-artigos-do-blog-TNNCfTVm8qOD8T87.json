@@ -1,0 +1,624 @@
+{
+  "updatedAt": "2026-10-27T14:01:00.694Z",
+  "createdAt": "2026-10-27T13:56:50.588Z",
+  "id": "TNNCfTVm8qOD8T87",
+  "name": "Doctor One - Automação de Artigos do Blog",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "triggerAtMinute": 5
+            }
+          ]
+        },
+        "skipDurableScheduler": true
+      },
+      "id": "48a5f01c-063f-49c5-a95d-ee97da3925af",
+      "name": "De hora em hora",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qpjgqusnkuqzlqclayuc.supabase.co/functions/v1/blog-automation",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"action\": \"config\" }",
+        "options": {}
+      },
+      "id": "5fe05763-f90c-43ee-b11f-6edb1f73ed14",
+      "name": "Busca configuração no admin",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "alwaysOutputData": false,
+      "position": [
+        -656,
+        0
+      ],
+      "credentials": {
+        "httpTemplatedCustomAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const c = $input.first().json;\nif (!c || c.enabled !== true || !c.settings) { return []; }\nconst s = c.settings;\n\n// Lista vazia = a automacao nao roda sozinha.\nconst dias = Array.isArray(s.run_days_of_week) ? s.run_days_of_week : [];\nif (dias.length === 0) { return []; }\n\n// Dia e hora em Brasilia, independente do fuso do servidor n8n.\nconst fmt = new Intl.DateTimeFormat('en-US', {\n  timeZone: 'America/Sao_Paulo',\n  weekday: 'short',\n  hour: 'numeric',\n  hourCycle: 'h23'\n});\nconst partes = {};\nfmt.formatToParts(new Date()).forEach(function (p) { partes[p.type] = p.value; });\nconst MAPA_DIA = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };\nconst hoje = MAPA_DIA[partes.weekday];\nconst hora = parseInt(partes.hour, 10);\n\nif (dias.indexOf(hoje) === -1) { return []; }\n\n// Hora EXATA, e nao `hora < run_hour`.\n//\n// O gatilho acorda de hora em hora, entao este no e o unico dono da decisao:\n// com `>=`, uma vez passada a hora configurada ele deixaria passar TODAS as\n// chamadas seguintes do dia e a automacao escreveria um artigo por hora ate a\n// meia-noite. Com igualdade, so a visita das HH:05 da hora marcada passa.\n//\n// O preco e que um n8n fora do ar naquela hora especifica perde o dia. E o\n// lado certo para errar: perder um artigo custa um dia de atraso, gerar quinze\n// custa a fila de revisao inteira.\nif (hora !== s.run_hour) { return []; }\n\nconst hist = (c.historico_recente || []).map(function (p) { return '- ' + p.title; }).join('\\n');\nreturn [{ json: {\n  settings: s,\n  categories: c.categories || [],\n  authors: c.authors || [],\n  historico_titulos: hist,\n  topicos_recentes: (c.topics_recentes || []).join(', '),\n  temas_desejados: (s.topics || []).join(', ')\n} }];"
+      },
+      "id": "5f2e2e45-c36b-4674-9323-dad4ef88ade6",
+      "name": "Roda hoje?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Data de hoje: {{ $now.format('dd/MM/yyyy') }}.\n\nCONTEXTO DA EMPRESA\n{{ $json.settings.company_context }}\n\nPÚBLICO-ALVO\n{{ $json.settings.audience }}\n\nTOM EDITORIAL\n{{ $json.settings.tone }}\n\nTEMAS PRIORITÁRIOS DEFINIDOS PELA EQUIPE\n{{ $json.temas_desejados }}\n\nARTIGOS JÁ PUBLICADOS OU EM RASCUNHO\n{{ $json.historico_titulos }}\n\nTAGS JÁ USADAS RECENTEMENTE\n{{ $json.topicos_recentes }}\n\nSUA TAREFA\nProponha UMA pauta de artigo para este blog.\n\nRegras:\n1. Comece pelos temas prioritários acima. Eles foram escolhidos pela equipe e devem guiar a pauta. Só proponha fora deles se houver uma razão forte e específica, e explique qual.\n2. O recorte precisa ser distinto do que já foi escrito. Tema próximo é aceitável desde que a tese e o ângulo sejam outros; repetir a mesma tese com palavras diferentes não é.\n3. O briefing deve ser autossuficiente: ângulo principal, público, problema ou oportunidade, conteúdo central, benefícios concretos, estrutura sugerida e uma pergunta de engajamento ao final.\n\nCOMO ATRIBUIR A NOTA DE RELEVÂNCIA\nEste é um blog de consultoria, não um veículo de notícias. A maior parte do bom conteúdo daqui é PERENE: ajuda quem opera um programa de fidelidade a decidir melhor, hoje ou daqui a um ano. NÃO exija gancho de atualidade, gatilho regulatório ou dado inédito para dar nota alta. Uma pauta atemporal, bem recortada e útil merece nota alta.\n\nAvalie por duas perguntas: o leitor sai com algo que muda como ele decide? E o recorte é diferente do que já está publicado?\n\nEscala:\n- 9 a 10: recorte específico e acionável, claramente distinto do histórico, dentro dos temas prioritários.\n- 7 a 8: útil e suficientemente distinto, ainda que o tema geral já tenha sido tocado por outro ângulo. A maior parte das boas pautas mora aqui.\n- 5 a 6: genérica demais, ou repete a tese de um artigo existente com outra roupagem.\n- 0 a 4: não serve ao público, ou é duplicata do que já existe.\n\nSeja honesto, mas não confunda rigor com pessimismo: pauta perene e útil não é defeito, é o normal deste blog.\n\nFORMATO DA RESPOSTA\nResponda apenas com o JSON pedido. Dentro dos textos (titulo, briefing, justificativa) NUNCA use aspas duplas: para destacar uma expressão use aspas simples ('assim') ou nenhuma aspa. Aspas duplas soltas quebram o JSON e a pauta é perdida.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Você é um editor-chefe de um blog corporativo brasileiro de alto nível. Você propõe pautas específicas, acionáveis e ancoradas no momento do mercado. Você é rigoroso ao avaliar a própria ideia e prefere reprovar uma pauta fraca a deixá-la passar."
+        }
+      },
+      "id": "8c4e70f5-872f-45a1-ba0f-675ca92847d6",
+      "name": "IA - Gera a pauta",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        -176,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "model": "anthropic/claude-sonnet-4.5",
+        "options": {
+          "temperature": 0.8
+        }
+      },
+      "id": "afe08d5b-3825-4023-b2ce-5be3829910ad",
+      "name": "Modelo da Pauta",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        208
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "YvbsMckC3Vu2ixem",
+          "name": "OpenRouter - LAB - Automação de Blogs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{ \"titulo\": \"Título provisório do artigo\", \"briefing\": \"Briefing estratégico completo com ângulo, público, problema, solução, estrutura sugerida e CTA\", \"relevancia\": 8, \"justificativa_relevancia\": \"Por que esta pauta merece virar artigo agora\" }"
+      },
+      "id": "ae4be15b-a2dc-462f-87f8-510aca9050b2",
+      "name": "Formato da Pauta",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -48,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "nota-minima",
+              "leftValue": "={{ $json.output.relevancia }}",
+              "rightValue": 7,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "92055fd9-3a82-44ea-b023-255560be3770",
+      "name": "Pauta é relevante?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"model\": \"perplexity/sonar\", \"messages\": [{ \"role\": \"user\", \"content\": {{ JSON.stringify($json.output.titulo + \" — dados, estatisticas e fontes verificaveis recentes sobre este tema, com URLs\") }} }] }",
+        "options": {}
+      },
+      "id": "ccd8aeeb-87c0-4c9f-b71a-ed976b4a010d",
+      "name": "Pesquisa de fontes (Perplexity/Sonar)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        304,
+        -96
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "YvbsMckC3Vu2ixem",
+          "name": "OpenRouter - LAB - Automação de Blogs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=CONTEXTO DA EMPRESA\n{{ $('Roda hoje?').item.json.settings.company_context }}\n\nPÚBLICO-ALVO\n{{ $('Roda hoje?').item.json.settings.audience }}\n\nTOM EDITORIAL\n{{ $('Roda hoje?').item.json.settings.tone }}\n\nTÍTULO PROPOSTO\n{{ $('IA - Gera a pauta').item.json.output.titulo }}\n\nBRIEFING\n{{ $('IA - Gera a pauta').item.json.output.briefing }}\n\nPESQUISA DE FONTES\n{{ $json.choices[0].message.content }}\n\nURLS DAS FONTES\n{{ $json.choices[0].message.annotations ? $json.choices[0].message.annotations.map(a => a.url_citation.title + ': ' + a.url_citation.url).join('\\n') : '' }}\n\n=== REGRA ZERO: ISTO NÃO PODE PARECER TEXTO DE IA ===\nO artigo será publicado com assinatura editorial de uma consultoria. Se o leitor desconfiar que foi gerado por máquina, o texto falhou, por melhor que seja o conteúdo. As proibições abaixo são absolutas.\n\nPONTUAÇÃO\nNÃO use travessão em hipótese alguma. Nem o travessão longo, nem o meio-traço usado como pausa. É a marca registrada de texto gerado por IA. Onde você sentir vontade de usar um, escolha: vírgula, parênteses, dois-pontos, ou quebre em duas frases. Vale também dentro de títulos de seção.\n\nCONSTRUÇÕES PROIBIDAS\n- 'não é apenas X, é Y' e todas as variantes ('não se trata de X, mas de Y', 'mais do que X, é Y'). É o tique mais reconhecível de todos.\n- Aberturas de clichê: 'Em um mundo cada vez mais', 'No cenário atual', 'Mais do que nunca', 'Na era da'.\n- Muletas de transição vazias: 'É importante destacar que', 'Vale ressaltar que', 'Cabe mencionar que'.\n- Tríades decorativas ('clareza, consistência e confiança') quando o terceiro termo não acrescenta nada.\n- Fecho grandiloquente: 'O futuro pertence a quem', 'A jornada apenas começou', 'uma coisa é certa'.\n- Verbos de consultoria importada: alavancar, desbloquear, navegar por, potencializar, impulsionar.\n- 'Em suma', 'Em síntese', 'Por fim', abrindo o último parágrafo.\n- Parágrafos com a mesma estrutura em sequência. Varie o comprimento e o ritmo das frases de propósito.\n- Pergunta retórica seguida da própria resposta no parágrafo seguinte, repetidamente.\n\nEscreva como um consultor sênior escreveria para outro executivo: afirmações diretas, opinião assumida, e disposição de dizer que algo não vale a pena.\n\n=== PADRÃO EDITORIAL ===\n\nTAMANHO\nEntre {{ $('Roda hoje?').item.json.settings.min_words }} e 2.300 palavras. Não ultrapasse 2.300 em nenhuma hipótese, e não infle o texto para bater meta. O que importa é a densidade: 9 a 13 seções H2.\n\nTÍTULO\nDeclarativo e sóbrio: instrucional ('Como definir a precificação de pontos em programas de loyalty') ou diagnóstico com dois-pontos ('Dores da cadeia farmacêutica: como Loyalty gera valor para indústria, distribuidor e varejo'). Proibido número no título, 'guia definitivo', 'tudo sobre', promessa de resultado e travessão.\n\nINTRODUÇÃO (antes do primeiro H2, sem cabeçalho)\nTrês a quatro parágrafos: (1) a tensão do mercado, em prosa, sem número e sem estatística; (2) por que a resposta habitual não resolve; (3) a pergunta que o artigo responde. Nunca abra com dado, definição de dicionário ou anedota.\n\nSEÇÕES\nH2 é o nível principal. H3 só para subdividir seção grande ou nas perguntas do FAQ. Nunca H4.\nNomeie com carga de tese, não com rótulo neutro. Formato preferido: substantivo mais dois-pontos mais o diagnóstico. Exemplos: 'O problema invisível: capacitação sem conexão com resultado'; 'A visão do distribuidor: comoditização e pressão constante de margem'.\nProibido seção numerada e H2 genérico de uma palavra.\nSequência típica: diagnóstico do cenário, as dores concretas, por que o modelo atual não resolve, a virada conceitual, como aplicar com exemplo prático, 'Erros comuns ao ...', fecho.\nCada seção tem 3 a 6 parágrafos, de 120 a 250 palavras.\n\nPARÁGRAFOS\nCurtos: 2 a 4 linhas, tipicamente duas frases. Nunca passe de 70 palavras. Parágrafo de uma frase é bem-vindo para marcar virada.\n\nVOZ\nTerceira pessoa analítica e impessoal no corpo. Use 'nós' apenas ao abrir um raciocínio e no CTA final. Fale com 'você' no máximo duas ou três vezes no artigo todo.\nAbra boa parte dos parágrafos com conectivo discursivo: No entanto, Além disso, Portanto, Por outro lado, Na prática, Dessa forma, Ou seja, Assim, Em muitos casos, Diante desse cenário. Use com naturalidade, sem transformar em fórmula.\n\nJARGÃO\nUse o vocabulário do setor sem pedir licença: sell-out, PDV, LTV, churn, cashback, tiers, mix, coalizão, verba de trade, NPS. Explique entre parênteses só na primeira aparição de um conceito estruturante.\n\nFORMATAÇÃO\n- No máximo três ou quatro listas com marcador no artigo inteiro, ou nenhuma. De 3 a 8 itens curtos, precedidos de frase-âncora e seguidos de parágrafo que fecha o raciocínio. Nunca duas listas seguidas.\n- NUNCA use lista numerada, tabela ou citação em bloco.\n- Negrito só para isolar a frase-síntese de uma seção ou rotular passo de método. Não espalhe.\n- Emojis: apenas 👉 no CTA. Em nenhum outro lugar.\n\nFECHO\nO artigo termina em três movimentos, e nenhum deles é rotulado como tal.\n1. Uma seção final com título de tese, como qualquer outra seção. NÃO escreva 'Conclusão', 'Conclusão estratégica', 'Considerações finais' nem nada parecido: esses rótulos denunciam texto automático. Use algo que carregue o argumento, por exemplo 'A decisão que define os próximos cinco anos' ou 'Onde a escolha realmente pesa'. Nela, recapitule a tese em três ou quatro parágrafos curtos.\n2. No último ou penúltimo parágrafo dessa mesma seção, integre a chamada para ação ao texto corrente, sem cabeçalho próprio e sem área separada. Uma frase natural com o link: 👉 [Assine a newsletter](https://loyaltyacademybrasil.com.br/newsletter) ou 👉 [Converse com nossos especialistas](http://wa.me/5511983830031). NÃO crie seção chamada 'Reflexão', 'Reflexão consultiva' ou 'Próximo passo'.\n3. Por último, '## FAQ — Perguntas frequentes sobre [tema]' com exatamente cinco perguntas, cada uma em negrito, resposta em 1 a 3 frases.\n\nFONTES\nEste blog NÃO publica seção de fontes nem linka estudos no corpo. Não crie seção de fontes dentro do artigo. Se precisar atribuir, faça em prosa e sem link. Os únicos links são os do CTA.\nAinda assim você deve se apoiar na pesquisa fornecida e declarar as fontes separadamente ao final, para a revisão humana.\n\n=== FORMATO DA RESPOSTA ===\nResponda APENAS com o texto, sem JSON, sem bloco de código, sem comentário.\n\nPrimeira linha, o título:\n# Título do artigo\n\nDepois o artigo, terminando no FAQ.\n\nDepois do FAQ, uma linha contendo exatamente:\n---FONTES---\n\ne abaixo, uma entrada por fonte, usando barra vertical como separador:\n- **Título da fonte** | Instituição\n  https://url-completa\n\nUse no mínimo {{ $('Roda hoje?').item.json.settings.min_sources }} fontes reais da pesquisa fornecida.\n\nPor último, uma linha sozinha:\nTAGS: tag um, tag dois, tag três\n\nde três a seis tags curtas, em minúsculas, sem acento.\n\nANTES DE ENTREGAR\nRevise o texto inteiro e confirme: nenhum travessão, nenhuma das construções proibidas, nenhum título de seção com cara de rótulo automático, e no máximo 2.300 palavras.",
+        "options": {
+          "systemMessage": "Você escreve para o blog da Loyalty Academy Brasil, em português do Brasil, seguindo um padrão editorial fixo que já existe e não deve ser reinventado. O público é executivo de marketing, CRM, trade e relacionamento — gente que já domina o vocabulário do setor. Você argumenta antes de instruir: o registro é ensaístico-consultivo, nunca manual de instruções. Você jamais fabrica dado, estatística ou fonte.",
+          "maxIterations": 3
+        }
+      },
+      "id": "818fd270-f4b7-4ff4-b782-bc894e2409aa",
+      "name": "IA - Escreve o artigo",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        528,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "model": "anthropic/claude-sonnet-4.5",
+        "options": {
+          "maxTokens": "***REMOVIDO***",
+          "temperature": 0.7
+        }
+      },
+      "id": "274ccc23-bb0a-4d16-8b4c-033bd9339ea8",
+      "name": "Modelo do Escritor",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        528,
+        208
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "YvbsMckC3Vu2ixem",
+          "name": "OpenRouter - LAB - Automação de Blogs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qpjgqusnkuqzlqclayuc.supabase.co/functions/v1/blog-automation",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ action: 'create_draft', titulo: $('Extrai o artigo').item.json.titulo, artigo_markdown: $('Extrai o artigo').item.json.artigo_markdown, resumo_executivo: $('Extrai o artigo').item.json.resumo_executivo, fontes: $('Extrai o artigo').item.json.fontes, palavras: $('Extrai o artigo').item.json.palavras, tag_slugs: $('Extrai o artigo').item.json.tag_slugs, briefing: $('IA - Gera a pauta').item.json.output.briefing, modelo: 'anthropic/claude-sonnet-4.5', execucao_id: $execution.id, banner_image_base64: ($('Converte a capa').isExecuted && $('Converte a capa').item.json.capa_ok) ? $('Converte a capa').item.json.banner_image_base64 : undefined, banner_image_mime: ($('Converte a capa').isExecuted && $('Converte a capa').item.json.capa_ok) ? $('Converte a capa').item.json.banner_image_mime : undefined, banner_alt_text: $('Busca no Unsplash').isExecuted ? ($('Busca no Unsplash').item.json.alt_description || undefined) : undefined }) }}",
+        "options": {}
+      },
+      "id": "ab3ac28a-ca3c-466a-9bfa-209b9dcd8e7c",
+      "name": "Grava rascunho no blog",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1632,
+        -96
+      ],
+      "credentials": {
+        "httpTemplatedCustomAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {
+        "content": "## O admin manda aqui\n\nO gatilho acorda DE HORA EM HORA, aos 5 minutos. Ele nao sabe nada sobre a frequencia: quem decide e o no \"Roda hoje?\", que pergunta a configuracao ao app e compara com o dia e a hora EXATA marcados na tela do admin. Fora dessa hora ele devolve lista vazia e a execucao termina em milissegundos, sem gastar um token.\n\nPor que de hora em hora: antes o gatilho acordava so as 06:05 e o no exigia hora >= run_hour. Qualquer horario acima das 6 escolhido no admin nunca era alcancado, e a automacao nunca rodava. Agora a hora da tela vale de verdade, seja ela qual for.\n\nNao mexa na frequencia por aqui. A fonte da verdade e a tela do admin, em Conteudo > Automacao.\n\nFuso: o no \"Roda hoje?\" ja resolve o horario de Brasilia por conta propria, com Intl e timeZone fixo. Nao depende do relogio do servidor n8n.\n\nA credencial dos dois nos de HTTP e do tipo Custom Auth, com o template {\"headers\":{\"x-blog-automation-secret\":\"{{api_key}}\"}} e o valor igual ao secret BLOG_AUTOMATION_SECRET do Supabase.",
+        "color": 4
+      },
+      "id": "3f612f78-8678-4d70-8ee2-a212f339379e",
+      "name": "Sticky Note 2d2e5dad",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        112,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Dois portões de qualidade\n\n1. Relevância: a própria IA dá nota de 0 a 10 para a pauta que propôs. Abaixo de 7 a execução para aqui e nenhum artigo é escrito. É o filtro mais barato que existe, porque custa uma chamada em vez de um artigo inteiro.\n\n2. Aprovação humana: o artigo entra como RASCUNHO. Nada é publicado sozinho. A fila de revisão fica no admin da LAB, em Conteúdo > Automação.\n\nO anti-repetição usa o histórico que o app devolve, incluindo rascunhos ainda não publicados — senão o mesmo tema voltaria na semana seguinte.",
+        "color": 3
+      },
+      "id": "3480d3b9-a487-4309-87e6-a4665b877d6f",
+      "name": "Sticky Note 3aae2a27",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        112,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// O escritor devolve markdown puro, com as fontes DEPOIS de um delimitador.\n// O blog nao publica secao de fontes, entao elas saem do corpo e vao so para\n// o ai_metadata, onde quem aprova consegue conferir.\n\nconst bruto = String($input.first().json.output || '').trim();\nif (!bruto) { throw new Error('O escritor devolveu texto vazio.'); }\n\nconst txt = bruto.replace(/^```[a-z]*\\s*/i, '').replace(/```\\s*$/, '').trim();\n\nconst mTags = txt.match(/^TAGS:\\s*(.+)$/im);\nconst slug = (s) => s.trim().toLowerCase()\n  .normalize('NFD').replace(/[̀-ͯ]/g, '')\n  .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');\nconst tag_slugs = mTags\n  ? mTags[1].split(',').map(slug).filter(Boolean).slice(0, 6)\n  : [];\n\nconst semTags = txt.replace(/^TAGS:.*$/im, '').trim();\n\nconst partes = semTags.split(/^\\s*-{3,}\\s*FONTES\\s*-{3,}\\s*$/im);\nconst corpo = partes[0].trim();\nconst blocoFontes = partes.length > 1 ? partes[1] : '';\n\n// Rede de seguranca: se o modelo publicou a secao de fontes dentro do artigo\n// mesmo tendo sido instruido a nao fazer, remove do corpo.\nconst corpoLimpo = corpo.split(/^##\\s*Fontes e Refer[eê]ncias\\s*$/im)[0].trim();\n\nconst mTitulo = corpoLimpo.match(/^#\\s+(.+)$/m);\nconst titulo = mTitulo ? mTitulo[1].trim() : '';\nif (!titulo) { throw new Error('Nao encontrei o titulo (linha iniciando com # ).'); }\n\n// Aceita barra vertical (formato atual) ou traco (formato antigo) como separador.\nconst fontes = [];\nlet atual = null;\nfor (const linha of blocoFontes.split('\\n')) {\n  const m = linha.match(/^\\s*[-*]\\s*\\*\\*(.+?)\\*\\*\\s*[|–—-]?\\s*(.*)$/);\n  if (m) {\n    atual = { titulo: m[1].trim(), fonte_instituicao: (m[2] || '').trim(), url: '' };\n    fontes.push(atual);\n    continue;\n  }\n  const u = linha.match(/(https?:\\/\\/[^\\s)\\]]+)/);\n  if (u && atual && !atual.url) { atual.url = u[1]; }\n}\nconst fontesValidas = fontes.filter((f) => f.url);\n\nconst palavras = corpoLimpo.split(/\\s+/).filter(Boolean).length;\nconst secoes = (corpoLimpo.match(/^##\\s+/gm) || []).length;\n\nlet resumo = '';\nfor (const bloco of corpoLimpo.split(/\\n\\s*\\n/)) {\n  const b = bloco.trim();\n  if (!b || b.startsWith('#') || b.startsWith('-') || b.startsWith('>')) { continue; }\n  resumo = b.replace(/[*_`]/g, '');\n  break;\n}\nif (resumo.length > 400) { resumo = resumo.slice(0, 397) + '...'; }\n\n// Marcas de texto de IA que o usuario pediu para eliminar. Nao reescrevemos o\n// texto: avisamos quem revisa, que decide publicar, editar ou descartar.\nconst avisos = [];\nif (fontesValidas.length === 0) { avisos.push('Nenhuma fonte com URL foi declarada.'); }\nif (secoes < 9) { avisos.push('Apenas ' + secoes + ' secoes H2; o padrao e de 9 a 13.'); }\nif (palavras > 2300) { avisos.push(palavras + ' palavras; o teto e 2300.'); }\nif (!/^##\\s*FAQ/im.test(corpoLimpo)) { avisos.push('O artigo nao tem secao de FAQ.'); }\n\nconst travessoes = (corpoLimpo.match(/[—–]/g) || []).length;\nif (travessoes > 0) { avisos.push(travessoes + ' travessao(oes) no texto; era para nao haver nenhum.'); }\n\nif (/^##\\s*(Conclus|Reflex|Consideraç|Consideracoes|Próximo passo|Proximo passo)/im.test(corpoLimpo)) {\n  avisos.push('Titulo de secao generico (Conclusao/Reflexao) que deveria ter sido evitado.');\n}\nconst cliches = ['não é apenas', 'não se trata apenas', 'mais do que nunca', 'em um mundo cada vez mais', 'no cenário atual', 'é importante destacar', 'vale ressaltar', 'em suma', 'o futuro pertence', 'alavancar'];\nconst achados = cliches.filter((c) => corpoLimpo.toLowerCase().indexOf(c) !== -1);\nif (achados.length) { avisos.push('Construcoes de IA encontradas: ' + achados.join('; ') + '.'); }\n\nreturn [{ json: {\n  titulo,\n  artigo_markdown: corpoLimpo,\n  resumo_executivo: resumo,\n  fontes: fontesValidas,\n  palavras,\n  secoes,\n  tag_slugs,\n  avisos: avisos.length ? avisos : null\n} }];"
+      },
+      "id": "9b594f4a-82e9-4262-8bf6-3220cbd4b664",
+      "name": "Extrai o artigo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "capa-ligada",
+              "leftValue": "={{ $('Roda hoje?').item.json.settings.auto_generate_image }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "242a3f9a-0f29-44b7-8709-e13dc8568f73",
+      "name": "Gerar capa?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        864,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// O Unsplash indexa em ingles, entao a busca sai das tags e de um mapa de\n// termos do setor. Query curta acha foto melhor do que frase longa.\nconst j = $input.first().json;\n\nconst MAPA = {\n  fidelizacao: 'customer loyalty',\n  loyalty: 'customer loyalty',\n  coalizao: 'business partnership',\n  pontos: 'reward points',\n  milhas: 'airline travel',\n  gamificacao: 'game design',\n  engajamento: 'customer engagement',\n  retencao: 'customer retention',\n  churn: 'business analytics',\n  crm: 'customer data',\n  varejo: 'retail store',\n  ecommerce: 'online shopping',\n  dados: 'data analytics',\n  ia: 'artificial intelligence',\n  marca: 'brand strategy',\n  cliente: 'customer service',\n  mercado: 'business meeting',\n  estrategia: 'business strategy'\n};\n\nconst tags = Array.isArray(j.tag_slugs) ? j.tag_slugs : [];\nconst termos = [];\nfor (const t of tags) {\n  const chave = String(t).toLowerCase();\n  for (const k of Object.keys(MAPA)) {\n    if (chave.indexOf(k) !== -1 && termos.indexOf(MAPA[k]) === -1) {\n      termos.push(MAPA[k]);\n    }\n  }\n}\n\n// Sem correspondencia, cai num termo neutro e corporativo em vez de arriscar\n// uma busca literal em portugues, que costuma devolver foto fora de contexto.\nif (termos.length === 0) { termos.push('business strategy meeting'); }\n\nreturn [{ json: { query: termos.slice(0, 2).join(' ') } }];"
+      },
+      "id": "2d128e0e-1b2e-464b-985a-f1e58d98056e",
+      "name": "Monta a busca da capa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.unsplash.com/photos/random",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $json.query }}"
+            },
+            {
+              "name": "orientation",
+              "value": "landscape"
+            },
+            {
+              "name": "content_filter",
+              "value": "high"
+            }
+          ]
+        },
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Client-ID 7cA4i_P1XrK0vEFO3hly2Lwr7XYmnHnDfAf3ChPjn6I"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "06414ec7-52a4-4315-ae96-56dbd26b6a03",
+      "name": "Busca no Unsplash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1184,
+        -224
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.urls.regular }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "f7f553a6-b47d-4e07-910f-e031308698ea",
+      "name": "Baixa a capa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1344,
+        -224
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Este n8n guarda binario em modo separado: item.binary.data.data e uma\n// referencia, nao o conteudo. getBinaryDataBuffer traz os bytes de verdade.\nconst meta = $input.first().binary && $input.first().binary.data;\nif (!meta) { return [{ json: { capa_ok: false, motivo: 'Nenhum binario recebido.' } }]; }\n\nconst buf = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (!buf || !buf.length) { return [{ json: { capa_ok: false, motivo: 'Binario vazio.' } }]; }\n\nconst MIMES = ['image/png', 'image/jpeg', 'image/webp'];\nconst mime = MIMES.indexOf(meta.mimeType) !== -1 ? meta.mimeType : 'image/jpeg';\n\n// A edge function recusa acima de 5 MB; melhor descobrir aqui do que levar 400.\nif (buf.length > 5 * 1024 * 1024) {\n  return [{ json: { capa_ok: false, motivo: 'Imagem de ' + Math.round(buf.length / 1024) + ' kB, acima do limite de 5 MB.' } }];\n}\n\nreturn [{ json: {\n  capa_ok: true,\n  banner_image_base64: buf.toString('base64'),\n  banner_image_mime: mime,\n  tamanho_kb: Math.round(buf.length / 1024)\n} }];"
+      },
+      "id": "25d74eb8-2c19-48e0-927f-49187c3e3552",
+      "name": "Converte a capa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        -224
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Busca configuração no admin": {
+      "main": [
+        [
+          {
+            "node": "Roda hoje?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Roda hoje?": {
+      "main": [
+        [
+          {
+            "node": "IA - Gera a pauta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA - Gera a pauta": {
+      "main": [
+        [
+          {
+            "node": "Pauta é relevante?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo da Pauta": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "IA - Gera a pauta",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formato da Pauta": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "IA - Gera a pauta",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pauta é relevante?": {
+      "main": [
+        [
+          {
+            "node": "Pesquisa de fontes (Perplexity/Sonar)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pesquisa de fontes (Perplexity/Sonar)": {
+      "main": [
+        [
+          {
+            "node": "IA - Escreve o artigo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo do Escritor": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "IA - Escreve o artigo",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA - Escreve o artigo": {
+      "main": [
+        [
+          {
+            "node": "Extrai o artigo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai o artigo": {
+      "main": [
+        [
+          {
+            "node": "Gerar capa?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar capa?": {
+      "main": [
+        [
+          {
+            "node": "Monta a busca da capa",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Grava rascunho no blog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta a busca da capa": {
+      "main": [
+        [
+          {
+            "node": "Busca no Unsplash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca no Unsplash": {
+      "main": [
+        [
+          {
+            "node": "Baixa a capa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixa a capa": {
+      "main": [
+        [
+          {
+            "node": "Converte a capa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converte a capa": {
+      "main": [
+        [
+          {
+            "node": "Grava rascunho no blog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "De hora em hora": {
+      "main": [
+        [
+          {
+            "node": "Busca configuração no admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate",
+    "errorWorkflow": "xfondpEOYdGLoDo4",
+    "timezone": "America/Sao_Paulo"
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "4b0bd438-b30f-4cca-830f-b630db993aae",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "TNNCfTVm8qOD8T87",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-27T14:01:00.679Z",
+      "updatedAt": "2026-10-27T14:01:00.679Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
