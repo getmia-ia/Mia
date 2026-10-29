@@ -1,0 +1,378 @@
+{
+  "updatedAt": "2026-10-28T22:20:42.550Z",
+  "createdAt": "2026-10-28T22:04:42.230Z",
+  "id": "03Oj3ETE9LCJCN5m",
+  "name": "Mia - 02 - Captação Lusha",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "1e569f65-b3e9-4c96-b1b3-f1e94d018127",
+      "name": "Dia útil às 8h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "clients",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "organization_id",
+              "condition": "eq",
+              "keyValue": "140da18c-c111-417f-95a6-57cec8d94a22"
+            }
+          ]
+        }
+      },
+      "id": "924b23ea-db04-4333-b516-96339de19f3e",
+      "name": "Clientes da M[IA] (Flow)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        224,
+        96
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "bAoDHJoMSHRhHw5u",
+          "name": "Flow - Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===================== CONFIGURAÇÃO =====================\nconst LUSHA_KEY = '37067340-f402-4864-bb98-d8d64f3b32ff'; // TODO: trocar por credencial do n8n\nconst FLOW = 'https://vclwmydunloeqomsmaah.supabase.co/functions/v1/api-v1';\nconst FLOW_H = { Authorization: '***REMOVIDO***', 'Content-Type': 'application/json' };\nconst ETAPA_PROSPECCAO = 'Prospecção';\nconst ETAPA_ENRIQUECIDO = 'Disparo Inicial';\nconst CUSTO_POR_CONTATO = 6;   // créditos estimados para revelar telefone/e-mail de 1 pessoa\nconst CUSTO_POR_EMPRESA = 1;   // créditos estimados para enriquecer 1 empresa\nconst MAX_POR_EMPRESA = 2;     // no máximo 2 pessoas da mesma empresa\nconst TAMANHO_BUSCA = 10;      // a Lusha não aceita páginas com menos de 10\n// ========================================================\n// Como funciona, para cada busca ativa no Flow:\n//  1) Se não tem nenhum lead dessa busca em \"Prospecção\": busca a próxima página na Lusha\n//     e cria as empresas em \"Prospecção\" (sem enriquecer, sem gastar crédito de contato).\n//  2) Enriquece até \"leads por rodada\" empresas que estão em \"Prospecção\" (as mais antigas):\n//     com telefone ou e-mail -> atualiza o cadastro e move para \"Disparo Inicial\";\n//     sem nenhum dos dois -> Lead Perdido (Contato inválido).\n\nconst http = (o) => this.helpers.httpRequest({ json: true, ...o });\nconst LH = { api_key: LUSHA_KEY, 'Content-Type': 'application/json' };\nconst lusha = async (method, path, body) => {\n  const r = await this.helpers.httpRequest({ method, url: 'https://api.lusha.com' + path, headers: LH, body, json: true, returnFullResponse: true, ignoreHttpStatusErrors: true });\n  if (r.statusCode >= 400) throw new Error('Lusha ' + r.statusCode + ': ' + JSON.stringify(r.body).slice(0, 600));\n  return r.body;\n};\nconst flow = (method, path, body, qs) => http({ method, url: FLOW + path, headers: FLOW_H, body, qs });\n\nconst norm = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase()\n  .replace(/\\b(ltda|s\\.?a\\.?|me|eireli|epp|sa|limitada|grupo|holding)\\b/g, '').replace(/[^a-z0-9]/g, '');\nconst normLinkedin = (u) => String(u || '').trim().toLowerCase().replace(/^https?:\\/\\/(www\\.)?/, '').replace(/\\/$/, '');\nconst digits = (v) => String(v || '').replace(/\\D/g, '');\nfunction normalizePhone(p) {\n  let d = digits(p);\n  if (!d) return null;\n  while (d.startsWith('5555')) d = d.slice(2);\n  if (!d.startsWith('55')) d = '55' + d;\n  let ddd = d.slice(2, 4), num = d.slice(4);\n  if (num.length === 8 && /^[6-9]/.test(num)) num = '9' + num;\n  return '55' + ddd + num;\n}\nconst pickEmail = (emails) => { if (!Array.isArray(emails) || !emails.length) return null; return ((emails.find(e => e.type === 'work') || emails[0]).email) || null; };\nconst pickPhone = (phones) => {\n  if (!Array.isArray(phones) || !phones.length) return null;\n  const ok = phones.filter(p => !p.doNotCall); const pool = ok.length ? ok : phones;\n  return ((pool.find(p => p.type === 'mobile') || pool[0]).number) || null;\n};\nconst lerContatos = (sm) => { let c = sm && sm.contacts; if (typeof c === 'string') { try { c = JSON.parse(c); } catch { c = []; } } return Array.isArray(c) ? c : []; };\nconst SENIORIDADE_PAPEL = { 10: 'Sócio', 7: 'Sócio', 9: 'Executivo', 8: 'Executivo', 6: 'Diretor', 5: 'Gerente' };\n\n// ---------- Etapas e dados do Flow ----------\nconst etapas = ((await flow('GET', '/pipeline-stages')).items) || [];\nconst etapaProsp = etapas.find(e => e.name === ETAPA_PROSPECCAO);\nif (!etapaProsp) return [{ json: { resultado: 'ERRO', motivo: 'etapa \"' + ETAPA_PROSPECCAO + '\" não existe no Flow' } }];\n\nconst clientes = $('Clientes da M[IA] (Flow)').all().map(i => i.json).filter(c => c && c.id);\nconst clientePorId = Object.fromEntries(clientes.map(c => [c.id, c]));\n\n// Leads hoje em Prospecção (pelo contrato em negociação), do mais antigo para o mais novo\nconst emProspeccao = $('Contratos em negociação (Flow)').all().map(i => i.json)\n  .filter(c => c && c.stage_id === etapaProsp.id && clientePorId[c.client_id])\n  .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))\n  .map(c => clientePorId[c.client_id]);\n\n// Para não duplicar\nconst linkedinsExistentes = new Set();\nconst empresasExistentes = new Set();\nconst lushaIdsExistentes = new Set();\nfor (const c of clientes) {\n  if (norm(c.name)) empresasExistentes.add(norm(c.name));\n  const sm = c.social_media || {};\n  if (sm.linkedin) linkedinsExistentes.add(normLinkedin(sm.linkedin));\n  for (const ct of lerContatos(sm)) {\n    if (ct && ct.linkedin) linkedinsExistentes.add(normLinkedin(ct.linkedin));\n    if (ct && ct.lusha_contact_id) lushaIdsExistentes.add(String(ct.lusha_contact_id));\n  }\n}\n\nconst relatorio = [];\nconst configs = ((await flow('GET', '/prospecting/lusha-configs')).items) || [];\nif (!configs.length) return [{ json: { resultado: 'nenhuma busca ativa' } }];\n\nfor (const cfg of configs) {\n  const porRodada = Math.min(Math.max(Number(cfg.page_size) || 10, 1), 50);\n  const page = Number(cfg.page) || 0;\n  const arr = (v) => (Array.isArray(v) && v.length ? v : undefined);\n  let fila = emProspeccao.filter(c => c.social_media && c.social_media.lusha && c.social_media.lusha.busca_id === cfg.id);\n  let puxados = 0, pagina_lida = null, proxima = page, total = null;\n\n  // ---------- 1) Puxa mais gente se a fila dessa busca está vazia ----------\n  if (!fila.length) {\n    const contacts = { departments: arr(cfg.departments), seniorityIds: arr(cfg.seniorities), jobTitles: arr(cfg.job_titles), locations: [{ country: 'Brazil' }] };\n    if (arr(cfg.existing_data_points)) { contacts.existingDataPoints = cfg.existing_data_points; contacts.existingDataPointsCondition = 'or'; }\n    const companies = { sizes: arr(cfg.company_sizes), revenues: arr(cfg.company_revenues) };\n    if (arr(cfg.company_industries_labels)) companies.industriesLabels = cfg.company_industries_labels;\n    let busca;\n    try {\n      busca = await lusha('POST', '/v3/contacts/prospecting', {\n        pagination: { page, size: Math.max(TAMANHO_BUSCA, porRodada) },\n        filters: { contacts: { include: contacts }, companies: { include: companies } },\n        options: { maxContactsPerCompany: MAX_POR_EMPRESA }\n      });\n    } catch (e) {\n      relatorio.push({ json: { busca: cfg.name, resultado: 'ERRO na busca da Lusha', detalhe: String(e.message || e) } });\n      continue;\n    }\n    const results = busca.results || [];\n    total = Number((busca.pagination || {}).total) || 0;\n    pagina_lida = page;\n    proxima = (total > 0 && (page + 1) * Math.max(TAMANHO_BUSCA, porRodada) >= total) ? 0 : page + 1;\n\n    // Agrupa por empresa, tirando quem já existe\n    const grupos = new Map();\n    for (const r of results) {\n      const li = normLinkedin(r.socialLinks && r.socialLinks.linkedin);\n      const emp = norm(r.company && r.company.name);\n      const nome = [r.firstName, r.lastName].filter(Boolean).join(' ').trim();\n      let motivo = null;\n      if (!nome) motivo = 'sem nome';\n      else if (lushaIdsExistentes.has(String(r.id))) motivo = 'contato já está no Flow';\n      else if (li && linkedinsExistentes.has(li)) motivo = 'LinkedIn já está no Flow';\n      else if (emp && empresasExistentes.has(emp) && !grupos.has(emp)) motivo = 'empresa já está no Flow';\n      if (motivo) { relatorio.push({ json: { busca: cfg.name, etapa: 'prospecção', pessoa: nome, empresa: r.company && r.company.name, resultado: 'pulado', motivo } }); continue; }\n      if (li) linkedinsExistentes.add(li);\n      lushaIdsExistentes.add(String(r.id));\n      const key = emp || String(r.id);\n      if (!grupos.has(key)) grupos.set(key, []);\n      grupos.get(key).push(r);\n    }\n\n    for (const [key, pessoas] of grupos) {\n      const r0 = pessoas[0];\n      const empNome = (r0.company && r0.company.name) || 'Empresa sem nome';\n      const contatos = pessoas.map((r, i) => ({\n        name: [r.firstName, r.lastName].filter(Boolean).join(' ').trim(),\n        role: SENIORIDADE_PAPEL[Number(r.jobTitle && r.jobTitle.seniority)] || 'Executivo',\n        cargo: (r.jobTitle && r.jobTitle.title) || '',\n        email: '', whatsapp: '',\n        linkedin: (r.socialLinks && r.socialLinks.linkedin) || '',\n        lusha_contact_id: String(r.id),\n        is_primary: i === 0\n      }));\n      const lushaInfo = { busca_id: cfg.id, busca_nome: cfg.name, company_id: r0.company && r0.company.id ? String(r0.company.id) : null, captado_em: new Date().toISOString() };\n      try {\n        const resp = await flow('POST', '/leads', {\n          name: empNome,\n          contact_name: contatos[0].name,\n          type: 'pj',\n          origin: 'Prospecção Lusha',\n          stage_name: ETAPA_PROSPECCAO,\n          website: (r0.company && r0.company.domain) ? 'https://' + r0.company.domain : null,\n          notes: 'Captado pela Lusha (busca: ' + cfg.name + ')' + (contatos[0].cargo ? '\\nCargo do contato principal: ' + contatos[0].cargo : ''),\n          social_media: { facebook: '', instagram: '', linkedin: '', contacts: contatos, lusha: lushaInfo }\n        });\n        if (resp && resp.lead) {\n          empresasExistentes.add(key);\n          fila.push(resp.lead);\n          puxados++;\n          relatorio.push({ json: { busca: cfg.name, etapa: 'prospecção', empresa: empNome, contato: contatos[0].name, cargo: contatos[0].cargo, pessoas: contatos.length, resultado: 'criado em Prospecção', lead_id: resp.lead.id } });\n        }\n      } catch (e) {\n        relatorio.push({ json: { busca: cfg.name, etapa: 'prospecção', empresa: empNome, resultado: 'ERRO ao criar no Flow', detalhe: String(e.message || e).slice(0, 400) } });\n      }\n    }\n    try { await flow('POST', '/prospecting/lusha-configs/' + cfg.id + '/advance', { page: proxima }); } catch (e) {}\n  }\n\n  // ---------- 2) Enriquece até \"leads por rodada\" empresas da fila ----------\n  const lote = fila.slice(0, porRodada);\n  const contatosLote = lote.flatMap(c => lerContatos(c.social_media).filter(ct => ct && ct.lusha_contact_id));\n  const empresasIds = [...new Set(lote.map(c => c.social_media && c.social_media.lusha && c.social_media.lusha.company_id).filter(Boolean))];\n\n  let saldo = null;\n  try { const u = await lusha('GET', '/v3/account/usage'); saldo = Number(u && u.credits && u.credits.remaining); } catch (e) {}\n  const custo = contatosLote.length * CUSTO_POR_CONTATO + empresasIds.length * CUSTO_POR_EMPRESA;\n  if (Number.isFinite(saldo) && saldo < custo) {\n    relatorio.push({ json: { busca: cfg.name, resultado: 'ERRO', motivo: 'saldo de créditos insuficiente para enriquecer', saldo, custo_estimado: custo } });\n    continue;\n  }\n\n  let enrichC = [], enrichE = [];\n  if (contatosLote.length) {\n    try { enrichC = (await lusha('POST', '/v3/contacts/enrich', { ids: contatosLote.map(ct => ct.lusha_contact_id), reveal: ['emails', 'phones'] })).results || []; }\n    catch (e) { relatorio.push({ json: { busca: cfg.name, resultado: 'ERRO no enrich de contatos', detalhe: String(e.message || e) } }); continue; }\n    if (empresasIds.length) {\n      try { enrichE = (await lusha('POST', '/v3/companies/enrich', { ids: empresasIds })).results || []; } catch (e) { enrichE = []; }\n    }\n  }\n  const contatoPorId = Object.fromEntries(enrichC.map(x => [String(x.id), x]));\n  const empresaPorId = Object.fromEntries(enrichE.map(x => [String(x.id), x]));\n\n  let enriquecidos = 0;\n  for (const cli of lote) {\n    const sm = cli.social_media || {};\n    const info = sm.lusha || {};\n    const empresa = empresaPorId[String(info.company_id)] || {};\n    const contatos = lerContatos(sm).map(ct => {\n      const c = contatoPorId[String(ct.lusha_contact_id)];\n      if (!c) return ct;\n      return {\n        ...ct,\n        name: c.fullName || ct.name,\n        cargo: (c.jobTitle && c.jobTitle.title) || ct.cargo || '',\n        email: pickEmail(c.emails) || ct.email || '',\n        whatsapp: normalizePhone(pickPhone(c.phones)) || ct.whatsapp || '',\n        linkedin: (c.socialLinks && c.socialLinks.linkedin) || ct.linkedin || ''\n      };\n    });\n    const comContato = contatos.filter(c => c.whatsapp || c.email);\n\n    if (!comContato.length) {\n      try {\n        await flow('POST', '/leads/' + cli.id + '/stage', { stage_name: 'Lead Perdido', loss_reason: 'Contato inválido', loss_comment: 'Lusha não trouxe telefone nem e-mail' });\n        relatorio.push({ json: { busca: cfg.name, etapa: 'enriquecimento', empresa: cli.name, resultado: 'Lead Perdido (Contato inválido)', motivo: 'Lusha não trouxe telefone nem e-mail', lead_id: cli.id } });\n      } catch (e) {\n        relatorio.push({ json: { busca: cfg.name, etapa: 'enriquecimento', empresa: cli.name, resultado: 'ERRO ao marcar perdido', detalhe: String(e.message || e).slice(0, 300) } });\n      }\n      continue;\n    }\n\n    // Contato principal = quem tem WhatsApp; os sem telefone/e-mail continuam no cadastro\n    contatos.forEach(c => { c.is_primary = false; });\n    const p = contatos.find(c => c.whatsapp) || comContato[0];\n    p.is_primary = true;\n    contatos.sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0));\n\n    const func = empresa.employeeCount ? (empresa.employeeCount.exact || [empresa.employeeCount.min, empresa.employeeCount.max].filter(Boolean).join('-')) : null;\n    const notas = [\n      'Captado pela Lusha (busca: ' + (info.busca_nome || cfg.name) + ')',\n      empresa.industry ? 'Setor: ' + empresa.industry + (empresa.subIndustry ? ' / ' + empresa.subIndustry : '') : null,\n      func ? 'Funcionários: ' + func : null,\n      p.cargo ? 'Cargo do contato principal: ' + p.cargo : null\n    ].filter(Boolean).join('\\n');\n\n    try {\n      await flow('PATCH', '/leads/' + cli.id, {\n        name: empresa.name || cli.name,\n        contact_name: p.name,\n        email: p.email || null,\n        phone: p.whatsapp || null,\n        whatsapp: p.whatsapp || null,\n        website: empresa.domain ? 'https://' + empresa.domain : (cli.website || null),\n        company_description: empresa.description ? String(empresa.description).slice(0, 2000) : null,\n        notes: notas,\n        social_media: { ...sm, contacts: contatos, lusha: { ...info, enriquecido_em: new Date().toISOString() } }\n      });\n      await flow('POST', '/leads/' + cli.id + '/stage', { stage_name: ETAPA_ENRIQUECIDO });\n      enriquecidos++;\n      relatorio.push({ json: { busca: cfg.name, etapa: 'enriquecimento', empresa: empresa.name || cli.name, contato: p.name, cargo: p.cargo, whatsapp: p.whatsapp, email: p.email, resultado: 'enriquecido → ' + ETAPA_ENRIQUECIDO, lead_id: cli.id } });\n    } catch (e) {\n      relatorio.push({ json: { busca: cfg.name, etapa: 'enriquecimento', empresa: cli.name, resultado: 'ERRO ao atualizar no Flow', detalhe: String(e.message || e).slice(0, 400) } });\n    }\n  }\n\n  relatorio.push({ json: { busca: cfg.name, resultado: 'resumo da rodada', puxados_para_prospeccao: puxados, pagina_lida, proxima_pagina: proxima, total_na_lusha: total, enriquecidos, ainda_em_prospeccao: Math.max(fila.length - lote.length, 0), saldo_antes_do_enrich: saldo } });\n}\nreturn relatorio;"
+      },
+      "id": "7c78dc14-175e-45de-9483-15699c976ed2",
+      "name": "Prospecção e enriquecimento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "bd753788-e4d0-491e-b917-ce169b7498d9",
+      "name": "Teste manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "contracts",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "organization_id",
+              "condition": "eq",
+              "keyValue": "140da18c-c111-417f-95a6-57cec8d94a22"
+            },
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "negociando"
+            }
+          ]
+        }
+      },
+      "id": "41e750e6-178a-4680-a478-3f10e75b5baf",
+      "name": "Contratos em negociação (Flow)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "bAoDHJoMSHRhHw5u",
+          "name": "Flow - Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Dia útil às 8h": {
+      "main": [
+        [
+          {
+            "node": "Clientes da M[IA] (Flow)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Teste manual": {
+      "main": [
+        [
+          {
+            "node": "Clientes da M[IA] (Flow)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clientes da M[IA] (Flow)": {
+      "main": [
+        [
+          {
+            "node": "Contratos em negociação (Flow)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contratos em negociação (Flow)": {
+      "main": [
+        [
+          {
+            "node": "Prospecção e enriquecimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "timezone": "America/Sao_Paulo",
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "node:Dia útil às 8h": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "43a939f5-0b89-4f1f-8121-02b6ccae8045",
+  "activeVersionId": "43a939f5-0b89-4f1f-8121-02b6ccae8045",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "03Oj3ETE9LCJCN5m",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-28T22:04:42.230Z",
+      "updatedAt": "2026-10-28T22:04:42.230Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "43a939f5-0b89-4f1f-8121-02b6ccae8045",
+    "workflowId": "03Oj3ETE9LCJCN5m",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 8 * * 1-5"
+              }
+            ]
+          }
+        },
+        "id": "1e569f65-b3e9-4c96-b1b3-f1e94d018127",
+        "name": "Dia útil às 8h",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "getAll",
+          "tableId": "clients",
+          "returnAll": true,
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "organization_id",
+                "condition": "eq",
+                "keyValue": "140da18c-c111-417f-95a6-57cec8d94a22"
+              }
+            ]
+          }
+        },
+        "id": "924b23ea-db04-4333-b516-96339de19f3e",
+        "name": "Clientes da M[IA] (Flow)",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          224,
+          96
+        ],
+        "executeOnce": true,
+        "alwaysOutputData": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "bAoDHJoMSHRhHw5u",
+            "name": "Flow - Supabase"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// ===================== CONFIGURAÇÃO =====================\nconst LUSHA_KEY = '37067340-f402-4864-bb98-d8d64f3b32ff'; // TODO: trocar por credencial do n8n\nconst FLOW = 'https://vclwmydunloeqomsmaah.supabase.co/functions/v1/api-v1';\nconst FLOW_H = { Authorization: '***REMOVIDO***', 'Content-Type': 'application/json' };\nconst ETAPA_PROSPECCAO = 'Prospecção';\nconst ETAPA_ENRIQUECIDO = 'Disparo Inicial';\nconst CUSTO_POR_CONTATO = 6;   // créditos estimados para revelar telefone/e-mail de 1 pessoa\nconst CUSTO_POR_EMPRESA = 1;   // créditos estimados para enriquecer 1 empresa\nconst MAX_POR_EMPRESA = 2;     // no máximo 2 pessoas da mesma empresa\nconst TAMANHO_BUSCA = 10;      // a Lusha não aceita páginas com menos de 10\n// ========================================================\n// Como funciona, para cada busca ativa no Flow:\n//  1) Se não tem nenhum lead dessa busca em \"Prospecção\": busca a próxima página na Lusha\n//     e cria as empresas em \"Prospecção\" (sem enriquecer, sem gastar crédito de contato).\n//  2) Enriquece até \"leads por rodada\" empresas que estão em \"Prospecção\" (as mais antigas):\n//     com telefone ou e-mail -> atualiza o cadastro e move para \"Disparo Inicial\";\n//     sem nenhum dos dois -> Lead Perdido (Contato inválido).\n\nconst http = (o) => this.helpers.httpRequest({ json: true, ...o });\nconst LH = { api_key: LUSHA_KEY, 'Content-Type': 'application/json' };\nconst lusha = async (method, path, body) => {\n  const r = await this.helpers.httpRequest({ method, url: 'https://api.lusha.com' + path, headers: LH, body, json: true, returnFullResponse: true, ignoreHttpStatusErrors: true });\n  if (r.statusCode >= 400) throw new Error('Lusha ' + r.statusCode + ': ' + JSON.stringify(r.body).slice(0, 600));\n  return r.body;\n};\nconst flow = (method, path, body, qs) => http({ method, url: FLOW + path, headers: FLOW_H, body, qs });\n\nconst norm = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase()\n  .replace(/\\b(ltda|s\\.?a\\.?|me|eireli|epp|sa|limitada|grupo|holding)\\b/g, '').replace(/[^a-z0-9]/g, '');\nconst normLinkedin = (u) => String(u || '').trim().toLowerCase().replace(/^https?:\\/\\/(www\\.)?/, '').replace(/\\/$/, '');\nconst digits = (v) => String(v || '').replace(/\\D/g, '');\nfunction normalizePhone(p) {\n  let d = digits(p);\n  if (!d) return null;\n  while (d.startsWith('5555')) d = d.slice(2);\n  if (!d.startsWith('55')) d = '55' + d;\n  let ddd = d.slice(2, 4), num = d.slice(4);\n  if (num.length === 8 && /^[6-9]/.test(num)) num = '9' + num;\n  return '55' + ddd + num;\n}\nconst pickEmail = (emails) => { if (!Array.isArray(emails) || !emails.length) return null; return ((emails.find(e => e.type === 'work') || emails[0]).email) || null; };\nconst pickPhone = (phones) => {\n  if (!Array.isArray(phones) || !phones.length) return null;\n  const ok = phones.filter(p => !p.doNotCall); const pool = ok.length ? ok : phones;\n  return ((pool.find(p => p.type === 'mobile') || pool[0]).number) || null;\n};\nconst lerContatos = (sm) => { let c = sm && sm.contacts; if (typeof c === 'string') { try { c = JSON.parse(c); } catch { c = []; } } return Array.isArray(c) ? c : []; };\nconst SENIORIDADE_PAPEL = { 10: 'Sócio', 7: 'Sócio', 9: 'Executivo', 8: 'Executivo', 6: 'Diretor', 5: 'Gerente' };\n\n// ---------- Etapas e dados do Flow ----------\nconst etapas = ((await flow('GET', '/pipeline-stages')).items) || [];\nconst etapaProsp = etapas.find(e => e.name === ETAPA_PROSPECCAO);\nif (!etapaProsp) return [{ json: { resultado: 'ERRO', motivo: 'etapa \"' + ETAPA_PROSPECCAO + '\" não existe no Flow' } }];\n\nconst clientes = $('Clientes da M[IA] (Flow)').all().map(i => i.json).filter(c => c && c.id);\nconst clientePorId = Object.fromEntries(clientes.map(c => [c.id, c]));\n\n// Leads hoje em Prospecção (pelo contrato em negociação), do mais antigo para o mais novo\nconst emProspeccao = $('Contratos em negociação (Flow)').all().map(i => i.json)\n  .filter(c => c && c.stage_id === etapaProsp.id && clientePorId[c.client_id])\n  .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))\n  .map(c => clientePorId[c.client_id]);\n\n// Para não duplicar\nconst linkedinsExistentes = new Set();\nconst empresasExistentes = new Set();\nconst lushaIdsExistentes = new Set();\nfor (const c of clientes) {\n  if (norm(c.name)) empresasExistentes.add(norm(c.name));\n  const sm = c.social_media || {};\n  if (sm.linkedin) linkedinsExistentes.add(normLinkedin(sm.linkedin));\n  for (const ct of lerContatos(sm)) {\n    if (ct && ct.linkedin) linkedinsExistentes.add(normLinkedin(ct.linkedin));\n    if (ct && ct.lusha_contact_id) lushaIdsExistentes.add(String(ct.lusha_contact_id));\n  }\n}\n\nconst relatorio = [];\nconst configs = ((await flow('GET', '/prospecting/lusha-configs')).items) || [];\nif (!configs.length) return [{ json: { resultado: 'nenhuma busca ativa' } }];\n\nfor (const cfg of configs) {\n  const porRodada = Math.min(Math.max(Number(cfg.page_size) || 10, 1), 50);\n  const page = Number(cfg.page) || 0;\n  const arr = (v) => (Array.isArray(v) && v.length ? v : undefined);\n  let fila = emProspeccao.filter(c => c.social_media && c.social_media.lusha && c.social_media.lusha.busca_id === cfg.id);\n  let puxados = 0, pagina_lida = null, proxima = page, total = null;\n\n  // ---------- 1) Puxa mais gente se a fila dessa busca está vazia ----------\n  if (!fila.length) {\n    const contacts = { departments: arr(cfg.departments), seniorityIds: arr(cfg.seniorities), jobTitles: arr(cfg.job_titles), locations: [{ country: 'Brazil' }] };\n    if (arr(cfg.existing_data_points)) { contacts.existingDataPoints = cfg.existing_data_points; contacts.existingDataPointsCondition = 'or'; }\n    const companies = { sizes: arr(cfg.company_sizes), revenues: arr(cfg.company_revenues) };\n    if (arr(cfg.company_industries_labels)) companies.industriesLabels = cfg.company_industries_labels;\n    let busca;\n    try {\n      busca = await lusha('POST', '/v3/contacts/prospecting', {\n        pagination: { page, size: Math.max(TAMANHO_BUSCA, porRodada) },\n        filters: { contacts: { include: contacts }, companies: { include: companies } },\n        options: { maxContactsPerCompany: MAX_POR_EMPRESA }\n      });\n    } catch (e) {\n      relatorio.push({ json: { busca: cfg.name, resultado: 'ERRO na busca da Lusha', detalhe: String(e.message || e) } });\n      continue;\n    }\n    const results = busca.results || [];\n    total = Number((busca.pagination || {}).total) || 0;\n    pagina_lida = page;\n    proxima = (total > 0 && (page + 1) * Math.max(TAMANHO_BUSCA, porRodada) >= total) ? 0 : page + 1;\n\n    // Agrupa por empresa, tirando quem já existe\n    const grupos = new Map();\n    for (const r of results) {\n      const li = normLinkedin(r.socialLinks && r.socialLinks.linkedin);\n      const emp = norm(r.company && r.company.name);\n      const nome = [r.firstName, r.lastName].filter(Boolean).join(' ').trim();\n      let motivo = null;\n      if (!nome) motivo = 'sem nome';\n      else if (lushaIdsExistentes.has(String(r.id))) motivo = 'contato já está no Flow';\n      else if (li && linkedinsExistentes.has(li)) motivo = 'LinkedIn já está no Flow';\n      else if (emp && empresasExistentes.has(emp) && !grupos.has(emp)) motivo = 'empresa já está no Flow';\n      if (motivo) { relatorio.push({ json: { busca: cfg.name, etapa: 'prospecção', pessoa: nome, empresa: r.company && r.company.name, resultado: 'pulado', motivo } }); continue; }\n      if (li) linkedinsExistentes.add(li);\n      lushaIdsExistentes.add(String(r.id));\n      const key = emp || String(r.id);\n      if (!grupos.has(key)) grupos.set(key, []);\n      grupos.get(key).push(r);\n    }\n\n    for (const [key, pessoas] of grupos) {\n      const r0 = pessoas[0];\n      const empNome = (r0.company && r0.company.name) || 'Empresa sem nome';\n      const contatos = pessoas.map((r, i) => ({\n        name: [r.firstName, r.lastName].filter(Boolean).join(' ').trim(),\n        role: SENIORIDADE_PAPEL[Number(r.jobTitle && r.jobTitle.seniority)] || 'Executivo',\n        cargo: (r.jobTitle && r.jobTitle.title) || '',\n        email: '', whatsapp: '',\n        linkedin: (r.socialLinks && r.socialLinks.linkedin) || '',\n        lusha_contact_id: String(r.id),\n        is_primary: i === 0\n      }));\n      const lushaInfo = { busca_id: cfg.id, busca_nome: cfg.name, company_id: r0.company && r0.company.id ? String(r0.company.id) : null, captado_em: new Date().toISOString() };\n      try {\n        const resp = await flow('POST', '/leads', {\n          name: empNome,\n          contact_name: contatos[0].name,\n          type: 'pj',\n          origin: 'Prospecção Lusha',\n          stage_name: ETAPA_PROSPECCAO,\n          website: (r0.company && r0.company.domain) ? 'https://' + r0.company.domain : null,\n          notes: 'Captado pela Lusha (busca: ' + cfg.name + ')' + (contatos[0].cargo ? '\\nCargo do contato principal: ' + contatos[0].cargo : ''),\n          social_media: { facebook: '', instagram: '', linkedin: '', contacts: contatos, lusha: lushaInfo }\n        });\n        if (resp && resp.lead) {\n          empresasExistentes.add(key);\n          fila.push(resp.lead);\n          puxados++;\n          relatorio.push({ json: { busca: cfg.name, etapa: 'prospecção', empresa: empNome, contato: contatos[0].name, cargo: contatos[0].cargo, pessoas: contatos.length, resultado: 'criado em Prospecção', lead_id: resp.lead.id } });\n        }\n      } catch (e) {\n        relatorio.push({ json: { busca: cfg.name, etapa: 'prospecção', empresa: empNome, resultado: 'ERRO ao criar no Flow', detalhe: String(e.message || e).slice(0, 400) } });\n      }\n    }\n    try { await flow('POST', '/prospecting/lusha-configs/' + cfg.id + '/advance', { page: proxima }); } catch (e) {}\n  }\n\n  // ---------- 2) Enriquece até \"leads por rodada\" empresas da fila ----------\n  const lote = fila.slice(0, porRodada);\n  const contatosLote = lote.flatMap(c => lerContatos(c.social_media).filter(ct => ct && ct.lusha_contact_id));\n  const empresasIds = [...new Set(lote.map(c => c.social_media && c.social_media.lusha && c.social_media.lusha.company_id).filter(Boolean))];\n\n  let saldo = null;\n  try { const u = await lusha('GET', '/v3/account/usage'); saldo = Number(u && u.credits && u.credits.remaining); } catch (e) {}\n  const custo = contatosLote.length * CUSTO_POR_CONTATO + empresasIds.length * CUSTO_POR_EMPRESA;\n  if (Number.isFinite(saldo) && saldo < custo) {\n    relatorio.push({ json: { busca: cfg.name, resultado: 'ERRO', motivo: 'saldo de créditos insuficiente para enriquecer', saldo, custo_estimado: custo } });\n    continue;\n  }\n\n  let enrichC = [], enrichE = [];\n  if (contatosLote.length) {\n    try { enrichC = (await lusha('POST', '/v3/contacts/enrich', { ids: contatosLote.map(ct => ct.lusha_contact_id), reveal: ['emails', 'phones'] })).results || []; }\n    catch (e) { relatorio.push({ json: { busca: cfg.name, resultado: 'ERRO no enrich de contatos', detalhe: String(e.message || e) } }); continue; }\n    if (empresasIds.length) {\n      try { enrichE = (await lusha('POST', '/v3/companies/enrich', { ids: empresasIds })).results || []; } catch (e) { enrichE = []; }\n    }\n  }\n  const contatoPorId = Object.fromEntries(enrichC.map(x => [String(x.id), x]));\n  const empresaPorId = Object.fromEntries(enrichE.map(x => [String(x.id), x]));\n\n  let enriquecidos = 0;\n  for (const cli of lote) {\n    const sm = cli.social_media || {};\n    const info = sm.lusha || {};\n    const empresa = empresaPorId[String(info.company_id)] || {};\n    const contatos = lerContatos(sm).map(ct => {\n      const c = contatoPorId[String(ct.lusha_contact_id)];\n      if (!c) return ct;\n      return {\n        ...ct,\n        name: c.fullName || ct.name,\n        cargo: (c.jobTitle && c.jobTitle.title) || ct.cargo || '',\n        email: pickEmail(c.emails) || ct.email || '',\n        whatsapp: normalizePhone(pickPhone(c.phones)) || ct.whatsapp || '',\n        linkedin: (c.socialLinks && c.socialLinks.linkedin) || ct.linkedin || ''\n      };\n    });\n    const comContato = contatos.filter(c => c.whatsapp || c.email);\n\n    if (!comContato.length) {\n      try {\n        await flow('POST', '/leads/' + cli.id + '/stage', { stage_name: 'Lead Perdido', loss_reason: 'Contato inválido', loss_comment: 'Lusha não trouxe telefone nem e-mail' });\n        relatorio.push({ json: { busca: cfg.name, etapa: 'enriquecimento', empresa: cli.name, resultado: 'Lead Perdido (Contato inválido)', motivo: 'Lusha não trouxe telefone nem e-mail', lead_id: cli.id } });\n      } catch (e) {\n        relatorio.push({ json: { busca: cfg.name, etapa: 'enriquecimento', empresa: cli.name, resultado: 'ERRO ao marcar perdido', detalhe: String(e.message || e).slice(0, 300) } });\n      }\n      continue;\n    }\n\n    // Contato principal = quem tem WhatsApp; os sem telefone/e-mail continuam no cadastro\n    contatos.forEach(c => { c.is_primary = false; });\n    const p = contatos.find(c => c.whatsapp) || comContato[0];\n    p.is_primary = true;\n    contatos.sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0));\n\n    const func = empresa.employeeCount ? (empresa.employeeCount.exact || [empresa.employeeCount.min, empresa.employeeCount.max].filter(Boolean).join('-')) : null;\n    const notas = [\n      'Captado pela Lusha (busca: ' + (info.busca_nome || cfg.name) + ')',\n      empresa.industry ? 'Setor: ' + empresa.industry + (empresa.subIndustry ? ' / ' + empresa.subIndustry : '') : null,\n      func ? 'Funcionários: ' + func : null,\n      p.cargo ? 'Cargo do contato principal: ' + p.cargo : null\n    ].filter(Boolean).join('\\n');\n\n    try {\n      await flow('PATCH', '/leads/' + cli.id, {\n        name: empresa.name || cli.name,\n        contact_name: p.name,\n        email: p.email || null,\n        phone: p.whatsapp || null,\n        whatsapp: p.whatsapp || null,\n        website: empresa.domain ? 'https://' + empresa.domain : (cli.website || null),\n        company_description: empresa.description ? String(empresa.description).slice(0, 2000) : null,\n        notes: notas,\n        social_media: { ...sm, contacts: contatos, lusha: { ...info, enriquecido_em: new Date().toISOString() } }\n      });\n      await flow('POST', '/leads/' + cli.id + '/stage', { stage_name: ETAPA_ENRIQUECIDO });\n      enriquecidos++;\n      relatorio.push({ json: { busca: cfg.name, etapa: 'enriquecimento', empresa: empresa.name || cli.name, contato: p.name, cargo: p.cargo, whatsapp: p.whatsapp, email: p.email, resultado: 'enriquecido → ' + ETAPA_ENRIQUECIDO, lead_id: cli.id } });\n    } catch (e) {\n      relatorio.push({ json: { busca: cfg.name, etapa: 'enriquecimento', empresa: cli.name, resultado: 'ERRO ao atualizar no Flow', detalhe: String(e.message || e).slice(0, 400) } });\n    }\n  }\n\n  relatorio.push({ json: { busca: cfg.name, resultado: 'resumo da rodada', puxados_para_prospeccao: puxados, pagina_lida, proxima_pagina: proxima, total_na_lusha: total, enriquecidos, ainda_em_prospeccao: Math.max(fila.length - lote.length, 0), saldo_antes_do_enrich: saldo } });\n}\nreturn relatorio;"
+        },
+        "id": "7c78dc14-175e-45de-9483-15699c976ed2",
+        "name": "Prospecção e enriquecimento",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          672,
+          0
+        ]
+      },
+      {
+        "parameters": {},
+        "id": "bd753788-e4d0-491e-b917-ce169b7498d9",
+        "name": "Teste manual",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "getAll",
+          "tableId": "contracts",
+          "returnAll": true,
+          "matchType": "allFilters",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "organization_id",
+                "condition": "eq",
+                "keyValue": "140da18c-c111-417f-95a6-57cec8d94a22"
+              },
+              {
+                "keyName": "status",
+                "condition": "eq",
+                "keyValue": "negociando"
+              }
+            ]
+          }
+        },
+        "id": "41e750e6-178a-4680-a478-3f10e75b5baf",
+        "name": "Contratos em negociação (Flow)",
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
+        "position": [
+          448,
+          0
+        ],
+        "alwaysOutputData": true,
+        "executeOnce": true,
+        "credentials": {
+          "supabaseApi": {
+            "id": "bAoDHJoMSHRhHw5u",
+            "name": "Flow - Supabase"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Dia útil às 8h": {
+        "main": [
+          [
+            {
+              "node": "Clientes da M[IA] (Flow)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Teste manual": {
+        "main": [
+          [
+            {
+              "node": "Clientes da M[IA] (Flow)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Clientes da M[IA] (Flow)": {
+        "main": [
+          [
+            {
+              "node": "Contratos em negociação (Flow)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Contratos em negociação (Flow)": {
+        "main": [
+          [
+            {
+              "node": "Prospecção e enriquecimento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version 43a939f5",
+    "description": "",
+    "autosaved": false,
+    "createdAt": "2026-10-28T22:20:42.553Z",
+    "updatedAt": "2026-10-28T22:20:44.124Z"
+  },
+  "tags": []
+}
