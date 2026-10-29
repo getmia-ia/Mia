@@ -1,0 +1,173 @@
+{
+  "updatedAt": "2026-10-28T21:31:02.749Z",
+  "createdAt": "2026-10-28T21:31:02.749Z",
+  "id": "t6RJonVtJHX74X0g",
+  "name": "Mia - Manutenção - Importar conversas abertas para Follow-up",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "65ea1337-61b3-415d-b7d3-e040b0022ad9",
+      "name": "Rodar",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "35109e50-a899-43ca-a130-1c8833afb263",
+      "name": "Importar conversas abertas para Follow-up",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const CW = 'https://chat.miabuilder.com/api/v1/accounts/39';\nconst CW_H = { api_access_token: 'SEPcKuFk5wqM67AsKE4FLPf6' };\nconst FLOW = 'https://vclwmydunloeqomsmaah.supabase.co/functions/v1/api-v1';\nconst FLOW_H = { Authorization: '***REMOVIDO***', 'Content-Type': 'application/json' };\nconst INBOX = 496;\nconst ETAPA = {\n  '173412d2-11a4-4d00-9547-5b495f288eff': 'Follow-up',\n  'f5b1230f-cad6-429b-8b51-e8b1c3046b70': 'Agendar reunião',\n  '43f575ed-daaf-4c57-9bbc-5b474d0332eb': 'Reunião',\n  '3cc3befb-d307-4ee5-ae29-f223d8b67d55': 'Montar proposta',\n  '66097cc4-2527-4afa-8fa7-88e63259cc76': 'Proposta enviada'\n};\nconst FOLLOWUP = '173412d2-11a4-4d00-9547-5b495f288eff';\n// Etapas que não mexemos (lead já avançou no funil)\nconst NAO_MEXER = ['f5b1230f-cad6-429b-8b51-e8b1c3046b70', '43f575ed-daaf-4c57-9bbc-5b474d0332eb', '3cc3befb-d307-4ee5-ae29-f223d8b67d55', '66097cc4-2527-4afa-8fa7-88e63259cc76'];\n\nconst http = (o) => this.helpers.httpRequest({ json: true, ...o });\nconst flow = (method, path, body, qs) => http({ method, url: FLOW + path, headers: FLOW_H, body, qs });\n\n// 1) Conversas abertas da caixa MIA-SDR\nconst convs = new Map();\nfor (let page = 1; page <= 20; page++) {\n  const r = await http({ method: 'GET', url: CW + '/conversations', headers: CW_H, qs: { status: 'open', inbox_id: INBOX, assignee_type: 'all', page } });\n  const p = (r && r.data && r.data.payload) || [];\n  for (const c of p) convs.set(c.id, c);\n  if (p.length < 25) break;\n}\n\nconst emFollowup = async (leadId) => {\n  const r = await flow('GET', '/leads/' + leadId + '/contracts');\n  return (r.contracts || []).some(c => c.status === 'negociando' && c.stage_id === FOLLOWUP);\n};\nconst moverFollowup = async (leadId) => {\n  await flow('POST', '/leads/' + leadId + '/stage', { stage_name: 'Follow-up' });\n  if (await emFollowup(leadId)) return true;\n  // current_stage já era \"Follow-up\" e o banco não sincronizou: troca e volta\n  await flow('POST', '/leads/' + leadId + '/stage', { stage_name: 'Disparo Inicial' });\n  await flow('POST', '/leads/' + leadId + '/stage', { stage_name: 'Follow-up' });\n  return await emFollowup(leadId);\n};\n\nconst saida = [];\nfor (const c of convs.values()) {\n  const s = (c.meta && c.meta.sender) || {};\n  const telefone = String(s.phone_number || '').replace(/\\D/g, '');\n  const nome = String(s.name || '').trim() || 'Lead WhatsApp';\n  const base = { conversa: c.id, nome, telefone };\n  try {\n    if (!telefone) { saida.push({ json: { ...base, resultado: 'pulado', motivo: 'conversa sem telefone', marcar: false } }); continue; }\n    const busca = await flow('GET', '/leads/search', undefined, { phone: telefone });\n    let lead = busca && busca.lead;\n    let resultado;\n    if (!lead) {\n      const novo = await flow('POST', '/leads?upsert_by=phone', { name: nome, contact_name: nome, phone: telefone, whatsapp: telefone, stage_name: 'Follow-up', origin: 'WhatsApp', type: 'pf' });\n      lead = novo.lead;\n      resultado = 'criado';\n    } else {\n      const cts = ((await flow('GET', '/leads/' + lead.id + '/contracts')).contracts) || [];\n      if (cts.some(x => x.status === 'ativo')) { saida.push({ json: { ...base, lead_id: lead.id, empresa: lead.name, resultado: 'pulado', motivo: 'cliente ativo', marcar: false } }); continue; }\n      const neg = cts.filter(x => x.status === 'negociando');\n      const avancado = neg.find(x => NAO_MEXER.includes(x.stage_id));\n      if (avancado) { saida.push({ json: { ...base, lead_id: lead.id, empresa: lead.name, resultado: 'pulado', motivo: 'já está em ' + ETAPA[avancado.stage_id], marcar: false } }); continue; }\n      if (!neg.length) await flow('POST', '/leads/' + lead.id + '/contracts', { title: 'Retomada follow-up' });\n      resultado = neg.some(x => x.stage_id === FOLLOWUP) ? 'já estava em Follow-up' : 'movido';\n    }\n    const ok = await moverFollowup(lead.id);\n    saida.push({ json: { ...base, lead_id: lead.id, empresa: lead.name, resultado: ok ? resultado : 'ERRO', motivo: ok ? '' : 'não ficou em Follow-up', marcar: ok } });\n  } catch (e) {\n    saida.push({ json: { ...base, resultado: 'ERRO', motivo: String(e.message || e).slice(0, 300), marcar: false } });\n  }\n}\nreturn saida;"
+      }
+    },
+    {
+      "id": "9151aedd-5db6-4c41-ad45-47ba9bdaee26",
+      "name": "Só quem entrou em Follow-up",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.marcar }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "4b80eec8-a5f0-46d1-9d6c-1d491cd5969b",
+      "name": "Marca início do follow-up no histórico",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "tableId": "mia-historico_mensagens",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "id_usuario",
+              "fieldValue": "={{ $json.conversa }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $json.telefone }}"
+            },
+            {
+              "fieldId": "nome_usuario",
+              "fieldValue": "={{ $json.nome }}"
+            },
+            {
+              "fieldId": "id_conversa",
+              "fieldValue": "followup_inicio"
+            },
+            {
+              "fieldId": "message_type",
+              "fieldValue": "followup_inicio"
+            },
+            {
+              "fieldId": "ativo",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "nome_app",
+              "fieldValue": "SDR-MIA"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "FsQeUlxQ7Q6O8mbE",
+          "name": "MIA - Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Rodar": {
+      "main": [
+        [
+          {
+            "node": "Importar conversas abertas para Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Importar conversas abertas para Follow-up": {
+      "main": [
+        [
+          {
+            "node": "Só quem entrou em Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Só quem entrou em Follow-up": {
+      "main": [
+        [
+          {
+            "node": "Marca início do follow-up no histórico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "437d1b1d-be4d-4506-a00d-bbe19497f3c6",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "t6RJonVtJHX74X0g",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-28T21:31:02.749Z",
+      "updatedAt": "2026-10-28T21:31:02.749Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
