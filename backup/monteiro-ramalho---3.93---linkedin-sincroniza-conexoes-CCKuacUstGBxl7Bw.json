@@ -1,0 +1,600 @@
+{
+  "updatedAt": "2026-10-29T12:19:42.458Z",
+  "createdAt": "2026-10-28T13:40:16.237Z",
+  "id": "CCKuacUstGBxl7Bw",
+  "name": "Monteiro Ramalho - 3.93 - LinkedIn: sincroniza conexões",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "c0960b5c-a8d8-4d80-b9c9-08ce636485ab",
+      "name": "Toda segunda, 7h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 180) + 1 }}",
+        "unit": "minutes"
+      },
+      "id": "ad7cd81e-bbca-429c-8712-948f22e76291",
+      "name": "Espera aleatória (até 3h)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        0
+      ],
+      "webhookId": "481f4b3e-42ca-4bca-ae6d-ab67038f0402"
+    },
+    {
+      "parameters": {
+        "url": "https://api2.unipile.com:13224/api/v1/users/relations",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "account_id",
+              "value": "zdo39fpWTRSOpVoU6WUDMg"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            }
+          ]
+        },
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "name": "cursor",
+                    "value": "={{ $response.body.cursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.cursor || !($response.body.items || []).length }}",
+              "limitPagesFetched": true,
+              "requestInterval": 4000
+            }
+          }
+        }
+      },
+      "id": "aca98bca-fd3a-43b5-a3a1-a6520aa3c2b8",
+      "name": "Unipile - Lista conexões do Monteiro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        96
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpHeaderAuth": "***REMOVIDO***"
+      }
+    },
+    {
+      "parameters": {},
+      "id": "6117d264-9d28-40a8-884b-740ab5c9ad18",
+      "name": "Sincronizar agora",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cada item é uma página devolvida pela Unipile. Junta todos os perfis num mapa identificador -> id do LinkedIn.\nconst norm = (s) => { let v = String(s || '').trim().replace(/\\/+$/, ''); try { v = decodeURIComponent(v); } catch (e) {} return v.toLowerCase(); };\nconst mapa = {};\nfor (const page of $input.all()) {\n  for (const r of (page.json.items || [])) {\n    const id = norm(r.public_identifier || (String(r.public_profile_url || '').match(/\\/in\\/([^\\/?#]+)/i) || [])[1]);\n    if (!id) continue;\n    const pid = String(r.provider_id || r.member_id || '');\n    mapa[id] = pid.startsWith('ACo') ? pid : '';\n  }\n}\nreturn [{ json: { total_conexoes: Object.keys(mapa).length, mapa } }];"
+      },
+      "id": "04a4e7f0-f7f9-4b37-974a-70ba16e11cd0",
+      "name": "Junta as conexões",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Só quem ainda não foi verificado (ou deu erro). Convidados/conectados ficam com o fluxo de aceite.\nselect id::text as id, linkedin_url\n  from public.leads_tributario\n where coalesce(linkedin_url, '') <> ''\n   and (linkedin_status is null or linkedin_status = 'erro');",
+        "options": {}
+      },
+      "id": "c868a27b-e1f9-4d91-9e59-677b1e2978de",
+      "name": "Leads com LinkedIn ainda sem status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        896,
+        96
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const { mapa, total_conexoes } = $('Junta as conexões').first().json;\nconst norm = (s) => { let v = String(s || '').trim().replace(/\\/+$/, ''); try { v = decodeURIComponent(v); } catch (e) {} return v.toLowerCase(); };\nconst achados = [];\nlet verificados = 0;\nfor (const item of $input.all()) {\n  const url = String(item.json.linkedin_url || '');\n  const m = url.match(/linkedin\\.com\\/in\\/([^\\/?#\\s]+)/i);\n  if (!m) continue;\n  verificados++;\n  const slug = norm(m[1]);\n  if (Object.prototype.hasOwnProperty.call(mapa, slug)) achados.push({ id: item.json.id, provider_id: mapa[slug] || '' });\n}\nreturn [{ json: { total_conexoes, leads_verificados: verificados, ja_conectados: achados.length, achados: JSON.stringify(achados) } }];"
+      },
+      "id": "081d20af-9976-49ba-a125-a2d3f8f388da",
+      "name": "Cruza base x conexões",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with upd as (\n  update public.leads_tributario l\n     set linkedin_status      = 'ja_conectado',\n         linkedin_provider_id = coalesce(nullif(x.provider_id, ''), l.linkedin_provider_id),\n         linkedin_erro        = null\n    from json_to_recordset($1::json) as x(id text, provider_id text)\n   where l.id::text = x.id\n     and (l.linkedin_status is null or l.linkedin_status = 'erro')\n  returning 1\n)\nselect count(*) as marcados_agora from upd;",
+        "options": {
+          "queryReplacement": "={{ [$json.achados] }}"
+        }
+      },
+      "id": "e8303ceb-c238-4582-ad63-793057095904",
+      "name": "Marca quem já é conexão",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1344,
+        96
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "### Sincroniza as conexões do Monteiro\nPuxa pela Unipile a lista de conexões do LinkedIn do Monteiro e marca como **já era conexão** os contatos da base que estão nela.\nSó mexe em quem ainda não tem status (ou deu erro). Quem recebeu convite fica com o fluxo de aceite, que manda a mensagem.\nRoda toda segunda com atraso aleatório de até 3h; páginas espaçadas de 4s.",
+        "color": 4
+      },
+      "id": "a5d7bd75-29c5-4d21-8b0b-29b88baeee2f",
+      "name": "Sticky Note 566194eb",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        608,
+        192
+      ]
+    }
+  ],
+  "connections": {
+    "Toda segunda, 7h": {
+      "main": [
+        [
+          {
+            "node": "Espera aleatória (até 3h)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Espera aleatória (até 3h)": {
+      "main": [
+        [
+          {
+            "node": "Unipile - Lista conexões do Monteiro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unipile - Lista conexões do Monteiro": {
+      "main": [
+        [
+          {
+            "node": "Junta as conexões",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sincronizar agora": {
+      "main": [
+        [
+          {
+            "node": "Unipile - Lista conexões do Monteiro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Junta as conexões": {
+      "main": [
+        [
+          {
+            "node": "Leads com LinkedIn ainda sem status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leads com LinkedIn ainda sem status": {
+      "main": [
+        [
+          {
+            "node": "Cruza base x conexões",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cruza base x conexões": {
+      "main": [
+        [
+          {
+            "node": "Marca quem já é conexão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "node:Toda segunda, 7h": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "10177227-47a5-4911-9b46-3f85697e48cb",
+  "activeVersionId": "77e6b92c-7461-43d4-8695-5fffd7360919",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "CCKuacUstGBxl7Bw",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-28T13:40:16.237Z",
+      "updatedAt": "2026-10-28T13:40:16.237Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "77e6b92c-7461-43d4-8695-5fffd7360919",
+    "workflowId": "CCKuacUstGBxl7Bw",
+    "nodes": [
+      {
+        "id": "c0960b5c-a8d8-4d80-b9c9-08ce636485ab",
+        "name": "Toda segunda, 7h",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 7 * * 1"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "ad7cd81e-bbca-429c-8712-948f22e76291",
+        "name": "Espera aleatória (até 3h)",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          224,
+          0
+        ],
+        "parameters": {
+          "resume": "timeInterval",
+          "amount": "={{ Math.floor(Math.random() * 180) + 1 }}",
+          "unit": "minutes"
+        },
+        "webhookId": "481f4b3e-42ca-4bca-ae6d-ab67038f0402"
+      },
+      {
+        "id": "aca98bca-fd3a-43b5-a3a1-a6520aa3c2b8",
+        "name": "Unipile - Lista conexões do Monteiro",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          448,
+          96
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "https://api2.unipile.com:13224/api/v1/users/relations",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "account_id",
+                "value": "zdo39fpWTRSOpVoU6WUDMg"
+              },
+              {
+                "name": "limit",
+                "value": "100"
+              }
+            ]
+          },
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "pagination": {
+              "pagination": {
+                "paginationMode": "updateAParameterInEachRequest",
+                "parameters": {
+                  "parameters": [
+                    {
+                      "type": "qs",
+                      "name": "cursor",
+                      "value": "={{ $response.body.cursor }}"
+                    }
+                  ]
+                },
+                "paginationCompleteWhen": "other",
+                "completeExpression": "={{ !$response.body.cursor || !($response.body.items || []).length }}",
+                "limitPagesFetched": true,
+                "maxRequests": 100,
+                "requestInterval": 4000
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": "***REMOVIDO***"
+        },
+        "executeOnce": true
+      },
+      {
+        "id": "6117d264-9d28-40a8-884b-740ab5c9ad18",
+        "name": "Sincronizar agora",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          224,
+          192
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "04a4e7f0-f7f9-4b37-974a-70ba16e11cd0",
+        "name": "Junta as conexões",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          672,
+          96
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "// Cada item é uma página devolvida pela Unipile. Junta todos os perfis num mapa identificador -> id do LinkedIn.\nconst norm = (s) => { let v = String(s || '').trim().replace(/\\/+$/, ''); try { v = decodeURIComponent(v); } catch (e) {} return v.toLowerCase(); };\nconst mapa = {};\nfor (const page of $input.all()) {\n  for (const r of (page.json.items || [])) {\n    const id = norm(r.public_identifier || (String(r.public_profile_url || '').match(/\\/in\\/([^\\/?#]+)/i) || [])[1]);\n    if (!id) continue;\n    const pid = String(r.provider_id || r.member_id || '');\n    mapa[id] = pid.startsWith('ACo') ? pid : '';\n  }\n}\nreturn [{ json: { total_conexoes: Object.keys(mapa).length, mapa } }];"
+        }
+      },
+      {
+        "id": "c868a27b-e1f9-4d91-9e59-677b1e2978de",
+        "name": "Leads com LinkedIn ainda sem status",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          896,
+          96
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- Só quem ainda não foi verificado (ou deu erro). Convidados/conectados ficam com o fluxo de aceite.\nselect id::text as id, linkedin_url\n  from public.leads_tributario\n where coalesce(linkedin_url, '') <> ''\n   and (linkedin_status is null or linkedin_status = 'erro');",
+          "options": {}
+        },
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        },
+        "executeOnce": true
+      },
+      {
+        "id": "081d20af-9976-49ba-a125-a2d3f8f388da",
+        "name": "Cruza base x conexões",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1120,
+          96
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const { mapa, total_conexoes } = $('Junta as conexões').first().json;\nconst norm = (s) => { let v = String(s || '').trim().replace(/\\/+$/, ''); try { v = decodeURIComponent(v); } catch (e) {} return v.toLowerCase(); };\nconst achados = [];\nlet verificados = 0;\nfor (const item of $input.all()) {\n  const url = String(item.json.linkedin_url || '');\n  const m = url.match(/linkedin\\.com\\/in\\/([^\\/?#\\s]+)/i);\n  if (!m) continue;\n  verificados++;\n  const slug = norm(m[1]);\n  if (Object.prototype.hasOwnProperty.call(mapa, slug)) achados.push({ id: item.json.id, provider_id: mapa[slug] || '' });\n}\nreturn [{ json: { total_conexoes, leads_verificados: verificados, ja_conectados: achados.length, achados: JSON.stringify(achados) } }];"
+        }
+      },
+      {
+        "id": "e8303ceb-c238-4582-ad63-793057095904",
+        "name": "Marca quem já é conexão",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.6,
+        "position": [
+          1344,
+          96
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "with upd as (\n  update public.leads_tributario l\n     set linkedin_status      = 'ja_conectado',\n         linkedin_provider_id = coalesce(nullif(x.provider_id, ''), l.linkedin_provider_id),\n         linkedin_erro        = null\n    from json_to_recordset($1::json) as x(id text, provider_id text)\n   where l.id::text = x.id\n     and (l.linkedin_status is null or l.linkedin_status = 'erro')\n  returning 1\n)\nselect count(*) as marcados_agora from upd;",
+          "options": {
+            "queryReplacement": "={{ [$json.achados] }}"
+          }
+        },
+        "credentials": {
+          "postgres": {
+            "id": "Hr0gqOEXHC8efR0Q",
+            "name": "Monteiro - Postgres"
+          }
+        }
+      },
+      {
+        "id": "a5d7bd75-29c5-4d21-8b0b-29b88baeee2f",
+        "name": "Sticky Note 566194eb",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          608,
+          192
+        ],
+        "parameters": {
+          "content": "### Sincroniza as conexões do Monteiro\nPuxa pela Unipile a lista de conexões do LinkedIn do Monteiro e marca como **já era conexão** os contatos da base que estão nela.\nSó mexe em quem ainda não tem status (ou deu erro). Quem recebeu convite fica com o fluxo de aceite, que manda a mensagem.\nRoda toda segunda com atraso aleatório de até 3h; páginas espaçadas de 4s.",
+          "color": 4
+        }
+      }
+    ],
+    "connections": {
+      "Toda segunda, 7h": {
+        "main": [
+          [
+            {
+              "node": "Espera aleatória (até 3h)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Espera aleatória (até 3h)": {
+        "main": [
+          [
+            {
+              "node": "Unipile - Lista conexões do Monteiro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Unipile - Lista conexões do Monteiro": {
+        "main": [
+          [
+            {
+              "node": "Junta as conexões",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sincronizar agora": {
+        "main": [
+          [
+            {
+              "node": "Unipile - Lista conexões do Monteiro",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Junta as conexões": {
+        "main": [
+          [
+            {
+              "node": "Leads com LinkedIn ainda sem status",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Leads com LinkedIn ainda sem status": {
+        "main": [
+          [
+            {
+              "node": "Cruza base x conexões",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cruza base x conexões": {
+        "main": [
+          [
+            {
+              "node": "Marca quem já é conexão",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Sincronização semanal de conexões",
+    "description": "Created with 9 nodes: Toda segunda, 7h, Espera aleatória (até 3h), Unipile - Lista conexões do Monteiro, Sincronizar agora, Junta as conexões and 4 more",
+    "autosaved": false,
+    "createdAt": "2026-10-28T13:40:16.237Z",
+    "updatedAt": "2026-10-28T13:40:16.237Z"
+  },
+  "tags": []
+}
