@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-26T16:12:32.830Z",
+  "updatedAt": "2026-10-29T17:04:52.564Z",
   "createdAt": "2026-05-18T20:37:31.672Z",
   "id": "5ovAOsUiOu36EjOn",
   "name": "Monteiro Ramalho - 2.2 - Criar Notificação",
@@ -168,7 +168,7 @@
     {
       "parameters": {
         "operation": "update",
-        "documentURL": "={{ $json.id }}",
+        "documentURL": "={{ $('Copy file').first().json.id }}",
         "actionsUi": {
           "actionFields": [
             {
@@ -243,13 +243,8 @@
             },
             {
               "action": "replaceAll",
-              "replaceText": "={{ $('Organiza os dados').first().json.linha_morador }}",
-              "text": "{{linha_morador}}"
-            },
-            {
-              "action": "replaceAll",
-              "replaceText": "={{ $('Organiza os dados').first().json.trecho_morador }}",
-              "text": "{{trecho_morador}}"
+              "replaceText": "={{ $('Organiza os dados').first().json.nome_morador }}",
+              "text": "{{nome_morador}}"
             }
           ]
         }
@@ -973,16 +968,10 @@
               "value": "={{ $('Gera o texto da infracao').first().json.output.texto_prazo }}"
             },
             {
-              "id": "b7e1c2a4-5d6f-4a8b-9c0d-1e2f3a4b5c61",
-              "name": "linha_morador",
+              "id": "b7e1c2a4-5d6f-4a8b-9c0d-1e2f3a4b5c63",
+              "name": "nome_morador",
               "type": "string",
-              "value": "={{ (() => { let n = ''; try { const b = $('Webhook').first().json.body || {}; n = (b.placeholders && b.placeholders.nome_morador) || b.nome_morador || ''; } catch (e) {} if (!n) { try { n = $('Trata os dados').first().json.nome_morador || ''; } catch (e) {} } n = String(n || '').trim(); return n ? 'Morador(a): ' + n + '\\u000b' : ''; })() }}"
-            },
-            {
-              "id": "b7e1c2a4-5d6f-4a8b-9c0d-1e2f3a4b5c62",
-              "name": "trecho_morador",
-              "type": "string",
-              "value": "={{ (() => { let n = ''; try { const b = $('Webhook').first().json.body || {}; n = (b.placeholders && b.placeholders.nome_morador) || b.nome_morador || ''; } catch (e) {} if (!n) { try { n = $('Trata os dados').first().json.nome_morador || ''; } catch (e) {} } n = String(n || '').trim(); return n ? n + ' - ' : ''; })() }}"
+              "value": "={{ (() => { let n = ''; try { const b = $('Webhook').first().json.body || {}; n = (b.placeholders && b.placeholders.nome_morador) || b.nome_morador || ''; } catch (e) {} if (!n) { try { n = $('Trata os dados').first().json.nome_morador || ''; } catch (e) {} } return String(n || '').trim(); })() }}"
             }
           ]
         },
@@ -1781,20 +1770,112 @@
       "parameters": {
         "jsCode": "// Garante que existe um template configurado para este condomínio (ou o padrão).\n// Sem isso o documento seria gerado sem template e o registro ficaria travado.\nconst id = $input.first().json.google_doc_id;\n\nif (!id) {\n  const condominio = $('Valida dados necessarios').first().json.id_condominio;\n  throw new Error(\n    `Nenhum template de NOTIFICAÇÃO ativo para o condomínio ${condominio} e nenhum template padrão. ` +\n    'Verifique a tabela condominio_templates_documento.'\n  );\n}\n\nreturn $input.all();"
       }
+    },
+    {
+      "id": "f5826af7-1d3f-4c4d-829f-e428b17de5ed",
+      "name": "Lê doc (blocos condicionais)",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        8032,
+        4800
+      ],
+      "parameters": {
+        "documentURL": "={{ $('Copy file').first().json.id }}",
+        "operation": "get",
+        "simple": false
+      },
+      "credentials": {
+        "googleDocsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "id": "309966a3-353b-4929-9a31-0d31f032f1fc",
+      "name": "Calcula blocos condicionais",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8240,
+        4800
+      ],
+      "parameters": {
+        "jsCode": "// Blocos condicionais nos templates: {{#campo}} ... {{/campo}}\n// - campo vazio      -> remove o bloco inteiro (rótulo/formatação incluídos)\n// - campo preenchido -> remove só as marcações; o conteúdo fica e {{campo}} é substituído depois\n// O valor do campo vem do node \"Organiza os dados\" (ex.: nome_morador).\n\nconst doc = $input.first().json;\nconst docId = doc.documentId || $('Copy file').first().json.id;\nconst dados = $('Organiza os dados').first().json;\n\nconst chars = []; // { c, idx, para }\nconst paras = []; // { start, end, isLast }\n\nfunction walk(content) {\n  const ids = [];\n  for (const item of content || []) {\n    if (item.paragraph) {\n      const pid = paras.length;\n      paras.push({ start: item.startIndex, end: item.endIndex, isLast: false });\n      ids.push(pid);\n      for (const el of item.paragraph.elements || []) {\n        const txt = el.textRun ? el.textRun.content : null;\n        if (typeof txt === 'string') {\n          for (let i = 0; i < txt.length; i++) {\n            chars.push({ c: txt[i], idx: el.startIndex + i, para: pid });\n          }\n        } else {\n          // elemento sem texto (imagem, quebra etc.): ocupa índice, não entra na busca\n          chars.push({ c: '\\u0000', idx: el.startIndex, para: pid });\n        }\n      }\n    } else if (item.table) {\n      for (const row of item.table.tableRows || []) {\n        for (const cell of row.tableCells || []) walk(cell.content);\n      }\n    } else if (item.tableOfContents) {\n      walk(item.tableOfContents.content);\n    }\n  }\n  if (ids.length) paras[ids[ids.length - 1]].isLast = true;\n}\n\nwalk((doc.body && doc.body.content) || []);\n\nconst text = chars.map(x => x.c).join('');\nconst re = /\\{\\{#([A-Za-z0-9_]+)\\}\\}([\\s\\S]*?)\\{\\{\\/\\1\\}\\}/g;\nconst ranges = [];\nconst blocos = [];\nlet m;\n\nwhile ((m = re.exec(text)) !== null) {\n  const campo = m[1];\n  const s = m.index;\n  const e = s + m[0].length; // exclusivo\n  const valor = dados[campo];\n  const vazio = valor === undefined || valor === null || String(valor).trim() === '';\n\n  if (vazio) {\n    let start = chars[s].idx;\n    let end = chars[e - 1].idx + 1;\n    const p = chars[s].para;\n    // Se o bloco ocupa o parágrafo inteiro, apaga também a quebra de parágrafo\n    // (exceto no último parágrafo de célula/corpo, que o Docs não permite apagar)\n    if (p === chars[e - 1].para && start === paras[p].start && end === paras[p].end - 1 && !paras[p].isLast) {\n      end = paras[p].end;\n    }\n    ranges.push({ startIndex: start, endIndex: end });\n  } else {\n    const abre = ('{{#' + campo + '}}').length;\n    const fecha = ('{{/' + campo + '}}').length;\n    ranges.push({ startIndex: chars[s].idx, endIndex: chars[s + abre - 1].idx + 1 });\n    ranges.push({ startIndex: chars[e - fecha].idx, endIndex: chars[e - 1].idx + 1 });\n  }\n  blocos.push({ campo, acao: vazio ? 'removido' : 'mantido' });\n}\n\n// Do fim para o início, para os índices continuarem válidos\nranges.sort((a, b) => b.startIndex - a.startIndex);\n\nconst requests = ranges.map(r => ({ deleteContentRange: { range: r } }));\n\nreturn [{ json: { documentId: docId, requests, total: requests.length, blocos }, pairedItem: { item: 0 } }];"
+      }
+    },
+    {
+      "id": "635e40b9-753a-493a-b68b-9e4ca7294f33",
+      "name": "Tem blocos condicionais?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        8448,
+        4800
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "9a1f3c2e-7b4d-4e8a-9c1d-2f3e4a5b6c71",
+              "leftValue": "={{ $json.total }}",
+              "operator": {
+                "operation": "gt",
+                "type": "number"
+              },
+              "rightValue": 0
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3d4ab9f4-a5db-44b2-8ea1-2684d7dede68",
+      "name": "Aplica blocos condicionais",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8656,
+        4720
+      ],
+      "parameters": {
+        "authentication": "***REMOVIDO***",
+        "jsonBody": "={{ JSON.stringify({ requests: $json.requests }) }}",
+        "method": "POST",
+        "nodeCredentialType": "googleDocsOAuth2Api",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "=https://docs.googleapis.com/v1/documents/{{ $json.documentId }}:batchUpdate"
+      },
+      "credentials": {
+        "googleDocsOAuth2Api": "***REMOVIDO***"
+      }
+    },
+    {
+      "id": "d7a03c76-e865-4b4a-b3dd-24c79f20789c",
+      "name": "Sticky Note blocos",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        7952,
+        4640
+      ],
+      "parameters": {
+        "color": 6,
+        "content": "## Blocos condicionais do template\n{{#campo}} ... {{/campo}}: campo vazio remove o bloco inteiro; preenchido remove só as marcações.",
+        "height": 320,
+        "width": 880
+      }
     }
   ],
   "connections": {
-    "Copy file": {
-      "main": [
-        [
-          {
-            "node": "Substitui os placeholders por dados",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Define Fundamento": {
       "main": [
         [
@@ -2477,6 +2558,68 @@
           }
         ]
       ]
+    },
+    "Copy file": {
+      "main": [
+        [
+          {
+            "node": "Lê doc (blocos condicionais)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lê doc (blocos condicionais)": {
+      "main": [
+        [
+          {
+            "node": "Calcula blocos condicionais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcula blocos condicionais": {
+      "main": [
+        [
+          {
+            "node": "Tem blocos condicionais?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem blocos condicionais?": {
+      "main": [
+        [
+          {
+            "node": "Aplica blocos condicionais",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Substitui os placeholders por dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplica blocos condicionais": {
+      "main": [
+        [
+          {
+            "node": "Substitui os placeholders por dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -2497,8 +2640,8 @@
     "aiBuilderAssisted": true,
     "builderVariant": "mcp"
   },
-  "versionId": "e13002ec-250f-4015-a481-4c830c9d7b71",
-  "activeVersionId": "e13002ec-250f-4015-a481-4c830c9d7b71",
+  "versionId": "18cb0ef6-1a73-4c59-9e9c-2a6af99f0989",
+  "activeVersionId": "18cb0ef6-1a73-4c59-9e9c-2a6af99f0989",
   "triggerCount": 1,
   "shared": [
     {
@@ -2510,7 +2653,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "e13002ec-250f-4015-a481-4c830c9d7b71",
+    "versionId": "18cb0ef6-1a73-4c59-9e9c-2a6af99f0989",
     "workflowId": "5ovAOsUiOu36EjOn",
     "nodes": [
       {
@@ -2675,7 +2818,7 @@
       {
         "parameters": {
           "operation": "update",
-          "documentURL": "={{ $json.id }}",
+          "documentURL": "={{ $('Copy file').first().json.id }}",
           "actionsUi": {
             "actionFields": [
               {
@@ -2750,13 +2893,8 @@
               },
               {
                 "action": "replaceAll",
-                "replaceText": "={{ $('Organiza os dados').first().json.linha_morador }}",
-                "text": "{{linha_morador}}"
-              },
-              {
-                "action": "replaceAll",
-                "replaceText": "={{ $('Organiza os dados').first().json.trecho_morador }}",
-                "text": "{{trecho_morador}}"
+                "replaceText": "={{ $('Organiza os dados').first().json.nome_morador }}",
+                "text": "{{nome_morador}}"
               }
             ]
           }
@@ -3480,16 +3618,10 @@
                 "value": "={{ $('Gera o texto da infracao').first().json.output.texto_prazo }}"
               },
               {
-                "id": "b7e1c2a4-5d6f-4a8b-9c0d-1e2f3a4b5c61",
-                "name": "linha_morador",
+                "id": "b7e1c2a4-5d6f-4a8b-9c0d-1e2f3a4b5c63",
+                "name": "nome_morador",
                 "type": "string",
-                "value": "={{ (() => { let n = ''; try { const b = $('Webhook').first().json.body || {}; n = (b.placeholders && b.placeholders.nome_morador) || b.nome_morador || ''; } catch (e) {} if (!n) { try { n = $('Trata os dados').first().json.nome_morador || ''; } catch (e) {} } n = String(n || '').trim(); return n ? 'Morador(a): ' + n + '\\u000b' : ''; })() }}"
-              },
-              {
-                "id": "b7e1c2a4-5d6f-4a8b-9c0d-1e2f3a4b5c62",
-                "name": "trecho_morador",
-                "type": "string",
-                "value": "={{ (() => { let n = ''; try { const b = $('Webhook').first().json.body || {}; n = (b.placeholders && b.placeholders.nome_morador) || b.nome_morador || ''; } catch (e) {} if (!n) { try { n = $('Trata os dados').first().json.nome_morador || ''; } catch (e) {} } n = String(n || '').trim(); return n ? n + ' - ' : ''; })() }}"
+                "value": "={{ (() => { let n = ''; try { const b = $('Webhook').first().json.body || {}; n = (b.placeholders && b.placeholders.nome_morador) || b.nome_morador || ''; } catch (e) {} if (!n) { try { n = $('Trata os dados').first().json.nome_morador || ''; } catch (e) {} } return String(n || '').trim(); })() }}"
               }
             ]
           },
@@ -4288,20 +4420,112 @@
         "parameters": {
           "jsCode": "// Garante que existe um template configurado para este condomínio (ou o padrão).\n// Sem isso o documento seria gerado sem template e o registro ficaria travado.\nconst id = $input.first().json.google_doc_id;\n\nif (!id) {\n  const condominio = $('Valida dados necessarios').first().json.id_condominio;\n  throw new Error(\n    `Nenhum template de NOTIFICAÇÃO ativo para o condomínio ${condominio} e nenhum template padrão. ` +\n    'Verifique a tabela condominio_templates_documento.'\n  );\n}\n\nreturn $input.all();"
         }
+      },
+      {
+        "id": "f5826af7-1d3f-4c4d-829f-e428b17de5ed",
+        "name": "Lê doc (blocos condicionais)",
+        "type": "n8n-nodes-base.googleDocs",
+        "typeVersion": 2,
+        "position": [
+          8032,
+          4800
+        ],
+        "parameters": {
+          "documentURL": "={{ $('Copy file').first().json.id }}",
+          "operation": "get",
+          "simple": false
+        },
+        "credentials": {
+          "googleDocsOAuth2Api": "***REMOVIDO***"
+        }
+      },
+      {
+        "id": "309966a3-353b-4929-9a31-0d31f032f1fc",
+        "name": "Calcula blocos condicionais",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          8240,
+          4800
+        ],
+        "parameters": {
+          "jsCode": "// Blocos condicionais nos templates: {{#campo}} ... {{/campo}}\n// - campo vazio      -> remove o bloco inteiro (rótulo/formatação incluídos)\n// - campo preenchido -> remove só as marcações; o conteúdo fica e {{campo}} é substituído depois\n// O valor do campo vem do node \"Organiza os dados\" (ex.: nome_morador).\n\nconst doc = $input.first().json;\nconst docId = doc.documentId || $('Copy file').first().json.id;\nconst dados = $('Organiza os dados').first().json;\n\nconst chars = []; // { c, idx, para }\nconst paras = []; // { start, end, isLast }\n\nfunction walk(content) {\n  const ids = [];\n  for (const item of content || []) {\n    if (item.paragraph) {\n      const pid = paras.length;\n      paras.push({ start: item.startIndex, end: item.endIndex, isLast: false });\n      ids.push(pid);\n      for (const el of item.paragraph.elements || []) {\n        const txt = el.textRun ? el.textRun.content : null;\n        if (typeof txt === 'string') {\n          for (let i = 0; i < txt.length; i++) {\n            chars.push({ c: txt[i], idx: el.startIndex + i, para: pid });\n          }\n        } else {\n          // elemento sem texto (imagem, quebra etc.): ocupa índice, não entra na busca\n          chars.push({ c: '\\u0000', idx: el.startIndex, para: pid });\n        }\n      }\n    } else if (item.table) {\n      for (const row of item.table.tableRows || []) {\n        for (const cell of row.tableCells || []) walk(cell.content);\n      }\n    } else if (item.tableOfContents) {\n      walk(item.tableOfContents.content);\n    }\n  }\n  if (ids.length) paras[ids[ids.length - 1]].isLast = true;\n}\n\nwalk((doc.body && doc.body.content) || []);\n\nconst text = chars.map(x => x.c).join('');\nconst re = /\\{\\{#([A-Za-z0-9_]+)\\}\\}([\\s\\S]*?)\\{\\{\\/\\1\\}\\}/g;\nconst ranges = [];\nconst blocos = [];\nlet m;\n\nwhile ((m = re.exec(text)) !== null) {\n  const campo = m[1];\n  const s = m.index;\n  const e = s + m[0].length; // exclusivo\n  const valor = dados[campo];\n  const vazio = valor === undefined || valor === null || String(valor).trim() === '';\n\n  if (vazio) {\n    let start = chars[s].idx;\n    let end = chars[e - 1].idx + 1;\n    const p = chars[s].para;\n    // Se o bloco ocupa o parágrafo inteiro, apaga também a quebra de parágrafo\n    // (exceto no último parágrafo de célula/corpo, que o Docs não permite apagar)\n    if (p === chars[e - 1].para && start === paras[p].start && end === paras[p].end - 1 && !paras[p].isLast) {\n      end = paras[p].end;\n    }\n    ranges.push({ startIndex: start, endIndex: end });\n  } else {\n    const abre = ('{{#' + campo + '}}').length;\n    const fecha = ('{{/' + campo + '}}').length;\n    ranges.push({ startIndex: chars[s].idx, endIndex: chars[s + abre - 1].idx + 1 });\n    ranges.push({ startIndex: chars[e - fecha].idx, endIndex: chars[e - 1].idx + 1 });\n  }\n  blocos.push({ campo, acao: vazio ? 'removido' : 'mantido' });\n}\n\n// Do fim para o início, para os índices continuarem válidos\nranges.sort((a, b) => b.startIndex - a.startIndex);\n\nconst requests = ranges.map(r => ({ deleteContentRange: { range: r } }));\n\nreturn [{ json: { documentId: docId, requests, total: requests.length, blocos }, pairedItem: { item: 0 } }];"
+        }
+      },
+      {
+        "id": "635e40b9-753a-493a-b68b-9e4ca7294f33",
+        "name": "Tem blocos condicionais?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          8448,
+          4800
+        ],
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "9a1f3c2e-7b4d-4e8a-9c1d-2f3e4a5b6c71",
+                "leftValue": "={{ $json.total }}",
+                "operator": {
+                  "operation": "gt",
+                  "type": "number"
+                },
+                "rightValue": 0
+              }
+            ],
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            }
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "3d4ab9f4-a5db-44b2-8ea1-2684d7dede68",
+        "name": "Aplica blocos condicionais",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          8656,
+          4720
+        ],
+        "parameters": {
+          "authentication": "***REMOVIDO***",
+          "jsonBody": "={{ JSON.stringify({ requests: $json.requests }) }}",
+          "method": "POST",
+          "nodeCredentialType": "googleDocsOAuth2Api",
+          "options": {},
+          "sendBody": true,
+          "specifyBody": "json",
+          "url": "=https://docs.googleapis.com/v1/documents/{{ $json.documentId }}:batchUpdate"
+        },
+        "credentials": {
+          "googleDocsOAuth2Api": "***REMOVIDO***"
+        }
+      },
+      {
+        "id": "d7a03c76-e865-4b4a-b3dd-24c79f20789c",
+        "name": "Sticky Note blocos",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          7952,
+          4640
+        ],
+        "parameters": {
+          "color": 6,
+          "content": "## Blocos condicionais do template\n{{#campo}} ... {{/campo}}: campo vazio remove o bloco inteiro; preenchido remove só as marcações.",
+          "height": 320,
+          "width": 880
+        }
       }
     ],
     "connections": {
-      "Copy file": {
-        "main": [
-          [
-            {
-              "node": "Substitui os placeholders por dados",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "Define Fundamento": {
         "main": [
           [
@@ -4984,15 +5208,77 @@
             }
           ]
         ]
+      },
+      "Copy file": {
+        "main": [
+          [
+            {
+              "node": "Lê doc (blocos condicionais)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Lê doc (blocos condicionais)": {
+        "main": [
+          [
+            {
+              "node": "Calcula blocos condicionais",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Calcula blocos condicionais": {
+        "main": [
+          [
+            {
+              "node": "Tem blocos condicionais?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tem blocos condicionais?": {
+        "main": [
+          [
+            {
+              "node": "Aplica blocos condicionais",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Substitui os placeholders por dados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Aplica blocos condicionais": {
+        "main": [
+          [
+            {
+              "node": "Substitui os placeholders por dados",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Guarda de template em node Code",
-    "description": "A guarda via throw dentro de expressão não interrompia o workflow (id_template saía null). Substituída pelo node Code \"Valida template\" entre \"Busca template\" e \"Busca Fundamentação\", que lança erro de verdade.",
+    "name": "Remove linha_morador e trecho_morador",
+    "description": "Templates migrados para {{#nome_morador}}...{{/nome_morador}}; linha_morador e trecho_morador removidas.",
     "autosaved": false,
-    "createdAt": "2026-10-26T16:12:32.920Z",
-    "updatedAt": "2026-10-26T16:12:32.920Z"
+    "createdAt": "2026-10-29T17:04:52.629Z",
+    "updatedAt": "2026-10-29T17:04:52.629Z"
   },
   "tags": []
 }
