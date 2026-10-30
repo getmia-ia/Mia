@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-27T14:19:00.519Z",
+  "updatedAt": "2026-10-29T17:46:21.831Z",
   "createdAt": "2026-03-06T15:47:28.821Z",
   "id": "b2EBHryv7dRFa9eH",
   "name": "Eleva - 1.01 - Agente de Consulta e Lancamentos",
@@ -1004,8 +1004,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -656,
-        -2560
+        -400,
+        -2704
       ],
       "id": "d3b0423a-236b-4944-8b4c-55aa158333aa",
       "name": "Saida do Agente"
@@ -3739,9 +3739,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1056,
-        -2704
+        -736,
+        -3072
       ],
+      "disabled": true,
       "notes": "Impede a IA de dizer 'lancei/alterei' quando a ferramenta não rodou de verdade (checa intermediateSteps). Se mentiu, troca a mensagem por um aviso honesto e marca lancamento_nao_confirmado=true."
     },
     {
@@ -3792,6 +3793,68 @@
       "position": [
         -1136,
         -2160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Monta o material que o guardrail de IA vai analisar: o texto final da\n// resposta do agente + um resumo de quais ferramentas de lançamento/edição\n// rodaram nesta rodada e se tiveram sucesso de verdade.\n//\n// Essa parte (achar se a ferramenta teve sucesso) continua sendo feita por\n// código, não por IA - é só checar um campo no retorno estruturado da\n// ferramenta, não precisa de interpretação de linguagem natural, então\n// código é mais rápido, mais barato e 100% confiável pra isso.\n//\n// O que MUDA pro guardrail antigo: entender se o TEXTO em português afirma\n// que o lançamento foi feito - isso sim precisa de interpretação de\n// linguagem, e é a parte que vai pro modelo de IA (node seguinte), em vez\n// de depender de uma lista fixa de palavras-chave com regex.\n\nfunction comoTexto(valor) {\n  return valor === undefined || valor === null ? '' : String(valor);\n}\n\nconst item = $input.all()[0];\nconst saida = item.json;\nconst texto = comoTexto(saida.output);\nconst passos = Array.isArray(saida.intermediateSteps) ? saida.intermediateSteps : [];\n\nconst nomeDaFerramenta = (p) => comoTexto(p && p.action && p.action.tool);\nconst retornoDaFerramenta = (p) => comoTexto(p && p.observation);\n\nconst chamadasLancamento = passos.filter(p => nomeDaFerramenta(p) === 'lancamento_whatsapp');\nconst chamadasEdicao = passos.filter(p => nomeDaFerramenta(p) === 'editar_lancamento');\n\nconst lancouDeVerdade = chamadasLancamento.some(p =>\n  /lancamento_id\\W{1,4}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(retornoDaFerramenta(p)));\n\nconst editouDeVerdade = chamadasEdicao.some(p =>\n  /editado\\W{1,4}true/i.test(retornoDaFerramenta(p)));\n\nlet resumoFerramentas;\nif (chamadasLancamento.length === 0 && chamadasEdicao.length === 0) {\n  resumoFerramentas = 'Nenhuma ferramenta de lançamento (lancamento_whatsapp) ou edição (editar_lancamento) foi chamada nesta rodada.';\n} else {\n  const linhas = [];\n  if (chamadasLancamento.length > 0) {\n    linhas.push(`lancamento_whatsapp foi chamada ${chamadasLancamento.length}x nesta rodada - ${lancouDeVerdade ? 'PELO MENOS UMA retornou sucesso (lancamento_id presente)' : 'NENHUMA retornou sucesso (sem lancamento_id no retorno)'}.`);\n  }\n  if (chamadasEdicao.length > 0) {\n    linhas.push(`editar_lancamento foi chamada ${chamadasEdicao.length}x nesta rodada - ${editouDeVerdade ? 'PELO MENOS UMA retornou sucesso (editado: true)' : 'NENHUMA retornou sucesso (sem editado: true no retorno)'}.`);\n  }\n  resumoFerramentas = linhas.join(' ');\n}\n\nreturn [{\n  json: {\n    ...saida,\n    _guardrail_texto: texto,\n    _guardrail_resumo_ferramentas: resumoFerramentas,\n    _guardrail_tool_confirmou: lancouDeVerdade || editouDeVerdade\n  }\n}];"
+      },
+      "id": "a6859b5a-5da2-4228-adf7-c5b47a2932a8",
+      "name": "Prepara Guardrail de Lançamento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        -2704
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Você é um verificador técnico e objetivo. Sua única tarefa é decidir se o TEXTO abaixo afirma, de qualquer forma, que um lançamento financeiro ou uma edição de lançamento foi concluído com sucesso.\n\nIsso inclui QUALQUER forma de dar a entender que a ação já foi feita - não só palavras como \"lancei\" ou \"registrei\". Conta também: \"separei esse valor\", \"já está no sistema\", \"pronto, ficou R$ X\", \"anotei como gasto\", \"corrigi pra você\", \"tá feito\", ou qualquer frase que leve o cliente a acreditar que o lançamento ou a edição já existe de verdade.\n\nNÃO conta como afirmação de sucesso:\n- Frases no passado distante, dúvida ou negação (\"não lancei\", \"já tinha lançado antes\", \"ainda não consegui registrar\", \"não tenho certeza se salvou\").\n- Perguntas, pedidos de mais informação, ou texto sobre outro assunto (ex: resposta de uma consulta de gastos, análise de período, explicação sobre categorias) - isso não é uma afirmação de lançamento.\n\nTEXTO A ANALISAR:\n\"\"\"\n{{ $json._guardrail_texto }}\n\"\"\"\n\nO QUE REALMENTE ACONTECEU NESTA RODADA (apurado por código, não pelo texto acima - use isso só como contexto, sua resposta deve ser sobre o que o TEXTO afirma, não sobre isso):\n{{ $json._guardrail_resumo_ferramentas }}\n\nResponda SOMENTE um JSON válido, sem nenhum texto antes ou depois, sem markdown, exatamente neste formato:\n{\"afirma_sucesso\": true}\nou\n{\"afirma_sucesso\": false}"
+      },
+      "id": "fa5c76b3-b631-4ecf-bfee-8ef0396a6d3f",
+      "name": "Guardrail IA - Verifica Lançamento",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        -912,
+        -2704
+      ]
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-2.5-flash-lite",
+        "options": {
+          "maxTokens": "***REMOVIDO***"
+        }
+      },
+      "id": "957ee95f-96db-4d8b-9e0d-68c319bbe9e3",
+      "name": "Guardrail - Modelo Barato",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -976,
+        -2544
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "OBNjBWmZfco6v8Gx",
+          "name": "OpenRouter - Eleva Agente de IA - Financeiro"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aplica a decisão do guardrail de IA: se ele disse que o texto afirma um\n// lançamento/edição que NÃO foi confirmado de verdade pela ferramenta,\n// troca a resposta por um aviso honesto - exatamente como a trava antiga\n// fazia, só que agora a parte difícil (entender o texto) foi decidida\n// pela IA, não por uma lista fixa de palavras com regex.\n\nconst AVISO = 'Não consegui registrar esse lançamento agora, então ele ainda NÃO foi salvo. Pode me mandar de novo, por favor? (valor, categoria e forma de pagamento)';\n\n// Busca os dados originais (texto completo, resumo de ferramentas) no node\n// anterior pelo nome - não dependemos de o node do LLM preservar os campos\n// extras que preparamos, porque ele normalmente só devolve o texto gerado.\nconst preparado = $('Prepara Guardrail de Lançamento').item.json;\nconst textoOriginal = preparado._guardrail_texto ?? '';\nconst toolConfirmou = preparado._guardrail_tool_confirmou === true;\n\nconst respostaLLM = $input.all()[0].json.text ?? $input.all()[0].json.output ?? '';\n\nlet afirmaSucesso = false;\ntry {\n  const limpo = String(respostaLLM).trim().replace(/^```json\\s*/i, '').replace(/```\\s*$/, '').trim();\n  const parsed = JSON.parse(limpo);\n  afirmaSucesso = parsed.afirma_sucesso === true;\n} catch (e) {\n  // Se o guardrail não devolveu um JSON válido, por segurança tratamos\n  // como \"não afirmou sucesso\" - uma falha do guardrail nunca deve travar\n  // ou distorcer o atendimento ao cliente, só deixamos a resposta passar.\n  afirmaSucesso = false;\n}\n\nconst mentiu = afirmaSucesso && !toolConfirmou;\n\n// Remove os campos internos de preparo antes de devolver pro resto do fluxo.\nconst { _guardrail_texto, _guardrail_resumo_ferramentas, _guardrail_tool_confirmou, ...resto } = preparado;\n\nif (!mentiu) {\n  return [{ json: { ...resto, output: textoOriginal, lancamento_nao_confirmado: false } }];\n}\nreturn [{ json: { ...resto, output: AVISO, output_original_bloqueado: textoOriginal, lancamento_nao_confirmado: true } }];"
+      },
+      "id": "6f2d1b4f-30bb-4a5e-883d-e3f5ae8a4e24",
+      "name": "Aplica Decisão do Guardrail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        -2704
       ]
     }
   ],
@@ -4648,18 +4711,6 @@
         ]
       ]
     },
-    "Eleva - Agente IA": {
-      "main": [
-        [
-          {
-            "node": "Trava - Confirma Lançamento Real",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        []
-      ]
-    },
     "contas_recorrentes": {
       "ai_tool": [
         [
@@ -4737,23 +4788,67 @@
         ]
       ]
     },
-    "Trava - Confirma Lançamento Real": {
-      "main": [
-        [
-          {
-            "node": "Saida do Agente",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "buscar_subcategoria": {
       "ai_tool": [
         [
           {
             "node": "Eleva - Agente IA",
             "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eleva - Agente IA": {
+      "main": [
+        [
+          {
+            "node": "Prepara Guardrail de Lançamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara Guardrail de Lançamento": {
+      "main": [
+        [
+          {
+            "node": "Guardrail IA - Verifica Lançamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardrail - Modelo Barato": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Guardrail IA - Verifica Lançamento",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardrail IA - Verifica Lançamento": {
+      "main": [
+        [
+          {
+            "node": "Aplica Decisão do Guardrail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplica Decisão do Guardrail": {
+      "main": [
+        [
+          {
+            "node": "Saida do Agente",
+            "type": "main",
             "index": 0
           }
         ]
@@ -4779,8 +4874,8 @@
     "aiBuilderAssisted": true,
     "builderVariant": "mcp"
   },
-  "versionId": "2c5a2d73-459c-4cab-8338-6fd1b3e4dd4e",
-  "activeVersionId": "2c5a2d73-459c-4cab-8338-6fd1b3e4dd4e",
+  "versionId": "554f7c79-c631-404d-b913-e39d53593e2c",
+  "activeVersionId": "554f7c79-c631-404d-b913-e39d53593e2c",
   "triggerCount": 1,
   "shared": [
     {
@@ -4792,7 +4887,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "2c5a2d73-459c-4cab-8338-6fd1b3e4dd4e",
+    "versionId": "554f7c79-c631-404d-b913-e39d53593e2c",
     "workflowId": "b2EBHryv7dRFa9eH",
     "nodes": [
       {
@@ -5793,8 +5888,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          -656,
-          -2560
+          -400,
+          -2704
         ],
         "id": "d3b0423a-236b-4944-8b4c-55aa158333aa",
         "name": "Saida do Agente"
@@ -8528,9 +8623,10 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          -1056,
-          -2704
+          -736,
+          -3072
         ],
+        "disabled": true,
         "notes": "Impede a IA de dizer 'lancei/alterei' quando a ferramenta não rodou de verdade (checa intermediateSteps). Se mentiu, troca a mensagem por um aviso honesto e marca lancamento_nao_confirmado=true."
       },
       {
@@ -8581,6 +8677,68 @@
         "position": [
           -1136,
           -2160
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Monta o material que o guardrail de IA vai analisar: o texto final da\n// resposta do agente + um resumo de quais ferramentas de lançamento/edição\n// rodaram nesta rodada e se tiveram sucesso de verdade.\n//\n// Essa parte (achar se a ferramenta teve sucesso) continua sendo feita por\n// código, não por IA - é só checar um campo no retorno estruturado da\n// ferramenta, não precisa de interpretação de linguagem natural, então\n// código é mais rápido, mais barato e 100% confiável pra isso.\n//\n// O que MUDA pro guardrail antigo: entender se o TEXTO em português afirma\n// que o lançamento foi feito - isso sim precisa de interpretação de\n// linguagem, e é a parte que vai pro modelo de IA (node seguinte), em vez\n// de depender de uma lista fixa de palavras-chave com regex.\n\nfunction comoTexto(valor) {\n  return valor === undefined || valor === null ? '' : String(valor);\n}\n\nconst item = $input.all()[0];\nconst saida = item.json;\nconst texto = comoTexto(saida.output);\nconst passos = Array.isArray(saida.intermediateSteps) ? saida.intermediateSteps : [];\n\nconst nomeDaFerramenta = (p) => comoTexto(p && p.action && p.action.tool);\nconst retornoDaFerramenta = (p) => comoTexto(p && p.observation);\n\nconst chamadasLancamento = passos.filter(p => nomeDaFerramenta(p) === 'lancamento_whatsapp');\nconst chamadasEdicao = passos.filter(p => nomeDaFerramenta(p) === 'editar_lancamento');\n\nconst lancouDeVerdade = chamadasLancamento.some(p =>\n  /lancamento_id\\W{1,4}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(retornoDaFerramenta(p)));\n\nconst editouDeVerdade = chamadasEdicao.some(p =>\n  /editado\\W{1,4}true/i.test(retornoDaFerramenta(p)));\n\nlet resumoFerramentas;\nif (chamadasLancamento.length === 0 && chamadasEdicao.length === 0) {\n  resumoFerramentas = 'Nenhuma ferramenta de lançamento (lancamento_whatsapp) ou edição (editar_lancamento) foi chamada nesta rodada.';\n} else {\n  const linhas = [];\n  if (chamadasLancamento.length > 0) {\n    linhas.push(`lancamento_whatsapp foi chamada ${chamadasLancamento.length}x nesta rodada - ${lancouDeVerdade ? 'PELO MENOS UMA retornou sucesso (lancamento_id presente)' : 'NENHUMA retornou sucesso (sem lancamento_id no retorno)'}.`);\n  }\n  if (chamadasEdicao.length > 0) {\n    linhas.push(`editar_lancamento foi chamada ${chamadasEdicao.length}x nesta rodada - ${editouDeVerdade ? 'PELO MENOS UMA retornou sucesso (editado: true)' : 'NENHUMA retornou sucesso (sem editado: true no retorno)'}.`);\n  }\n  resumoFerramentas = linhas.join(' ');\n}\n\nreturn [{\n  json: {\n    ...saida,\n    _guardrail_texto: texto,\n    _guardrail_resumo_ferramentas: resumoFerramentas,\n    _guardrail_tool_confirmou: lancouDeVerdade || editouDeVerdade\n  }\n}];"
+        },
+        "id": "a6859b5a-5da2-4228-adf7-c5b47a2932a8",
+        "name": "Prepara Guardrail de Lançamento",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -1120,
+          -2704
+        ]
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=Você é um verificador técnico e objetivo. Sua única tarefa é decidir se o TEXTO abaixo afirma, de qualquer forma, que um lançamento financeiro ou uma edição de lançamento foi concluído com sucesso.\n\nIsso inclui QUALQUER forma de dar a entender que a ação já foi feita - não só palavras como \"lancei\" ou \"registrei\". Conta também: \"separei esse valor\", \"já está no sistema\", \"pronto, ficou R$ X\", \"anotei como gasto\", \"corrigi pra você\", \"tá feito\", ou qualquer frase que leve o cliente a acreditar que o lançamento ou a edição já existe de verdade.\n\nNÃO conta como afirmação de sucesso:\n- Frases no passado distante, dúvida ou negação (\"não lancei\", \"já tinha lançado antes\", \"ainda não consegui registrar\", \"não tenho certeza se salvou\").\n- Perguntas, pedidos de mais informação, ou texto sobre outro assunto (ex: resposta de uma consulta de gastos, análise de período, explicação sobre categorias) - isso não é uma afirmação de lançamento.\n\nTEXTO A ANALISAR:\n\"\"\"\n{{ $json._guardrail_texto }}\n\"\"\"\n\nO QUE REALMENTE ACONTECEU NESTA RODADA (apurado por código, não pelo texto acima - use isso só como contexto, sua resposta deve ser sobre o que o TEXTO afirma, não sobre isso):\n{{ $json._guardrail_resumo_ferramentas }}\n\nResponda SOMENTE um JSON válido, sem nenhum texto antes ou depois, sem markdown, exatamente neste formato:\n{\"afirma_sucesso\": true}\nou\n{\"afirma_sucesso\": false}"
+        },
+        "id": "fa5c76b3-b631-4ecf-bfee-8ef0396a6d3f",
+        "name": "Guardrail IA - Verifica Lançamento",
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.6,
+        "position": [
+          -912,
+          -2704
+        ]
+      },
+      {
+        "parameters": {
+          "model": "google/gemini-2.5-flash-lite",
+          "options": {
+            "maxTokens": "***REMOVIDO***"
+          }
+        },
+        "id": "957ee95f-96db-4d8b-9e0d-68c319bbe9e3",
+        "name": "Guardrail - Modelo Barato",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          -976,
+          -2544
+        ],
+        "credentials": {
+          "openRouterApi": {
+            "id": "OBNjBWmZfco6v8Gx",
+            "name": "OpenRouter - Eleva Agente de IA - Financeiro"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Aplica a decisão do guardrail de IA: se ele disse que o texto afirma um\n// lançamento/edição que NÃO foi confirmado de verdade pela ferramenta,\n// troca a resposta por um aviso honesto - exatamente como a trava antiga\n// fazia, só que agora a parte difícil (entender o texto) foi decidida\n// pela IA, não por uma lista fixa de palavras com regex.\n\nconst AVISO = 'Não consegui registrar esse lançamento agora, então ele ainda NÃO foi salvo. Pode me mandar de novo, por favor? (valor, categoria e forma de pagamento)';\n\n// Busca os dados originais (texto completo, resumo de ferramentas) no node\n// anterior pelo nome - não dependemos de o node do LLM preservar os campos\n// extras que preparamos, porque ele normalmente só devolve o texto gerado.\nconst preparado = $('Prepara Guardrail de Lançamento').item.json;\nconst textoOriginal = preparado._guardrail_texto ?? '';\nconst toolConfirmou = preparado._guardrail_tool_confirmou === true;\n\nconst respostaLLM = $input.all()[0].json.text ?? $input.all()[0].json.output ?? '';\n\nlet afirmaSucesso = false;\ntry {\n  const limpo = String(respostaLLM).trim().replace(/^```json\\s*/i, '').replace(/```\\s*$/, '').trim();\n  const parsed = JSON.parse(limpo);\n  afirmaSucesso = parsed.afirma_sucesso === true;\n} catch (e) {\n  // Se o guardrail não devolveu um JSON válido, por segurança tratamos\n  // como \"não afirmou sucesso\" - uma falha do guardrail nunca deve travar\n  // ou distorcer o atendimento ao cliente, só deixamos a resposta passar.\n  afirmaSucesso = false;\n}\n\nconst mentiu = afirmaSucesso && !toolConfirmou;\n\n// Remove os campos internos de preparo antes de devolver pro resto do fluxo.\nconst { _guardrail_texto, _guardrail_resumo_ferramentas, _guardrail_tool_confirmou, ...resto } = preparado;\n\nif (!mentiu) {\n  return [{ json: { ...resto, output: textoOriginal, lancamento_nao_confirmado: false } }];\n}\nreturn [{ json: { ...resto, output: AVISO, output_original_bloqueado: textoOriginal, lancamento_nao_confirmado: true } }];"
+        },
+        "id": "6f2d1b4f-30bb-4a5e-883d-e3f5ae8a4e24",
+        "name": "Aplica Decisão do Guardrail",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -608,
+          -2704
         ]
       }
     ],
@@ -9437,18 +9595,6 @@
           ]
         ]
       },
-      "Eleva - Agente IA": {
-        "main": [
-          [
-            {
-              "node": "Trava - Confirma Lançamento Real",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          []
-        ]
-      },
       "contas_recorrentes": {
         "ai_tool": [
           [
@@ -9526,17 +9672,6 @@
           ]
         ]
       },
-      "Trava - Confirma Lançamento Real": {
-        "main": [
-          [
-            {
-              "node": "Saida do Agente",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "buscar_subcategoria": {
         "ai_tool": [
           [
@@ -9547,15 +9682,70 @@
             }
           ]
         ]
+      },
+      "Eleva - Agente IA": {
+        "main": [
+          [
+            {
+              "node": "Prepara Guardrail de Lançamento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepara Guardrail de Lançamento": {
+        "main": [
+          [
+            {
+              "node": "Guardrail IA - Verifica Lançamento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Guardrail - Modelo Barato": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Guardrail IA - Verifica Lançamento",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Guardrail IA - Verifica Lançamento": {
+        "main": [
+          [
+            {
+              "node": "Aplica Decisão do Guardrail",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Aplica Decisão do Guardrail": {
+        "main": [
+          [
+            {
+              "node": "Saida do Agente",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Version 2c5a2d73",
+    "name": "Version 554f7c79",
     "description": "",
-    "autosaved": false,
-    "createdAt": "2026-10-27T14:19:00.539Z",
-    "updatedAt": "2026-10-27T14:19:02.833Z"
+    "autosaved": true,
+    "createdAt": "2026-10-29T17:33:11.178Z",
+    "updatedAt": "2026-10-29T17:41:08.533Z"
   },
   "tags": []
 }
