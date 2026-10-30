@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-28T18:15:30.831Z",
+  "updatedAt": "2026-10-29T17:29:58.285Z",
   "createdAt": "2026-10-27T13:59:17.754Z",
   "id": "4Kf55a6MnuTVMuLi",
   "name": "Finamob - 8.09 - SDR Parceiros - Jornada de Disparos",
@@ -391,7 +391,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Pega quem ainda não recebeu este disparo e monta o envio dos próximos N (igual ao \"Montar envio\" do 5.1b).\nconst cfg = $('Config').first().json;\nconst d = $('Busca disparo').first().json;\nconst LOTE = Number(cfg.lote) || 100;\n\nfunction normalizeTelefone(raw) {\n  if (raw == null) return '';\n  let t = String(raw).replace(/\\D/g, '').replace(/^0+/, '');\n  if (!t) return '';\n  if (t.startsWith('55')) t = t.slice(2);\n  if (t.length === 10 && ['6', '7', '8', '9'].includes(t[2])) t = t.slice(0, 2) + '9' + t.slice(2);\n  return '55' + t;\n}\n\nconst processados = new Set(\n  $('Já processados').all().map(i => i.json.telefone).filter(Boolean)\n);\n\nconst vistos = new Set();\nconst lote = [];\nlet pendentes = 0;\n\nfor (const { json: p } of $('Base de parceiros').all()) {\n  const telefone = normalizeTelefone(p.whatsapp);\n  if (!telefone || telefone.length < 12) continue;   // telefone inválido: ignora\n  if (vistos.has(telefone)) continue;                // mesmo telefone em 2 cadastros: uma vez só\n  vistos.add(telefone);\n  if (processados.has(telefone)) continue;           // já recebeu (ou já deu erro definitivo)\n  pendentes++;\n  if (lote.length >= LOTE) continue;\n\n  const nome = String(p.clientes || '').trim();\n  const primeiroNome = nome.split(' ')[0] || 'tudo bem';\n  const comps = [];\n  if (d.tipo_midia === 'imagem' && d.imagem_url) {\n    comps.push({ type: 'header', parameters: [{ type: 'image', image: { link: d.imagem_url } }] });\n  }\n  if (d.usa_nome) {\n    comps.push({ type: 'body', parameters: [{ type: 'text', text: primeiroNome }] });\n  }\n\n  lote.push({ json: {\n    disparo_id: d.id,\n    mailing_id: p.id,\n    nome,\n    primeiro_nome: primeiroNome,\n    telefone,\n    template_name: d.template_name,\n    mensagem: String(d.mensagem || '').replaceAll('{{1}}', primeiroNome),\n    url: `https://graph.facebook.com/v22.0/${cfg.phone_id}/messages`,\n    meta_body: {\n      messaging_product: 'whatsapp',\n      to: telefone,\n      type: 'template',\n      template: { name: d.template_name, language: { code: d.language_code || 'pt_BR' }, components: comps },\n    },\n  }});\n}\n\nif (lote.length === 0) {\n  return [{ json: { vazio: true, total_base: vistos.size } }];\n}\nreturn lote.map(i => ({ json: { ...i.json, vazio: false, pendentes_antes: pendentes } }));"
+        "jsCode": "// Pega quem ainda não recebeu este disparo e monta o envio dos próximos N (igual ao \"Montar envio\" do 5.1b).\nconst cfg = $('Config').first().json;\nconst d = $('Busca disparo').first().json;\nconst LOTE = Number(cfg.lote) || 100;\n\nfunction normalizeTelefone(raw) {\n  if (raw == null) return '';\n  let t = String(raw).replace(/\\D/g, '').replace(/^0+/, '');\n  if (!t) return '';\n  if (t.startsWith('55')) t = t.slice(2);\n  if (t.length === 10 && ['6', '7', '8', '9'].includes(t[2])) t = t.slice(0, 2) + '9' + t.slice(2);\n  return '55' + t;\n}\n\nconst processados = new Set(\n  $('Já processados').all().map(i => i.json.telefone).filter(Boolean)\n);\n\nconst vistos = new Set();\nconst lote = [];\nlet pendentes = 0;\n\nfor (const { json: p } of $('Base de parceiros').all()) {\n  const telefone = normalizeTelefone(p.whatsapp);\n  if (!telefone || telefone.length < 12) continue;   // telefone inválido: ignora\n  if (vistos.has(telefone)) continue;                // mesmo telefone em 2 cadastros: uma vez só\n  vistos.add(telefone);\n  if (processados.has(telefone)) continue;           // já recebeu (ou já deu erro definitivo)\n  pendentes++;\n  if (lote.length >= LOTE) continue;\n\n  const nome = String(p.clientes || '').trim();\n  const primeiroNome = nome.split(' ')[0] || 'tudo bem';\n  const comps = [];\n  if (d.tipo_midia === 'imagem' && d.imagem_url) {\n    comps.push({ type: 'header', parameters: [{ type: 'image', image: { link: d.imagem_url } }] });\n  }\n  \n  // Variáveis do template: o sistema grava em \"variaveis\" qual dado do parceiro vai em cada {{n}}.\n  // Se o cadastro não tiver o dado, usa um texto genérico (a Meta recusa variável vazia).\n  const CAMPOS = {\n    nome:    primeiroNome,\n    empresa: String(p.empresa || '').trim() || 'sua empresa',\n    cidade:  String(p.cidade || '').trim()  || 'sua cidade',\n    uf:      String(p.uf || '').trim()      || 'seu estado',\n  };\n  let vars = d.variaveis;\n  if (typeof vars === 'string') { try { vars = JSON.parse(vars); } catch (e) { vars = []; } }\n  if (!Array.isArray(vars)) vars = [];\n  if (vars.length === 0 && d.usa_nome) vars = [{ indice: 1, campo: 'nome' }]; // disparos antigos\n  vars = [...vars].sort((a, b) => a.indice - b.indice);\n  const valores = vars.map(v => CAMPOS[v.campo] ?? '');\n  if (valores.length) {\n    comps.push({ type: 'body', parameters: valores.map(t => ({ type: 'text', text: t })) });\n  }\n  let mensagemFinal = String(d.mensagem || '');\n  vars.forEach((v, i) => { mensagemFinal = mensagemFinal.replaceAll(`{{${v.indice}}}`, valores[i]); });\n\n  lote.push({ json: {\n    disparo_id: d.id,\n    mailing_id: p.id,\n    nome,\n    primeiro_nome: primeiroNome,\n    telefone,\n    template_name: d.template_name,\n    mensagem: mensagemFinal,\n    url: `https://graph.facebook.com/v22.0/${cfg.phone_id}/messages`,\n    meta_body: {\n      messaging_product: 'whatsapp',\n      to: telefone,\n      type: 'template',\n      template: { name: d.template_name, language: { code: d.language_code || 'pt_BR' }, components: comps },\n    },\n  }});\n}\n\nif (lote.length === 0) {\n  return [{ json: { vazio: true, total_base: vistos.size } }];\n}\nreturn lote.map(i => ({ json: { ...i.json, vazio: false, pendentes_antes: pendentes } }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -474,7 +474,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        7024,
+        7008,
         6192
       ],
       "credentials": {
@@ -492,7 +492,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        7184,
+        7168,
         6192
       ]
     },
@@ -511,30 +511,6 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "insert into public.parcerias_envios (disparo_id, telefone, mailing_id, nome, status, erro, wamid)\nselect x.disparo_id, x.telefone, x.mailing_id, x.nome,\n       case when x.ok then 'enviado' when x.retry then 'retry' else 'erro' end,\n       x.erro, x.wamid\nfrom jsonb_to_recordset($1::jsonb) as x(\n  disparo_id uuid, telefone text, mailing_id int, nome text,\n  ok boolean, retry boolean, erro text, wamid text\n)\non conflict (disparo_id, telefone) do update set\n  tentativas = parcerias_envios.tentativas + 1,\n  status = case\n    when excluded.status = 'retry' and parcerias_envios.tentativas + 1 >= 3 then 'erro'\n    else excluded.status\n  end,\n  erro = excluded.erro,\n  wamid = excluded.wamid,\n  enviado_em = now();",
-        "options": {
-          "queryReplacement": "={{ [JSON.stringify($input.all().map(i => i.json))] }}"
-        }
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.7,
-      "position": [
-        6864,
-        6032
-      ],
-      "id": "ea56b07e-dede-4711-a98a-de78cbc82b6c",
-      "name": "Registrar envios",
-      "executeOnce": true,
-      "credentials": {
-        "postgres": {
-          "id": "AnkjyUs1zUuCvnoa",
-          "name": "Finamob - Postgres"
-        }
-      }
-    },
-    {
-      "parameters": {
         "method": "POST",
         "url": "={{ $('Config').first().json.webhook_proprio }}",
         "sendBody": true,
@@ -547,7 +523,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
       "position": [
-        7024,
+        6864,
         6032
       ],
       "id": "57d27399-ce1c-4c9e-992e-776519d2ea6a",
@@ -689,9 +665,9 @@
     },
     {
       "parameters": {
-        "content": "## 2. Envio em lotes\nEnvia um por um, registra o lote em parcerias_envios e chama o próprio webhook para o próximo lote.",
+        "content": "## 2. Envio em lotes\nEnvia um por um, registra cada envio em parcerias_envios e chama o próprio webhook para o próximo lote.",
         "height": 448,
-        "width": 784,
+        "width": 1040,
         "color": "#D2A528"
       },
       "type": "n8n-nodes-base.stickyNote",
@@ -734,6 +710,44 @@
       ],
       "id": "59adc586-bcb6-44db-8de5-cc5b17789ebc",
       "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.parcerias_envios (disparo_id, telefone, mailing_id, nome, status, erro, wamid)\nselect x.disparo_id, x.telefone, x.mailing_id, x.nome,\n       case when x.ok then 'enviado' when x.retry then 'retry' else 'erro' end,\n       x.erro, x.wamid\nfrom jsonb_to_record($1::jsonb) as x(\n  disparo_id uuid, telefone text, mailing_id int, nome text,\n  ok boolean, retry boolean, erro text, wamid text\n)\non conflict (disparo_id, telefone) do update set\n  tentativas = parcerias_envios.tentativas + 1,\n  status = case\n    when excluded.status = 'retry' and parcerias_envios.tentativas + 1 >= 3 then 'erro'\n    else excluded.status\n  end,\n  erro = excluded.erro,\n  wamid = excluded.wamid,\n  enviado_em = now();",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json)] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        7328,
+        6192
+      ],
+      "id": "f40072de-2402-44da-ab79-065129dbec49",
+      "name": "Registrar envio",
+      "retryOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "AnkjyUs1zUuCvnoa",
+          "name": "Finamob - Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// O Postgres devolve o resultado do insert. Aqui devolvemos o resultado do envio,\n// para que o fim do loop (Só enviados / Só erros) continue recebendo os dados certos.\nreturn { json: $('Resultado Meta').item.json };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7488,
+        6192
+      ],
+      "id": "12fe8e6d-f549-44f7-b67a-c4399043569e",
+      "name": "Repassa resultado"
     }
   ],
   "connections": {
@@ -895,7 +909,7 @@
       "main": [
         [
           {
-            "node": "Loop Envio",
+            "node": "Registrar envio",
             "type": "main",
             "index": 0
           }
@@ -906,11 +920,6 @@
       "main": [
         [
           {
-            "node": "Registrar envios",
-            "type": "main",
-            "index": 0
-          },
-          {
             "node": "Só enviados",
             "type": "main",
             "index": 0
@@ -919,22 +928,16 @@
             "node": "Só erros",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Chamar prox lote",
+            "type": "main",
+            "index": 0
           }
         ],
         [
           {
             "node": "Intervalo",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Registrar envios": {
-      "main": [
-        [
-          {
-            "node": "Chamar prox lote",
             "type": "main",
             "index": 0
           }
@@ -989,7 +992,19 @@
           }
         ]
       ]
-    }
+    },
+    "Registrar envio": {
+      "main": [
+        [
+          {
+            "node": "Repassa resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repassa resultado": "***REMOVIDO***"
   },
   "settings": {
     "executionOrder": "v1",
@@ -1008,8 +1023,8 @@
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "versionId": "4c1b5014-153e-41e8-b7b4-e0bad28b1a74",
-  "activeVersionId": "4c1b5014-153e-41e8-b7b4-e0bad28b1a74",
+  "versionId": "84e219f2-bcd6-41f1-a44c-39fd1e31482d",
+  "activeVersionId": "98cdfc92-e2e0-4adf-b43b-33ee56fa57e5",
   "triggerCount": 1,
   "shared": [
     {
@@ -1021,7 +1036,7 @@
     }
   ],
   "activeVersion": {
-    "versionId": "4c1b5014-153e-41e8-b7b4-e0bad28b1a74",
+    "versionId": "98cdfc92-e2e0-4adf-b43b-33ee56fa57e5",
     "workflowId": "4Kf55a6MnuTVMuLi",
     "nodes": [
       {
@@ -1409,7 +1424,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Pega quem ainda não recebeu este disparo e monta o envio dos próximos N (igual ao \"Montar envio\" do 5.1b).\nconst cfg = $('Config').first().json;\nconst d = $('Busca disparo').first().json;\nconst LOTE = Number(cfg.lote) || 100;\n\nfunction normalizeTelefone(raw) {\n  if (raw == null) return '';\n  let t = String(raw).replace(/\\D/g, '').replace(/^0+/, '');\n  if (!t) return '';\n  if (t.startsWith('55')) t = t.slice(2);\n  if (t.length === 10 && ['6', '7', '8', '9'].includes(t[2])) t = t.slice(0, 2) + '9' + t.slice(2);\n  return '55' + t;\n}\n\nconst processados = new Set(\n  $('Já processados').all().map(i => i.json.telefone).filter(Boolean)\n);\n\nconst vistos = new Set();\nconst lote = [];\nlet pendentes = 0;\n\nfor (const { json: p } of $('Base de parceiros').all()) {\n  const telefone = normalizeTelefone(p.whatsapp);\n  if (!telefone || telefone.length < 12) continue;   // telefone inválido: ignora\n  if (vistos.has(telefone)) continue;                // mesmo telefone em 2 cadastros: uma vez só\n  vistos.add(telefone);\n  if (processados.has(telefone)) continue;           // já recebeu (ou já deu erro definitivo)\n  pendentes++;\n  if (lote.length >= LOTE) continue;\n\n  const nome = String(p.clientes || '').trim();\n  const primeiroNome = nome.split(' ')[0] || 'tudo bem';\n  const comps = [];\n  if (d.tipo_midia === 'imagem' && d.imagem_url) {\n    comps.push({ type: 'header', parameters: [{ type: 'image', image: { link: d.imagem_url } }] });\n  }\n  if (d.usa_nome) {\n    comps.push({ type: 'body', parameters: [{ type: 'text', text: primeiroNome }] });\n  }\n\n  lote.push({ json: {\n    disparo_id: d.id,\n    mailing_id: p.id,\n    nome,\n    primeiro_nome: primeiroNome,\n    telefone,\n    template_name: d.template_name,\n    mensagem: String(d.mensagem || '').replaceAll('{{1}}', primeiroNome),\n    url: `https://graph.facebook.com/v22.0/${cfg.phone_id}/messages`,\n    meta_body: {\n      messaging_product: 'whatsapp',\n      to: telefone,\n      type: 'template',\n      template: { name: d.template_name, language: { code: d.language_code || 'pt_BR' }, components: comps },\n    },\n  }});\n}\n\nif (lote.length === 0) {\n  return [{ json: { vazio: true, total_base: vistos.size } }];\n}\nreturn lote.map(i => ({ json: { ...i.json, vazio: false, pendentes_antes: pendentes } }));"
+          "jsCode": "// Pega quem ainda não recebeu este disparo e monta o envio dos próximos N (igual ao \"Montar envio\" do 5.1b).\nconst cfg = $('Config').first().json;\nconst d = $('Busca disparo').first().json;\nconst LOTE = Number(cfg.lote) || 100;\n\nfunction normalizeTelefone(raw) {\n  if (raw == null) return '';\n  let t = String(raw).replace(/\\D/g, '').replace(/^0+/, '');\n  if (!t) return '';\n  if (t.startsWith('55')) t = t.slice(2);\n  if (t.length === 10 && ['6', '7', '8', '9'].includes(t[2])) t = t.slice(0, 2) + '9' + t.slice(2);\n  return '55' + t;\n}\n\nconst processados = new Set(\n  $('Já processados').all().map(i => i.json.telefone).filter(Boolean)\n);\n\nconst vistos = new Set();\nconst lote = [];\nlet pendentes = 0;\n\nfor (const { json: p } of $('Base de parceiros').all()) {\n  const telefone = normalizeTelefone(p.whatsapp);\n  if (!telefone || telefone.length < 12) continue;   // telefone inválido: ignora\n  if (vistos.has(telefone)) continue;                // mesmo telefone em 2 cadastros: uma vez só\n  vistos.add(telefone);\n  if (processados.has(telefone)) continue;           // já recebeu (ou já deu erro definitivo)\n  pendentes++;\n  if (lote.length >= LOTE) continue;\n\n  const nome = String(p.clientes || '').trim();\n  const primeiroNome = nome.split(' ')[0] || 'tudo bem';\n  const comps = [];\n  if (d.tipo_midia === 'imagem' && d.imagem_url) {\n    comps.push({ type: 'header', parameters: [{ type: 'image', image: { link: d.imagem_url } }] });\n  }\n  \n  // Variáveis do template: o sistema grava em \"variaveis\" qual dado do parceiro vai em cada {{n}}.\n  // Se o cadastro não tiver o dado, usa um texto genérico (a Meta recusa variável vazia).\n  const CAMPOS = {\n    nome:    primeiroNome,\n    empresa: String(p.empresa || '').trim() || 'sua empresa',\n    cidade:  String(p.cidade || '').trim()  || 'sua cidade',\n    uf:      String(p.uf || '').trim()      || 'seu estado',\n  };\n  let vars = d.variaveis;\n  if (typeof vars === 'string') { try { vars = JSON.parse(vars); } catch (e) { vars = []; } }\n  if (!Array.isArray(vars)) vars = [];\n  if (vars.length === 0 && d.usa_nome) vars = [{ indice: 1, campo: 'nome' }]; // disparos antigos\n  vars = [...vars].sort((a, b) => a.indice - b.indice);\n  const valores = vars.map(v => CAMPOS[v.campo] ?? '');\n  if (valores.length) {\n    comps.push({ type: 'body', parameters: valores.map(t => ({ type: 'text', text: t })) });\n  }\n  let mensagemFinal = String(d.mensagem || '');\n  vars.forEach((v, i) => { mensagemFinal = mensagemFinal.replaceAll(`{{${v.indice}}}`, valores[i]); });\n\n  lote.push({ json: {\n    disparo_id: d.id,\n    mailing_id: p.id,\n    nome,\n    primeiro_nome: primeiroNome,\n    telefone,\n    template_name: d.template_name,\n    mensagem: mensagemFinal,\n    url: `https://graph.facebook.com/v22.0/${cfg.phone_id}/messages`,\n    meta_body: {\n      messaging_product: 'whatsapp',\n      to: telefone,\n      type: 'template',\n      template: { name: d.template_name, language: { code: d.language_code || 'pt_BR' }, components: comps },\n    },\n  }});\n}\n\nif (lote.length === 0) {\n  return [{ json: { vazio: true, total_base: vistos.size } }];\n}\nreturn lote.map(i => ({ json: { ...i.json, vazio: false, pendentes_antes: pendentes } }));"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -1492,7 +1507,7 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          7024,
+          7008,
           6192
         ],
         "credentials": {
@@ -1510,7 +1525,7 @@
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          7184,
+          7168,
           6192
         ]
       },
@@ -1529,30 +1544,6 @@
       },
       {
         "parameters": {
-          "operation": "executeQuery",
-          "query": "insert into public.parcerias_envios (disparo_id, telefone, mailing_id, nome, status, erro, wamid)\nselect x.disparo_id, x.telefone, x.mailing_id, x.nome,\n       case when x.ok then 'enviado' when x.retry then 'retry' else 'erro' end,\n       x.erro, x.wamid\nfrom jsonb_to_recordset($1::jsonb) as x(\n  disparo_id uuid, telefone text, mailing_id int, nome text,\n  ok boolean, retry boolean, erro text, wamid text\n)\non conflict (disparo_id, telefone) do update set\n  tentativas = parcerias_envios.tentativas + 1,\n  status = case\n    when excluded.status = 'retry' and parcerias_envios.tentativas + 1 >= 3 then 'erro'\n    else excluded.status\n  end,\n  erro = excluded.erro,\n  wamid = excluded.wamid,\n  enviado_em = now();",
-          "options": {
-            "queryReplacement": "={{ [JSON.stringify($input.all().map(i => i.json))] }}"
-          }
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.7,
-        "position": [
-          6864,
-          6032
-        ],
-        "id": "ea56b07e-dede-4711-a98a-de78cbc82b6c",
-        "name": "Registrar envios",
-        "executeOnce": true,
-        "credentials": {
-          "postgres": {
-            "id": "AnkjyUs1zUuCvnoa",
-            "name": "Finamob - Postgres"
-          }
-        }
-      },
-      {
-        "parameters": {
           "method": "POST",
           "url": "={{ $('Config').first().json.webhook_proprio }}",
           "sendBody": true,
@@ -1565,7 +1556,7 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.5,
         "position": [
-          7024,
+          6864,
           6032
         ],
         "id": "57d27399-ce1c-4c9e-992e-776519d2ea6a",
@@ -1709,7 +1700,7 @@
         "parameters": {
           "content": "## 2. Envio em lotes\nEnvia um por um, registra o lote em parcerias_envios e chama o próprio webhook para o próximo lote.",
           "height": 448,
-          "width": 784,
+          "width": 1040,
           "color": "#D2A528"
         },
         "type": "n8n-nodes-base.stickyNote",
@@ -1752,6 +1743,43 @@
         ],
         "id": "59adc586-bcb6-44db-8de5-cc5b17789ebc",
         "name": "Sticky Note5"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "insert into public.parcerias_envios (disparo_id, telefone, mailing_id, nome, status, erro, wamid)\nselect x.disparo_id, x.telefone, x.mailing_id, x.nome,\n       case when x.ok then 'enviado' when x.retry then 'retry' else 'erro' end,\n       x.erro, x.wamid\nfrom jsonb_to_record($1::jsonb) as x(\n  disparo_id uuid, telefone text, mailing_id int, nome text,\n  ok boolean, retry boolean, erro text, wamid text\n)\non conflict (disparo_id, telefone) do update set\n  tentativas = parcerias_envios.tentativas + 1,\n  status = case\n    when excluded.status = 'retry' and parcerias_envios.tentativas + 1 >= 3 then 'erro'\n    else excluded.status\n  end,\n  erro = excluded.erro,\n  wamid = excluded.wamid,\n  enviado_em = now();",
+          "options": {
+            "queryReplacement": "={{ [JSON.stringify($json)] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.7,
+        "position": [
+          7328,
+          6192
+        ],
+        "id": "f40072de-2402-44da-ab79-065129dbec49",
+        "name": "Registrar envio",
+        "credentials": {
+          "postgres": {
+            "id": "AnkjyUs1zUuCvnoa",
+            "name": "Finamob - Postgres"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "// O Postgres devolve o resultado do insert. Aqui devolvemos o resultado do envio,\n// para que o fim do loop (Só enviados / Só erros) continue recebendo os dados certos.\nreturn { json: $('Resultado Meta').item.json };"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          7488,
+          6192
+        ],
+        "id": "12fe8e6d-f549-44f7-b67a-c4399043569e",
+        "name": "Repassa resultado"
       }
     ],
     "connections": {
@@ -1913,7 +1941,7 @@
         "main": [
           [
             {
-              "node": "Loop Envio",
+              "node": "Registrar envio",
               "type": "main",
               "index": 0
             }
@@ -1924,11 +1952,6 @@
         "main": [
           [
             {
-              "node": "Registrar envios",
-              "type": "main",
-              "index": 0
-            },
-            {
               "node": "Só enviados",
               "type": "main",
               "index": 0
@@ -1937,22 +1960,16 @@
               "node": "Só erros",
               "type": "main",
               "index": 0
+            },
+            {
+              "node": "Chamar prox lote",
+              "type": "main",
+              "index": 0
             }
           ],
           [
             {
               "node": "Intervalo",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Registrar envios": {
-        "main": [
-          [
-            {
-              "node": "Chamar prox lote",
               "type": "main",
               "index": 0
             }
@@ -2007,15 +2024,27 @@
             }
           ]
         ]
-      }
+      },
+      "Registrar envio": {
+        "main": [
+          [
+            {
+              "node": "Repassa resultado",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Repassa resultado": "***REMOVIDO***"
     },
     "nodeGroups": [],
     "authors": "***REMOVIDO***",
-    "name": "Version 4c1b5014",
+    "name": "Version 98cdfc92",
     "description": "",
     "autosaved": true,
-    "createdAt": "2026-10-28T18:15:30.834Z",
-    "updatedAt": "2026-10-28T18:15:59.233Z"
+    "createdAt": "2026-10-29T17:16:43.511Z",
+    "updatedAt": "2026-10-29T17:16:45.329Z"
   },
   "tags": []
 }
