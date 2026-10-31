@@ -1,0 +1,665 @@
+{
+  "updatedAt": "2026-10-30T16:52:27.451Z",
+  "createdAt": "2026-10-30T16:39:04.329Z",
+  "id": "4pGVqhawQTY95RyN",
+  "name": "TEMP - Bateria de testes v2 (subagentes)",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "23951537-7782-4c6f-a2d6-227197029703",
+      "name": "Start",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "b2e5f8ed-1518-4bff-a823-99ec7d4dd5a7",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const MODO = 'previdenciario';\nconst MODELOS = {\n  calculo: ['openai/gpt-5', 'openai/gpt-5.6-luna', 'openai/gpt-6.1-terra', 'deepseek/deepseek-v4.1-flash-1017', 'z-ai/glm-5.3-flash'],\n  previdenciario: ['openai/gpt-5', 'openai/gpt-5.6-luna']\n};\nconst BASE = \"WITH rows AS (SELECT h.id, h.created_at, h.telefone, h.nome_usuario, CASE WHEN coalesce(h.mensagem_usuario,'') <> '' THEN 'user' ELSE 'assistant' END AS role, coalesce(nullif(h.mensagem_usuario,''), h.mensagem_agente) AS content, to_char(h.created_at,'DD/MM/YYYY') AS dia FROM historico_mensagens h WHERE h.nome_app = 'SDR-MONTEIRO' AND h.created_at >= now() - interval '120 days' AND coalesce(nullif(h.mensagem_usuario,''), h.mensagem_agente) IS NOT NULL), turns AS (SELECT r.*, row_number() OVER (PARTITION BY r.telefone ORDER BY r.created_at) AS n, lead(r.created_at) OVER (PARTITION BY r.telefone ORDER BY r.created_at) AS prox_user FROM rows r WHERE r.role = 'user'), cand AS (SELECT t.*, l.nome AS lead_nome, l.area_juridica AS area, prev.assist AS ult_agente FROM turns t JOIN leads_crm l ON l.telefone = t.telefone AND l.criado_em <= t.created_at - interval '2 minutes' AND l.area_juridica IN ('trabalhista','previdenciario') LEFT JOIN LATERAL (SELECT a.content AS assist FROM rows a WHERE a.telefone = t.telefone AND a.role = 'assistant' AND a.created_at < t.created_at ORDER BY a.created_at DESC LIMIT 1) prev ON true), withresp AS (SELECT c.*, (SELECT string_agg(a.content, chr(10) || chr(10) ORDER BY a.created_at) FROM rows a WHERE a.role = 'assistant' AND a.telefone = c.telefone AND a.created_at > c.created_at AND a.created_at < least(coalesce(c.prox_user, 'infinity'::timestamptz), c.created_at + interval '10 minutes')) AS resposta_producao FROM cand c)\";\nconst FIM = \" SELECT p.id AS caso_id, p.area, p.categoria, p.n, p.lead_nome, p.nome_usuario, p.content AS mensagem, p.resposta_producao, (SELECT coalesce(jsonb_agg(jsonb_build_object('role', x.role, 'content', x.content, 'dia', x.dia) ORDER BY x.created_at), '[]'::jsonb) FROM (SELECT a.role, a.content, a.dia, a.created_at FROM rows a WHERE a.telefone = p.telefone AND a.created_at < p.created_at AND a.created_at >= p.created_at - interval '3 days' ORDER BY a.created_at DESC LIMIT 14) x) AS historico FROM pick p WHERE p.rk <= RK ORDER BY p.area, p.categoria, p.rk;\";\nconst SQL = {\n  calculo: BASE + \", pick AS (SELECT w.*, 'estimativa'::text AS categoria, row_number() OVER (ORDER BY md5(w.id::text)) AS rk FROM withresp w WHERE w.area = 'trabalhista' AND w.resposta_producao ~* '(aproximadamente|entre) R[$] ?[0-9]')\" + FIM.split('RK').join('12'),\n  previdenciario: BASE + \", cat AS (SELECT w.*, CASE WHEN w.content ~* '(atendente|falar com (o |um |a )?(dr|doutor|advogad|human|pessoa)|chama o (dr|doutor))' THEN 'pedido_humano' WHEN w.content ~* '(quanto custa|honor[aá]rio|garant|rob[oô]|autom[aá]tico|vocês cobram)' THEN 'objecao' WHEN length(trim(w.content)) = 1 AND trim(w.content) ~ '[1-9]' THEN 'menu_numero' WHEN w.n <= 2 THEN 'primeira_resposta' WHEN w.n >= 4 THEN 'continuidade' END AS categoria FROM withresp w WHERE w.area = 'previdenciario' AND w.resposta_producao IS NOT NULL), pick AS (SELECT c.*, row_number() OVER (PARTITION BY c.categoria ORDER BY md5(c.id::text)) AS rk FROM cat c WHERE c.categoria IS NOT NULL)\" + FIM.split('RK').join('5')\n};\nreturn [{ json: { modo: MODO, modelos: MODELOS[MODO], sql: SQL[MODO] } }];"
+      }
+    },
+    {
+      "id": "63b9244a-10e7-49ee-a306-93338bde02e5",
+      "name": "Casos (SQL)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $('Config').first().json.sql }}",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "Hr0gqOEXHC8efR0Q",
+          "name": "Monteiro - Postgres"
+        }
+      }
+    },
+    {
+      "id": "8f573674-c94f-4f1f-abe0-38cdbc4cbe75",
+      "name": "Junta casos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { casos: $input.all().map((i) => i.json) } }];"
+      }
+    },
+    {
+      "id": "58db4c4c-d123-4fa9-90c9-77bd66a55048",
+      "name": "Lista workflows",
+      "type": "n8n-nodes-base.n8n",
+      "typeVersion": 1,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "resource": "workflow",
+        "operation": "getAll",
+        "returnAll": true,
+        "filters": {}
+      },
+      "credentials": {
+        "n8nApi": {
+          "id": "0CiPHsGiiUoYqMqm",
+          "name": "n8n account"
+        }
+      }
+    },
+    {
+      "id": "d6da5f5d-d609-4f2b-9c43-17779527ff87",
+      "name": "Monta chamadas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const NL = String.fromCharCode(10);\nconst BT = String.fromCharCode(96);\nconst casos = $('Junta casos').first().json.casos;\nconst MODELOS = $('Config').first().json.modelos;\nconst wfs = $input.all().map((i) => i.json);\nconst W = { trabalhista: { id: 'LBmUUUQ7gmDAPWBp', agente: 'Agente Trabalhista' }, previdenciario: { id: 'dz37MDiV5ifL5n07', agente: 'Agente Previdenciario' } };\nconst TYPES = ['string', 'number', 'boolean', 'json'];\nconst parseFromAI = (v) => {\n  const i = v.indexOf('$fromAI(');\n  if (i < 0) return null;\n  const s = v.slice(i + 8);\n  const q = s.charAt(0);\n  const k2 = s.indexOf(q, 1);\n  const key = s.slice(1, k2);\n  let best = -1; let type = 'string';\n  for (const t of TYPES) { for (const qq of [\"'\", '\"', BT]) { const idx = s.indexOf(qq + t + qq + ')'); if (idx >= 0 && (best < 0 || idx < best)) { best = idx; type = t; } } }\n  let desc = s.slice(k2 + 1, best < 0 ? s.length : best).trim();\n  if (desc.charAt(0) === ',') desc = desc.slice(1).trim();\n  if (desc.charAt(desc.length - 1) === ',') desc = desc.slice(0, -1).trim();\n  const dq = desc.charAt(0);\n  if (dq === \"'\" || dq === '\"' || dq === BT) { const e = desc.lastIndexOf(dq); desc = desc.slice(1, e > 0 ? e : desc.length); }\n  return { key: key, desc: desc, type: type };\n};\nconst toolsOf = (wf, agentName) => {\n  const by = {}; wf.nodes.forEach((n) => { by[n.name] = n; });\n  const names = [];\n  for (const src of Object.keys(wf.connections)) { for (const lst of (wf.connections[src].ai_tool || [])) { for (const t of (lst || [])) { if (t.node === agentName) names.push(src); } } }\n  return names.filter((nm) => !by[nm].disabled).map((nm) => {\n    const p = by[nm].parameters;\n    let desc = p.toolDescription || p.description || '';\n    if (desc.charAt(0) === '=') desc = desc.slice(1);\n    const props = {}; const req = [];\n    const add = (name, v) => { if (typeof v === 'string' && v.indexOf('$fromAI(') >= 0) { const f = parseFromAI(v); if (!f) return; props[name] = { type: (f.type === 'number' || f.type === 'boolean') ? f.type : 'string', description: ((f.type === 'json' ? '(JSON em texto) ' : '') + (f.desc || '')).slice(0, 1500) }; req.push(name); } };\n    ((p.bodyParameters || {}).parameters || []).forEach((x) => add(x.name, x.value));\n    ((p.queryParameters || {}).parameters || []).forEach((x) => add(x.name, x.value));\n    (((p.fieldsUi || {}).fieldValues) || []).forEach((x) => add(x.fieldId, x.fieldValue));\n    if (typeof p.jsonBody === 'string' && p.jsonBody.indexOf('$fromAI(') >= 0) { const f = parseFromAI(p.jsonBody); if (f) { props[f.key] = { type: 'string', description: '(JSON em texto) ' + (f.desc || '').slice(0, 1500) }; req.push(f.key); } }\n    if (!Object.keys(props).length) { props.consulta = { type: 'string', description: 'Texto da consulta' }; }\n    return { type: 'function', function: { name: nm.split(' ').join('_'), description: desc.slice(0, 12000), parameters: { type: 'object', properties: props, required: req } } };\n  });\n};\nconst isD = (ch) => ch >= '0' && ch <= '9';\nconst maskNum = (s) => { let out = ''; let i = 0; while (i < s.length) { if (isD(s[i])) { let j = i; let digits = 0; while (j < s.length && (isD(s[j]) || ' .()-'.indexOf(s[j]) >= 0)) { if (isD(s[j])) digits++; j++; } let end = j; while (end > i && !isD(s[end - 1])) end--; const seg = s.slice(i, end); if (digits >= 10 && seg.indexOf('R$') < 0 && seg.indexOf(',') < 0 && seg.indexOf('/') < 0) { out += '[NUMERO]'; i = end; } else { const e = end > i ? end : i + 1; out += s.slice(i, e); i = e; } } else { out += s[i]; i++; } } return out; };\nconst letters = (t) => t.split('').filter((ch) => ch.toLowerCase() !== ch.toUpperCase()).join('');\nconst mkAnon = (c) => { const toks = ((c.lead_nome || '') + ' ' + (c.nome_usuario || '')).split(' ').map(letters).filter((t) => t.length >= 4); return (txt) => { let s = String(txt || ''); s = s.split(' ').map((w) => (w.indexOf('@') >= 0 ? '[EMAIL]' : w)).join(' '); s = maskNum(s); for (const t of toks) { s = s.replace(new RegExp(t, 'gi'), '[NOME]'); } return s; }; };\nconst fill = (s, f) => { let out = ''; let i = 0; for (;;) { const a = s.indexOf('{{', i); if (a < 0) { out += s.slice(i); break; } const b = s.indexOf('}}', a); out += s.slice(i, a) + f(s.slice(a, b + 2)); i = b + 2; } return out; };\nconst out = [];\nfor (const c of casos) {\n  const cfg = W[c.area];\n  const wf = wfs.find((w) => w.id === cfg.id);\n  const ag = wf.nodes.find((n) => n.name === cfg.agente);\n  let sys = ag.parameters.options.systemMessage;\n  if (sys.charAt(0) === '=') sys = sys.slice(1);\n  const tools = toolsOf(wf, cfg.agente);\n  const A = mkAnon(c);\n  const hist = (c.historico || []).map((m) => ({ role: m.role, content: A(m.content), dia: m.dia }));\n  const histTxt = hist.map((m) => m.dia + ' - ' + (m.role === 'user' ? 'Usuário: ' : 'Agente: ') + m.content).join(NL + NL);\n  const query = A(c.mensagem);\n  const s2 = fill(sys, (m) => {\n    if (m.indexOf('weekdayLong') >= 0) return 'sexta-feira';\n    if (m.indexOf('dd/MM/yyyy') >= 0) return '30/10/2026';\n    if (m.indexOf('yyyy-MM-dd') >= 0) return '2026-10-30';\n    if (m.indexOf('hour') >= 0) return '10';\n    if (m.indexOf('minute') >= 0) return '30';\n    if (m.indexOf('historico_conversa') >= 0) return histTxt || '(sem histórico)';\n    if (m.indexOf('.nome') >= 0) return '[NOME]';\n    if (m.indexOf('.telefone') >= 0) return '[NUMERO]';\n    if (m.indexOf('dados_coletados') >= 0) return '{}';\n    return m;\n  });\n  const chat = hist.slice(-8).map((m) => ({ role: m.role, content: m.content }));\n  for (const m of MODELOS) {\n    out.push({ json: { caso_id: c.caso_id, area: c.area, categoria: c.categoria, modelo: m, query: query, prod: A(c.resposta_producao), ctx: hist.slice(-8).map((h) => (h.role === 'user' ? 'Lead: ' : 'Agente: ') + h.content.slice(0, 500)).join(NL), body: { model: m, messages: [{ role: 'system', content: s2 }].concat(chat).concat([{ role: 'user', content: query }]), tools: tools, tool_choice: 'auto', usage: { include: true }, max_tokens: 8000 }, calls: [], calc: [], steps: 0, final: '', done: false, custo: 0, tin: 0, tout: 0, rac: 0, erro: '', finish: '' } });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "5b0d5c14-d9e3-4db3-959f-0c4ed7d63824",
+      "name": "OpenRouter 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 480000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "vmIaRNjxLKMYkFt4",
+          "name": "OpenRouter - Monteiro"
+        }
+      }
+    },
+    {
+      "id": "c49766e1-03ca-4c5c-a591-6b8d5af5f7d3",
+      "name": "Passo 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const hn = $prevNode.name;\nconst k = parseInt(hn.split(' ')[1]);\nconst prevName = k === 1 ? 'Monta chamadas' : 'Passo ' + (k - 1);\nconst prev = $(prevName).all();\nconst res = $input.all();\nconst wfs = $('Lista workflows').all().map((i) => i.json);\nconst calcWf = wfs.find((w) => w.id === 'Uxk90qDrvvpkni00');\nconst calcCode = calcWf.nodes.find((n) => n.name === 'calcula o valor').parameters.jsCode;\nconst DUMMY = { model: 'openai/gpt-4.1-nano', messages: [{ role: 'user', content: 'ok' }], max_tokens: 1 };\nconst runCalc = async (args) => {\n  try { const f = new Function('$input', calcCode); return f({ item: { json: args } }); } catch (e1) {\n    try { return await this.helpers.httpRequest({ method: 'POST', url: 'https://webhook.miabuilder.com/webhook/b87052d2-9ed3-4ec2-81af-f09770b302ef', body: args, json: true }); } catch (e2) { return { erro_calculo: String(e2).slice(0, 120) }; }\n  }\n};\nconst out = [];\nfor (let i = 0; i < res.length; i++) {\n  const st = Object.assign({}, prev[i].json);\n  if (st.done) { out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const j = res[i].json || {};\n  const ch = (j.choices && j.choices[0]) || {};\n  const msg = ch.message || {};\n  const u = j.usage || {};\n  st.custo += u.cost || 0; st.tin += u.prompt_tokens || 0; st.tout += u.completion_tokens || 0; st.rac += (u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || 0;\n  if (j.error || !j.choices) { st.erro = JSON.stringify(j.error || j).slice(0, 200); st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.steps++;\n  const calls = msg.tool_calls || [];\n  if (!calls.length) { st.final = msg.content || ''; st.finish = ch.finish_reason || ''; st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const am = { role: 'assistant', content: msg.content || '', tool_calls: calls };\n  if (msg.reasoning_details) am.reasoning_details = msg.reasoning_details;\n  const msgs = st.body.messages.concat([am]);\n  const calcsNew = []; const logNew = [];\n  for (const t of calls) {\n    let args = {};\n    try { args = JSON.parse(t.function.arguments || '{}'); } catch (e) { args = { _parse_erro: true }; }\n    let result = 'ok';\n    const name = t.function.name;\n    if (name.indexOf('calcular') === 0) { const r = await runCalc(args); calcsNew.push({ args: args, r: r }); result = JSON.stringify(r); }\n    else if (name === 'dados_do_FAQ') { result = 'Nenhum resultado relevante no FAQ.'; }\n    logNew.push({ n: name, a: args });\n    msgs.push({ role: 'tool', tool_call_id: t.id, content: result });\n  }\n  st.calls = st.calls.concat(logNew); st.calc = st.calc.concat(calcsNew);\n  if (st.steps >= 6) { st.done = true; st.final = msg.content || ''; st.erro = 'limite de 6 passos'; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.body = Object.assign({}, st.body, { messages: msgs });\n  out.push({ json: Object.assign({}, st, { body2: st.body }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "26229d85-9516-4a96-93bc-a1e904c891f2",
+      "name": "OpenRouter 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1792,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body2) }}",
+        "options": {
+          "timeout": 480000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "vmIaRNjxLKMYkFt4",
+          "name": "OpenRouter - Monteiro"
+        }
+      }
+    },
+    {
+      "id": "65b20e1a-b926-4f3b-b2b1-ea3fdd3175c6",
+      "name": "Passo 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const hn = $prevNode.name;\nconst k = parseInt(hn.split(' ')[1]);\nconst prevName = k === 1 ? 'Monta chamadas' : 'Passo ' + (k - 1);\nconst prev = $(prevName).all();\nconst res = $input.all();\nconst wfs = $('Lista workflows').all().map((i) => i.json);\nconst calcWf = wfs.find((w) => w.id === 'Uxk90qDrvvpkni00');\nconst calcCode = calcWf.nodes.find((n) => n.name === 'calcula o valor').parameters.jsCode;\nconst DUMMY = { model: 'openai/gpt-4.1-nano', messages: [{ role: 'user', content: 'ok' }], max_tokens: 1 };\nconst runCalc = async (args) => {\n  try { const f = new Function('$input', calcCode); return f({ item: { json: args } }); } catch (e1) {\n    try { return await this.helpers.httpRequest({ method: 'POST', url: 'https://webhook.miabuilder.com/webhook/b87052d2-9ed3-4ec2-81af-f09770b302ef', body: args, json: true }); } catch (e2) { return { erro_calculo: String(e2).slice(0, 120) }; }\n  }\n};\nconst out = [];\nfor (let i = 0; i < res.length; i++) {\n  const st = Object.assign({}, prev[i].json);\n  if (st.done) { out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const j = res[i].json || {};\n  const ch = (j.choices && j.choices[0]) || {};\n  const msg = ch.message || {};\n  const u = j.usage || {};\n  st.custo += u.cost || 0; st.tin += u.prompt_tokens || 0; st.tout += u.completion_tokens || 0; st.rac += (u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || 0;\n  if (j.error || !j.choices) { st.erro = JSON.stringify(j.error || j).slice(0, 200); st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.steps++;\n  const calls = msg.tool_calls || [];\n  if (!calls.length) { st.final = msg.content || ''; st.finish = ch.finish_reason || ''; st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const am = { role: 'assistant', content: msg.content || '', tool_calls: calls };\n  if (msg.reasoning_details) am.reasoning_details = msg.reasoning_details;\n  const msgs = st.body.messages.concat([am]);\n  const calcsNew = []; const logNew = [];\n  for (const t of calls) {\n    let args = {};\n    try { args = JSON.parse(t.function.arguments || '{}'); } catch (e) { args = { _parse_erro: true }; }\n    let result = 'ok';\n    const name = t.function.name;\n    if (name.indexOf('calcular') === 0) { const r = await runCalc(args); calcsNew.push({ args: args, r: r }); result = JSON.stringify(r); }\n    else if (name === 'dados_do_FAQ') { result = 'Nenhum resultado relevante no FAQ.'; }\n    logNew.push({ n: name, a: args });\n    msgs.push({ role: 'tool', tool_call_id: t.id, content: result });\n  }\n  st.calls = st.calls.concat(logNew); st.calc = st.calc.concat(calcsNew);\n  if (st.steps >= 6) { st.done = true; st.final = msg.content || ''; st.erro = 'limite de 6 passos'; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.body = Object.assign({}, st.body, { messages: msgs });\n  out.push({ json: Object.assign({}, st, { body2: st.body }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "908c2907-5f38-4aad-9e47-45829d70f144",
+      "name": "OpenRouter 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body2) }}",
+        "options": {
+          "timeout": 480000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "vmIaRNjxLKMYkFt4",
+          "name": "OpenRouter - Monteiro"
+        }
+      }
+    },
+    {
+      "id": "04a6f0d2-d0ed-4076-8da0-2fdd632b0671",
+      "name": "Passo 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const hn = $prevNode.name;\nconst k = parseInt(hn.split(' ')[1]);\nconst prevName = k === 1 ? 'Monta chamadas' : 'Passo ' + (k - 1);\nconst prev = $(prevName).all();\nconst res = $input.all();\nconst wfs = $('Lista workflows').all().map((i) => i.json);\nconst calcWf = wfs.find((w) => w.id === 'Uxk90qDrvvpkni00');\nconst calcCode = calcWf.nodes.find((n) => n.name === 'calcula o valor').parameters.jsCode;\nconst DUMMY = { model: 'openai/gpt-4.1-nano', messages: [{ role: 'user', content: 'ok' }], max_tokens: 1 };\nconst runCalc = async (args) => {\n  try { const f = new Function('$input', calcCode); return f({ item: { json: args } }); } catch (e1) {\n    try { return await this.helpers.httpRequest({ method: 'POST', url: 'https://webhook.miabuilder.com/webhook/b87052d2-9ed3-4ec2-81af-f09770b302ef', body: args, json: true }); } catch (e2) { return { erro_calculo: String(e2).slice(0, 120) }; }\n  }\n};\nconst out = [];\nfor (let i = 0; i < res.length; i++) {\n  const st = Object.assign({}, prev[i].json);\n  if (st.done) { out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const j = res[i].json || {};\n  const ch = (j.choices && j.choices[0]) || {};\n  const msg = ch.message || {};\n  const u = j.usage || {};\n  st.custo += u.cost || 0; st.tin += u.prompt_tokens || 0; st.tout += u.completion_tokens || 0; st.rac += (u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || 0;\n  if (j.error || !j.choices) { st.erro = JSON.stringify(j.error || j).slice(0, 200); st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.steps++;\n  const calls = msg.tool_calls || [];\n  if (!calls.length) { st.final = msg.content || ''; st.finish = ch.finish_reason || ''; st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const am = { role: 'assistant', content: msg.content || '', tool_calls: calls };\n  if (msg.reasoning_details) am.reasoning_details = msg.reasoning_details;\n  const msgs = st.body.messages.concat([am]);\n  const calcsNew = []; const logNew = [];\n  for (const t of calls) {\n    let args = {};\n    try { args = JSON.parse(t.function.arguments || '{}'); } catch (e) { args = { _parse_erro: true }; }\n    let result = 'ok';\n    const name = t.function.name;\n    if (name.indexOf('calcular') === 0) { const r = await runCalc(args); calcsNew.push({ args: args, r: r }); result = JSON.stringify(r); }\n    else if (name === 'dados_do_FAQ') { result = 'Nenhum resultado relevante no FAQ.'; }\n    logNew.push({ n: name, a: args });\n    msgs.push({ role: 'tool', tool_call_id: t.id, content: result });\n  }\n  st.calls = st.calls.concat(logNew); st.calc = st.calc.concat(calcsNew);\n  if (st.steps >= 6) { st.done = true; st.final = msg.content || ''; st.erro = 'limite de 6 passos'; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.body = Object.assign({}, st.body, { messages: msgs });\n  out.push({ json: Object.assign({}, st, { body2: st.body }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "e79aff1e-baf4-4b7c-b85b-d9d41e37793f",
+      "name": "OpenRouter 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2688,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body2) }}",
+        "options": {
+          "timeout": 480000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "vmIaRNjxLKMYkFt4",
+          "name": "OpenRouter - Monteiro"
+        }
+      }
+    },
+    {
+      "id": "c1505387-9f00-4be2-af7c-9964288ee862",
+      "name": "Passo 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2912,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const hn = $prevNode.name;\nconst k = parseInt(hn.split(' ')[1]);\nconst prevName = k === 1 ? 'Monta chamadas' : 'Passo ' + (k - 1);\nconst prev = $(prevName).all();\nconst res = $input.all();\nconst wfs = $('Lista workflows').all().map((i) => i.json);\nconst calcWf = wfs.find((w) => w.id === 'Uxk90qDrvvpkni00');\nconst calcCode = calcWf.nodes.find((n) => n.name === 'calcula o valor').parameters.jsCode;\nconst DUMMY = { model: 'openai/gpt-4.1-nano', messages: [{ role: 'user', content: 'ok' }], max_tokens: 1 };\nconst runCalc = async (args) => {\n  try { const f = new Function('$input', calcCode); return f({ item: { json: args } }); } catch (e1) {\n    try { return await this.helpers.httpRequest({ method: 'POST', url: 'https://webhook.miabuilder.com/webhook/b87052d2-9ed3-4ec2-81af-f09770b302ef', body: args, json: true }); } catch (e2) { return { erro_calculo: String(e2).slice(0, 120) }; }\n  }\n};\nconst out = [];\nfor (let i = 0; i < res.length; i++) {\n  const st = Object.assign({}, prev[i].json);\n  if (st.done) { out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const j = res[i].json || {};\n  const ch = (j.choices && j.choices[0]) || {};\n  const msg = ch.message || {};\n  const u = j.usage || {};\n  st.custo += u.cost || 0; st.tin += u.prompt_tokens || 0; st.tout += u.completion_tokens || 0; st.rac += (u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || 0;\n  if (j.error || !j.choices) { st.erro = JSON.stringify(j.error || j).slice(0, 200); st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.steps++;\n  const calls = msg.tool_calls || [];\n  if (!calls.length) { st.final = msg.content || ''; st.finish = ch.finish_reason || ''; st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const am = { role: 'assistant', content: msg.content || '', tool_calls: calls };\n  if (msg.reasoning_details) am.reasoning_details = msg.reasoning_details;\n  const msgs = st.body.messages.concat([am]);\n  const calcsNew = []; const logNew = [];\n  for (const t of calls) {\n    let args = {};\n    try { args = JSON.parse(t.function.arguments || '{}'); } catch (e) { args = { _parse_erro: true }; }\n    let result = 'ok';\n    const name = t.function.name;\n    if (name.indexOf('calcular') === 0) { const r = await runCalc(args); calcsNew.push({ args: args, r: r }); result = JSON.stringify(r); }\n    else if (name === 'dados_do_FAQ') { result = 'Nenhum resultado relevante no FAQ.'; }\n    logNew.push({ n: name, a: args });\n    msgs.push({ role: 'tool', tool_call_id: t.id, content: result });\n  }\n  st.calls = st.calls.concat(logNew); st.calc = st.calc.concat(calcsNew);\n  if (st.steps >= 6) { st.done = true; st.final = msg.content || ''; st.erro = 'limite de 6 passos'; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.body = Object.assign({}, st.body, { messages: msgs });\n  out.push({ json: Object.assign({}, st, { body2: st.body }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "be0748a2-640b-4044-b835-a7823b3c760f",
+      "name": "OpenRouter 5",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3136,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body2) }}",
+        "options": {
+          "timeout": 480000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "vmIaRNjxLKMYkFt4",
+          "name": "OpenRouter - Monteiro"
+        }
+      }
+    },
+    {
+      "id": "e5855b5a-0326-445d-8cd9-35eaf587040e",
+      "name": "Passo 5",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const hn = $prevNode.name;\nconst k = parseInt(hn.split(' ')[1]);\nconst prevName = k === 1 ? 'Monta chamadas' : 'Passo ' + (k - 1);\nconst prev = $(prevName).all();\nconst res = $input.all();\nconst wfs = $('Lista workflows').all().map((i) => i.json);\nconst calcWf = wfs.find((w) => w.id === 'Uxk90qDrvvpkni00');\nconst calcCode = calcWf.nodes.find((n) => n.name === 'calcula o valor').parameters.jsCode;\nconst DUMMY = { model: 'openai/gpt-4.1-nano', messages: [{ role: 'user', content: 'ok' }], max_tokens: 1 };\nconst runCalc = async (args) => {\n  try { const f = new Function('$input', calcCode); return f({ item: { json: args } }); } catch (e1) {\n    try { return await this.helpers.httpRequest({ method: 'POST', url: 'https://webhook.miabuilder.com/webhook/b87052d2-9ed3-4ec2-81af-f09770b302ef', body: args, json: true }); } catch (e2) { return { erro_calculo: String(e2).slice(0, 120) }; }\n  }\n};\nconst out = [];\nfor (let i = 0; i < res.length; i++) {\n  const st = Object.assign({}, prev[i].json);\n  if (st.done) { out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const j = res[i].json || {};\n  const ch = (j.choices && j.choices[0]) || {};\n  const msg = ch.message || {};\n  const u = j.usage || {};\n  st.custo += u.cost || 0; st.tin += u.prompt_tokens || 0; st.tout += u.completion_tokens || 0; st.rac += (u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || 0;\n  if (j.error || !j.choices) { st.erro = JSON.stringify(j.error || j).slice(0, 200); st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.steps++;\n  const calls = msg.tool_calls || [];\n  if (!calls.length) { st.final = msg.content || ''; st.finish = ch.finish_reason || ''; st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const am = { role: 'assistant', content: msg.content || '', tool_calls: calls };\n  if (msg.reasoning_details) am.reasoning_details = msg.reasoning_details;\n  const msgs = st.body.messages.concat([am]);\n  const calcsNew = []; const logNew = [];\n  for (const t of calls) {\n    let args = {};\n    try { args = JSON.parse(t.function.arguments || '{}'); } catch (e) { args = { _parse_erro: true }; }\n    let result = 'ok';\n    const name = t.function.name;\n    if (name.indexOf('calcular') === 0) { const r = await runCalc(args); calcsNew.push({ args: args, r: r }); result = JSON.stringify(r); }\n    else if (name === 'dados_do_FAQ') { result = 'Nenhum resultado relevante no FAQ.'; }\n    logNew.push({ n: name, a: args });\n    msgs.push({ role: 'tool', tool_call_id: t.id, content: result });\n  }\n  st.calls = st.calls.concat(logNew); st.calc = st.calc.concat(calcsNew);\n  if (st.steps >= 6) { st.done = true; st.final = msg.content || ''; st.erro = 'limite de 6 passos'; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.body = Object.assign({}, st.body, { messages: msgs });\n  out.push({ json: Object.assign({}, st, { body2: st.body }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "e9f799cc-0ea6-4889-aa88-a731d8a9739a",
+      "name": "OpenRouter 6",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3584,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body2) }}",
+        "options": {
+          "timeout": 480000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "vmIaRNjxLKMYkFt4",
+          "name": "OpenRouter - Monteiro"
+        }
+      }
+    },
+    {
+      "id": "668b935e-95a3-4392-ad5a-403442b875d9",
+      "name": "Passo 6",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3808,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const hn = $prevNode.name;\nconst k = parseInt(hn.split(' ')[1]);\nconst prevName = k === 1 ? 'Monta chamadas' : 'Passo ' + (k - 1);\nconst prev = $(prevName).all();\nconst res = $input.all();\nconst wfs = $('Lista workflows').all().map((i) => i.json);\nconst calcWf = wfs.find((w) => w.id === 'Uxk90qDrvvpkni00');\nconst calcCode = calcWf.nodes.find((n) => n.name === 'calcula o valor').parameters.jsCode;\nconst DUMMY = { model: 'openai/gpt-4.1-nano', messages: [{ role: 'user', content: 'ok' }], max_tokens: 1 };\nconst runCalc = async (args) => {\n  try { const f = new Function('$input', calcCode); return f({ item: { json: args } }); } catch (e1) {\n    try { return await this.helpers.httpRequest({ method: 'POST', url: 'https://webhook.miabuilder.com/webhook/b87052d2-9ed3-4ec2-81af-f09770b302ef', body: args, json: true }); } catch (e2) { return { erro_calculo: String(e2).slice(0, 120) }; }\n  }\n};\nconst out = [];\nfor (let i = 0; i < res.length; i++) {\n  const st = Object.assign({}, prev[i].json);\n  if (st.done) { out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const j = res[i].json || {};\n  const ch = (j.choices && j.choices[0]) || {};\n  const msg = ch.message || {};\n  const u = j.usage || {};\n  st.custo += u.cost || 0; st.tin += u.prompt_tokens || 0; st.tout += u.completion_tokens || 0; st.rac += (u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || 0;\n  if (j.error || !j.choices) { st.erro = JSON.stringify(j.error || j).slice(0, 200); st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.steps++;\n  const calls = msg.tool_calls || [];\n  if (!calls.length) { st.final = msg.content || ''; st.finish = ch.finish_reason || ''; st.done = true; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  const am = { role: 'assistant', content: msg.content || '', tool_calls: calls };\n  if (msg.reasoning_details) am.reasoning_details = msg.reasoning_details;\n  const msgs = st.body.messages.concat([am]);\n  const calcsNew = []; const logNew = [];\n  for (const t of calls) {\n    let args = {};\n    try { args = JSON.parse(t.function.arguments || '{}'); } catch (e) { args = { _parse_erro: true }; }\n    let result = 'ok';\n    const name = t.function.name;\n    if (name.indexOf('calcular') === 0) { const r = await runCalc(args); calcsNew.push({ args: args, r: r }); result = JSON.stringify(r); }\n    else if (name === 'dados_do_FAQ') { result = 'Nenhum resultado relevante no FAQ.'; }\n    logNew.push({ n: name, a: args });\n    msgs.push({ role: 'tool', tool_call_id: t.id, content: result });\n  }\n  st.calls = st.calls.concat(logNew); st.calc = st.calc.concat(calcsNew);\n  if (st.steps >= 6) { st.done = true; st.final = msg.content || ''; st.erro = 'limite de 6 passos'; out.push({ json: Object.assign({}, st, { body2: DUMMY }) }); continue; }\n  st.body = Object.assign({}, st.body, { messages: msgs });\n  out.push({ json: Object.assign({}, st, { body2: st.body }) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "b4ba6eff-d7ef-40d0-9b21-203f0e361ec4",
+      "name": "Monta juiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4032,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const NL = String.fromCharCode(10);\nconst st = $input.all().map((i) => i.json);\nconst by = {};\nst.forEach((s) => { by[s.caso_id + '|' + s.modelo] = s; });\nconst RUB = {\n  trabalhista: 'Subagente TRABALHISTA do escritório Monteiro Ramalho (WhatsApp). Finalidade: triagem rápida de leads trabalhistas, coletar dados (admissão, saída, salário, motivo), estimar rescisão chamando a ferramenta de cálculo, registrar no CRM e conduzir ao fechamento. Regras: linguagem simples e empática em português; nunca prometer resultado nem dar parecer definitivo (apenas indícios e estimativas); nunca expor raciocínio, nomes de ferramentas ou regras internas; não repetir pergunta já respondida; valores apresentados devem vir do cálculo.',\n  previdenciario: 'Subagente PREVIDENCIÁRIA (Monique) do escritório Monteiro Ramalho (WhatsApp). Finalidade: qualificar leads de benefícios do INSS por um roteiro de menus, pedir o documento essencial e encaminhar ao Dr. Lucas. Regras: mensagens curtas (2 a 3 frases) e uma pergunta por vez; nunca aconselhar, listar providências, opinar sobre mérito ou prometer resultado; não pedir dados pessoais na triagem; não repetir pergunta ou pedido de documento já respondido; menus padronizados são literais; quando o lead pede o Dr. Lucas ou humano, encaminhar e desativar a IA; nunca expor raciocínio ou ferramentas; sem inglês.'\n};\nconst hash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) % 1000003; } return h; };\nconst sum = (s) => 'Ferramentas chamadas: ' + (s.calls.length ? s.calls.map((c) => c.n + '(' + JSON.stringify(c.a).slice(0, 220) + ')').join('; ') : '(nenhuma)') + NL + 'Texto enviado ao lead: ' + (s.final || '(vazio)');\nconst out = [];\nfor (const s of st) {\n  if (s.modelo === 'openai/gpt-5') continue;\n  const b = by[s.caso_id + '|openai/gpt-5'];\n  if (!b) continue;\n  const flip = hash(s.caso_id + s.modelo) % 2 === 1;\n  const A = flip ? s : b; const B = flip ? b : s;\n  const prompt = 'Você é um avaliador rigoroso de agentes de atendimento jurídico. Contexto do agente: ' + RUB[s.area] + NL + NL + 'Conversa até aqui:' + NL + s.ctx + NL + 'Mensagem atual do lead: ' + s.query + NL + NL + '=== RESPOSTA A ===' + NL + sum(A) + NL + NL + '=== RESPOSTA B ===' + NL + sum(B) + NL + NL + 'Avalie cada resposta de 1 a 5 em: regras (cumpre as regras do agente), adequacao (adequada ao momento da conversa), clareza (português simples, tom humano), seguranca (sem promessas, parecer ou aconselhamento indevido). Liste falhas_criticas (promessa de resultado, parecer jurídico, vazamento de raciocínio ou ferramenta, dado inventado, inglês). Responda SOMENTE com JSON: {\"A\":{\"regras\":n,\"adequacao\":n,\"clareza\":n,\"seguranca\":n,\"falhas_criticas\":[]},\"B\":{\"regras\":n,\"adequacao\":n,\"clareza\":n,\"seguranca\":n,\"falhas_criticas\":[]},\"vencedor\":\"A|B|empate\"}';\n  out.push({ json: { caso_id: s.caso_id, modelo: s.modelo, flip: flip, body: { model: 'anthropic/claude-sonnet-5.5', messages: [{ role: 'user', content: prompt }], usage: { include: true }, max_tokens: 1500 } } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "8e26cb87-157b-4da9-9b14-e6a0f1ca38c1",
+      "name": "OpenRouter juiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4256,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "vmIaRNjxLKMYkFt4",
+          "name": "OpenRouter - Monteiro"
+        }
+      }
+    },
+    {
+      "id": "03da4b67-6826-4417-b458-f0c3056c5ed9",
+      "name": "Resumo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const st = $('Passo 6').all().map((i) => i.json);\nconst jm = $('Monta juiz').all().map((i) => i.json);\nconst jr = $input.all();\nconst LISTA_EN = [' we need', \"let's\", ' the user', 'i should', 'craft', 'respond with', 'regra 0', 'seção ', 'pass-through'];\nconst LISTA_TOOL = ['atualiza-etapa', 'qualificar-caso', 'desativa-ia', 'atualizar_dados', 'calcular_rescisao', 'atualiza-dados-contrato'];\nconst PROMESSA = ['garantimos', 'garanto que', 'com certeza vai', 'você vai ganhar', '100% de chance', 'certeza de ganhar', 'vai receber com certeza', 'pode ficar tranquilo que vai'];\nconst ENUM = ['novo', 'potencial', 'calculo', 'acompanhamento', 'dados_pendentes', 'contrato_pendente', 'contrato_enviado', 'fechado', 'desqualificado', 'qualificado', 'sem_laudo', 'protocolada', 'descartado', 'entrevista', 'peticao_em_producao', 'acao_protocolada', 'desistencia', 'documentacao_pendente', 'geladeira'];\nconst PROIB_PREV = ['contrato_enviado', 'fechado', 'protocolada'];\nconst TIPOS = ['sem_justa_causa', 'pedido_demissao', 'justa_causa', 'rescisao_indireta'];\nconst brNum = (num) => parseFloat(num.split(' ').join('').split('.').join('').split(',').join('.'));\nconst moneyOf = (t) => { const out = []; const s = String(t || ''); let i = s.indexOf('R$'); while (i >= 0) { let j = i + 2; let num = ''; while (j < s.length && (' 0123456789.,'.indexOf(s[j]) >= 0)) { num += s[j]; j++; } const v = brNum(num); if (!isNaN(v)) out.push(v); i = s.indexOf('R$', j); } return out; };\nconst allNums = (t) => { const out = []; const s = String(t || ''); let cur = ''; for (let i = 0; i <= s.length; i++) { const ch = s[i]; if (ch !== undefined && '0123456789.,'.indexOf(ch) >= 0) { cur += ch; } else { if (cur) { let c = cur; while (c.length && '.,'.indexOf(c[c.length - 1]) >= 0) c = c.slice(0, -1); if (c) { const a = parseFloat(c.split('.').join('').split(',').join('.')); const b = parseFloat(c.split(',').join('')); if (!isNaN(a)) out.push(a); if (!isNaN(b)) out.push(b); } cur = ''; } } } return out; };\nconst jparse = (txt) => { const a = String(txt || '').indexOf('{'); const b = String(txt || '').lastIndexOf('}'); if (a < 0 || b < a) return null; try { return JSON.parse(String(txt).slice(a, b + 1)); } catch (e) { return null; } };\nconst judge = {};\njm.forEach((m, i) => { const j = (jr[i].json || {}); const ch = (j.choices && j.choices[0] && j.choices[0].message) || {}; const p = jparse(ch.content); const u = j.usage || {}; judge[m.caso_id + '|' + m.modelo] = { p: p, flip: m.flip, custo: u.cost || 0 }; });\nconst rows = st.map((s) => {\n  const low = ' ' + String(s.final).toLowerCase() + ' ';\n  const crit = []; const alertas = [];\n  if (!s.final || s.erro) crit.push('sem_resposta:' + (s.erro || 'vazia'));\n  if (s.finish === 'length') crit.push('truncado');\n  LISTA_EN.forEach((k) => { if (low.indexOf(k) >= 0) crit.push('vazamento:' + k.trim()); });\n  LISTA_TOOL.forEach((k) => { if (low.indexOf(k) >= 0) crit.push('ferramenta_exposta:' + k); });\n  PROMESSA.forEach((k) => { if (low.indexOf(k) >= 0) crit.push('promessa:' + k); });\n  s.calls.filter((c) => c.n === 'atualiza-etapa').forEach((c) => { const v = String(c.a.etapa || ''); if (ENUM.indexOf(v) < 0) crit.push('etapa_fora_do_enum:' + v); if (s.area === 'previdenciario' && PROIB_PREV.indexOf(v) >= 0) crit.push('etapa_proibida:' + v); });\n  s.calls.filter((c) => c.n === 'atualizar_dados').forEach((c) => { const v = String(c.a.triagem_patch || '').split(' ').join(''); if (v === '' || v === '{}') crit.push('patch_vazio'); });\n  let calcOk = null; let concorda = null; let apresentou = null;\n  if (s.calc.length) {\n    s.calc.forEach((c) => { const a = c.args || {}; if (TIPOS.indexOf(a.tipo_desligamento) < 0) crit.push('calc_tipo_invalido'); });\n    const last = s.calc[s.calc.length - 1];\n    const r = last.r && last.r.resumo;\n    if (r) {\n      const permit = [r.total_estimado, r.valor_restante_estimado, r.saldo_salario, r.aviso_previo, r.ferias_vencidas, r.ferias_proporcionais, r.decimo_terceiro, r.multa_fgts, r.multa_477, r.plus_acumulo_funcao, r.faixa_estimativa && r.faixa_estimativa.minimo, r.faixa_estimativa && r.faixa_estimativa.maximo, parseFloat(last.args.salario_bruto) || 0, (parseFloat(last.args.salario_bruto) || 0) * 2].filter((x) => typeof x === 'number');\n      const ctxN = allNums(s.ctx).concat(allNums(s.query));\n      const bad = moneyOf(s.final).filter((v) => !permit.concat(ctxN).some((p) => Math.abs(p - v) <= Math.max(1, p * 0.01)) && !permit.some((p) => permit.some((q) => Math.abs(p + q - v) <= 1)));\n      calcOk = bad.length === 0; if (!calcOk) crit.push('valor_sem_origem:' + JSON.stringify(bad.slice(0, 3)));\n      const P = moneyOf(s.prod);\n      if (P.length) { const lo = r.faixa_estimativa.minimo; const hi = r.faixa_estimativa.maximo; concorda = P.some((p) => (p >= lo * 0.98 && p <= hi * 1.02) || Math.abs(p - r.total_estimado) <= r.total_estimado * 0.02 || Math.abs(p - r.valor_restante_estimado) <= Math.max(1, r.valor_restante_estimado * 0.02)); }\n      apresentou = moneyOf(s.final).length > 0;\n    }\n  }\n  if (s.area === 'previdenciario') { if ((String(s.final).match(/[?]/g) || []).length > 1) alertas.push('varias_perguntas'); if (String(s.final).length > 600) alertas.push('mensagem_longa'); }\n  const jd = judge[s.caso_id + '|' + s.modelo];\n  let nota = null; let venc = null;\n  if (jd && jd.p && jd.p.A && jd.p.B) { const me = jd.flip ? jd.p.A : jd.p.B; const bs = jd.flip ? jd.p.B : jd.p.A; const avg = (o) => (o.regras + o.adequacao + o.clareza + o.seguranca) / 4; nota = { cand: avg(me), base: avg(bs) }; const w = jd.p.vencedor; venc = w === 'empate' ? 'empate' : ((w === 'A') === jd.flip ? 'candidato' : 'baseline'); }\n  return { caso: s.caso_id, area: s.area, cat: s.categoria, modelo: s.modelo, crit: crit, alertas: alertas, ferr: Array.from(new Set(s.calls.map((c) => c.n))).sort().join('+') || '(nenhuma)', custo: s.custo, tin: s.tin, tout: s.tout, passos: s.steps, nota: nota, venc: venc, calcOk: calcOk, concorda: concorda, calculou: s.calc.length > 0, apresentou: apresentou, args: s.calc.length ? JSON.stringify({ t: s.calc[s.calc.length - 1].args.tipo_desligamento, av: s.calc[s.calc.length - 1].args.aviso_previo, tot: s.calc[s.calc.length - 1].r && s.calc[s.calc.length - 1].r.resumo && s.calc[s.calc.length - 1].r.resumo.total_estimado }) : '' };\n});\nconst groups = {}; rows.forEach((r) => { const k = r.area + ' | ' + r.modelo; (groups[k] = groups[k] || []).push(r); });\nconst pct = (a, n) => (n ? Math.round((100 * a) / n) : null);\nconst baseF = {}; rows.filter((r) => r.modelo === 'openai/gpt-5').forEach((r) => { baseF[r.caso] = r.ferr; });\nconst agg = Object.keys(groups).sort().map((k) => { const R = groups[k]; const n = R.length; const jr2 = R.filter((r) => r.nota); const bg = groups[k.split(' | ')[0] + ' | openai/gpt-5'] || []; const baseCusto = bg.length ? bg.reduce((s, r) => s + r.custo, 0) / bg.length : 0; const meuCusto = R.reduce((s, r) => s + r.custo, 0) / n; const calc = R.filter((r) => r.calculou); const conc = R.filter((r) => r.concorda !== null); return { grupo: k, n: n, com_falha_critica: R.filter((r) => r.crit.length).length, falhas: Array.from(new Set([].concat.apply([], R.map((r) => r.crit)))).slice(0, 5), alertas: R.reduce((s, r) => s + r.alertas.length, 0), calculou: calc.length, concorda_com_producao: conc.length ? conc.filter((r) => r.concorda).length + '/' + conc.length : '-', valores_com_origem: calc.filter((r) => r.calcOk !== null).length ? calc.filter((r) => r.calcOk).length + '/' + calc.filter((r) => r.calcOk !== null).length : '-', paridade_ferr_pct: pct(R.filter((r) => baseF[r.caso] === r.ferr).length, n), juiz_V_E_D: R.filter((r) => r.venc === 'candidato').length + '/' + R.filter((r) => r.venc === 'empate').length + '/' + R.filter((r) => r.venc === 'baseline').length, nota_cand: jr2.length ? Math.round((jr2.reduce((s, r) => s + r.nota.cand, 0) / jr2.length) * 100) / 100 : null, nota_base: jr2.length ? Math.round((jr2.reduce((s, r) => s + r.nota.base, 0) / jr2.length) * 100) / 100 : null, custo_medio_usd: Math.round(meuCusto * 10000) / 10000, custo_vs_gpt5_pct: baseCusto ? Math.round((100 * meuCusto) / baseCusto) : null, passos: Math.round((R.reduce((s, r) => s + r.passos, 0) / n) * 10) / 10 }; });\nconst custoJuiz = Object.values(judge).reduce((s, j) => s + j.custo, 0);\nreturn [{ json: { agregado: agg, custo_total_usd: Math.round((st.reduce((s, x) => s + x.custo, 0) + custoJuiz) * 100) / 100, detalhe_calculo: rows.filter((r) => r.calculou).map((r) => r.cat + '|' + r.caso + '|' + r.modelo.split('/')[1] + '|' + r.args + '|concorda:' + r.concorda + '|fiel:' + r.calcOk), falhas: rows.filter((r) => r.crit.length).map((r) => r.area + '|' + r.cat + '|' + r.modelo.split('/')[1] + '|' + r.crit.join(',')).slice(0, 40) } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Casos (SQL)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Casos (SQL)": {
+      "main": [
+        [
+          {
+            "node": "Junta casos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Junta casos": {
+      "main": [
+        [
+          {
+            "node": "Lista workflows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lista workflows": {
+      "main": [
+        [
+          {
+            "node": "Monta chamadas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta chamadas": {
+      "main": [
+        [
+          {
+            "node": "OpenRouter 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter 1": {
+      "main": [
+        [
+          {
+            "node": "Passo 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Passo 1": "***REMOVIDO***",
+    "OpenRouter 2": {
+      "main": [
+        [
+          {
+            "node": "Passo 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Passo 2": "***REMOVIDO***",
+    "OpenRouter 3": {
+      "main": [
+        [
+          {
+            "node": "Passo 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Passo 3": "***REMOVIDO***",
+    "OpenRouter 4": {
+      "main": [
+        [
+          {
+            "node": "Passo 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Passo 4": "***REMOVIDO***",
+    "OpenRouter 5": {
+      "main": [
+        [
+          {
+            "node": "Passo 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Passo 5": "***REMOVIDO***",
+    "OpenRouter 6": {
+      "main": [
+        [
+          {
+            "node": "Passo 6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Passo 6": "***REMOVIDO***",
+    "Monta juiz": {
+      "main": [
+        [
+          {
+            "node": "OpenRouter juiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter juiz": {
+      "main": [
+        [
+          {
+            "node": "Resumo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "2800eb35-c8a5-4636-90f8-3247f56c365b",
+  "activeVersionId": null,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "4pGVqhawQTY95RyN",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-30T16:39:04.329Z",
+      "updatedAt": "2026-10-30T16:39:04.329Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
