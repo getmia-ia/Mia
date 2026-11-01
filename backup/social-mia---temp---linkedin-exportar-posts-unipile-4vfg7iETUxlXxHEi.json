@@ -1,0 +1,176 @@
+{
+  "updatedAt": "2026-10-31T23:12:21.441Z",
+  "createdAt": "2026-10-31T23:09:08.103Z",
+  "id": "4vfg7iETUxlXxHEi",
+  "name": "Social Mia - TEMP - LinkedIn: exportar posts (Unipile)",
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "8590ab1a-8a25-490e-99f7-492113cdf1e9",
+      "name": "Executar manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "1d37bda3-5306-41eb-805a-2d5e7b550e63",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "unipile_dsn",
+              "value": "https://api2.unipile.com:13224",
+              "type": "string"
+            },
+            {
+              "id": "c2",
+              "name": "unipile_key",
+              "value": "F2jbNuAC.vpa76oFpouy2Q1I5L+tX9N8OHVqGR7RBwgWjasshBtA=",
+              "type": "string"
+            },
+            {
+              "id": "c3",
+              "name": "unipile_account_id",
+              "value": "sbFW1i6KSNuf7lBl_-ZGeg",
+              "type": "string"
+            },
+            {
+              "id": "c4",
+              "name": "empresa_linkedin",
+              "value": "mia-ia",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cd7a3dd4-0002-44e6-bb34-a9bf40238c90",
+      "name": "Exportar posts LinkedIn",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const cfg = $('Configuração').first().json;\nconst helpers = this.helpers;\nconst headers = { 'X-API-KEY': cfg.unipile_key, accept: 'application/json' };\nasync function get(path, qs = {}) {\n  return await helpers.httpRequest({ method: 'GET', url: cfg.unipile_dsn + path, qs: { account_id: cfg.unipile_account_id, ...qs }, headers, json: true, timeout: 60000 });\n}\nconst erros = [];\nconst paginas = [];\nconst out = [];\nconst vistos = new Set();\nfunction pick(p, origem) {\n  const att = Array.isArray(p.attachments) ? p.attachments.map(a => ({ type: a.type, url: a.url || a.src || null, mimetype: a.mimetype || null, file_name: a.file_name || null })) : [];\n  return { origem, id: p.id || null, social_id: p.social_id || null, share_url: p.share_url || null, data: p.parsed_datetime || p.date || null, texto: p.text || '', reacoes: p.reaction_counter ?? null, comentarios: p.comment_counter ?? null, compartilhamentos: p.repost_counter ?? null, impressoes: p.impressions_counter ?? null, is_repost: !!(p.is_repost || p.reposted_by), autor: p.author ? (p.author.name || p.author.public_identifier || null) : null, anexos: att };\n}\nasync function listar(identifier, origem, isCompany, limit) {\n  let cursor = null; let pages = 0;\n  do {\n    const qs = { limit };\n    if (cursor) qs.cursor = cursor;\n    if (isCompany) qs.is_company = 'true';\n    let r;\n    try { r = await get('/api/v1/users/' + encodeURIComponent(identifier) + '/posts', qs); }\n    catch (e) { erros.push(origem + ' página ' + (pages + 1) + ': ' + e.message); break; }\n    const items = r.items || [];\n    paginas.push(origem + ' p' + (pages + 1) + ': ' + items.length + ' itens, cursor=' + (r.cursor ? 'sim' : 'não'));\n    for (const p of items) { const k = origem + ':' + (p.social_id || p.id); if (vistos.has(k)) continue; vistos.add(k); out.push(pick(p, origem)); }\n    cursor = r.cursor || null; pages++;\n  } while (cursor && pages < 60);\n}\nlet me = null;\ntry { me = await get('/api/v1/users/me'); } catch (e) { erros.push('perfil: ' + e.message); }\nif (me && me.provider_id) await listar(me.provider_id, 'perfil_lucas', false, 50);\nlet empresa = null;\ntry { empresa = await get('/api/v1/linkedin/company/' + encodeURIComponent(cfg.empresa_linkedin)); } catch (e) { erros.push('empresa: ' + e.message); }\nif (empresa && empresa.id) await listar(empresa.id, 'pagina_mia', true, 50);\nconst resumo = { tipo: 'resumo', perfil: me ? (me.name || ((me.first_name || '') + ' ' + (me.last_name || ''))) : null, perfil_id: me ? me.provider_id : null, empresa: empresa ? empresa.name : null, empresa_id: empresa ? empresa.id : null, posts_perfil: out.filter(o => o.origem === 'perfil_lucas').length, posts_empresa: out.filter(o => o.origem === 'pagina_mia').length, reposts_perfil: out.filter(o => o.origem === 'perfil_lucas' && o.is_repost).length, mais_antigo: out.map(o => o.data).filter(Boolean).sort()[0] || null, paginas, erros };\nreturn [{ json: resumo }, ...out.map(o => ({ json: { tipo: 'post', ...o } }))];"
+      }
+    },
+    {
+      "id": "9f686dd1-f93b-4621-a7ed-c066402a518a",
+      "name": "Webhook exportação (temporário)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "options": {},
+        "path": "social-mia-linkedin-export-7f3k29xq",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "5cdc212b-8cc7-4e1b-9f88-2ae580e9d486"
+    },
+    {
+      "id": "fe387798-fbae-4a21-aab4-d0d592b80a49",
+      "name": "Responder com os posts",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        700,
+        200
+      ],
+      "parameters": {
+        "options": {},
+        "respondWith": "allIncomingItems"
+      }
+    }
+  ],
+  "connections": {
+    "Executar manualmente": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Exportar posts LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook exportação (temporário)": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exportar posts LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Responder com os posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "2e614c24-98e3-42c4-be2d-e06a35cbd413",
+  "activeVersionId": null,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "4vfg7iETUxlXxHEi",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-10-31T23:09:08.103Z",
+      "updatedAt": "2026-10-31T23:09:08.103Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
