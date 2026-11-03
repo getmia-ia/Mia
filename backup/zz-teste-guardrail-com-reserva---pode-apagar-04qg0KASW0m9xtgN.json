@@ -1,0 +1,200 @@
+{
+  "updatedAt": "2026-11-02T18:04:01.340Z",
+  "createdAt": "2026-11-02T17:59:59.840Z",
+  "id": "04qg0KASW0m9xtgN",
+  "name": "ZZ [TESTE] Guardrail com reserva - pode apagar",
+  "active": false,
+  "isArchived": true,
+  "nodes": [
+    {
+      "id": "b104e060-beba-4399-abaf-2ce031121015",
+      "name": "Webhook Teste",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        112
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "teste-guardrail-eleva-sandbox"
+      },
+      "webhookId": "1462a603-0103-457d-b404-c995286b8cc1"
+    },
+    {
+      "id": "82fe95f9-4dcf-4732-924a-b9fb665d564d",
+      "name": "Prepara Guardrail de Lançamento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        112
+      ],
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || {};\nreturn [{ json: { _guardrail_texto: b.texto || '', _guardrail_resumo_ferramentas: b.resumo || 'Nenhuma ferramenta de lançamento (lancamento_whatsapp) ou edição (editar_lancamento) foi chamada nesta rodada.', _guardrail_tool_confirmou: b.tool === true, modelo_principal: b.modelo_principal || 'google/gemini-2.5-flash-lite', modelo_reserva: b.modelo_reserva || 'openai/gpt-4.1-nano' } }];"
+      }
+    },
+    {
+      "id": "c96fea78-b5ac-4549-a1f6-acdd347939f3",
+      "name": "Guardrail IA - Verifica Lançamento",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        448,
+        112
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "=Você é um verificador técnico e objetivo. Sua única tarefa é decidir se o TEXTO abaixo afirma, de qualquer forma, que um lançamento financeiro ou uma edição de lançamento foi concluído com sucesso.\n\nIsso inclui QUALQUER forma de dar a entender que a ação já foi feita - não só palavras como \"lancei\" ou \"registrei\". Conta também: \"separei esse valor\", \"já está no sistema\", \"pronto, ficou R$ X\", \"anotei como gasto\", \"corrigi pra você\", \"tá feito\", ou qualquer frase que leve o cliente a acreditar que o lançamento ou a edição já existe de verdade.\n\nNÃO conta como afirmação de sucesso:\n- Frases no passado distante, dúvida ou negação (\"não lancei\", \"já tinha lançado antes\", \"ainda não consegui registrar\", \"não tenho certeza se salvou\").\n- Perguntas, pedidos de mais informação, ou texto sobre outro assunto (ex: resposta de uma consulta de gastos, análise de período, explicação sobre categorias) - isso não é uma afirmação de lançamento.\n\nTEXTO A ANALISAR:\n\"\"\"\n{{ $json._guardrail_texto }}\n\"\"\"\n\nO QUE REALMENTE ACONTECEU NESTA RODADA (apurado por código, não pelo texto acima - use isso só como contexto, sua resposta deve ser sobre o que o TEXTO afirma, não sobre isso):\n{{ $json._guardrail_resumo_ferramentas }}\n\nResponda SOMENTE um JSON válido, sem nenhum texto antes ou depois, sem markdown, exatamente neste formato:\n{\"afirma_sucesso\": true}\nou\n{\"afirma_sucesso\": false}",
+        "hasOutputParser": false,
+        "needsFallback": true
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "e956d8c8-f3ea-4b3a-8f23-709a52242da9",
+      "name": "Guardrail - Modelo Barato",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        464,
+        336
+      ],
+      "parameters": {
+        "model": "={{ $('Prepara Guardrail de Lançamento').first().json.modelo_principal }}",
+        "options": {
+          "temperature": 0,
+          "maxTokens": "***REMOVIDO***",
+          "timeout": 15000,
+          "maxRetries": 1
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "OBNjBWmZfco6v8Gx",
+          "name": "OpenRouter - Eleva Agente de IA - Financeiro"
+        }
+      }
+    },
+    {
+      "id": "4a93ca2f-9bc7-4767-bc9e-6cb582f76ae8",
+      "name": "Guardrail - Modelo Reserva",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        592,
+        336
+      ],
+      "parameters": {
+        "model": "={{ $('Prepara Guardrail de Lançamento').first().json.modelo_reserva }}",
+        "options": {
+          "temperature": 0,
+          "maxTokens": "***REMOVIDO***",
+          "timeout": 15000,
+          "maxRetries": 1
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "OBNjBWmZfco6v8Gx",
+          "name": "OpenRouter - Eleva Agente de IA - Financeiro"
+        }
+      }
+    },
+    {
+      "id": "f29a6a2f-f7b6-43ed-a349-04335279975c",
+      "name": "Aplica Decisão do Guardrail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        112
+      ],
+      "parameters": {
+        "jsCode": "// Aplica a decisão do guardrail. O guardrail tem 3 camadas, nesta ordem:\n//   1) IA principal   2) IA reserva (de outro provedor, assume sozinha se a\n//   principal falhar)   3) checagem simples por código, caso nenhuma IA responda.\n// Assim, a falha de um modelo auxiliar nunca deixa o cliente sem resposta.\n\nconst AVISO = 'Não consegui registrar esse lançamento agora, então ele ainda NÃO foi salvo. Pode me mandar de novo, por favor? (valor, categoria e forma de pagamento)';\nconst JANELA_PERTO_DO_VALOR = 40; // caracteres aceitos entre o verbo e o valor em R$\n\n// Dados originais (texto completo e o que a ferramenta realmente fez), buscados\n// pelo nome do node anterior - o node da IA só devolve o texto que ele gerou.\nconst preparado = $('Prepara Guardrail de Lançamento').first().json;\nconst textoOriginal = preparado._guardrail_texto ?? '';\nconst toolConfirmou = preparado._guardrail_tool_confirmou === true;\n\n// --- Camada 3: checagem simples por código (só roda se nenhuma IA respondeu) ---\n// Limites de palavra: não pode haver letra ou número colado antes/depois.\nconst ANTES = '(?<![a-zA-Zà-úÀ-Ú0-9_])';\nconst DEPOIS = '(?![a-zA-Zà-úÀ-Ú0-9_])';\nconst VERBOS = 'lancei|registrei|adicionei|inseri|criei|alterei|atualizei|corrigi|editei';\n\n// Tira do texto as frases que NÃO afirmam algo novo: negações (\"não lancei\")\n// e referências ao passado (\"já lancei\", \"lancei antes\").\nfunction semFrasesQueNaoAfirmam(texto) {\n  const v = '(?:' + VERBOS + ')';\n  return texto\n    .replace(new RegExp(ANTES + 'n[ãa]o +(?:[^ ]+ +){0,2}?' + v + DEPOIS, 'gi'), ' ')\n    .replace(new RegExp(ANTES + 'j[áa] +(?:[^ ]+ +){0,2}?' + v + DEPOIS, 'gi'), ' ')\n    .replace(new RegExp(ANTES + v + ' +(?:[^ ]+ +){0,2}?(?:antes|anteriormente|ontem)' + DEPOIS, 'gi'), ' ');\n}\n\n// Só conta como afirmação se o verbo tiver um valor em R$ por perto.\nfunction temVerboPertoDeValor(texto) {\n  const re = new RegExp(ANTES + '(?:' + VERBOS + ')' + DEPOIS, 'gi');\n  let m;\n  while ((m = re.exec(texto)) !== null) {\n    const janela = texto.slice(\n      Math.max(0, m.index - JANELA_PERTO_DO_VALOR),\n      m.index + m[0].length + JANELA_PERTO_DO_VALOR\n    );\n    if (/R[$] *[0-9]/.test(janela)) return true;\n  }\n  return false;\n}\n\nfunction afirmaSucessoPorCodigo(texto) {\n  const t = semFrasesQueNaoAfirmam(String(texto));\n  return temVerboPertoDeValor(t) || /pronto[!,.]? *ficou *[*]{0,2} *R[$]/i.test(t);\n}\n\n// --- Lê a resposta da IA (se houver) ---\nconst entrada = $input.all()[0]?.json ?? {};\nlet veredito = null; // true / false se a IA respondeu algo válido; null se não respondeu\nif (!entrada.error && typeof entrada.text === 'string') {\n  try {\n    // Pega só o trecho entre a primeira \"{\" e a última \"}\" (ignora cercas de markdown).\n    const t = entrada.text;\n    const parsed = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1));\n    if (typeof parsed.afirma_sucesso === 'boolean') veredito = parsed.afirma_sucesso;\n  } catch (e) {\n    veredito = null;\n  }\n}\n\nlet afirmaSucesso;\nlet via;\nif (veredito !== null) {\n  afirmaSucesso = veredito;\n  // Se o modelo reserva chegou a rodar, foi ele que salvou a checagem.\n  let reservaRodou = false;\n  try { reservaRodou = $('Guardrail - Modelo Reserva').isExecuted === true; } catch (e) { reservaRodou = false; }\n  via = reservaRodou ? 'ia_reserva' : 'ia';\n} else {\n  // Nenhuma IA respondeu: só vale checar por código se a ferramenta não\n  // confirmou nada (se confirmou, a resposta não tem como ser falsa).\n  afirmaSucesso = toolConfirmou ? false : afirmaSucessoPorCodigo(textoOriginal);\n  via = 'codigo';\n}\n\nconst mentiu = afirmaSucesso && !toolConfirmou;\n\n// Remove os campos internos de preparo antes de devolver pro resto do fluxo.\nconst { _guardrail_texto, _guardrail_resumo_ferramentas, _guardrail_tool_confirmou, ...resto } = preparado;\n\nif (!mentiu) {\n  return [{ json: { ...resto, output: textoOriginal, lancamento_nao_confirmado: false, guardrail_via: via } }];\n}\nreturn [{ json: { ...resto, output: AVISO, output_original_bloqueado: textoOriginal, lancamento_nao_confirmado: true, guardrail_via: via } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Teste": {
+      "main": [
+        [
+          {
+            "node": "Prepara Guardrail de Lançamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara Guardrail de Lançamento": {
+      "main": [
+        [
+          {
+            "node": "Guardrail IA - Verifica Lançamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardrail IA - Verifica Lançamento": {
+      "main": [
+        [
+          {
+            "node": "Aplica Decisão do Guardrail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardrail - Modelo Barato": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Guardrail IA - Verifica Lançamento",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardrail - Modelo Reserva": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Guardrail IA - Verifica Lançamento",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "030c5be5-e952-4fff-b6af-94a6155b074f",
+  "activeVersionId": null,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "04qg0KASW0m9xtgN",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-11-02T17:59:59.840Z",
+      "updatedAt": "2026-11-02T17:59:59.840Z"
+    }
+  ],
+  "activeVersion": null,
+  "tags": []
+}
