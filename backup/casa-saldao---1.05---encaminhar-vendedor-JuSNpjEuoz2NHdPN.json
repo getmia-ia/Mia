@@ -1,0 +1,544 @@
+{
+  "updatedAt": "2026-11-25T14:14:43.439Z",
+  "createdAt": "2026-11-23T15:08:03.282Z",
+  "id": "JuSNpjEuoz2NHdPN",
+  "name": "Casa Saldão - 1.05 - Encaminhar vendedor",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "telefone"
+            },
+            {
+              "name": "nome"
+            },
+            {
+              "name": "account_id"
+            },
+            {
+              "name": "conversation_id"
+            },
+            {
+              "name": "produtos"
+            },
+            {
+              "name": "loja"
+            },
+            {
+              "name": "resumo"
+            },
+            {
+              "name": "tipo"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -192,
+        0
+      ],
+      "id": "8f02fe7e-d9c9-4e90-b7bf-454c70dce424",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with alvo as (\n  select id, etapa from leads\n  where telefone in ($1::text, substr($1::text, 1, 4) || substr($1::text, 6))\n  order by created_at desc limit 1\n),\nupd as (\n  update leads l set etapa = 'qualificado', etapa_em = now(),\n         ultima_interacao_em = now(), updated_at = now()\n  from alvo\n  where l.id = alvo.id and alvo.etapa in ('novo', 'em_contato', 'perdido')\n  returning l.id\n),\nev as (\n  insert into lead_eventos (lead_id, autor_id, tipo, de, para)\n  select alvo.id, null, 'etapa', alvo.etapa, 'qualificado' from alvo\n  where alvo.etapa in ('novo', 'em_contato', 'perdido')\n),\nnota as (\n  insert into lead_notas (lead_id, autor_id, texto)\n  select id, null, $2::text from alvo\n)\nselect (select id from alvo) as lead_id;",
+        "options": {
+          "queryReplacement": "={{ [ $json.telefone, 'Atendimento IA WhatsApp\\nProdutos: ' + $json.produtos + '\\nLoja: ' + ($json.loja || '-') + '\\n\\n' + $json.resumo ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        16,
+        0
+      ],
+      "id": "36487e92-360b-4672-bda3-482fdd3bc98b",
+      "name": "Atualiza lead e registra nota",
+      "credentials": {
+        "postgres": {
+          "id": "1ev7OwCneYeU4YD4",
+          "name": "Casa Saldão - Postgress"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "MIA-LOGS-2",
+        "remoteJid": "={{ $('Define destino').first().json.remoteJid }}",
+        "messageText": "={{ $('Define destino').first().json.texto }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        432,
+        0
+      ],
+      "id": "3c3bd758-c969-4222-96df-d5a26c522ebd",
+      "name": "Avisa vendedores",
+      "executeOnce": true,
+      "credentials": {
+        "evolutionApi": {
+          "id": "PBxKGNUnpI3LPGR3",
+          "name": "MIA-LOGS-2"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "ok",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "msg",
+              "name": "mensagem",
+              "value": "Equipe da loja avisada. Diga ao cliente que a equipe da loja escolhida vai entrar em contato pelo WhatsApp. Não prometa horário.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "21e0c541-1790-4293-af70-db8f013cdd3e",
+      "name": "Resposta - Avisado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        672,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const entrada = $('When Executed by Another Workflow').first().json;\n\n// Destino de cada loja. Por enquanto todos vão para o número de teste.\n// Quando os grupos existirem, troque pelo ID do grupo (termina em @g.us).\nconst destinos = {\n  'osasco':      '5511975881489@s.whatsapp.net',\n  'carapicuiba': '5511975881489@s.whatsapp.net',\n  'jundiai':     '5511975881489@s.whatsapp.net',\n  'sao miguel':  '5511975881489@s.whatsapp.net',\n};\n// Se a loja não vier ou não for reconhecida, vai para cá.\nconst padrao = '5511975881489@s.whatsapp.net';\n\nconst loja = (entrada.loja || '')\n  .toLowerCase()\n  .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n  .trim();\nconst chave = Object.keys(destinos).find(k => loja.includes(k));\n\nconst titulo = entrada.tipo === 'lembrete'\n  ? '⏰ *Lembrete: este cliente ainda aguarda retorno*'\n  : '🛋️ *Cliente pronto para comprar*';\n\nconst texto = [\n  titulo,\n  `*Nome:* ${entrada.nome || '-'}`,\n  `*WhatsApp:* https://wa.me/${entrada.telefone}`,\n  `*Produtos:* ${entrada.produtos || '-'}`,\n  `*Loja:* ${entrada.loja || '-'}`,\n  `*Resumo:* ${entrada.resumo || '-'}`,\n].join('\\n');\n\nreturn [{ json: {\n  remoteJid: chave ? destinos[chave] : padrao,\n  loja_identificada: chave || 'nenhuma',\n  texto,\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "690f5c20-27df-476b-8145-13c5ed8bf3fa",
+      "name": "Define destino"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "ok",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "msg",
+              "name": "mensagem",
+              "value": "Equipe da loja avisada. Diga ao cliente que a equipe da loja escolhida vai entrar em contato pelo WhatsApp. Não prometa horário.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "575fed92-a077-4fb0-aba3-23e0eb6878d7",
+      "name": "Resposta - Avisado (Plano B)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        832,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  from: 'Casa Saldão Avisos <casasaldao@getmia.com.br>',\n  to: ['maria.eduarda@getmia.com.br'],\n  subject: 'Cliente para a loja ' + ($('When Executed by Another Workflow').first().json.loja || 'não informada') + ': ' + ($('When Executed by Another Workflow').first().json.nome || 'sem nome'),\n  text: (() => {\n    const texto = $('Define destino').first().json.texto.replace(/\\*/g, '');\n    return texto + '\\n\\n' +\n      'Este aviso chegou por e-mail porque o WhatsApp de alertas está fora do ar. ' +\n      'Ele não será reenviado no WhatsApp, então combine com a equipe quem vai atender este cliente.';\n  })()\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        672,
+        160
+      ],
+      "id": "1092ac88-bbd3-43a8-b464-9b75bc008a80",
+      "name": "Envia por e-mail",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Atualiza lead e registra nota",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza lead e registra nota": {
+      "main": [
+        [
+          {
+            "node": "Define destino",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisa vendedores": {
+      "main": [
+        [
+          {
+            "node": "Resposta - Avisado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Envia por e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define destino": {
+      "main": [
+        [
+          {
+            "node": "Avisa vendedores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia por e-mail": {
+      "main": [
+        [
+          {
+            "node": "Resposta - Avisado (Plano B)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "35101d14-6fb0-4801-bac9-a03e27d2ccdb",
+  "activeVersionId": "35101d14-6fb0-4801-bac9-a03e27d2ccdb",
+  "triggerCount": 0,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "JuSNpjEuoz2NHdPN",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-11-23T15:08:03.282Z",
+      "updatedAt": "2026-11-23T15:08:03.282Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "35101d14-6fb0-4801-bac9-a03e27d2ccdb",
+    "workflowId": "JuSNpjEuoz2NHdPN",
+    "nodes": [
+      {
+        "parameters": {
+          "workflowInputs": {
+            "values": [
+              {
+                "name": "telefone"
+              },
+              {
+                "name": "nome"
+              },
+              {
+                "name": "account_id"
+              },
+              {
+                "name": "conversation_id"
+              },
+              {
+                "name": "produtos"
+              },
+              {
+                "name": "loja"
+              },
+              {
+                "name": "resumo"
+              },
+              {
+                "name": "tipo"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -192,
+          0
+        ],
+        "id": "8f02fe7e-d9c9-4e90-b7bf-454c70dce424",
+        "name": "When Executed by Another Workflow"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "with alvo as (\n  select id, etapa from leads\n  where telefone in ($1::text, substr($1::text, 1, 4) || substr($1::text, 6))\n  order by created_at desc limit 1\n),\nupd as (\n  update leads l set etapa = 'qualificado', etapa_em = now(),\n         ultima_interacao_em = now(), updated_at = now()\n  from alvo\n  where l.id = alvo.id and alvo.etapa in ('novo', 'em_contato', 'perdido')\n  returning l.id\n),\nev as (\n  insert into lead_eventos (lead_id, autor_id, tipo, de, para)\n  select alvo.id, null, 'etapa', alvo.etapa, 'qualificado' from alvo\n  where alvo.etapa in ('novo', 'em_contato', 'perdido')\n),\nnota as (\n  insert into lead_notas (lead_id, autor_id, texto)\n  select id, null, $2::text from alvo\n)\nselect (select id from alvo) as lead_id;",
+          "options": {
+            "queryReplacement": "={{ [ $json.telefone, 'Atendimento IA WhatsApp\\nProdutos: ' + $json.produtos + '\\nLoja: ' + ($json.loja || '-') + '\\n\\n' + $json.resumo ] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.7,
+        "position": [
+          16,
+          0
+        ],
+        "id": "36487e92-360b-4672-bda3-482fdd3bc98b",
+        "name": "Atualiza lead e registra nota",
+        "credentials": {
+          "postgres": {
+            "id": "1ev7OwCneYeU4YD4",
+            "name": "Casa Saldão - Postgress"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "resource": "messages-api",
+          "instanceName": "MIA-LOGS-2",
+          "remoteJid": "={{ $('Define destino').first().json.remoteJid }}",
+          "messageText": "={{ $('Define destino').first().json.texto }}",
+          "options_message": {}
+        },
+        "type": "n8n-nodes-evolution-api.evolutionApi",
+        "typeVersion": 1,
+        "position": [
+          432,
+          0
+        ],
+        "id": "3c3bd758-c969-4222-96df-d5a26c522ebd",
+        "name": "Avisa vendedores",
+        "executeOnce": true,
+        "credentials": {
+          "evolutionApi": {
+            "id": "PBxKGNUnpI3LPGR3",
+            "name": "MIA-LOGS-2"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "ok",
+                "name": "ok",
+                "value": true,
+                "type": "boolean"
+              },
+              {
+                "id": "msg",
+                "name": "mensagem",
+                "value": "Equipe da loja avisada. Diga ao cliente que a equipe da loja escolhida vai entrar em contato pelo WhatsApp. Não prometa horário.",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "21e0c541-1790-4293-af70-db8f013cdd3e",
+        "name": "Resposta - Avisado",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          672,
+          -16
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const entrada = $('When Executed by Another Workflow').first().json;\n\n// Destino de cada loja. Por enquanto todos vão para o número de teste.\n// Quando os grupos existirem, troque pelo ID do grupo (termina em @g.us).\nconst destinos = {\n  'osasco':      '5511975881489@s.whatsapp.net',\n  'carapicuiba': '5511975881489@s.whatsapp.net',\n  'jundiai':     '5511975881489@s.whatsapp.net',\n  'sao miguel':  '5511975881489@s.whatsapp.net',\n};\n// Se a loja não vier ou não for reconhecida, vai para cá.\nconst padrao = '5511975881489@s.whatsapp.net';\n\nconst loja = (entrada.loja || '')\n  .toLowerCase()\n  .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n  .trim();\nconst chave = Object.keys(destinos).find(k => loja.includes(k));\n\nconst titulo = entrada.tipo === 'lembrete'\n  ? '⏰ *Lembrete: este cliente ainda aguarda retorno*'\n  : '🛋️ *Cliente pronto para comprar*';\n\nconst texto = [\n  titulo,\n  `*Nome:* ${entrada.nome || '-'}`,\n  `*WhatsApp:* https://wa.me/${entrada.telefone}`,\n  `*Produtos:* ${entrada.produtos || '-'}`,\n  `*Loja:* ${entrada.loja || '-'}`,\n  `*Resumo:* ${entrada.resumo || '-'}`,\n].join('\\n');\n\nreturn [{ json: {\n  remoteJid: chave ? destinos[chave] : padrao,\n  loja_identificada: chave || 'nenhuma',\n  texto,\n} }];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          224,
+          0
+        ],
+        "id": "690f5c20-27df-476b-8145-13c5ed8bf3fa",
+        "name": "Define destino"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "ok",
+                "name": "ok",
+                "value": true,
+                "type": "boolean"
+              },
+              {
+                "id": "msg",
+                "name": "mensagem",
+                "value": "Equipe da loja avisada. Diga ao cliente que a equipe da loja escolhida vai entrar em contato pelo WhatsApp. Não prometa horário.",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "575fed92-a077-4fb0-aba3-23e0eb6878d7",
+        "name": "Resposta - Avisado (Plano B)",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          832,
+          160
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.resend.com/emails",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({\n  from: 'Casa Saldão Avisos <casasaldao@getmia.com.br>',\n  to: ['maria.eduarda@getmia.com.br'],\n  subject: 'Cliente para a loja ' + ($('When Executed by Another Workflow').first().json.loja || 'não informada') + ': ' + ($('When Executed by Another Workflow').first().json.nome || 'sem nome'),\n  text: (() => {\n    const texto = $('Define destino').first().json.texto.replace(/\\*/g, '');\n    return texto + '\\n\\n' +\n      'Este aviso chegou por e-mail porque o WhatsApp de alertas está fora do ar. ' +\n      'Ele não será reenviado no WhatsApp, então combine com a equipe quem vai atender este cliente.';\n  })()\n}) }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.5,
+        "position": [
+          672,
+          160
+        ],
+        "id": "1092ac88-bbd3-43a8-b464-9b75bc008a80",
+        "name": "Envia por e-mail",
+        "retryOnFail": true,
+        "credentials": {
+          "httpBearerAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      }
+    ],
+    "connections": {
+      "When Executed by Another Workflow": {
+        "main": [
+          [
+            {
+              "node": "Atualiza lead e registra nota",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Atualiza lead e registra nota": {
+        "main": [
+          [
+            {
+              "node": "Define destino",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Avisa vendedores": {
+        "main": [
+          [
+            {
+              "node": "Resposta - Avisado",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Envia por e-mail",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Define destino": {
+        "main": [
+          [
+            {
+              "node": "Avisa vendedores",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Envia por e-mail": {
+        "main": [
+          [
+            {
+              "node": "Resposta - Avisado (Plano B)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Version 35101d14",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-11-25T14:14:43.441Z",
+    "updatedAt": "2026-11-25T14:15:24.128Z"
+  },
+  "tags": []
+}
