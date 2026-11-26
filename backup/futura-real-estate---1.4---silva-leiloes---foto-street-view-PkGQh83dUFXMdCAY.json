@@ -1,0 +1,693 @@
+{
+  "updatedAt": "2026-11-26T13:56:14.052Z",
+  "createdAt": "2026-11-25T00:44:17.105Z",
+  "id": "PkGQh83dUFXMdCAY",
+  "name": "Futura Real Estate - 1.4 - Silva Leilões - Foto Street View",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "8f39c7de-4388-4abc-8456-601a7f716081",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "futura-silva-foto-streetview",
+        "responseMode": "onReceived",
+        "responseCode": 202,
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "c971b855-2a47-45a7-84e0-e60c431e2d3d"
+    },
+    {
+      "id": "7bbe6250-ac74-47e1-8d46-557ecbfd9659",
+      "name": "Preparar endereços",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nif (!jwt || !/^[0-9a-f-]{36}$/i.test(String(avaliacaoId || ''))) throw new Error('Pedido inválido.');\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto, zerar) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); const atual = zerar ? (r.progresso || []).filter(p => p.tipo !== 'fotos') : (r.progresso || []); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...atual, { em: new Date().toISOString(), texto, tipo: 'fotos' }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { } };\n\ntry {\n  const [av] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=id,endereco,bairro,cidade,uf,cep' });\n  if (!av) throw new Error('Avaliação não encontrada ou sem acesso.');\n  const amostras = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_amostras?avaliacao_id=eq.' + avaliacaoId + '&selecionada=eq.true&select=id,endereco,condominio' });\n  const numeroDe = (end) => { const partes = String(end || '').split(','); if (partes.length < 2) return null; const m = partes[1].match(/\\d+/); return m ? m[0] : null; };\n  const alvos = [];\n  const numAv = numeroDe(av.endereco);\n  if (numAv) alvos.push({ tipo: 'imovel', id: av.id, numero: numAv, caminho: avaliacaoId + '/streetview-imovel.jpg', endereco: [String(av.endereco).split(',').slice(0, 2).join(','), av.bairro, av.cidade, av.uf, av.cep, 'Brasil'].filter(Boolean).join(', ') });\n  for (const a of amostras) {\n    const n = numeroDe(a.endereco);\n    if (!n) continue;\n    alvos.push({ tipo: 'amostra', id: a.id, numero: n, caminho: avaliacaoId + '/streetview-amostra-' + a.id + '.jpg', endereco: [String(a.endereco).split(',').slice(0, 2).join(','), av.cidade, av.uf, 'Brasil'].filter(Boolean).join(', ') });\n  }\n  await progresso('Procurando no Google Street View a foto da fachada do imóvel' + (alvos.length > 1 ? ' e de ' + (alvos.length - 1) + ' comparável(is) com número' : '') + '…', true);\n  if (!alvos.length) { await progresso('O endereço do imóvel está sem número, então não dá para tirar a foto da fachada.'); await patch({ etapa: 'selecionar_fotos', etapa_erro: null }); return []; }\n  return alvos.map(a => ({ json: a }));\n} catch (e) {\n  await patch({ etapa: 'selecionar_fotos', etapa_erro: null }).catch(() => {});\n  throw e;\n}\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "0ec871f1-77d6-44c6-b83b-5e8ecfd07f87",
+      "name": "Google Geocoding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://maps.googleapis.com/maps/api/geocode/json",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "address",
+              "value": "={{ $json.endereco }}"
+            },
+            {
+              "name": "region",
+              "value": "br"
+            },
+            {
+              "name": "language",
+              "value": "pt-BR"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpQueryAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a77520bd-eb29-4119-9064-3d3cc6d52234",
+      "name": "Street View metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://maps.googleapis.com/maps/api/streetview/metadata",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "location",
+              "value": "={{ ($json.results && $json.results[0]) ? $json.results[0].geometry.location.lat + \",\" + $json.results[0].geometry.location.lng : \"0,0\" }}"
+            },
+            {
+              "name": "source",
+              "value": "outdoor"
+            },
+            {
+              "name": "radius",
+              "value": "50"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpQueryAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "fb0f6be8-dd9f-4296-b3eb-e021cc94ec52",
+      "name": "Escolher câmera",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...(r.progresso || []), { em: new Date().toISOString(), texto, tipo: 'fotos' }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { } };\nconst alvos = $('Preparar endereços').all().map(i => i.json);\nconst geos = $('Google Geocoding').all().map(i => i.json);\nconst metas = $input.all().map(i => i.json);\nconst rad = (x) => x * Math.PI / 180;\nconst rumo = (a, b) => { const y = Math.sin(rad(b.lng - a.lng)) * Math.cos(rad(b.lat)); const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lng - a.lng)); return Math.round((Math.atan2(y, x) * 180 / Math.PI + 360) % 360); };\nconst saida = [];\nlet imovelOk = false;\nalvos.forEach((alvo, i) => {\n  const g = geos[i] || {}, m = metas[i] || {};\n  const r = (g.results || [])[0];\n  if (g.status !== 'OK' || !r || m.status !== 'OK' || !m.location) return;\n  const num = ((r.address_components || []).find(c => (c.types || []).includes('street_number')) || {}).long_name;\n  if (String(num || '') !== String(alvo.numero)) return;\n  if (alvo.tipo === 'imovel') imovelOk = true;\n  const alvoPt = r.geometry.location, pano = m.location;\n  saida.push({ json: { ...alvo, lat: alvoPt.lat, lng: alvoPt.lng, pano_id: m.pano_id, heading: rumo(pano, alvoPt), data_imagem: m.date || null, endereco_google: r.formatted_address, precisao: r.geometry.location_type } });\n});\nconst imv = saida.find(s => s.json.tipo === 'imovel');\nawait progresso(imovelOk ? 'Encontramos imagem do Street View na frente do imóvel' + (imv && imv.json.data_imagem ? ' (de ' + imv.json.data_imagem + ')' : '') + '. Baixando a foto…' : 'Não há imagem do Street View exatamente nesse número.');\nif (!saida.length) { await patch({ etapa: 'selecionar_fotos', etapa_erro: null }).catch(() => {}); return []; }\nreturn saida;\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "923a5f1a-0600-4bac-90f1-bce1600965c3",
+      "name": "Street View foto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://maps.googleapis.com/maps/api/streetview",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "size",
+              "value": "640x480"
+            },
+            {
+              "name": "pano",
+              "value": "={{ $json.pano_id }}"
+            },
+            {
+              "name": "heading",
+              "value": "={{ $json.heading }}"
+            },
+            {
+              "name": "pitch",
+              "value": "5"
+            },
+            {
+              "name": "fov",
+              "value": "80"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "foto"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpQueryAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "e996040e-914b-42af-8c52-53ef306786d7",
+      "name": "Salvar no Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://wdjlellvhvsarivdpgou.supabase.co/storage/v1/object/fotos/{{ $('Escolher câmera').item.json.caminho }}",
+        "sendHeaders": "***REMOVIDO***",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Webhook').first().json.headers.apikey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $('Webhook').first().json.headers.authorization }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "image/jpeg"
+            },
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "foto",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "bc24c3ec-9e7c-4b5f-a0d4-528bb7297e81",
+      "name": "Gravar fotos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...(r.progresso || []), { em: new Date().toISOString(), texto, tipo: 'fotos' }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { } };\ntry {\n  const esc = $('Escolher câmera').all().map(i => i.json);\n  const ups = $input.all();\n  let salvas = 0;\n  for (let i = 0; i < esc.length; i++) {\n    const e = esc[i], u = ups[i];\n    if (!u || u.json.error) continue;\n    salvas++;\n    if (e.tipo === 'imovel') {\n      await patch({ foto_imovel: { path: e.caminho, data_imagem: e.data_imagem, lat: e.lat, lng: e.lng, heading: e.heading, endereco_google: e.endereco_google } });\n    } else {\n      const [a] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_amostras?id=eq.' + e.id + '&select=fotos,fotos_origem' });\n      if (!a) continue;\n      const fotos = (a.fotos || []).filter(f => f !== e.caminho), origem = [];\n      (a.fotos || []).forEach((f, k) => { if (f !== e.caminho) origem.push((a.fotos_origem || [])[k] || ''); });\n      await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_amostras?id=eq.' + e.id, body: { fotos: [e.caminho, ...fotos], fotos_origem: ['google-streetview:' + (e.data_imagem || ''), ...origem] }, headers: { Prefer: 'return=minimal' } });\n    }\n  }\n  await progresso('Pronto! ' + salvas + ' foto(s) do Street View salva(s).');\n  await patch({ etapa: 'selecionar_fotos', etapa_erro: null });\n  return [{ json: { ok: true, fotos_salvas: salvas } }];\n} catch (e) {\n  await patch({ etapa: 'selecionar_fotos', etapa_erro: null }).catch(() => {});\n  throw e;\n}\n",
+        "mode": "runOnceForAllItems"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Preparar endereços",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar endereços": {
+      "main": [
+        [
+          {
+            "node": "Google Geocoding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Geocoding": {
+      "main": [
+        [
+          {
+            "node": "Street View metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Street View metadata": {
+      "main": [
+        [
+          {
+            "node": "Escolher câmera",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escolher câmera": {
+      "main": [
+        [
+          {
+            "node": "Street View foto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Street View foto": {
+      "main": [
+        [
+          {
+            "node": "Salvar no Storage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar no Storage": {
+      "main": [
+        [
+          {
+            "node": "Gravar fotos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "896af247-0700-4551-be3d-e3d7198a08bd",
+  "activeVersionId": "896af247-0700-4551-be3d-e3d7198a08bd",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "PkGQh83dUFXMdCAY",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-11-25T00:44:17.105Z",
+      "updatedAt": "2026-11-25T00:44:17.105Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "896af247-0700-4551-be3d-e3d7198a08bd",
+    "workflowId": "PkGQh83dUFXMdCAY",
+    "nodes": [
+      {
+        "id": "8f39c7de-4388-4abc-8456-601a7f716081",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "futura-silva-foto-streetview",
+          "responseMode": "onReceived",
+          "responseCode": 202,
+          "options": {
+            "allowedOrigins": "*"
+          }
+        },
+        "webhookId": "c971b855-2a47-45a7-84e0-e60c431e2d3d"
+      },
+      {
+        "id": "7bbe6250-ac74-47e1-8d46-557ecbfd9659",
+        "name": "Preparar endereços",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          224,
+          0
+        ],
+        "parameters": {
+          "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nif (!jwt || !/^[0-9a-f-]{36}$/i.test(String(avaliacaoId || ''))) throw new Error('Pedido inválido.');\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto, zerar) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); const atual = zerar ? (r.progresso || []).filter(p => p.tipo !== 'fotos') : (r.progresso || []); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...atual, { em: new Date().toISOString(), texto, tipo: 'fotos' }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { } };\n\ntry {\n  const [av] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=id,endereco,bairro,cidade,uf,cep' });\n  if (!av) throw new Error('Avaliação não encontrada ou sem acesso.');\n  const amostras = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_amostras?avaliacao_id=eq.' + avaliacaoId + '&selecionada=eq.true&select=id,endereco,condominio' });\n  const numeroDe = (end) => { const partes = String(end || '').split(','); if (partes.length < 2) return null; const m = partes[1].match(/\\d+/); return m ? m[0] : null; };\n  const alvos = [];\n  const numAv = numeroDe(av.endereco);\n  if (numAv) alvos.push({ tipo: 'imovel', id: av.id, numero: numAv, caminho: avaliacaoId + '/streetview-imovel.jpg', endereco: [String(av.endereco).split(',').slice(0, 2).join(','), av.bairro, av.cidade, av.uf, av.cep, 'Brasil'].filter(Boolean).join(', ') });\n  for (const a of amostras) {\n    const n = numeroDe(a.endereco);\n    if (!n) continue;\n    alvos.push({ tipo: 'amostra', id: a.id, numero: n, caminho: avaliacaoId + '/streetview-amostra-' + a.id + '.jpg', endereco: [String(a.endereco).split(',').slice(0, 2).join(','), av.cidade, av.uf, 'Brasil'].filter(Boolean).join(', ') });\n  }\n  await progresso('Procurando no Google Street View a foto da fachada do imóvel' + (alvos.length > 1 ? ' e de ' + (alvos.length - 1) + ' comparável(is) com número' : '') + '…', true);\n  if (!alvos.length) { await progresso('O endereço do imóvel está sem número, então não dá para tirar a foto da fachada.'); await patch({ etapa: 'selecionar_fotos', etapa_erro: null }); return []; }\n  return alvos.map(a => ({ json: a }));\n} catch (e) {\n  await patch({ etapa: 'selecionar_fotos', etapa_erro: null }).catch(() => {});\n  throw e;\n}\n",
+          "mode": "runOnceForAllItems"
+        }
+      },
+      {
+        "id": "0ec871f1-77d6-44c6-b83b-5e8ecfd07f87",
+        "name": "Google Geocoding",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          448,
+          0
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "https://maps.googleapis.com/maps/api/geocode/json",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "address",
+                "value": "={{ $json.endereco }}"
+              },
+              {
+                "name": "region",
+                "value": "br"
+              },
+              {
+                "name": "language",
+                "value": "pt-BR"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpQueryAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "a77520bd-eb29-4119-9064-3d3cc6d52234",
+        "name": "Street View metadata",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          672,
+          0
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "https://maps.googleapis.com/maps/api/streetview/metadata",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "location",
+                "value": "={{ ($json.results && $json.results[0]) ? $json.results[0].geometry.location.lat + \",\" + $json.results[0].geometry.location.lng : \"0,0\" }}"
+              },
+              {
+                "name": "source",
+                "value": "outdoor"
+              },
+              {
+                "name": "radius",
+                "value": "50"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpQueryAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "fb0f6be8-dd9f-4296-b3eb-e021cc94ec52",
+        "name": "Escolher câmera",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          896,
+          0
+        ],
+        "parameters": {
+          "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...(r.progresso || []), { em: new Date().toISOString(), texto, tipo: 'fotos' }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { } };\nconst alvos = $('Preparar endereços').all().map(i => i.json);\nconst geos = $('Google Geocoding').all().map(i => i.json);\nconst metas = $input.all().map(i => i.json);\nconst rad = (x) => x * Math.PI / 180;\nconst rumo = (a, b) => { const y = Math.sin(rad(b.lng - a.lng)) * Math.cos(rad(b.lat)); const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lng - a.lng)); return Math.round((Math.atan2(y, x) * 180 / Math.PI + 360) % 360); };\nconst saida = [];\nlet imovelOk = false;\nalvos.forEach((alvo, i) => {\n  const g = geos[i] || {}, m = metas[i] || {};\n  const r = (g.results || [])[0];\n  if (g.status !== 'OK' || !r || m.status !== 'OK' || !m.location) return;\n  const num = ((r.address_components || []).find(c => (c.types || []).includes('street_number')) || {}).long_name;\n  if (String(num || '') !== String(alvo.numero)) return;\n  if (alvo.tipo === 'imovel') imovelOk = true;\n  const alvoPt = r.geometry.location, pano = m.location;\n  saida.push({ json: { ...alvo, lat: alvoPt.lat, lng: alvoPt.lng, pano_id: m.pano_id, heading: rumo(pano, alvoPt), data_imagem: m.date || null, endereco_google: r.formatted_address, precisao: r.geometry.location_type } });\n});\nconst imv = saida.find(s => s.json.tipo === 'imovel');\nawait progresso(imovelOk ? 'Encontramos imagem do Street View na frente do imóvel' + (imv && imv.json.data_imagem ? ' (de ' + imv.json.data_imagem + ')' : '') + '. Baixando a foto…' : 'Não há imagem do Street View exatamente nesse número.');\nif (!saida.length) { await patch({ etapa: 'selecionar_fotos', etapa_erro: null }).catch(() => {}); return []; }\nreturn saida;\n",
+          "mode": "runOnceForAllItems"
+        }
+      },
+      {
+        "id": "923a5f1a-0600-4bac-90f1-bce1600965c3",
+        "name": "Street View foto",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1120,
+          0
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "https://maps.googleapis.com/maps/api/streetview",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "size",
+                "value": "640x480"
+              },
+              {
+                "name": "pano",
+                "value": "={{ $json.pano_id }}"
+              },
+              {
+                "name": "heading",
+                "value": "={{ $json.heading }}"
+              },
+              {
+                "name": "pitch",
+                "value": "5"
+              },
+              {
+                "name": "fov",
+                "value": "80"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file",
+                "outputPropertyName": "foto"
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpQueryAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "e996040e-914b-42af-8c52-53ef306786d7",
+        "name": "Salvar no Storage",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1344,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "=https://wdjlellvhvsarivdpgou.supabase.co/storage/v1/object/fotos/{{ $('Escolher câmera').item.json.caminho }}",
+          "sendHeaders": "***REMOVIDO***",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "={{ $('Webhook').first().json.headers.apikey }}"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{ $('Webhook').first().json.headers.authorization }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "image/jpeg"
+              },
+              {
+                "name": "x-upsert",
+                "value": "true"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "binaryData",
+          "inputDataFieldName": "foto",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "bc24c3ec-9e7c-4b5f-a0d4-528bb7297e81",
+        "name": "Gravar fotos",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1568,
+          0
+        ],
+        "parameters": {
+          "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...(r.progresso || []), { em: new Date().toISOString(), texto, tipo: 'fotos' }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { } };\ntry {\n  const esc = $('Escolher câmera').all().map(i => i.json);\n  const ups = $input.all();\n  let salvas = 0;\n  for (let i = 0; i < esc.length; i++) {\n    const e = esc[i], u = ups[i];\n    if (!u || u.json.error) continue;\n    salvas++;\n    if (e.tipo === 'imovel') {\n      await patch({ foto_imovel: { path: e.caminho, data_imagem: e.data_imagem, lat: e.lat, lng: e.lng, heading: e.heading, endereco_google: e.endereco_google } });\n    } else {\n      const [a] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_amostras?id=eq.' + e.id + '&select=fotos,fotos_origem' });\n      if (!a) continue;\n      const fotos = (a.fotos || []).filter(f => f !== e.caminho), origem = [];\n      (a.fotos || []).forEach((f, k) => { if (f !== e.caminho) origem.push((a.fotos_origem || [])[k] || ''); });\n      await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_amostras?id=eq.' + e.id, body: { fotos: [e.caminho, ...fotos], fotos_origem: ['google-streetview:' + (e.data_imagem || ''), ...origem] }, headers: { Prefer: 'return=minimal' } });\n    }\n  }\n  await progresso('Pronto! ' + salvas + ' foto(s) do Street View salva(s).');\n  await patch({ etapa: 'selecionar_fotos', etapa_erro: null });\n  return [{ json: { ok: true, fotos_salvas: salvas } }];\n} catch (e) {\n  await patch({ etapa: 'selecionar_fotos', etapa_erro: null }).catch(() => {});\n  throw e;\n}\n",
+          "mode": "runOnceForAllItems"
+        }
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Preparar endereços",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Preparar endereços": {
+        "main": [
+          [
+            {
+              "node": "Google Geocoding",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Geocoding": {
+        "main": [
+          [
+            {
+              "node": "Street View metadata",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Street View metadata": {
+        "main": [
+          [
+            {
+              "node": "Escolher câmera",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Escolher câmera": {
+        "main": [
+          [
+            {
+              "node": "Street View foto",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Street View foto": {
+        "main": [
+          [
+            {
+              "node": "Salvar no Storage",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Salvar no Storage": {
+        "main": [
+          [
+            {
+              "node": "Gravar fotos",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Progresso em tempo real",
+    "description": "Updated nodes: Preparar endereços, Escolher câmera, Gravar fotos",
+    "autosaved": false,
+    "createdAt": "2026-11-26T13:56:14.055Z",
+    "updatedAt": "2026-11-26T13:56:14.055Z"
+  },
+  "tags": []
+}
