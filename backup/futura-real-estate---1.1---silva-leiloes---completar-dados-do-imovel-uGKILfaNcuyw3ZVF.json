@@ -1,0 +1,429 @@
+{
+  "updatedAt": "2026-11-26T13:53:16.941Z",
+  "createdAt": "2026-11-26T13:53:16.941Z",
+  "id": "uGKILfaNcuyw3ZVF",
+  "name": "Futura Real Estate - 1.1 - Silva Leilões - Completar dados do imóvel",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "8ebd3167-021e-4d3b-be02-6102c34c0546",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "futura-silva-completar-dados",
+        "responseMode": "onReceived",
+        "responseCode": 202,
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "37b0f68a-cf0d-4a7c-ae91-4babca7f5297"
+    },
+    {
+      "id": "7166b83c-7756-4415-8c4f-dc0e5b8f33f5",
+      "name": "Ler avaliação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nif (!jwt || !/^[0-9a-f-]{36}$/i.test(String(avaliacaoId || ''))) throw new Error('Pedido inválido.');\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto, tipo, zerar) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); const atual = zerar ? (r.progresso || []).filter(p => p.tipo !== tipo) : (r.progresso || []); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...atual, { em: new Date().toISOString(), texto, tipo }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { /* progresso é só informativo */ } };\n\ntry {\n  const [av] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=id,endereco,condominio,bairro,cidade,uf,cep,tipo_imovel,ano_construcao,fontes_dados' });\n  if (!av) throw new Error('Avaliação não encontrada ou sem acesso.');\n  await progresso('Localizando o endereço no Google…', 'dados', true);\n  const endereco = [String(av.endereco || '').split(',').slice(0, 2).join(','), av.bairro, av.cidade, av.uf, av.cep, 'Brasil'].filter(Boolean).join(', ');\n  return [{ json: { av, endereco } }];\n} catch (e) {\n  await patch({ etapa: 'conferir_dados', etapa_erro: null }).catch(() => {});\n  throw e;\n}\n"
+      }
+    },
+    {
+      "id": "3ce44355-6dac-4db8-9332-fdb12e1b5509",
+      "name": "Google Geocoding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://maps.googleapis.com/maps/api/geocode/json",
+        "authentication": "***REMOVIDO***",
+        "genericAuthType": "***REMOVIDO***",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "address",
+              "value": "={{ $json.endereco }}"
+            },
+            {
+              "name": "region",
+              "value": "br"
+            },
+            {
+              "name": "language",
+              "value": "pt-BR"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpQueryAuth": "***REMOVIDO***"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "c79ad95b-f075-4384-b92d-ae62c146b8eb",
+      "name": "Montar pesquisa do prédio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nif (!jwt || !/^[0-9a-f-]{36}$/i.test(String(avaliacaoId || ''))) throw new Error('Pedido inválido.');\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto, tipo, zerar) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); const atual = zerar ? (r.progresso || []).filter(p => p.tipo !== tipo) : (r.progresso || []); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...atual, { em: new Date().toISOString(), texto, tipo }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { /* progresso é só informativo */ } };\n\nconst { av, endereco } = $('Ler avaliação').first().json;\nconst g = $input.first().json || {};\nconst r = (g.results || [])[0];\nconst comp = (tipo) => { const c = ((r && r.address_components) || []).find(x => (x.types || []).includes(tipo)); return c ? c.long_name : null; };\nconst google = r ? { endereco_google: r.formatted_address, bairro: comp('sublocality_level_1') || comp('sublocality'), cidade: comp('administrative_area_level_2'), uf: ((r.address_components || []).find(x => (x.types || []).includes('administrative_area_level_1')) || {}).short_name || null, cep: (comp('postal_code') || '').replace(/[^0-9]/g, '') || null, numero: comp('street_number'), lat: r.geometry.location.lat, lng: r.geometry.location.lng, precisao: r.geometry.location_type } : null;\nawait progresso(google ? 'Endereço localizado: ' + google.endereco_google : 'Não achamos o endereço exato no Google; seguimos com o que temos', 'dados');\nawait progresso('Pesquisando na internet o nome do prédio e o ano de construção…', 'dados');\nconst campo = (t) => ({ type: 'object', additionalProperties: false, required: ['valor', 'url'], properties: { valor: { type: t }, url: { type: 'string' } } });\nconst schema = { type: 'object', additionalProperties: false, required: ['condominio', 'ano_construcao', 'andares', 'observacao'], properties: { condominio: campo('string'), ano_construcao: campo('integer'), andares: campo('integer'), observacao: { type: 'string' } } };\nconst sistema = 'Você pesquisa dados públicos de um imóvel no Brasil para um laudo de avaliação. Pesquise o endereço informado e responda só com o que encontrar em fontes confiáveis (sites de condomínios, portais imobiliários, construtoras). ' +\n  'condominio: nome do edifício ou condomínio NESSE número da rua (texto vazio se não for prédio/condomínio ou se não tiver certeza). ano_construcao: ano em que o prédio foi construído/entregue (0 se não souber). andares: número de andares do prédio (0 se não souber). ' +\n  'Em cada campo, url = página onde você viu a informação (texto vazio se não achou). Não invente; na dúvida deixe vazio ou 0. observacao: 1 frase curta.';\nconst pergunta = 'Endereço: ' + (google ? google.endereco_google : endereco) + '. Tipo: ' + (av.tipo_imovel || 'imóvel') + (av.condominio ? '. Nome informado: ' + av.condominio : '') + '. Qual o nome do prédio/condomínio, o ano de construção e o número de andares?';\nreturn [{ json: { av, google, req: { model: 'anthropic/claude-sonnet-5.5', temperature: 0, usage: { include: true }, plugins: [ { id: 'web', max_results: 10 } ], response_format: { type: 'json_schema', json_schema: { name: 'predio', strict: true, schema } }, messages: [ { role: 'system', content: sistema }, { role: 'user', content: pergunta } ] } } }];\n"
+      }
+    },
+    {
+      "id": "9119ccff-547f-4bde-a5cf-8610ca584166",
+      "name": "IA pesquisa o prédio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "***REMOVIDO***",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "openRouterApi": {
+          "id": "J6jvcQp684lg8SSM",
+          "name": "OpenRouter - Futura Real Estate [SILVA LEILÕES]"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dfcff957-4386-4c70-b923-63d3b87ec3c9",
+      "name": "Completar e gravar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nif (!jwt || !/^[0-9a-f-]{36}$/i.test(String(avaliacaoId || ''))) throw new Error('Pedido inválido.');\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto, tipo, zerar) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); const atual = zerar ? (r.progresso || []).filter(p => p.tipo !== tipo) : (r.progresso || []); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...atual, { em: new Date().toISOString(), texto, tipo }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { /* progresso é só informativo */ } };\n\ntry {\n  const { av, google } = $('Montar pesquisa do prédio').first().json;\n  const r = $input.first().json || {};\n  let d = null; try { d = JSON.parse(r.choices[0].message.content); } catch (e) { d = null; }\n  const fontes = { ...(av.fontes_dados || {}) };\n  const campos = {};\n  // Só preenche o que está vazio: nunca sobrescreve o que veio do documento ou foi digitado.\n  if (google) {\n    if (!av.bairro && google.bairro) { campos.bairro = google.bairro; fontes.bairro = { fonte: 'Google' }; }\n    if (!av.cep && google.cep && google.cep.length === 8) { campos.cep = google.cep; fontes.cep = { fonte: 'Google' }; }\n    if (!av.cidade && google.cidade) { campos.cidade = google.cidade; fontes.cidade = { fonte: 'Google' }; }\n    if (!av.uf && google.uf) { campos.uf = google.uf; fontes.uf = { fonte: 'Google' }; }\n    fontes.localizacao = { fonte: 'Google', endereco: google.endereco_google, lat: google.lat, lng: google.lng, precisao: google.precisao };\n  }\n  const achou = [];\n  if (d) {\n    const ano = Number(d.ano_construcao && d.ano_construcao.valor);\n    if (!av.condominio && d.condominio && String(d.condominio.valor || '').trim()) { campos.condominio = String(d.condominio.valor).trim().slice(0, 120); fontes.condominio = { fonte: 'busca na web', url: d.condominio.url || null }; achou.push('prédio ' + campos.condominio); }\n    if (!av.ano_construcao && ano >= 1850 && ano <= new Date().getFullYear()) { campos.ano_construcao = ano; fontes.ano_construcao = { fonte: 'busca na web', url: d.ano_construcao.url || null }; achou.push('construído em ' + ano); }\n    if (Number(d.andares && d.andares.valor) > 0) { fontes.andares = { valor: Number(d.andares.valor), fonte: 'busca na web', url: d.andares.url || null }; achou.push(d.andares.valor + ' andares'); }\n  }\n  await progresso(achou.length ? 'Encontramos: ' + achou.join(', ') : 'Não encontramos dados do prédio na internet; confira os campos', 'dados');\n  await patch({ ...campos, fontes_dados: fontes, etapa: 'conferir_dados', etapa_erro: null });\n  return [{ json: { ok: true, preenchidos: Object.keys(campos) } }];\n} catch (e) {\n  await patch({ etapa: 'conferir_dados', etapa_erro: null }).catch(() => {});\n  throw e;\n}\n"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Ler avaliação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler avaliação": {
+      "main": [
+        [
+          {
+            "node": "Google Geocoding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Geocoding": {
+      "main": [
+        [
+          {
+            "node": "Montar pesquisa do prédio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar pesquisa do prédio": {
+      "main": [
+        [
+          {
+            "node": "IA pesquisa o prédio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA pesquisa o prédio": {
+      "main": [
+        [
+          {
+            "node": "Completar e gravar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "versionId": "98812ecf-cd48-4690-b37b-6a43712c1ed3",
+  "activeVersionId": "98812ecf-cd48-4690-b37b-6a43712c1ed3",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "uGKILfaNcuyw3ZVF",
+      "projectId": "nRxOu1L1N41Jyveq",
+      "createdAt": "2026-11-26T13:53:16.941Z",
+      "updatedAt": "2026-11-26T13:53:16.941Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "98812ecf-cd48-4690-b37b-6a43712c1ed3",
+    "workflowId": "uGKILfaNcuyw3ZVF",
+    "nodes": [
+      {
+        "id": "8ebd3167-021e-4d3b-be02-6102c34c0546",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "futura-silva-completar-dados",
+          "responseMode": "onReceived",
+          "responseCode": 202,
+          "options": {
+            "allowedOrigins": "*"
+          }
+        },
+        "webhookId": "37b0f68a-cf0d-4a7c-ae91-4babca7f5297"
+      },
+      {
+        "id": "7166b83c-7756-4415-8c4f-dc0e5b8f33f5",
+        "name": "Ler avaliação",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          224,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nif (!jwt || !/^[0-9a-f-]{36}$/i.test(String(avaliacaoId || ''))) throw new Error('Pedido inválido.');\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto, tipo, zerar) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); const atual = zerar ? (r.progresso || []).filter(p => p.tipo !== tipo) : (r.progresso || []); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...atual, { em: new Date().toISOString(), texto, tipo }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { /* progresso é só informativo */ } };\n\ntry {\n  const [av] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=id,endereco,condominio,bairro,cidade,uf,cep,tipo_imovel,ano_construcao,fontes_dados' });\n  if (!av) throw new Error('Avaliação não encontrada ou sem acesso.');\n  await progresso('Localizando o endereço no Google…', 'dados', true);\n  const endereco = [String(av.endereco || '').split(',').slice(0, 2).join(','), av.bairro, av.cidade, av.uf, av.cep, 'Brasil'].filter(Boolean).join(', ');\n  return [{ json: { av, endereco } }];\n} catch (e) {\n  await patch({ etapa: 'conferir_dados', etapa_erro: null }).catch(() => {});\n  throw e;\n}\n"
+        }
+      },
+      {
+        "id": "3ce44355-6dac-4db8-9332-fdb12e1b5509",
+        "name": "Google Geocoding",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          448,
+          0
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "https://maps.googleapis.com/maps/api/geocode/json",
+          "authentication": "***REMOVIDO***",
+          "genericAuthType": "***REMOVIDO***",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "address",
+                "value": "={{ $json.endereco }}"
+              },
+              {
+                "name": "region",
+                "value": "br"
+              },
+              {
+                "name": "language",
+                "value": "pt-BR"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpQueryAuth": "***REMOVIDO***"
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "c79ad95b-f075-4384-b92d-ae62c146b8eb",
+        "name": "Montar pesquisa do prédio",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          672,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nif (!jwt || !/^[0-9a-f-]{36}$/i.test(String(avaliacaoId || ''))) throw new Error('Pedido inválido.');\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto, tipo, zerar) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); const atual = zerar ? (r.progresso || []).filter(p => p.tipo !== tipo) : (r.progresso || []); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...atual, { em: new Date().toISOString(), texto, tipo }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { /* progresso é só informativo */ } };\n\nconst { av, endereco } = $('Ler avaliação').first().json;\nconst g = $input.first().json || {};\nconst r = (g.results || [])[0];\nconst comp = (tipo) => { const c = ((r && r.address_components) || []).find(x => (x.types || []).includes(tipo)); return c ? c.long_name : null; };\nconst google = r ? { endereco_google: r.formatted_address, bairro: comp('sublocality_level_1') || comp('sublocality'), cidade: comp('administrative_area_level_2'), uf: ((r.address_components || []).find(x => (x.types || []).includes('administrative_area_level_1')) || {}).short_name || null, cep: (comp('postal_code') || '').replace(/[^0-9]/g, '') || null, numero: comp('street_number'), lat: r.geometry.location.lat, lng: r.geometry.location.lng, precisao: r.geometry.location_type } : null;\nawait progresso(google ? 'Endereço localizado: ' + google.endereco_google : 'Não achamos o endereço exato no Google; seguimos com o que temos', 'dados');\nawait progresso('Pesquisando na internet o nome do prédio e o ano de construção…', 'dados');\nconst campo = (t) => ({ type: 'object', additionalProperties: false, required: ['valor', 'url'], properties: { valor: { type: t }, url: { type: 'string' } } });\nconst schema = { type: 'object', additionalProperties: false, required: ['condominio', 'ano_construcao', 'andares', 'observacao'], properties: { condominio: campo('string'), ano_construcao: campo('integer'), andares: campo('integer'), observacao: { type: 'string' } } };\nconst sistema = 'Você pesquisa dados públicos de um imóvel no Brasil para um laudo de avaliação. Pesquise o endereço informado e responda só com o que encontrar em fontes confiáveis (sites de condomínios, portais imobiliários, construtoras). ' +\n  'condominio: nome do edifício ou condomínio NESSE número da rua (texto vazio se não for prédio/condomínio ou se não tiver certeza). ano_construcao: ano em que o prédio foi construído/entregue (0 se não souber). andares: número de andares do prédio (0 se não souber). ' +\n  'Em cada campo, url = página onde você viu a informação (texto vazio se não achou). Não invente; na dúvida deixe vazio ou 0. observacao: 1 frase curta.';\nconst pergunta = 'Endereço: ' + (google ? google.endereco_google : endereco) + '. Tipo: ' + (av.tipo_imovel || 'imóvel') + (av.condominio ? '. Nome informado: ' + av.condominio : '') + '. Qual o nome do prédio/condomínio, o ano de construção e o número de andares?';\nreturn [{ json: { av, google, req: { model: 'anthropic/claude-sonnet-5.5', temperature: 0, usage: { include: true }, plugins: [ { id: 'web', max_results: 10 } ], response_format: { type: 'json_schema', json_schema: { name: 'predio', strict: true, schema } }, messages: [ { role: 'system', content: sistema }, { role: 'user', content: pergunta } ] } } }];\n"
+        }
+      },
+      {
+        "id": "9119ccff-547f-4bde-a5cf-8610ca584166",
+        "name": "IA pesquisa o prédio",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          896,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://openrouter.ai/api/v1/chat/completions",
+          "authentication": "***REMOVIDO***",
+          "nodeCredentialType": "openRouterApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.req) }}",
+          "options": {
+            "timeout": 120000
+          }
+        },
+        "credentials": {
+          "openRouterApi": {
+            "id": "J6jvcQp684lg8SSM",
+            "name": "OpenRouter - Futura Real Estate [SILVA LEILÕES]"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "id": "dfcff957-4386-4c70-b923-63d3b87ec3c9",
+        "name": "Completar e gravar",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1120,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "\nconst SB = 'https://wdjlellvhvsarivdpgou.supabase.co';\nconst entrada = $('Webhook').first().json;\nconst ANON = String((entrada.headers || {}).apikey || '');\nconst jwt = String((entrada.headers || {})['author' + 'ization'] || '').split(' ').pop();\nconst avaliacaoId = (entrada.body || {}).avaliacao_id;\nif (!jwt || !/^[0-9a-f-]{36}$/i.test(String(avaliacaoId || ''))) throw new Error('Pedido inválido.');\nconst H = Object.fromEntries([['api' + 'key', ANON], ['Author' + 'ization', 'Bea' + 'rer ' + jwt]]);\nconst req = (o) => this.helpers.httpRequest({ json: true, ...o, headers: { ...H, ...(o.headers || {}) } });\nconst patch = (campos) => req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { ...campos, etapa_atualizada_em: new Date().toISOString() }, headers: { Prefer: 'return=minimal' } });\nconst progresso = async (texto, tipo, zerar) => { try { const [r] = await req({ method: 'GET', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId + '&select=progresso' }); const atual = zerar ? (r.progresso || []).filter(p => p.tipo !== tipo) : (r.progresso || []); await req({ method: 'PATCH', url: SB + '/rest/v1/avaliacoes_imoveis?id=eq.' + avaliacaoId, body: { progresso: [...atual, { em: new Date().toISOString(), texto, tipo }] }, headers: { Prefer: 'return=minimal' } }); } catch (e) { /* progresso é só informativo */ } };\n\ntry {\n  const { av, google } = $('Montar pesquisa do prédio').first().json;\n  const r = $input.first().json || {};\n  let d = null; try { d = JSON.parse(r.choices[0].message.content); } catch (e) { d = null; }\n  const fontes = { ...(av.fontes_dados || {}) };\n  const campos = {};\n  // Só preenche o que está vazio: nunca sobrescreve o que veio do documento ou foi digitado.\n  if (google) {\n    if (!av.bairro && google.bairro) { campos.bairro = google.bairro; fontes.bairro = { fonte: 'Google' }; }\n    if (!av.cep && google.cep && google.cep.length === 8) { campos.cep = google.cep; fontes.cep = { fonte: 'Google' }; }\n    if (!av.cidade && google.cidade) { campos.cidade = google.cidade; fontes.cidade = { fonte: 'Google' }; }\n    if (!av.uf && google.uf) { campos.uf = google.uf; fontes.uf = { fonte: 'Google' }; }\n    fontes.localizacao = { fonte: 'Google', endereco: google.endereco_google, lat: google.lat, lng: google.lng, precisao: google.precisao };\n  }\n  const achou = [];\n  if (d) {\n    const ano = Number(d.ano_construcao && d.ano_construcao.valor);\n    if (!av.condominio && d.condominio && String(d.condominio.valor || '').trim()) { campos.condominio = String(d.condominio.valor).trim().slice(0, 120); fontes.condominio = { fonte: 'busca na web', url: d.condominio.url || null }; achou.push('prédio ' + campos.condominio); }\n    if (!av.ano_construcao && ano >= 1850 && ano <= new Date().getFullYear()) { campos.ano_construcao = ano; fontes.ano_construcao = { fonte: 'busca na web', url: d.ano_construcao.url || null }; achou.push('construído em ' + ano); }\n    if (Number(d.andares && d.andares.valor) > 0) { fontes.andares = { valor: Number(d.andares.valor), fonte: 'busca na web', url: d.andares.url || null }; achou.push(d.andares.valor + ' andares'); }\n  }\n  await progresso(achou.length ? 'Encontramos: ' + achou.join(', ') : 'Não encontramos dados do prédio na internet; confira os campos', 'dados');\n  await patch({ ...campos, fontes_dados: fontes, etapa: 'conferir_dados', etapa_erro: null });\n  return [{ json: { ok: true, preenchidos: Object.keys(campos) } }];\n} catch (e) {\n  await patch({ etapa: 'conferir_dados', etapa_erro: null }).catch(() => {});\n  throw e;\n}\n"
+        }
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Ler avaliação",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ler avaliação": {
+        "main": [
+          [
+            {
+              "node": "Google Geocoding",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Geocoding": {
+        "main": [
+          [
+            {
+              "node": "Montar pesquisa do prédio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Montar pesquisa do prédio": {
+        "main": [
+          [
+            {
+              "node": "IA pesquisa o prédio",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IA pesquisa o prédio": {
+        "main": [
+          [
+            {
+              "node": "Completar e gravar",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "***REMOVIDO***",
+    "name": "Initial version",
+    "description": "Created with 6 nodes: Webhook, Ler avaliação, Google Geocoding, Montar pesquisa do prédio, IA pesquisa o prédio and 1 more",
+    "autosaved": false,
+    "createdAt": "2026-11-26T13:53:16.941Z",
+    "updatedAt": "2026-11-26T13:53:16.941Z"
+  },
+  "tags": []
+}
